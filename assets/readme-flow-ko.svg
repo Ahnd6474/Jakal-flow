@@ -1,0 +1,82 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="80" y1="40" x2="1120" y2="320" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5F1E8"/>
+      <stop offset="1" stop-color="#E7EEF6"/>
+    </linearGradient>
+    <linearGradient id="card1" x1="0" y1="0" x2="180" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1F4B99"/>
+      <stop offset="1" stop-color="#2C6CCF"/>
+    </linearGradient>
+    <linearGradient id="card2" x1="0" y1="0" x2="180" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#14B8A6"/>
+    </linearGradient>
+    <linearGradient id="card3" x1="0" y1="0" x2="180" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#A855F7"/>
+    </linearGradient>
+    <linearGradient id="card4" x1="0" y1="0" x2="180" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B45309"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <linearGradient id="card5" x1="0" y1="0" x2="180" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#BE123C"/>
+      <stop offset="1" stop-color="#F43F5E"/>
+    </linearGradient>
+    <filter id="shadow" x="-20" y="-20" width="240" height="180" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="10"/>
+      <feGaussianBlur stdDeviation="10"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0588235 0 0 0 0 0.0941176 0 0 0 0 0.156863 0 0 0 0.12 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#355070"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="20" width="1160" height="320" rx="28" fill="url(#bg)"/>
+  <circle cx="110" cy="85" r="56" fill="#D7E6FB" fill-opacity="0.8"/>
+  <circle cx="1080" cy="270" r="72" fill="#F8DCC7" fill-opacity="0.55"/>
+  <path d="M170 250C270 190 350 305 450 250C550 195 620 145 710 185C805 228 890 125 1010 155" stroke="#C8D4E3" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+
+  <g filter="url(#shadow)" transform="translate(70 110)">
+    <rect width="170" height="108" rx="24" fill="url(#card1)"/>
+    <text x="85" y="48" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="28" font-weight="700">초기화</text>
+    <text x="85" y="76" text-anchor="middle" fill="#D9E8FF" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="14">repo + plan</text>
+  </g>
+
+  <g filter="url(#shadow)" transform="translate(285 110)">
+    <rect width="170" height="108" rx="24" fill="url(#card2)"/>
+    <text x="85" y="48" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="28" font-weight="700">계획</text>
+    <text x="85" y="76" text-anchor="middle" fill="#D6FFFA" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="14">mid task</text>
+  </g>
+
+  <g filter="url(#shadow)" transform="translate(500 110)">
+    <rect width="170" height="108" rx="24" fill="url(#card3)"/>
+    <text x="85" y="48" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="28" font-weight="700">실행</text>
+    <text x="85" y="76" text-anchor="middle" fill="#F1E8FF" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="14">2-pass + web</text>
+  </g>
+
+  <g filter="url(#shadow)" transform="translate(715 110)">
+    <rect width="170" height="108" rx="24" fill="url(#card4)"/>
+    <text x="85" y="48" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="28" font-weight="700">테스트</text>
+    <text x="85" y="76" text-anchor="middle" fill="#FFF0CF" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="14">검증 / 롤백</text>
+  </g>
+
+  <g filter="url(#shadow)" transform="translate(930 110)">
+    <rect width="170" height="108" rx="24" fill="url(#card5)"/>
+    <text x="85" y="48" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="24" font-weight="700">체크포인트</text>
+    <text x="85" y="76" text-anchor="middle" fill="#FFE0E7" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="14">승인 / 저장</text>
+  </g>
+
+  <path d="M240 164H285" stroke="#355070" stroke-width="6" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M455 164H500" stroke="#355070" stroke-width="6" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M670 164H715" stroke="#355070" stroke-width="6" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M885 164H930" stroke="#355070" stroke-width="6" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M1015 236C930 300 760 312 615 298C450 282 315 236 270 212" stroke="#355070" stroke-width="5" stroke-linecap="round" stroke-dasharray="10 12" marker-end="url(#arrow)"/>
+  <text x="647" y="332" text-anchor="middle" fill="#4B5563" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="18" font-weight="600">반복</text>
+</svg>

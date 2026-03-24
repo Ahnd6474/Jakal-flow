@@ -9,8 +9,12 @@ from .memory import MemoryStore
 from .models import CandidateTask, ProjectContext, RuntimeOptions, TestRunResult
 from .planning import (
     attempt_history_entry,
+    assess_repository_maturity,
     build_mid_term_plan,
+    build_checkpoint_timeline,
+    bootstrap_long_term_plan_prompt,
     candidate_tasks_from_mid_term,
+    checkpoint_timeline_markdown,
     ensure_scope_guard,
     generate_long_term_plan,
     implementation_prompt,
@@ -21,7 +25,7 @@ from .planning import (
     write_active_task,
 )
 from .reporting import Reporter
-from .utils import now_utc_iso, read_text, write_text
+from .utils import now_utc_iso, read_json, read_text, write_json, write_text
 from .workspace import WorkspaceManager
 
 
@@ -46,16 +50,39 @@ class Orchestrator:
                 runtime.git_user_email,
             )
             repo_inputs = scan_repository_inputs(context.paths.repo_dir)
+            is_mature, maturity_details = assess_repository_maturity(context.paths.repo_dir, repo_inputs)
             if long_term_plan_path:
                 long_term_text = Path(long_term_plan_path).read_text(encoding="utf-8")
             elif context.paths.long_term_plan_file.exists():
                 long_term_text = read_text(context.paths.long_term_plan_file)
-            else:
+            elif is_mature:
                 long_term_text = generate_long_term_plan(context, repo_inputs)
+            else:
+                if not runtime.init_plan_prompt.strip():
+                    raise RuntimeError(
+                        "This repository appears early-stage. Provide --init-plan-prompt or use the GUI initialization prompt to bootstrap LONG_TERM_PLAN.md."
+                    )
+                runner = CodexRunner(runtime.codex_path)
+                prompt = bootstrap_long_term_plan_prompt(context, repo_inputs, runtime.init_plan_prompt)
+                result = runner.run_pass(
+                    context=context,
+                    prompt=prompt,
+                    pass_type="init-long-term-plan",
+                    block_index=0,
+                    search_enabled=False,
+                )
+                long_term_text = read_text(context.paths.long_term_plan_file)
+                if result.returncode != 0 or not long_term_text.strip():
+                    raise RuntimeError(
+                        f"Codex failed to create the initial prompt-based long-term plan. maturity={maturity_details}"
+                    )
             write_text(context.paths.long_term_plan_file, long_term_text)
             write_text(context.paths.scope_guard_file, ensure_scope_guard(context))
             mid_term_text, _ = build_mid_term_plan(long_term_text)
             write_text(context.paths.mid_term_plan_file, mid_term_text)
+            checkpoints = build_checkpoint_timeline(long_term_text, runtime.checkpoint_interval_blocks)
+            write_text(context.paths.checkpoint_timeline_file, checkpoint_timeline_markdown(checkpoints))
+            write_json(context.paths.checkpoint_state_file, {"checkpoints": [checkpoint.to_dict() for checkpoint in checkpoints]})
 
             for file_path, starter in [
                 (context.paths.active_task_file, "# Active Task\n\nNo active task selected yet.\n"),
@@ -110,6 +137,10 @@ class Orchestrator:
 
         block_limit = max(1, context.runtime.max_blocks)
         for _ in range(block_limit):
+            if context.loop_state.pending_checkpoint_approval:
+                context.metadata.current_status = "awaiting_checkpoint_approval"
+                context.loop_state.stop_reason = "checkpoint approval required"
+                break
             stop_reason = self._stop_reason(context)
             if stop_reason:
                 context.loop_state.stop_reason = stop_reason
@@ -142,6 +173,45 @@ class Orchestrator:
     def report(self, repo_url: str, branch: str) -> Path:
         context = self.status(repo_url, branch)
         return Reporter(context).write_status_report()
+
+    def checkpoints(self, repo_url: str, branch: str) -> dict:
+        context = self.status(repo_url, branch)
+        data = read_json(context.paths.checkpoint_state_file, default=None)
+        if data is None:
+            checkpoints = build_checkpoint_timeline(read_text(context.paths.long_term_plan_file), context.runtime.checkpoint_interval_blocks)
+            data = {"checkpoints": [checkpoint.to_dict() for checkpoint in checkpoints]}
+            write_json(context.paths.checkpoint_state_file, data)
+            write_text(context.paths.checkpoint_timeline_file, checkpoint_timeline_markdown(checkpoints))
+        return data
+
+    def approve_checkpoint(self, repo_url: str, branch: str, review_notes: str = "", push: bool = True) -> dict:
+        context = self.status(repo_url, branch)
+        data = self.checkpoints(repo_url, branch)
+        checkpoints = data.get("checkpoints", [])
+        target: dict | None = None
+        for checkpoint in checkpoints:
+            if checkpoint.get("status") == "awaiting_review":
+                target = checkpoint
+                break
+        if target is None and context.loop_state.current_checkpoint_id:
+            for checkpoint in checkpoints:
+                if checkpoint.get("checkpoint_id") == context.loop_state.current_checkpoint_id:
+                    target = checkpoint
+                    break
+        if target is None:
+            raise RuntimeError("No checkpoint is awaiting approval.")
+        target["status"] = "approved"
+        target["approved_at"] = now_utc_iso()
+        target["review_notes"] = review_notes.strip()
+        if push and context.metadata.current_safe_revision:
+            self.git.push(context.paths.repo_dir, context.metadata.branch)
+            target["pushed"] = True
+        write_json(context.paths.checkpoint_state_file, data)
+        context.loop_state.pending_checkpoint_approval = False
+        context.loop_state.stop_reason = None
+        context.metadata.current_status = "ready"
+        self.workspace.save_project(context)
+        return target
 
     def _run_single_block(
         self,
@@ -324,8 +394,14 @@ class Orchestrator:
         )
         context.loop_state.last_commit_hash = block_commit_hashes[-1] if block_commit_hashes else context.loop_state.last_commit_hash
         context.loop_state.last_block_completed_at = now_utc_iso()
-        context.metadata.current_status = "ready"
-        context.loop_state.stop_reason = self._stop_reason(context)
+        if made_progress:
+            self._mark_checkpoint_if_due(context, block_index, block_commit_hashes)
+        if context.loop_state.pending_checkpoint_approval:
+            context.metadata.current_status = "awaiting_checkpoint_approval"
+            context.loop_state.stop_reason = "checkpoint approval required"
+        else:
+            context.metadata.current_status = "ready"
+            context.loop_state.stop_reason = self._stop_reason(context)
 
     def _execute_pass(
         self,
@@ -441,3 +517,23 @@ class Orchestrator:
         if counters.empty_cycles >= context.runtime.empty_cycle_limit:
             return f"too many empty cycles: {counters.empty_cycles}"
         return None
+
+    def _mark_checkpoint_if_due(self, context: ProjectContext, block_index: int, commit_hashes: list[str]) -> None:
+        if not context.runtime.require_checkpoint_approval:
+            return
+        data = read_json(context.paths.checkpoint_state_file, default={"checkpoints": []})
+        checkpoints = data.get("checkpoints", [])
+        changed = False
+        for checkpoint in checkpoints:
+            if checkpoint.get("status") != "pending":
+                continue
+            if int(checkpoint.get("target_block", 0)) <= block_index:
+                checkpoint["status"] = "awaiting_review"
+                checkpoint["reached_at"] = now_utc_iso()
+                checkpoint["commit_hashes"] = commit_hashes
+                context.loop_state.current_checkpoint_id = checkpoint.get("checkpoint_id")
+                context.loop_state.pending_checkpoint_approval = True
+                changed = True
+                break
+        if changed:
+            write_json(context.paths.checkpoint_state_file, data)

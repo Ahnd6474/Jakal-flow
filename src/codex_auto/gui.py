@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import json
-import secrets
 import queue
 import threading
-import time
 import traceback
-import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from tkinter import BOTH, END, LEFT, W, filedialog, messagebox, StringVar, Tk
 from tkinter import ttk
@@ -24,8 +20,8 @@ class CodexAutoGUI:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("코덱스 오토 워크스페이스")
-        self.root.geometry("1540x950")
-        self.root.minsize(1240, 780)
+        self.root.geometry("1500x920")
+        self.root.minsize(1180, 760)
 
         self.queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.busy = False
@@ -43,13 +39,10 @@ class CodexAutoGUI:
         self.max_blocks_var = StringVar(value="1")
         self.long_term_plan_var = StringVar()
         self.allow_push_var = StringVar(value="false")
-        self.github_token_var = StringVar()
-        self.github_client_id_var = StringVar()
-        self.github_client_secret_var = StringVar()
         self.github_query_var = StringVar()
+        self.github_url_mode_var = StringVar(value="ssh")
 
         self.status_var = StringVar(value="대기 중")
-        self.hero_var = StringVar(value="여러 저장소를 안전하게 관리하고, Codex 기반 개선 루프를 추적 가능하게 실행합니다.")
         self.repo_count_var = StringVar(value="0")
         self.ready_count_var = StringVar(value="0")
         self.active_count_var = StringVar(value="0")
@@ -72,34 +65,37 @@ class CodexAutoGUI:
         style.configure("App.TFrame", background="#f4efe7")
         style.configure("Card.TLabelframe", background="#fffaf3", borderwidth=1)
         style.configure("Card.TLabelframe.Label", background="#fffaf3", foreground="#42372b", font=("Malgun Gothic", 10, "bold"))
-        style.configure("HeroTitle.TLabel", background="#25443d", foreground="#fff9ef", font=("Malgun Gothic", 22, "bold"))
-        style.configure("HeroBody.TLabel", background="#25443d", foreground="#d7d1c4", font=("Malgun Gothic", 10))
-        style.configure("StatValue.TLabel", background="#fffaf3", foreground="#25443d", font=("Malgun Gothic", 18, "bold"))
-        style.configure("StatTitle.TLabel", background="#fffaf3", foreground="#76695d", font=("Malgun Gothic", 9))
-        style.configure("Section.TLabel", background="#f4efe7", foreground="#42372b", font=("Malgun Gothic", 11, "bold"))
-        style.configure("Primary.TButton", font=("Malgun Gothic", 10, "bold"))
+        style.configure("Hero.TLabel", background="#25443d", foreground="#fff9ef", font=("Malgun Gothic", 20, "bold"))
+        style.configure("HeroSub.TLabel", background="#25443d", foreground="#ddd4c7", font=("Malgun Gothic", 10))
 
     def _build_layout(self) -> None:
         root_frame = ttk.Frame(self.root, padding=14, style="App.TFrame")
         root_frame.pack(fill=BOTH, expand=True)
-        self._build_hero(root_frame)
-        self._build_stat_strip(root_frame)
+
+        hero = ttk.Frame(root_frame, style="App.TFrame")
+        hero.pack(fill="x")
+        ttk.Label(hero, text="코덱스 오토", style="Hero.TLabel", anchor="w", padding=(18, 18, 18, 6)).pack(fill="x")
+        ttk.Label(
+            hero,
+            text="GitHub 저장소를 SSH 기준으로 선택하고, Codex 개선 루프를 안전하게 실행합니다.",
+            style="HeroSub.TLabel",
+            anchor="w",
+            padding=(18, 0, 18, 18),
+        ).pack(fill="x")
+
+        self._build_stats(root_frame)
+
         content = ttk.Panedwindow(root_frame, orient="horizontal")
         content.pack(fill=BOTH, expand=True, pady=(12, 0))
         left = ttk.Frame(content, style="App.TFrame")
         right = ttk.Frame(content, style="App.TFrame")
-        content.add(left, weight=40)
-        content.add(right, weight=60)
-        self._build_left_column(left)
-        self._build_right_column(right)
+        content.add(left, weight=38)
+        content.add(right, weight=62)
 
-    def _build_hero(self, parent: ttk.Frame) -> None:
-        hero = ttk.Frame(parent, style="App.TFrame")
-        hero.pack(fill="x")
-        ttk.Label(hero, text="코덱스 오토", style="HeroTitle.TLabel", anchor="w", padding=(18, 18, 18, 6)).pack(fill="x")
-        ttk.Label(hero, textvariable=self.hero_var, style="HeroBody.TLabel", anchor="w", padding=(18, 0, 18, 18)).pack(fill="x")
+        self._build_left(left)
+        self._build_right(right)
 
-    def _build_stat_strip(self, parent: ttk.Frame) -> None:
+    def _build_stats(self, parent: ttk.Frame) -> None:
         row = ttk.Frame(parent, style="App.TFrame")
         row.pack(fill="x", pady=(10, 0))
         for title, variable in [
@@ -113,89 +109,80 @@ class CodexAutoGUI:
         ]:
             card = ttk.LabelFrame(row, text=title, padding=10, style="Card.TLabelframe")
             card.pack(side=LEFT, fill="x", expand=True, padx=(0, 10))
-            ttk.Label(card, textvariable=variable, style="StatValue.TLabel").pack(anchor=W)
-            ttk.Label(card, text="워크스페이스 합계", style="StatTitle.TLabel").pack(anchor=W)
+            ttk.Label(card, textvariable=variable, font=("Malgun Gothic", 16, "bold")).pack(anchor=W)
 
-    def _build_left_column(self, parent: ttk.Frame) -> None:
+    def _build_left(self, parent: ttk.Frame) -> None:
         notebook = ttk.Notebook(parent)
         notebook.pack(fill=BOTH, expand=True)
+
         managed_tab = ttk.Frame(notebook)
         github_tab = ttk.Frame(notebook)
         notebook.add(managed_tab, text="관리 중 저장소")
-        notebook.add(github_tab, text="GitHub 연동")
+        notebook.add(github_tab, text="GitHub 검색")
+
         self._build_managed_repo_panel(managed_tab)
         self._build_github_panel(github_tab)
 
-    def _build_right_column(self, parent: ttk.Frame) -> None:
-        self._build_form(parent)
-        self._build_output(parent)
-
     def _build_managed_repo_panel(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="관리 중 저장소 목록", padding=12, style="Card.TLabelframe")
+        frame = ttk.LabelFrame(parent, text="관리 중 저장소", padding=12, style="Card.TLabelframe")
         frame.pack(fill=BOTH, expand=True)
 
-        toolbar = ttk.Frame(frame)
-        toolbar.pack(fill="x", pady=(0, 10))
-        ttk.Button(toolbar, text="새로고침", command=self.refresh_repositories, style="Primary.TButton").pack(side=LEFT)
-        ttk.Button(toolbar, text="선택 불러오기", command=self.load_selected_repository).pack(side=LEFT, padx=(8, 0))
+        tools = ttk.Frame(frame)
+        tools.pack(fill="x", pady=(0, 10))
+        ttk.Button(tools, text="새로고침", command=self.refresh_repositories).pack(side=LEFT)
+        ttk.Button(tools, text="선택 불러오기", command=self.load_selected_repository).pack(side=LEFT, padx=(8, 0))
 
         columns = ("slug", "branch", "status", "safe_revision", "last_run")
-        self.repo_tree = ttk.Treeview(frame, columns=columns, show="headings", height=22)
-        self.repo_tree.heading("slug", text="슬러그")
-        self.repo_tree.heading("branch", text="브랜치")
-        self.repo_tree.heading("status", text="상태")
-        self.repo_tree.heading("safe_revision", text="안전 리비전")
-        self.repo_tree.heading("last_run", text="마지막 실행")
-        self.repo_tree.column("slug", width=250, anchor=W)
-        self.repo_tree.column("branch", width=90, anchor=W)
-        self.repo_tree.column("status", width=140, anchor=W)
-        self.repo_tree.column("safe_revision", width=120, anchor=W)
-        self.repo_tree.column("last_run", width=170, anchor=W)
+        self.repo_tree = ttk.Treeview(frame, columns=columns, show="headings", height=20)
+        for key, title, width in [
+            ("slug", "슬러그", 230),
+            ("branch", "브랜치", 80),
+            ("status", "상태", 120),
+            ("safe_revision", "안전 리비전", 110),
+            ("last_run", "마지막 실행", 160),
+        ]:
+            self.repo_tree.heading(key, text=title)
+            self.repo_tree.column(key, width=width, anchor=W)
         self.repo_tree.pack(fill=BOTH, expand=True)
         self.repo_tree.bind("<<TreeviewSelect>>", self._on_repo_selected)
 
     def _build_github_panel(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="GitHub 저장소 선택", padding=12, style="Card.TLabelframe")
+        frame = ttk.LabelFrame(parent, text="GitHub 공개 저장소 검색", padding=12, style="Card.TLabelframe")
         frame.pack(fill=BOTH, expand=True)
 
-        token_row = ttk.Frame(frame)
-        token_row.pack(fill="x")
-        ttk.Label(token_row, text="OAuth Client ID").pack(side=LEFT)
-        ttk.Entry(token_row, textvariable=self.github_client_id_var, width=24).pack(side=LEFT, padx=(8, 8))
-        ttk.Label(token_row, text="Client Secret").pack(side=LEFT)
-        ttk.Entry(token_row, textvariable=self.github_client_secret_var, show="*", width=24).pack(side=LEFT, padx=(8, 8))
-        ttk.Button(token_row, text="브라우저 로그인", command=self.github_browser_login).pack(side=LEFT, padx=(0, 8))
-        ttk.Label(token_row, text="GitHub 토큰").pack(side=LEFT)
-        ttk.Entry(token_row, textvariable=self.github_token_var, show="*", width=38).pack(side=LEFT, padx=(8, 8), fill="x", expand=True)
-        ttk.Button(token_row, text="내 저장소 불러오기", command=self.load_my_github_repos).pack(side=LEFT)
-
         search_row = ttk.Frame(frame)
-        search_row.pack(fill="x", pady=(10, 10))
+        search_row.pack(fill="x", pady=(0, 10))
         ttk.Label(search_row, text="검색어").pack(side=LEFT)
         ttk.Entry(search_row, textvariable=self.github_query_var, width=38).pack(side=LEFT, padx=(8, 8), fill="x", expand=True)
-        ttk.Button(search_row, text="공개 저장소 검색", command=self.search_github_repositories).pack(side=LEFT)
+        ttk.Button(search_row, text="검색", command=self.search_github_repositories).pack(side=LEFT)
+
+        mode_row = ttk.Frame(frame)
+        mode_row.pack(fill="x", pady=(0, 10))
+        ttk.Label(mode_row, text="적용 URL 방식").pack(side=LEFT)
+        ttk.Combobox(mode_row, textvariable=self.github_url_mode_var, values=["ssh", "https"], state="readonly", width=10).pack(side=LEFT, padx=(8, 0))
 
         ttk.Label(
             frame,
-            text="공개 검색은 토큰 없이 가능합니다. 브라우저 OAuth 로그인은 GitHub OAuth App의 Client ID / Client Secret 과 로컬 콜백을 사용합니다.",
-            style="StatTitle.TLabel",
+            text="기본은 SSH clone URL 입니다. 비공개 저장소는 이 화면 대신 직접 SSH URL을 붙여넣으면 됩니다.",
         ).pack(anchor=W, pady=(0, 8))
 
         columns = ("full_name", "branch", "visibility", "stars")
         self.github_tree = ttk.Treeview(frame, columns=columns, show="headings", height=18)
-        self.github_tree.heading("full_name", text="저장소")
-        self.github_tree.heading("branch", text="기본 브랜치")
-        self.github_tree.heading("visibility", text="공개 여부")
-        self.github_tree.heading("stars", text="Stars")
-        self.github_tree.column("full_name", width=280, anchor=W)
-        self.github_tree.column("branch", width=100, anchor=W)
-        self.github_tree.column("visibility", width=90, anchor=W)
-        self.github_tree.column("stars", width=70, anchor=W)
+        for key, title, width in [
+            ("full_name", "저장소", 260),
+            ("branch", "기본 브랜치", 100),
+            ("visibility", "공개 여부", 90),
+            ("stars", "Stars", 70),
+        ]:
+            self.github_tree.heading(key, text=title)
+            self.github_tree.column(key, width=width, anchor=W)
         self.github_tree.pack(fill=BOTH, expand=True)
 
-        action_row = ttk.Frame(frame)
-        action_row.pack(fill="x", pady=(10, 0))
-        ttk.Button(action_row, text="선택 저장소 적용", command=self.apply_selected_github_repository, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(frame, text="선택 저장소 적용", command=self.apply_selected_github_repository).pack(anchor=W, pady=(10, 0))
+
+    def _build_right(self, parent: ttk.Frame) -> None:
+        self._build_form(parent)
+        self._build_output(parent)
 
     def _build_form(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="실행 설정", padding=12, style="Card.TLabelframe")
@@ -206,74 +193,49 @@ class CodexAutoGUI:
         project_tab = ttk.Frame(notebook)
         execution_tab = ttk.Frame(notebook)
         prompt_tab = ttk.Frame(notebook)
-        safety_tab = ttk.Frame(notebook)
+        init_plan_tab = ttk.Frame(notebook)
+        checkpoint_tab = ttk.Frame(notebook)
         notebook.add(project_tab, text="프로젝트")
         notebook.add(execution_tab, text="실행")
         notebook.add(prompt_tab, text="프롬프트")
-        notebook.add(safety_tab, text="안전")
+        notebook.add(init_plan_tab, text="초기 장기 계획")
+        notebook.add(checkpoint_tab, text="체크포인트")
 
         self._build_project_tab(project_tab)
         self._build_execution_tab(execution_tab)
         self._build_prompt_tab(prompt_tab)
-        self._build_safety_tab(safety_tab)
+        self._build_init_plan_tab(init_plan_tab)
+        self._build_checkpoint_tab(checkpoint_tab)
 
         actions = ttk.Frame(frame)
         actions.pack(fill="x", pady=(12, 0))
-        self.action_buttons = []
+        self.action_buttons: list[ttk.Button] = []
         for label, handler in [
             ("저장소 초기화", self.init_repo),
             ("블록 실행", self.run_blocks),
             ("이어서 실행", self.resume_run),
+            ("체크포인트 보기", self.show_checkpoints),
+            ("승인+업로드", self.approve_and_push_checkpoint),
             ("상태 보기", self.show_status),
             ("히스토리", self.show_history),
             ("리포트", self.show_report),
         ]:
-            button = ttk.Button(actions, text=label, command=handler, style="Primary.TButton")
+            button = ttk.Button(actions, text=label, command=handler)
             button.pack(side=LEFT, padx=(0, 8))
             self.action_buttons.append(button)
-
-    def _build_output(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="실행 결과", padding=12, style="Card.TLabelframe")
-        frame.pack(fill=BOTH, expand=True, pady=(12, 0))
-
-        status_row = ttk.Frame(frame)
-        status_row.pack(fill="x")
-        ttk.Label(status_row, text="상태", style="Section.TLabel").pack(side=LEFT)
-        ttk.Label(status_row, textvariable=self.status_var).pack(side=LEFT, padx=(8, 0))
-
-        self.tabs = ttk.Notebook(frame)
-        self.tabs.pack(fill=BOTH, expand=True, pady=(10, 0))
-
-        summary_tab = ttk.Frame(self.tabs)
-        self.summary_text = ScrolledText(summary_tab, wrap="word", height=10)
-        self.summary_text.pack(fill=BOTH, expand=True)
-        self.summary_text.configure(state="disabled")
-        self.tabs.add(summary_tab, text="워크스페이스 요약")
-
-        detail_tab = ttk.Frame(self.tabs)
-        self.detail_text = ScrolledText(detail_tab, wrap="word", height=18)
-        self.detail_text.pack(fill=BOTH, expand=True)
-        self.detail_text.configure(state="disabled")
-        self.tabs.add(detail_tab, text="상세 정보")
-
-        log_tab = ttk.Frame(self.tabs)
-        self.log_text = ScrolledText(log_tab, wrap="word", height=18)
-        self.log_text.pack(fill=BOTH, expand=True)
-        self.log_text.configure(state="disabled")
-        self.tabs.add(log_tab, text="활동 로그")
 
     def _build_project_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(1, weight=1)
 
-        def add_entry(row: int, label: str, variable: StringVar, width: int = 72) -> None:
+        def add_row(row: int, label: str, variable: StringVar) -> None:
             ttk.Label(parent, text=label).grid(row=row, column=0, sticky=W, padx=(0, 10), pady=6)
-            ttk.Entry(parent, textvariable=variable, width=width).grid(row=row, column=1, sticky="ew", pady=6)
+            ttk.Entry(parent, textvariable=variable, width=72).grid(row=row, column=1, sticky="ew", pady=6)
 
-        add_entry(0, "저장소 URL", self.repo_url_var)
-        add_entry(1, "브랜치", self.branch_var, width=20)
-        add_entry(2, "워크스페이스 루트", self.workspace_root_var)
+        add_row(0, "저장소 URL", self.repo_url_var)
+        add_row(1, "브랜치", self.branch_var)
+        add_row(2, "워크스페이스 루트", self.workspace_root_var)
         ttk.Button(parent, text="찾아보기", command=self._choose_workspace_root).grid(row=2, column=2, padx=(8, 0), pady=6)
-        add_entry(3, "장기 계획 파일", self.long_term_plan_var)
+        add_row(3, "장기 계획 파일", self.long_term_plan_var)
         ttk.Button(parent, text="찾아보기", command=self._choose_long_term_plan).grid(row=3, column=2, padx=(8, 0), pady=6)
 
     def _build_execution_tab(self, parent: ttk.Frame) -> None:
@@ -283,41 +245,69 @@ class CodexAutoGUI:
             (1, "추론 강도", self.effort_var, ["low", "medium", "high", "xhigh"]),
             (2, "승인 모드", self.approval_var, ["never", "on-request", "untrusted", "on-failure"]),
             (3, "샌드박스", self.sandbox_var, ["workspace-write", "read-only", "danger-full-access"]),
+            (4, "원격 push", self.allow_push_var, ["false", "true"]),
         ]:
             ttk.Label(parent, text=label).grid(row=row, column=0, sticky=W, padx=(0, 10), pady=6)
             ttk.Combobox(parent, textvariable=variable, values=values, state="readonly", width=20).grid(row=row, column=1, sticky=W, pady=6)
-
-        ttk.Label(parent, text="최대 블록 수").grid(row=4, column=0, sticky=W, padx=(0, 10), pady=6)
-        ttk.Entry(parent, textvariable=self.max_blocks_var, width=10).grid(row=4, column=1, sticky=W, pady=6)
-        ttk.Label(parent, text="테스트 명령").grid(row=5, column=0, sticky=W, padx=(0, 10), pady=6)
-        ttk.Entry(parent, textvariable=self.test_cmd_var, width=72).grid(row=5, column=1, sticky="ew", pady=6)
+        ttk.Label(parent, text="최대 블록 수").grid(row=5, column=0, sticky=W, padx=(0, 10), pady=6)
+        ttk.Entry(parent, textvariable=self.max_blocks_var, width=10).grid(row=5, column=1, sticky=W, pady=6)
+        ttk.Label(parent, text="테스트 명령").grid(row=6, column=0, sticky=W, padx=(0, 10), pady=6)
+        ttk.Entry(parent, textvariable=self.test_cmd_var, width=72).grid(row=6, column=1, sticky="ew", pady=6)
 
     def _build_prompt_tab(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="추가 프롬프트").pack(anchor=W, pady=(0, 6))
         self.extra_prompt_text = ScrolledText(parent, height=12, wrap="word")
         self.extra_prompt_text.pack(fill=BOTH, expand=True)
-        self.extra_prompt_text.insert(
+
+    def _build_init_plan_tab(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="초기 장기 계획 프롬프트").pack(anchor=W, pady=(0, 6))
+        ttk.Label(
+            parent,
+            text="저장소가 아직 초기 단계면, Codex가 이 프롬프트를 기반으로 LONG_TERM_PLAN.md 를 먼저 작성합니다.",
+        ).pack(anchor=W, pady=(0, 6))
+        self.init_plan_prompt_text = ScrolledText(parent, height=10, wrap="word")
+        self.init_plan_prompt_text.pack(fill=BOTH, expand=True)
+
+    def _build_checkpoint_tab(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="체크포인트 승인 메모").pack(anchor=W, pady=(0, 6))
+        self.checkpoint_notes_text = ScrolledText(parent, height=10, wrap="word")
+        self.checkpoint_notes_text.pack(fill=BOTH, expand=True)
+        self.checkpoint_notes_text.insert(
             "1.0",
             "예시:\n"
-            "- 테스트 실패를 줄이기 위해 작은 변경만 해라.\n"
-            "- 문서는 구현과 테스트가 확인된 경우에만 갱신해라.\n",
+            "- 장기 계획과 현재 변경이 일치함\n"
+            "- 다음 체크포인트 전까지 범위를 유지할 것\n",
         )
 
-    def _build_safety_tab(self, parent: ttk.Frame) -> None:
-        parent.columnconfigure(1, weight=1)
-        ttk.Label(parent, text="원격 push 허용").grid(row=0, column=0, sticky=W, padx=(0, 10), pady=6)
-        ttk.Combobox(parent, textvariable=self.allow_push_var, values=["false", "true"], state="readonly", width=12).grid(row=0, column=1, sticky=W, pady=6)
-        tips = ScrolledText(parent, height=10, wrap="word")
-        tips.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
-        tips.insert(
-            "1.0",
-            "안전 규칙\n\n"
-            "- LONG_TERM_PLAN.md 는 기본적으로 잠겨 있습니다.\n"
-            "- 검증된 변경만 커밋합니다.\n"
-            "- 테스트 회귀가 나면 마지막 안전 리비전으로 롤백합니다.\n"
-            "- 토큰 사용량은 Codex JSON 이벤트에서 집계합니다.\n",
-        )
-        tips.configure(state="disabled")
+    def _build_output(self, parent: ttk.Frame) -> None:
+        frame = ttk.LabelFrame(parent, text="실행 결과", padding=12, style="Card.TLabelframe")
+        frame.pack(fill=BOTH, expand=True, pady=(12, 0))
+
+        status_row = ttk.Frame(frame)
+        status_row.pack(fill="x")
+        ttk.Label(status_row, text="상태").pack(side=LEFT)
+        ttk.Label(status_row, textvariable=self.status_var).pack(side=LEFT, padx=(8, 0))
+
+        tabs = ttk.Notebook(frame)
+        tabs.pack(fill=BOTH, expand=True, pady=(10, 0))
+
+        summary_tab = ttk.Frame(tabs)
+        self.summary_text = ScrolledText(summary_tab, wrap="word", height=10)
+        self.summary_text.pack(fill=BOTH, expand=True)
+        self.summary_text.configure(state="disabled")
+        tabs.add(summary_tab, text="요약")
+
+        detail_tab = ttk.Frame(tabs)
+        self.detail_text = ScrolledText(detail_tab, wrap="word", height=18)
+        self.detail_text.pack(fill=BOTH, expand=True)
+        self.detail_text.configure(state="disabled")
+        tabs.add(detail_tab, text="상세 정보")
+
+        log_tab = ttk.Frame(tabs)
+        self.log_text = ScrolledText(log_tab, wrap="word", height=18)
+        self.log_text.pack(fill=BOTH, expand=True)
+        self.log_text.configure(state="disabled")
+        tabs.add(log_tab, text="활동 로그")
 
     def _schedule_queue_poll(self) -> None:
         self.root.after(150, self._poll_queue)
@@ -342,10 +332,6 @@ class CodexAutoGUI:
                 messagebox.showerror("코덱스 오토", str(payload))
             elif event == "github_results":
                 self._populate_github_results(payload if isinstance(payload, list) else [])
-            elif event == "github_token":
-                self.github_token_var.set(str(payload))
-                self._append_log("[완료] GitHub 액세스 토큰이 GUI에 반영되었습니다.")
-                self.root.after(0, self.load_my_github_repos)
         self._schedule_queue_poll()
 
     def _append_log(self, message: str) -> None:
@@ -369,18 +355,16 @@ class CodexAutoGUI:
     def _set_busy(self, busy: bool, label: str = "대기 중") -> None:
         self.busy = busy
         self.status_var.set(label)
-        for button in getattr(self, "action_buttons", []):
+        for button in self.action_buttons:
             button.state(["disabled"] if busy else ["!disabled"])
 
     def _orchestrator(self) -> Orchestrator:
-        workspace_root = Path(self.workspace_root_var.get().strip() or ".codex-auto-workspace")
-        return Orchestrator(workspace_root)
+        return Orchestrator(Path(self.workspace_root_var.get().strip() or ".codex-auto-workspace"))
 
     def _github_client(self) -> GitHubClient:
-        return GitHubClient(token=self.github_token_var.get())
+        return GitHubClient()
 
     def _runtime(self) -> RuntimeOptions:
-        extra_prompt = self.extra_prompt_text.get("1.0", END).strip() if hasattr(self, "extra_prompt_text") else ""
         try:
             max_blocks = max(1, int(self.max_blocks_var.get().strip() or "1"))
         except ValueError as exc:
@@ -391,7 +375,8 @@ class CodexAutoGUI:
         return RuntimeOptions(
             model=self.model_var.get().strip() or "gpt-5.4",
             effort=effort,
-            extra_prompt=extra_prompt,
+            extra_prompt=self.extra_prompt_text.get("1.0", END).strip(),
+            init_plan_prompt=self.init_plan_prompt_text.get("1.0", END).strip(),
             approval_mode=self.approval_var.get().strip() or "never",
             sandbox_mode=self.sandbox_var.get().strip() or "workspace-write",
             test_cmd=self.test_cmd_var.get().strip() or "python -m pytest",
@@ -413,9 +398,7 @@ class CodexAutoGUI:
     def _render_result(self, result: object) -> str:
         if isinstance(result, ProjectContext):
             return json.dumps({"metadata": result.metadata.to_dict(), "loop_state": result.loop_state.to_dict()}, indent=2, ensure_ascii=False)
-        if isinstance(result, list):
-            return json.dumps(result, indent=2, ensure_ascii=False)
-        if isinstance(result, dict):
+        if isinstance(result, (list, dict)):
             return json.dumps(result, indent=2, ensure_ascii=False)
         return str(result)
 
@@ -460,11 +443,7 @@ class CodexAutoGUI:
             f"- input_tokens: {usage['input_tokens']}",
             f"- cached_input_tokens: {usage['cached_input_tokens']}",
             f"- output_tokens: {usage['output_tokens']}",
-            "",
-            "저장소 상태",
         ]
-        for row in rows:
-            lines.append(f"- {row['slug']} | branch={row['branch']} | status={row['status']} | safe={row['safe_revision'] or 'n/a'}")
         return "\n".join(lines)
 
     def _populate_github_results(self, repos: list[GitHubRepository]) -> None:
@@ -479,6 +458,7 @@ class CodexAutoGUI:
                 [
                     {
                         "full_name": repo.full_name,
+                        "ssh_url": repo.ssh_url,
                         "clone_url": repo.clone_url,
                         "default_branch": repo.default_branch,
                         "description": repo.description,
@@ -543,8 +523,7 @@ class CodexAutoGUI:
             if show_message:
                 messagebox.showinfo("코덱스 오토", "관리 중인 저장소를 먼저 선택하세요.")
             return
-        repo_id = selected[0]
-        row = self.repo_index.get(repo_id)
+        row = self.repo_index.get(selected[0])
         if not row:
             return
         self.repo_url_var.set(str(row["repo_url"]))
@@ -569,19 +548,6 @@ class CodexAutoGUI:
 
         self._run_async("GitHub 검색", worker)
 
-    def load_my_github_repos(self) -> None:
-        if not self.github_token_var.get().strip():
-            messagebox.showerror("코덱스 오토", "내 저장소 조회에는 GitHub 토큰이 필요합니다.")
-            return
-        client = self._github_client()
-
-        def worker() -> dict[str, object]:
-            repos = client.list_my_repositories()
-            self.queue.put(("github_results", repos))
-            return {"내 저장소 수": len(repos)}
-
-        self._run_async("내 GitHub 저장소 조회", worker)
-
     def apply_selected_github_repository(self) -> None:
         selected = self.github_tree.selection()
         if not selected:
@@ -590,78 +556,11 @@ class CodexAutoGUI:
         repo = self.github_repo_index.get(selected[0])
         if not repo:
             return
-        self.repo_url_var.set(repo.clone_url or repo.html_url)
+        mode = self.github_url_mode_var.get().strip().lower()
+        url = repo.ssh_url if mode == "ssh" else repo.clone_url
+        self.repo_url_var.set(url or repo.html_url)
         self.branch_var.set(repo.default_branch or "main")
-        self._append_log(f"[정보] GitHub 저장소 적용: {repo.full_name}")
-
-    def github_browser_login(self) -> None:
-        client_id = self.github_client_id_var.get().strip()
-        client_secret = self.github_client_secret_var.get().strip()
-        if not client_id or not client_secret:
-            messagebox.showerror("코덱스 오토", "브라우저 로그인에는 GitHub OAuth Client ID 와 Client Secret 이 필요합니다.")
-            return
-        client = self._github_client()
-
-        def worker() -> dict[str, object]:
-            callback: dict[str, str] = {}
-            state = secrets.token_urlsafe(24)
-
-            class OAuthCallbackHandler(BaseHTTPRequestHandler):
-                def do_GET(self) -> None:  # noqa: N802
-                    from urllib.parse import parse_qs, urlparse
-
-                    parsed = urlparse(self.path)
-                    params = parse_qs(parsed.query)
-                    callback["code"] = params.get("code", [""])[0]
-                    callback["state"] = params.get("state", [""])[0]
-                    callback["error"] = params.get("error", [""])[0]
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(
-                        (
-                            "<html><body><h2>GitHub 로그인 완료</h2>"
-                            "<p>이 창은 닫고 앱으로 돌아가세요.</p></body></html>"
-                        ).encode("utf-8")
-                    )
-
-                def log_message(self, format: str, *args: object) -> None:
-                    return
-
-            server = HTTPServer(("127.0.0.1", 0), OAuthCallbackHandler)
-            server.timeout = 1
-            redirect_uri = f"http://127.0.0.1:{server.server_port}/callback"
-            authorize_url = client.build_authorize_url(
-                client_id=client_id,
-                redirect_uri=redirect_uri,
-                state=state,
-            )
-            self.queue.put(("log", f"[정보] 브라우저에서 GitHub 승인을 진행합니다. 콜백 주소: {redirect_uri}"))
-            webbrowser.open(authorize_url)
-
-            deadline = time.time() + 300
-            while time.time() < deadline and "code" not in callback and "error" not in callback:
-                server.handle_request()
-            server.server_close()
-
-            if callback.get("error"):
-                raise RuntimeError(f"GitHub 승인 실패: {callback['error']}")
-            if callback.get("state") != state:
-                raise RuntimeError("GitHub OAuth state 검증에 실패했습니다.")
-            code = callback.get("code", "")
-            if not code:
-                raise RuntimeError("GitHub OAuth 승인 코드를 받지 못했습니다.")
-
-            token = client.exchange_web_flow_code(
-                client_id=client_id,
-                client_secret=client_secret,
-                code=code,
-                redirect_uri=redirect_uri,
-            )
-            self.queue.put(("github_token", token))
-            return {"login": "ok", "redirect_uri": redirect_uri}
-
-        self._run_async("GitHub 브라우저 로그인", worker)
+        self._append_log(f"[정보] GitHub 저장소 적용: {repo.full_name} ({mode})")
 
     def _choose_workspace_root(self) -> None:
         chosen = filedialog.askdirectory(initialdir=str(Path.cwd()))
@@ -683,15 +582,7 @@ class CodexAutoGUI:
         except Exception as exc:
             messagebox.showerror("코덱스 오토", str(exc))
             return
-        self._run_async(
-            "저장소 초기화",
-            lambda: orchestrator.init_repo(
-                repo_url=repo_url,
-                branch=branch,
-                runtime=runtime,
-                long_term_plan_path=long_term_path,
-            ),
-        )
+        self._run_async("저장소 초기화", lambda: orchestrator.init_repo(repo_url=repo_url, branch=branch, runtime=runtime, long_term_plan_path=long_term_path))
 
     def run_blocks(self) -> None:
         try:
@@ -704,13 +595,7 @@ class CodexAutoGUI:
             return
         self._run_async(
             "블록 실행",
-            lambda: orchestrator.run(
-                repo_url=repo_url,
-                branch=branch,
-                runtime=runtime,
-                long_term_plan_path=long_term_path,
-                resume=False,
-            ),
+            lambda: orchestrator.run(repo_url=repo_url, branch=branch, runtime=runtime, long_term_plan_path=long_term_path, resume=False),
         )
 
     def resume_run(self) -> None:
@@ -721,14 +606,7 @@ class CodexAutoGUI:
         except Exception as exc:
             messagebox.showerror("코덱스 오토", str(exc))
             return
-        self._run_async(
-            "이어서 실행",
-            lambda: orchestrator.resume(
-                repo_url=repo_url,
-                branch=branch,
-                runtime=runtime,
-            ),
-        )
+        self._run_async("이어서 실행", lambda: orchestrator.resume(repo_url=repo_url, branch=branch, runtime=runtime))
 
     def show_status(self) -> None:
         try:
@@ -747,6 +625,33 @@ class CodexAutoGUI:
             messagebox.showerror("코덱스 오토", str(exc))
             return
         self._run_async("히스토리", lambda: orchestrator.history(repo_url=repo_url, branch=branch, limit=20))
+
+    def show_checkpoints(self) -> None:
+        try:
+            repo_url, branch = self._repo_inputs()
+            orchestrator = self._orchestrator()
+        except Exception as exc:
+            messagebox.showerror("코덱스 오토", str(exc))
+            return
+        self._run_async("체크포인트 보기", lambda: orchestrator.checkpoints(repo_url=repo_url, branch=branch))
+
+    def approve_and_push_checkpoint(self) -> None:
+        try:
+            repo_url, branch = self._repo_inputs()
+            orchestrator = self._orchestrator()
+            notes = self.checkpoint_notes_text.get("1.0", END).strip()
+        except Exception as exc:
+            messagebox.showerror("코덱스 오토", str(exc))
+            return
+        self._run_async(
+            "체크포인트 승인+업로드",
+            lambda: orchestrator.approve_checkpoint(
+                repo_url=repo_url,
+                branch=branch,
+                review_notes=notes,
+                push=True,
+            ),
+        )
 
     def show_report(self) -> None:
         try:

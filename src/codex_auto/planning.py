@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
-from .models import CandidateTask, ProjectContext
+from .models import CandidateTask, Checkpoint, ProjectContext
 from .utils import compact_text, now_utc_iso, read_text, similarity_score, tokenize, write_text
 
 
@@ -34,6 +34,26 @@ def scan_repository_inputs(repo_dir: Path) -> dict[str, str]:
     }
 
 
+def assess_repository_maturity(repo_dir: Path, repo_inputs: dict[str, str]) -> tuple[bool, dict[str, int]]:
+    score = 0
+    details = {"readme": 0, "docs": 0, "source": 0, "tests": 0}
+    if "not found" not in repo_inputs["readme"].lower():
+        score += 1
+        details["readme"] = 1
+    if "no markdown files under repo/docs" not in repo_inputs["docs"].lower():
+        score += 1
+        details["docs"] = 1
+    source_matches = list(repo_dir.glob("src")) + list(repo_dir.glob("app")) + list(repo_dir.glob("package.json")) + list(repo_dir.glob("pyproject.toml"))
+    if source_matches:
+        score += 1
+        details["source"] = 1
+    tests_dir = repo_dir / "tests"
+    if tests_dir.exists() or list(repo_dir.glob("*test*")):
+        score += 1
+        details["tests"] = 1
+    return score >= 2, details
+
+
 def generate_long_term_plan(context: ProjectContext, repo_inputs: dict[str, str]) -> str:
     template = load_template("LONG_TERM_PLAN.sample.md")
     repo_name = context.metadata.repo_url.rstrip("/").split("/")[-1].removesuffix(".git")
@@ -49,6 +69,42 @@ def generate_long_term_plan(context: ProjectContext, repo_inputs: dict[str, str]
         goal_1=seed_goals[0],
         goal_2=seed_goals[1],
         goal_3=seed_goals[2],
+    )
+
+
+def bootstrap_long_term_plan_prompt(context: ProjectContext, repo_inputs: dict[str, str], user_prompt: str) -> str:
+    return "\n".join(
+        [
+            "Draft a long-term plan in markdown and write it to the managed planning file outside the repo.",
+            f"Target file: {context.paths.long_term_plan_file}",
+            "The repository is early-stage or insufficiently documented, so the plan must be prompt-based.",
+            "Use the user's prompt as the primary product direction.",
+            "Keep the plan concrete, scoped, and testable.",
+            "Do not invent broad roadmap items beyond the user prompt.",
+            "",
+            "Repository context:",
+            f"- Repo URL: {context.metadata.repo_url}",
+            f"- Branch: {context.metadata.branch}",
+            "",
+            "Observed repository inputs:",
+            f"README:\n{repo_inputs['readme']}",
+            "",
+            f"AGENTS:\n{repo_inputs['agents']}",
+            "",
+            f"docs summary:\n{repo_inputs['docs']}",
+            "",
+            "User initialization prompt:",
+            user_prompt.strip(),
+            "",
+            "Required plan structure:",
+            "- Title: Long-Term Plan",
+            "- Repository metadata",
+            "- Strategic goals as LT1, LT2, LT3...",
+            "- Non-goals",
+            "- Operating constraints",
+            "",
+            "Write the file directly. Keep it realistic and implementation-oriented.",
+        ]
     )
 
 
@@ -281,4 +337,52 @@ def attempt_history_entry(block_index: int, task: str, outcome: str, commit_hash
         f"- Commits: {', '.join(commit_hashes) if commit_hashes else 'none'}",
         "",
     ]
+    return "\n".join(lines)
+
+
+def build_checkpoint_timeline(long_term_text: str, checkpoint_interval_blocks: int) -> list[Checkpoint]:
+    items = [item for item in extract_plan_items(long_term_text) if not item.text.lower().startswith("do not")]
+    if not items:
+        return [
+            Checkpoint(
+                checkpoint_id="CP1",
+                title="Initial stabilization checkpoint",
+                long_term_refs=[],
+                target_block=max(1, checkpoint_interval_blocks),
+                created_at=now_utc_iso(),
+            )
+        ]
+    checkpoints: list[Checkpoint] = []
+    for index, item in enumerate(items, start=1):
+        checkpoints.append(
+            Checkpoint(
+                checkpoint_id=f"CP{index}",
+                title=item.text,
+                long_term_refs=[item.item_id],
+                target_block=max(1, index * checkpoint_interval_blocks),
+                created_at=now_utc_iso(),
+            )
+        )
+    return checkpoints
+
+
+def checkpoint_timeline_markdown(checkpoints: list[Checkpoint]) -> str:
+    lines = [
+        "# Checkpoint Timeline",
+        "",
+        "This timeline is derived from the long-term plan and is intended for user review at checkpoint boundaries.",
+        "",
+    ]
+    for checkpoint in checkpoints:
+        refs = ", ".join(checkpoint.long_term_refs) if checkpoint.long_term_refs else "none"
+        lines.extend(
+            [
+                f"## {checkpoint.checkpoint_id}",
+                f"- Title: {checkpoint.title}",
+                f"- Target block: {checkpoint.target_block}",
+                f"- Long-term refs: {refs}",
+                f"- Status: {checkpoint.status}",
+                "",
+            ]
+        )
     return "\n".join(lines)

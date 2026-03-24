@@ -18,6 +18,7 @@ class GitHubRepository:
     full_name: str
     html_url: str
     clone_url: str
+    ssh_url: str
     default_branch: str
     description: str
     private: bool
@@ -77,6 +78,7 @@ class GitHubClient:
             full_name=item.get("full_name", ""),
             html_url=item.get("html_url", ""),
             clone_url=item.get("clone_url", ""),
+            ssh_url=item.get("ssh_url", ""),
             default_branch=item.get("default_branch", "main"),
             description=item.get("description") or "",
             private=bool(item.get("private", False)),

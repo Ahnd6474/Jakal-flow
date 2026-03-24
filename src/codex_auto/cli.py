@@ -25,6 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
         target.add_argument("--model", default="gpt-5.4", help="Codex model name")
         target.add_argument("--effort", default="medium", help="Reasoning effort: low, medium, high, xhigh")
         target.add_argument("--extra-prompt", default="", help="Additional user instructions appended to Codex prompts")
+        target.add_argument(
+            "--init-plan-prompt",
+            default="",
+            help="Required for immature repositories; used by Codex to draft the initial long-term plan",
+        )
         target.add_argument("--approval-mode", default="never", help="Codex approval mode")
         target.add_argument("--sandbox-mode", default="workspace-write", help="Codex sandbox mode")
         target.add_argument("--test-cmd", default="python -m pytest", help="Validation command to run after passes")
@@ -64,6 +69,7 @@ def runtime_from_args(args: argparse.Namespace) -> RuntimeOptions:
         model=args.model,
         effort=args.effort,
         extra_prompt=args.extra_prompt,
+        init_plan_prompt=args.init_plan_prompt,
         approval_mode=args.approval_mode,
         sandbox_mode=args.sandbox_mode,
         test_cmd=args.test_cmd,

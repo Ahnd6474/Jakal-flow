@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -97,3 +98,24 @@ def similarity_score(left: str, right: str) -> float:
     intersection = left_tokens & right_tokens
     union = left_tokens | right_tokens
     return len(intersection) / len(union)
+
+
+def load_dotenv(dotenv_path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not dotenv_path.exists():
+        return values
+    for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def get_env_or_dotenv(key: str, dotenv_path: Path) -> str:
+    env_value = os.environ.get(key)
+    if env_value:
+        return env_value
+    values = load_dotenv(dotenv_path)
+    return values.get(key, "")

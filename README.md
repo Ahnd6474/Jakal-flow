@@ -6,6 +6,16 @@ It is designed around two planning layers:
 
 - `docs/LONG_TERM_PLAN.md`: created once or seeded from a user-provided file; treated as immutable unless explicitly changed by the user
 - `docs/MID_TERM_PLAN.md`: regenerated at block boundaries and kept as a strict subset of the long-term plan
+- `docs/CHECKPOINT_TIMELINE.md`: derived from the long-term plan and used for review/approval boundaries
+
+Initialization rule:
+
+- if the target repository is already somewhat mature, the initial long-term plan is derived from the repository itself
+- if the target repository is early-stage, Codex must first create the long-term plan from a user-provided initialization prompt
+
+## Flow
+
+![codex-auto flow chart](assets/readme-flow-ko.svg)
 
 ## Project Layout
 
@@ -54,19 +64,21 @@ The GUI lets you:
 - configure repo URL, branch, workspace root, model, sandbox, approval mode, test command, and max blocks
 - choose reasoning effort from `low`, `medium`, `high`, `xhigh`
 - add extra user prompt instructions that are appended to Codex implementation prompts
+- provide an initialization prompt for immature repositories so Codex can create the first long-term plan
 - browse GitHub repositories from inside the app using the GitHub REST API
 - initialize, run, and resume managed repositories
+- review checkpoint timelines and approve checkpoint uploads from the GUI
 - browse managed repositories in the current workspace
 - inspect status, history, and generated reports without leaving the app
 - view aggregate Codex token usage pulled from saved JSON event logs
+- apply selected GitHub repositories as SSH clone URLs by default
 
 GitHub integration notes:
 
 - public repository search works without a token
-- listing your own repositories requires a GitHub Personal Access Token
-- the GUI keeps the token in memory only; it is not persisted by this app
-- browser OAuth login uses GitHub OAuth web application flow with a local loopback callback
-- the GUI browser login requires a GitHub OAuth App `Client ID` and `Client Secret`
+- the GUI can fill in repository URLs using `ssh` or `https`
+- default GUI behavior is to use SSH clone URLs such as `git@github.com:OWNER/REPO.git`
+- for private repositories, paste the SSH URL directly if the repository does not appear in public search
 
 ## Main Commands
 
@@ -79,6 +91,7 @@ python -m codex_auto init-repo \
   --workspace-root .codex-auto-workspace \
   --model gpt-5.4 \
   --effort medium \
+  --init-plan-prompt "Build a safe long-term plan for this new repository focused on a narrow MVP and strong tests." \
   --approval-mode never \
   --sandbox-mode workspace-write \
   --test-cmd "python -m pytest"
@@ -135,8 +148,11 @@ Initialization:
 1. Creates an isolated project directory under the workspace
 2. Clones or updates the target repository into `repo/`
 3. Scans `README.md`, `AGENTS.md`, and `repo/docs/**`
-4. Creates `docs/LONG_TERM_PLAN.md`, `docs/SCOPE_GUARD.md`, `docs/MID_TERM_PLAN.md`, memory files, and loop state
-5. Records the current safe git revision
+4. If the repository is mature enough, derives `docs/LONG_TERM_PLAN.md` from repository context
+5. If the repository is early-stage, requires an initialization prompt and has Codex draft `docs/LONG_TERM_PLAN.md` from that prompt
+6. Creates `docs/SCOPE_GUARD.md`, `docs/MID_TERM_PLAN.md`, memory files, and loop state
+5. Builds a checkpoint timeline from the long-term plan
+6. Records the current safe git revision
 
 Each run block:
 
@@ -147,8 +163,10 @@ Each run block:
 5. Runs a research-backed pass with Codex web search enabled
 6. Runs tests after each pass
 7. Commits only safe validated changes
-8. Rolls back to the previous safe revision on regression
-9. Saves structured logs, reports, block review, and memory summaries
+8. Stops at checkpoint boundaries for user review when approval is required
+9. Pushes to GitHub when the user approves a checkpoint in the GUI
+10. Rolls back to the previous safe revision on regression
+11. Saves structured logs, reports, block review, and memory summaries
 
 ## Repository Files Managed Per Project
 
@@ -159,9 +177,11 @@ The tool creates or maintains these files for each managed repository project:
 - `docs/SCOPE_GUARD.md`
 - `docs/ACTIVE_TASK.md`
 - `docs/BLOCK_REVIEW.md`
+- `docs/CHECKPOINT_TIMELINE.md`
 - `docs/RESEARCH_NOTES.md`
 - `docs/attempt_history.md`
 - `state/LOOP_STATE.json`
+- `state/CHECKPOINTS.json`
 - `memory/success_patterns.jsonl`
 - `memory/failure_patterns.jsonl`
 - `memory/task_summaries.jsonl`

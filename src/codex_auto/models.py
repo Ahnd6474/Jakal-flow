@@ -22,6 +22,7 @@ class RuntimeOptions:
     model: str = "gpt-5.4"
     effort: str = "medium"
     extra_prompt: str = ""
+    init_plan_prompt: str = ""
     approval_mode: str = "never"
     sandbox_mode: str = "workspace-write"
     test_cmd: str = "python -m pytest"
@@ -33,6 +34,8 @@ class RuntimeOptions:
     no_progress_limit: int = 3
     regression_limit: int = 3
     empty_cycle_limit: int = 3
+    checkpoint_interval_blocks: int = 2
+    require_checkpoint_approval: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)
@@ -74,6 +77,8 @@ class LoopState:
     current_safe_revision: str | None = None
     long_term_plan_locked: bool = True
     stop_reason: str | None = None
+    current_checkpoint_id: str | None = None
+    pending_checkpoint_approval: bool = False
     counters: LoopCounters = field(default_factory=LoopCounters)
 
     def to_dict(self) -> dict[str, Any]:
@@ -99,6 +104,7 @@ class ProjectPaths:
     scope_guard_file: Path
     active_task_file: Path
     block_review_file: Path
+    checkpoint_timeline_file: Path
     research_notes_file: Path
     attempt_history_file: Path
     success_patterns_file: Path
@@ -106,6 +112,7 @@ class ProjectPaths:
     task_summaries_file: Path
     pass_log_file: Path
     block_log_file: Path
+    checkpoint_state_file: Path
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)
@@ -175,6 +182,24 @@ class TestRunResult:
     stdout_file: Path
     stderr_file: Path
     summary: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return _normalize(self)
+
+
+@dataclass(slots=True)
+class Checkpoint:
+    checkpoint_id: str
+    title: str
+    long_term_refs: list[str]
+    target_block: int
+    status: str = "pending"
+    created_at: str | None = None
+    reached_at: str | None = None
+    approved_at: str | None = None
+    review_notes: str = ""
+    commit_hashes: list[str] = field(default_factory=list)
+    pushed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)

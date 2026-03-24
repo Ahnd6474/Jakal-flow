@@ -46,6 +46,7 @@ class WorkspaceManager:
             scope_guard_file=docs_dir / "SCOPE_GUARD.md",
             active_task_file=docs_dir / "ACTIVE_TASK.md",
             block_review_file=docs_dir / "BLOCK_REVIEW.md",
+            checkpoint_timeline_file=docs_dir / "CHECKPOINT_TIMELINE.md",
             research_notes_file=docs_dir / "RESEARCH_NOTES.md",
             attempt_history_file=docs_dir / "attempt_history.md",
             success_patterns_file=memory_dir / "success_patterns.jsonl",
@@ -53,6 +54,7 @@ class WorkspaceManager:
             task_summaries_file=memory_dir / "task_summaries.jsonl",
             pass_log_file=logs_dir / "passes.jsonl",
             block_log_file=logs_dir / "blocks.jsonl",
+            checkpoint_state_file=state_dir / "CHECKPOINTS.json",
         )
 
     def initialize_project(
@@ -149,6 +151,8 @@ class WorkspaceManager:
             current_safe_revision=loop_state_data.get("current_safe_revision"),
             long_term_plan_locked=loop_state_data.get("long_term_plan_locked", True),
             stop_reason=loop_state_data.get("stop_reason"),
+            current_checkpoint_id=loop_state_data.get("current_checkpoint_id"),
+            pending_checkpoint_approval=loop_state_data.get("pending_checkpoint_approval", False),
             counters=replace(LoopCounters(), **counters_data),
         )
         return ProjectContext(metadata=metadata, runtime=runtime, paths=paths, loop_state=loop_state)
