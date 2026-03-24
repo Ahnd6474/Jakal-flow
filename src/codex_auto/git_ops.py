@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from .models import CommandResult
+from .utils import decode_process_output
 
 
 class GitCommandError(RuntimeError):
@@ -15,19 +16,20 @@ class GitOps:
         completed = subprocess.run(
             ["git", *args],
             cwd=cwd,
-            text=True,
             capture_output=True,
             check=False,
         )
+        stdout = decode_process_output(completed.stdout)
+        stderr = decode_process_output(completed.stderr)
         result = CommandResult(
             command=["git", *args],
             returncode=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
+            stdout=stdout,
+            stderr=stderr,
         )
         if check and completed.returncode != 0:
             raise GitCommandError(
-                f"git {' '.join(args)} failed with code {completed.returncode}: {completed.stderr.strip()}"
+                f"git {' '.join(args)} failed with code {completed.returncode}: {stderr.strip()}"
             )
         return result
 

@@ -415,7 +415,9 @@ class CodexAutoGUI:
                 self.queue.put(("done", {"status": f"{label} 완료", "details": self._render_result(result)}))
                 self.queue.put(("log", f"[완료] {label}"))
             except Exception as exc:
-                self.queue.put(("error", f"{label} 실패: {exc}\n\n{traceback.format_exc()}"))
+                error_text = f"{label} 실패: {exc}"
+                self.queue.put(("log", f"[오류] {error_text}\n{traceback.format_exc()}"))
+                self.queue.put(("error", error_text))
 
         threading.Thread(target=target, daemon=True).start()
 

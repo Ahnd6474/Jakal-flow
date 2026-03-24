@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from .models import CodexRunResult, ProjectContext
-from .utils import ensure_dir, read_text, write_text
+from .utils import decode_process_output, ensure_dir, read_text, write_text
 
 
 class CodexRunner:
@@ -65,15 +65,16 @@ class CodexRunner:
         )
         completed = subprocess.run(
             command,
-            input=prompt,
-            text=True,
+            input=prompt.encode("utf-8"),
             capture_output=True,
             check=False,
         )
-        write_text(event_file, completed.stdout)
-        if completed.stderr:
-            write_text(block_dir / f"{pass_slug}.stderr.log", completed.stderr)
-        usage = self._extract_usage(completed.stdout)
+        stdout = decode_process_output(completed.stdout)
+        stderr = decode_process_output(completed.stderr)
+        write_text(event_file, stdout)
+        if stderr:
+            write_text(block_dir / f"{pass_slug}.stderr.log", stderr)
+        usage = self._extract_usage(stdout)
         return CodexRunResult(
             pass_type=pass_type,
             prompt_file=prompt_file,

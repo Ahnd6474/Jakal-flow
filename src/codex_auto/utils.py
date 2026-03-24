@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import locale
 import os
 import re
 from datetime import UTC, datetime
@@ -77,6 +78,24 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
         if line.strip():
             entries.append(json.loads(line))
     return entries
+
+
+def decode_process_output(data: bytes) -> str:
+    if not data:
+        return ""
+    preferred_encodings: list[str] = ["utf-8"]
+    locale_encoding = locale.getpreferredencoding(False)
+    if locale_encoding and locale_encoding.lower() not in {"utf-8", "utf8"}:
+        preferred_encodings.append(locale_encoding)
+    for encoding in ("cp949", "utf-8-sig"):
+        if encoding not in preferred_encodings:
+            preferred_encodings.append(encoding)
+    for encoding in preferred_encodings:
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def compact_text(value: str, max_chars: int = 3_000) -> str:

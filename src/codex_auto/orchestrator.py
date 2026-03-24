@@ -25,7 +25,7 @@ from .planning import (
     write_active_task,
 )
 from .reporting import Reporter
-from .utils import now_utc_iso, read_json, read_text, write_json, write_text
+from .utils import decode_process_output, now_utc_iso, read_json, read_text, write_json, write_text
 from .workspace import WorkspaceManager
 
 
@@ -490,12 +490,13 @@ class Orchestrator:
             context.runtime.test_cmd,
             cwd=context.paths.repo_dir,
             shell=True,
-            text=True,
             capture_output=True,
             check=False,
         )
-        write_text(stdout_file, completed.stdout)
-        write_text(stderr_file, completed.stderr)
+        stdout = decode_process_output(completed.stdout)
+        stderr = decode_process_output(completed.stderr)
+        write_text(stdout_file, stdout)
+        write_text(stderr_file, stderr)
         return TestRunResult(
             command=context.runtime.test_cmd,
             returncode=completed.returncode,
