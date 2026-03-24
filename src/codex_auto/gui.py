@@ -390,6 +390,84 @@ class CodexAutoGUI:
         self.status_var.set(label)
         for button in self.action_buttons:
             button.state(["disabled"] if busy else ["!disabled"])
+        if busy:
+            self.loop_status_var.set(label)
+
+    def _set_progress_from_context(self, context: ProjectContext | None) -> None:
+        self.current_project = context
+        if context is None:
+            self.current_repo_var.set("선택 없음")
+            self.block_progress_var.set("0 / 0")
+            self.loop_status_var.set("대기")
+            self.checkpoint_status_var.set("없음")
+            self.next_action_var.set("저장소를 선택한 뒤 실행")
+            self.timeline_caption_var.set("준비")
+            self.timeline_progress.configure(value=0)
+            return
+
+        max_blocks = max(1, context.runtime.max_blocks)
+        current_block = min(context.loop_state.block_index, max_blocks)
+        self.current_repo_var.set(context.metadata.slug)
+        self.block_progress_var.set(f"{current_block} / {max_blocks}")
+        self.loop_status_var.set(self._human_status(context))
+        self.checkpoint_status_var.set(self._checkpoint_summary(context))
+        self.next_action_var.set(self._next_action(context, max_blocks))
+        timeline_value, caption = self._timeline_state(context)
+        self.timeline_progress.configure(value=timeline_value)
+        self.timeline_caption_var.set(caption)
+
+    def _human_status(self, context: ProjectContext) -> str:
+        status = context.metadata.current_status
+        if status == "ready":
+            return "준비 완료"
+        if status == "init_failed":
+            return "초기화 실패"
+        if status == "awaiting_checkpoint_approval":
+            return "체크포인트 승인 대기"
+        if status.startswith("running:block:"):
+            block = status.rsplit(":", 1)[-1]
+            return f"블록 {block} 실행 중"
+        if context.loop_state.stop_reason:
+            return context.loop_state.stop_reason
+        return status or "대기"
+
+    def _checkpoint_summary(self, context: ProjectContext) -> str:
+        data = read_json(context.paths.checkpoint_state_file, default={"checkpoints": []})
+        checkpoints = data.get("checkpoints", [])
+        if not checkpoints:
+            return "없음"
+        approved = sum(1 for item in checkpoints if item.get("status") == "approved")
+        total = len(checkpoints)
+        waiting = next((item for item in checkpoints if item.get("status") == "awaiting_review"), None)
+        if waiting:
+            return f"{waiting.get('checkpoint_id', 'CP')} 승인 대기"
+        return f"{approved} / {total} 승인"
+
+    def _next_action(self, context: ProjectContext, max_blocks: int) -> str:
+        if context.loop_state.pending_checkpoint_approval:
+            return "승인+업로드 버튼으로 체크포인트를 처리"
+        if context.metadata.current_status == "init_failed":
+            return "장기 계획 입력이나 저장소 설정을 수정 후 다시 실행"
+        if context.metadata.current_status.startswith("running:"):
+            return "현재 블록 진행 중"
+        if context.loop_state.block_index >= max_blocks:
+            return "필요하면 최대 블록 수를 늘리거나 이어서 실행"
+        if context.loop_state.stop_reason:
+            return f"중단 원인 확인: {context.loop_state.stop_reason}"
+        return "실행 또는 이어서 실행 가능"
+
+    def _timeline_state(self, context: ProjectContext) -> tuple[int, str]:
+        if context.metadata.current_status == "init_failed":
+            return 1, "초기화 단계에서 멈춤"
+        if context.loop_state.pending_checkpoint_approval:
+            return 4, "체크포인트 검토 필요"
+        if context.metadata.current_status.startswith("running:"):
+            return 3, f"반복 실행 중 · block {context.loop_state.block_index}"
+        if context.loop_state.block_index > 0:
+            return 3, f"반복 실행 완료 · block {context.loop_state.block_index}"
+        if context.metadata.current_safe_revision:
+            return 2, "초기화 완료"
+        return 1, "입력 확인 중"
 
     def _orchestrator(self) -> Orchestrator:
         return Orchestrator(Path(self.workspace_root_var.get().strip() or ".codex-auto-workspace"))
@@ -409,7 +487,7 @@ class CodexAutoGUI:
             model=self.model_var.get().strip() or "gpt-5.4",
             effort=effort,
             extra_prompt=self.extra_prompt_text.get("1.0", END).strip(),
-            init_plan_prompt=self.init_plan_prompt_text.get("1.0", END).strip(),
+            init_plan_prompt="",
             approval_mode=self.approval_var.get().strip() or "never",
             sandbox_mode=self.sandbox_var.get().strip() or "workspace-write",
             test_cmd=self.test_cmd_var.get().strip() or "python -m pytest",
@@ -550,6 +628,26 @@ class CodexAutoGUI:
         self.output_tokens_var.set(f"{usage['output_tokens']:,}")
         self._set_summary(self._format_workspace_summary(rows, usage))
         self._set_details(json.dumps(rows, indent=2, ensure_ascii=False))
+        self._set_progress_from_context(self._current_project_from_selection(projects))
+
+    def _current_project_from_selection(self, projects: list[ProjectContext]) -> ProjectContext | None:
+        selected = self.repo_tree.selection()
+        if selected:
+            selected_id = selected[0]
+            for project in projects:
+                if project.metadata.repo_id == selected_id:
+                    return project
+        if self.current_project is not None:
+            for project in projects:
+                if project.metadata.repo_id == self.current_project.metadata.repo_id:
+                    return project
+        repo_url = self.repo_url_var.get().strip()
+        branch = self.branch_var.get().strip() or "main"
+        if repo_url:
+            for project in projects:
+                if project.metadata.repo_url == repo_url and project.metadata.branch == branch:
+                    return project
+        return None
 
     def load_selected_repository(self, show_message: bool = True) -> None:
         selected = self.repo_tree.selection()
@@ -562,6 +660,8 @@ class CodexAutoGUI:
             return
         self.repo_url_var.set(str(row["repo_url"]))
         self.branch_var.set(str(row["branch"]))
+        self.current_project = self._orchestrator().find_project(str(row["repo_url"]), str(row["branch"]))
+        self._set_progress_from_context(self.current_project)
         if show_message:
             self._append_log(f"[정보] {row['slug']} 불러옴")
 
