@@ -53,6 +53,9 @@ class RepoMetadata:
     last_run_at: str | None = None
     current_status: str = "initialized"
     current_safe_revision: str | None = None
+    repo_kind: str = "remote"
+    display_name: str | None = None
+    origin_url: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)
@@ -114,6 +117,8 @@ class ProjectPaths:
     pass_log_file: Path
     block_log_file: Path
     checkpoint_state_file: Path
+    execution_plan_file: Path
+    execution_flow_svg_file: Path
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)
@@ -204,3 +209,63 @@ class Checkpoint:
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)
+
+
+@dataclass(slots=True)
+class ExecutionStep:
+    step_id: str
+    title: str
+    description: str = ""
+    test_command: str = ""
+    success_criteria: str = ""
+    status: str = "pending"
+    started_at: str | None = None
+    completed_at: str | None = None
+    commit_hash: str | None = None
+    notes: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return _normalize(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExecutionStep":
+        return cls(
+            step_id=str(data.get("step_id", "")).strip() or "LT1",
+            title=str(data.get("title", "")).strip(),
+            description=str(data.get("description", "")).strip(),
+            test_command=str(data.get("test_command", "")).strip(),
+            success_criteria=str(data.get("success_criteria", "")).strip(),
+            status=str(data.get("status", "pending")).strip() or "pending",
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+            commit_hash=data.get("commit_hash"),
+            notes=str(data.get("notes", "")).strip(),
+        )
+
+
+@dataclass(slots=True)
+class ExecutionPlanState:
+    project_prompt: str = ""
+    summary: str = ""
+    default_test_command: str = "python -m pytest"
+    last_updated_at: str | None = None
+    steps: list[ExecutionStep] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _normalize(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExecutionPlanState":
+        raw_steps = data.get("steps", [])
+        steps = []
+        if isinstance(raw_steps, list):
+            for item in raw_steps:
+                if isinstance(item, dict):
+                    steps.append(ExecutionStep.from_dict(item))
+        return cls(
+            project_prompt=str(data.get("project_prompt", "")).strip(),
+            summary=str(data.get("summary", "")).strip(),
+            default_test_command=str(data.get("default_test_command", "python -m pytest")).strip() or "python -m pytest",
+            last_updated_at=data.get("last_updated_at"),
+            steps=steps,
+        )

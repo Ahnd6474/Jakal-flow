@@ -55,6 +55,8 @@ class WorkspaceManager:
             pass_log_file=logs_dir / "passes.jsonl",
             block_log_file=logs_dir / "blocks.jsonl",
             checkpoint_state_file=state_dir / "CHECKPOINTS.json",
+            execution_plan_file=state_dir / "EXECUTION_PLAN.json",
+            execution_flow_svg_file=docs_dir / "EXECUTION_FLOW.svg",
         )
 
     def initialize_project(
@@ -93,6 +95,7 @@ class WorkspaceManager:
             project_root=paths.project_root,
             repo_path=paths.repo_dir,
             created_at=created_at,
+            display_name=slug,
         )
         loop_state = LoopState(repo_id=repo_id, repo_slug=slug)
         registry["projects"][repo_id] = {
@@ -101,6 +104,71 @@ class WorkspaceManager:
             "repo_url": repo_url,
             "branch": branch,
             "project_root": str(paths.project_root),
+            "repo_kind": "remote",
+            "repo_path": str(paths.repo_dir),
+        }
+        write_json(self.registry_file, registry)
+        self.save_project(ProjectContext(metadata=metadata, runtime=runtime, paths=paths, loop_state=loop_state))
+        return self.load_project_by_id(repo_id)
+
+    def initialize_local_project(
+        self,
+        project_dir: Path,
+        branch: str,
+        runtime: RuntimeOptions,
+        origin_url: str = "",
+    ) -> ProjectContext:
+        self.ensure_workspace()
+        resolved_dir = project_dir.resolve()
+        repo_id, slug = stable_repo_identity(str(resolved_dir), branch)
+        paths = self.build_paths(slug)
+        paths.repo_dir = resolved_dir
+        for directory in [
+            paths.project_root,
+            paths.docs_dir,
+            paths.memory_dir,
+            paths.logs_dir,
+            paths.reports_dir,
+            paths.state_dir,
+        ]:
+            ensure_dir(directory)
+        ensure_dir(resolved_dir)
+
+        registry = read_json(self.registry_file, default={"projects": {}})
+        if repo_id in registry["projects"]:
+            context = self.load_project_by_id(repo_id)
+            context.runtime = runtime
+            context.metadata.repo_path = resolved_dir
+            context.metadata.branch = branch
+            context.metadata.repo_kind = "local"
+            context.metadata.display_name = resolved_dir.name
+            context.metadata.origin_url = origin_url or context.metadata.origin_url
+            context.metadata.repo_url = origin_url or str(resolved_dir)
+            self.save_project(context)
+            return context
+
+        created_at = now_utc_iso()
+        metadata = RepoMetadata(
+            repo_id=repo_id,
+            slug=slug,
+            repo_url=origin_url or str(resolved_dir),
+            branch=branch,
+            project_root=paths.project_root,
+            repo_path=resolved_dir,
+            created_at=created_at,
+            repo_kind="local",
+            display_name=resolved_dir.name,
+            origin_url=origin_url or None,
+        )
+        loop_state = LoopState(repo_id=repo_id, repo_slug=slug)
+        registry["projects"][repo_id] = {
+            "repo_id": repo_id,
+            "slug": slug,
+            "repo_url": metadata.repo_url,
+            "branch": branch,
+            "project_root": str(paths.project_root),
+            "repo_kind": "local",
+            "repo_path": str(resolved_dir),
         }
         write_json(self.registry_file, registry)
         self.save_project(ProjectContext(metadata=metadata, runtime=runtime, paths=paths, loop_state=loop_state))
@@ -110,6 +178,18 @@ class WorkspaceManager:
         write_json(context.paths.metadata_file, context.metadata.to_dict())
         write_json(context.paths.project_config_file, context.runtime.to_dict())
         write_json(context.paths.loop_state_file, context.loop_state.to_dict())
+        registry = read_json(self.registry_file, default={"projects": {}})
+        if context.metadata.repo_id in registry["projects"]:
+            registry["projects"][context.metadata.repo_id] = {
+                "repo_id": context.metadata.repo_id,
+                "slug": context.metadata.slug,
+                "repo_url": context.metadata.repo_url,
+                "branch": context.metadata.branch,
+                "project_root": str(context.metadata.project_root),
+                "repo_kind": context.metadata.repo_kind,
+                "repo_path": str(context.metadata.repo_path),
+            }
+            write_json(self.registry_file, registry)
 
     def load_project_by_id(self, repo_id: str) -> ProjectContext:
         registry = read_json(self.registry_file, default={"projects": {}})
@@ -137,7 +217,12 @@ class WorkspaceManager:
             last_run_at=metadata_data.get("last_run_at"),
             current_status=metadata_data.get("current_status", "initialized"),
             current_safe_revision=metadata_data.get("current_safe_revision"),
+            repo_kind=metadata_data.get("repo_kind", "remote"),
+            display_name=metadata_data.get("display_name"),
+            origin_url=metadata_data.get("origin_url"),
         )
+        if metadata.repo_kind == "local":
+            paths.repo_dir = metadata.repo_path
         runtime = RuntimeOptions(**runtime_data)
         counters_data = loop_state_data.get("counters", {})
         loop_state = LoopState(
@@ -176,3 +261,10 @@ class WorkspaceManager:
             except FileNotFoundError:
                 continue
         return sorted(projects, key=lambda ctx: ctx.metadata.created_at)
+
+    def find_project_by_repo_path(self, repo_path: Path) -> ProjectContext | None:
+        resolved_target = repo_path.resolve()
+        for project in self.list_projects():
+            if project.metadata.repo_path.resolve() == resolved_target:
+                return project
+        return None

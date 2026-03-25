@@ -42,12 +42,53 @@ class GitOps:
         repo_dir.parent.mkdir(parents=True, exist_ok=True)
         self.run(["clone", "--branch", branch, "--single-branch", repo_url, str(repo_dir)], cwd=repo_dir.parent)
 
+    def is_git_repository(self, repo_dir: Path) -> bool:
+        return (repo_dir / ".git").exists()
+
+    def ensure_repository(self, repo_dir: Path, branch: str) -> bool:
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        created = False
+        if not self.is_git_repository(repo_dir):
+            self.run(["init"], cwd=repo_dir)
+            created = True
+        if branch:
+            branch_check = self.run(["rev-parse", "--verify", branch], cwd=repo_dir, check=False)
+            if branch_check.returncode == 0:
+                self.run(["checkout", branch], cwd=repo_dir)
+            else:
+                self.run(["checkout", "-b", branch], cwd=repo_dir)
+        return created
+
     def configure_local_identity(self, repo_dir: Path, name: str, email: str) -> None:
         self.run(["config", "user.name", name], cwd=repo_dir)
         self.run(["config", "user.email", email], cwd=repo_dir)
 
     def current_revision(self, repo_dir: Path) -> str:
         return self.run(["rev-parse", "HEAD"], cwd=repo_dir).stdout.strip()
+
+    def has_commits(self, repo_dir: Path) -> bool:
+        result = self.run(["rev-parse", "--verify", "HEAD"], cwd=repo_dir, check=False)
+        return result.returncode == 0
+
+    def current_branch(self, repo_dir: Path) -> str:
+        result = self.run(["branch", "--show-current"], cwd=repo_dir, check=False)
+        branch = result.stdout.strip()
+        if branch:
+            return branch
+        fallback = self.run(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_dir, check=False).stdout.strip()
+        return "" if fallback == "HEAD" else fallback
+
+    def remote_url(self, repo_dir: Path, remote_name: str = "origin") -> str | None:
+        result = self.run(["remote", "get-url", remote_name], cwd=repo_dir, check=False)
+        url = result.stdout.strip()
+        return url or None
+
+    def set_remote_url(self, repo_dir: Path, remote_name: str, remote_url: str) -> None:
+        existing = self.run(["remote"], cwd=repo_dir, check=False).stdout.splitlines()
+        if remote_name in {item.strip() for item in existing}:
+            self.run(["remote", "set-url", remote_name, remote_url], cwd=repo_dir)
+            return
+        self.run(["remote", "add", remote_name, remote_url], cwd=repo_dir)
 
     def has_changes(self, repo_dir: Path) -> bool:
         return bool(self.run(["status", "--porcelain"], cwd=repo_dir).stdout.strip())
@@ -63,6 +104,11 @@ class GitOps:
     def commit_all(self, repo_dir: Path, message: str) -> str:
         self.run(["add", "-A"], cwd=repo_dir)
         self.run(["commit", "-m", message], cwd=repo_dir)
+        return self.current_revision(repo_dir)
+
+    def create_initial_commit(self, repo_dir: Path, message: str) -> str:
+        self.run(["add", "-A"], cwd=repo_dir)
+        self.run(["commit", "--allow-empty", "-m", message], cwd=repo_dir)
         return self.current_revision(repo_dir)
 
     def push(self, repo_dir: Path, branch: str) -> None:

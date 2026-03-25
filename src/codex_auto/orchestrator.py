@@ -3,10 +3,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from .environment import ensure_gitignore, ensure_virtualenv
 from .codex_runner import CodexRunner
 from .git_ops import GitOps
 from .memory import MemoryStore
-from .models import CandidateTask, ProjectContext, RuntimeOptions, TestRunResult
+from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, ProjectContext, RuntimeOptions, TestRunResult
 from .planning import (
     attempt_history_entry,
     assess_repository_maturity,
@@ -17,11 +18,16 @@ from .planning import (
     bootstrap_long_term_plan_prompt,
     candidate_tasks_from_mid_term,
     checkpoint_timeline_markdown,
+    execution_plan_markdown,
+    execution_plan_svg,
+    execution_steps_to_plan_items,
     ensure_scope_guard,
     generate_long_term_plan,
     implementation_prompt,
     is_long_term_plan_markdown,
+    parse_execution_plan_response,
     parse_work_breakdown_response,
+    prompt_to_execution_plan_prompt,
     reflection_markdown,
     scan_repository_inputs,
     select_candidate,
@@ -30,7 +36,7 @@ from .planning import (
     write_active_task,
 )
 from .reporting import Reporter
-from .utils import decode_process_output, now_utc_iso, read_json, read_text, write_json, write_text
+from .utils import decode_process_output, now_utc_iso, read_json, read_jsonl, read_text, write_json, write_text
 from .workspace import WorkspaceManager
 
 
@@ -38,6 +44,290 @@ class Orchestrator:
     def __init__(self, workspace_root: Path) -> None:
         self.workspace = WorkspaceManager(workspace_root)
         self.git = GitOps()
+
+    def setup_local_project(
+        self,
+        project_dir: Path,
+        runtime: RuntimeOptions,
+        branch: str = "main",
+        origin_url: str = "",
+    ) -> ProjectContext:
+        resolved_dir = project_dir.resolve()
+        created_repo = self.git.ensure_repository(resolved_dir, branch)
+        active_branch = self.git.current_branch(resolved_dir) or branch or "main"
+        if origin_url.strip():
+            self.git.set_remote_url(resolved_dir, "origin", origin_url.strip())
+        detected_origin = self.git.remote_url(resolved_dir, "origin")
+
+        existing = self.workspace.find_project_by_repo_path(resolved_dir)
+        if existing is None:
+            context = self.workspace.initialize_local_project(
+                project_dir=resolved_dir,
+                branch=active_branch,
+                runtime=runtime,
+                origin_url=detected_origin or origin_url.strip(),
+            )
+        else:
+            context = existing
+            context.runtime = runtime
+            context.metadata.branch = active_branch
+            context.metadata.repo_path = resolved_dir
+            context.metadata.repo_url = detected_origin or origin_url.strip() or str(resolved_dir)
+            context.metadata.origin_url = detected_origin or origin_url.strip() or None
+            context.metadata.repo_kind = "local"
+            context.metadata.display_name = resolved_dir.name
+
+        self.git.configure_local_identity(
+            context.paths.repo_dir,
+            runtime.git_user_name,
+            runtime.git_user_email,
+        )
+        ensure_virtualenv(context.paths.repo_dir)
+        ensure_gitignore(context.paths.repo_dir)
+        self._ensure_project_documents(context)
+
+        if created_repo or not self.git.has_commits(context.paths.repo_dir):
+            safe_revision = self.git.create_initial_commit(
+                context.paths.repo_dir,
+                "chore: initialize codex-auto workspace",
+            )
+        else:
+            safe_revision = self.git.current_revision(context.paths.repo_dir)
+
+        context.metadata.branch = self.git.current_branch(context.paths.repo_dir) or active_branch
+        context.metadata.current_safe_revision = safe_revision
+        context.metadata.current_status = "setup_ready"
+        context.metadata.last_run_at = now_utc_iso()
+        context.metadata.repo_url = self.git.remote_url(context.paths.repo_dir, "origin") or str(context.paths.repo_dir)
+        context.metadata.origin_url = self.git.remote_url(context.paths.repo_dir, "origin")
+        context.metadata.repo_kind = "local"
+        context.metadata.display_name = context.paths.repo_dir.name
+        context.loop_state.current_safe_revision = safe_revision
+        context.loop_state.stop_requested = False
+        context.loop_state.stop_reason = None
+        self.workspace.save_project(context)
+        self.save_execution_plan_state(context, self.load_execution_plan_state(context))
+        return context
+
+    def generate_execution_plan(
+        self,
+        project_dir: Path,
+        runtime: RuntimeOptions,
+        project_prompt: str,
+        branch: str = "main",
+        max_steps: int = 6,
+        origin_url: str = "",
+    ) -> tuple[ProjectContext, ExecutionPlanState]:
+        context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
+        repo_inputs = scan_repository_inputs(context.paths.repo_dir)
+        runner = CodexRunner(context.runtime.codex_path)
+        prompt = prompt_to_execution_plan_prompt(
+            context=context,
+            repo_inputs=repo_inputs,
+            user_prompt=project_prompt,
+            default_test_command=runtime.test_cmd,
+            max_steps=max_steps,
+        )
+        result = runner.run_pass(
+            context=context,
+            prompt=prompt,
+            pass_type="plan-interactive-execution",
+            block_index=max(0, context.loop_state.block_index),
+            search_enabled=False,
+        )
+        summary = ""
+        steps: list[ExecutionStep] = []
+        if result.returncode == 0:
+            summary, steps = parse_execution_plan_response(result.last_message or "", runtime.test_cmd, limit=max_steps)
+        if not steps:
+            steps = [
+                ExecutionStep(
+                    step_id="LT1",
+                    title=project_prompt.strip() or "Implement the requested improvement safely",
+                    test_command=runtime.test_cmd,
+                    success_criteria="Run the configured verification command successfully.",
+                )
+            ]
+            summary = summary or "Fallback execution plan created because Codex did not return a machine-readable breakdown."
+
+        plan_state = ExecutionPlanState(
+            project_prompt=project_prompt.strip(),
+            summary=summary.strip(),
+            default_test_command=runtime.test_cmd,
+            last_updated_at=now_utc_iso(),
+            steps=steps,
+        )
+        self.save_execution_plan_state(context, plan_state)
+        context.metadata.current_status = "plan_ready"
+        context.metadata.last_run_at = now_utc_iso()
+        self.workspace.save_project(context)
+        return context, plan_state
+
+    def load_execution_plan_state(self, context: ProjectContext) -> ExecutionPlanState:
+        payload = read_json(context.paths.execution_plan_file, default=None)
+        if not isinstance(payload, dict):
+            return ExecutionPlanState(
+                default_test_command=context.runtime.test_cmd,
+                last_updated_at=now_utc_iso(),
+                steps=[],
+            )
+        state = ExecutionPlanState.from_dict(payload)
+        if not state.default_test_command:
+            state.default_test_command = context.runtime.test_cmd
+        return state
+
+    def update_execution_plan(
+        self,
+        project_dir: Path,
+        runtime: RuntimeOptions,
+        plan_state: ExecutionPlanState,
+        branch: str = "main",
+        origin_url: str = "",
+    ) -> tuple[ProjectContext, ExecutionPlanState]:
+        context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
+        saved = self.save_execution_plan_state(context, plan_state)
+        context.metadata.current_status = "plan_ready" if saved.steps else "setup_ready"
+        context.metadata.last_run_at = now_utc_iso()
+        self.workspace.save_project(context)
+        return context, saved
+
+    def save_execution_plan_state(self, context: ProjectContext, plan_state: ExecutionPlanState) -> ExecutionPlanState:
+        normalized_steps: list[ExecutionStep] = []
+        for index, step in enumerate(plan_state.steps, start=1):
+            normalized_steps.append(
+                ExecutionStep(
+                    step_id=f"LT{index}",
+                    title=step.title.strip(),
+                    description=step.description.strip(),
+                    test_command=step.test_command.strip() or plan_state.default_test_command or context.runtime.test_cmd,
+                    success_criteria=step.success_criteria.strip(),
+                    status=step.status if step.status else "pending",
+                    started_at=step.started_at,
+                    completed_at=step.completed_at,
+                    commit_hash=step.commit_hash,
+                    notes=step.notes.strip(),
+                )
+            )
+        state = ExecutionPlanState(
+            project_prompt=plan_state.project_prompt.strip(),
+            summary=plan_state.summary.strip(),
+            default_test_command=plan_state.default_test_command.strip() or context.runtime.test_cmd,
+            last_updated_at=now_utc_iso(),
+            steps=normalized_steps,
+        )
+        write_json(context.paths.execution_plan_file, state.to_dict())
+        write_text(
+            context.paths.long_term_plan_file,
+            execution_plan_markdown(context, state.project_prompt, state.summary, state.steps),
+        )
+        mid_term_text, _ = build_mid_term_plan_from_plan_items(
+            execution_steps_to_plan_items(state.steps),
+            "This plan is the user-reviewed execution sequence for the current local project.",
+        )
+        write_text(context.paths.mid_term_plan_file, mid_term_text)
+        write_text(context.paths.scope_guard_file, ensure_scope_guard(context))
+        checkpoints = self._checkpoints_from_execution_steps(state.steps)
+        write_json(context.paths.checkpoint_state_file, {"checkpoints": [checkpoint.to_dict() for checkpoint in checkpoints]})
+        write_text(context.paths.checkpoint_timeline_file, checkpoint_timeline_markdown(checkpoints))
+        title = context.metadata.display_name or context.metadata.slug
+        write_text(context.paths.execution_flow_svg_file, execution_plan_svg(f"{title} execution flow", state.steps))
+        return state
+
+    def run_saved_execution_step(
+        self,
+        project_dir: Path,
+        runtime: RuntimeOptions,
+        step_id: str | None = None,
+        branch: str = "main",
+        origin_url: str = "",
+    ) -> tuple[ProjectContext, ExecutionPlanState, ExecutionStep]:
+        context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
+        plan_state = self.load_execution_plan_state(context)
+        if not plan_state.steps:
+            raise RuntimeError("No saved execution plan exists for this project.")
+
+        target_step: ExecutionStep | None = None
+        for step in plan_state.steps:
+            if step.status == "completed":
+                continue
+            if step_id and step.step_id != step_id:
+                continue
+            target_step = step
+            break
+        if target_step is None:
+            raise RuntimeError("No remaining execution step is available.")
+
+        for step in plan_state.steps:
+            if step.step_id == target_step.step_id:
+                step.status = "running"
+                step.started_at = step.started_at or now_utc_iso()
+                step.notes = ""
+            elif step.status == "running":
+                step.status = "paused"
+        plan_state.default_test_command = runtime.test_cmd
+        plan_state = self.save_execution_plan_state(context, plan_state)
+
+        previous_runtime = context.runtime
+        context.runtime = RuntimeOptions(
+            **{
+                **previous_runtime.to_dict(),
+                "test_cmd": target_step.test_command or runtime.test_cmd,
+                "max_blocks": 1,
+                "allow_push": True,
+                "approval_mode": runtime.approval_mode,
+                "sandbox_mode": runtime.sandbox_mode,
+                "require_checkpoint_approval": False,
+                "checkpoint_interval_blocks": 1,
+            }
+        )
+        self.workspace.save_project(context)
+
+        runner = CodexRunner(context.runtime.codex_path)
+        memory = MemoryStore(context.paths)
+        reporter = Reporter(context)
+        before_blocks = len(read_jsonl(context.paths.block_log_file))
+        candidate = CandidateTask(
+            candidate_id=target_step.step_id,
+            title=target_step.title,
+            rationale=self._execution_step_rationale(target_step, context.runtime.test_cmd),
+            long_term_refs=[target_step.step_id],
+            score=1.0,
+        )
+        target_step = next(step for step in plan_state.steps if step.step_id == target_step.step_id)
+        try:
+            self._run_single_block(
+                context=context,
+                runner=runner,
+                memory=memory,
+                reporter=reporter,
+                candidate_override=candidate,
+            )
+            context.metadata.last_run_at = now_utc_iso()
+            block_logs = read_jsonl(context.paths.block_log_file)
+            latest_block = block_logs[-1] if len(block_logs) > before_blocks else None
+            if latest_block and latest_block.get("status") == "completed":
+                target_step.status = "completed"
+                target_step.completed_at = now_utc_iso()
+                commit_hashes = latest_block.get("commit_hashes", [])
+                if isinstance(commit_hashes, list) and commit_hashes:
+                    target_step.commit_hash = str(commit_hashes[-1])
+                target_step.notes = str(latest_block.get("test_summary", "")).strip()
+                context.metadata.current_status = "plan_completed" if self._all_steps_completed(plan_state.steps) else "plan_ready"
+            else:
+                target_step.status = "failed"
+                target_step.notes = str(context.loop_state.stop_reason or "Step execution failed.").strip()
+                context.metadata.current_status = "failed"
+        except Exception as exc:
+            target_step.status = "failed"
+            target_step.notes = str(exc).strip() or "Step execution failed."
+            context.metadata.current_status = "failed"
+            raise
+        finally:
+            context.runtime = previous_runtime
+            self.save_execution_plan_state(context, plan_state)
+            self.workspace.save_project(context)
+
+        return context, plan_state, target_step
 
     def init_repo(
         self,
@@ -67,15 +357,7 @@ class Orchestrator:
                 long_term_plan_input=long_term_plan_input,
             )
             self._write_planning_state(context, runtime, long_term_text)
-
-            for file_path, starter in [
-                (context.paths.active_task_file, "# Active Task\n\nNo active task selected yet.\n"),
-                (context.paths.block_review_file, "# Block Review\n\nNo completed blocks yet.\n"),
-                (context.paths.research_notes_file, "# Research Notes\n\nNo research notes recorded yet.\n"),
-                (context.paths.attempt_history_file, "# Attempt History\n\n"),
-            ]:
-                if not file_path.exists():
-                    write_text(file_path, starter)
+            self._ensure_project_documents(context)
 
             safe_revision = self.git.current_revision(context.paths.repo_dir)
             context.metadata.current_safe_revision = safe_revision
@@ -169,6 +451,9 @@ class Orchestrator:
 
     def list_projects(self) -> list[ProjectContext]:
         return self.workspace.list_projects()
+
+    def local_project(self, project_dir: Path) -> ProjectContext | None:
+        return self.workspace.find_project_by_repo_path(project_dir)
 
     def status(self, repo_url: str, branch: str) -> ProjectContext:
         context = self.workspace.find_project(repo_url, branch)
@@ -309,6 +594,60 @@ class Orchestrator:
         self.workspace.save_project(context)
         return {"status": "stop_requested"}
 
+    def _ensure_project_documents(self, context: ProjectContext) -> None:
+        for file_path, starter in [
+            (context.paths.active_task_file, "# Active Task\n\nNo active task selected yet.\n"),
+            (context.paths.block_review_file, "# Block Review\n\nNo completed blocks yet.\n"),
+            (context.paths.research_notes_file, "# Research Notes\n\nNo research notes recorded yet.\n"),
+            (context.paths.attempt_history_file, "# Attempt History\n\n"),
+        ]:
+            if not file_path.exists():
+                write_text(file_path, starter)
+        if not context.paths.scope_guard_file.exists():
+            write_text(context.paths.scope_guard_file, ensure_scope_guard(context))
+        if not context.paths.execution_plan_file.exists():
+            write_json(context.paths.execution_plan_file, ExecutionPlanState(default_test_command=context.runtime.test_cmd).to_dict())
+        if not context.paths.execution_flow_svg_file.exists():
+            write_text(
+                context.paths.execution_flow_svg_file,
+                execution_plan_svg(f"{context.metadata.display_name or context.metadata.slug} execution flow", []),
+            )
+
+    def _execution_step_rationale(self, step: ExecutionStep, test_command: str) -> str:
+        details = step.description or "Complete the saved execution checkpoint with a small, safe change."
+        success = step.success_criteria or "The verification command exits successfully."
+        return f"{details} Verification command: {test_command}. Success criteria: {success}"
+
+    def _all_steps_completed(self, steps: list[ExecutionStep]) -> bool:
+        return bool(steps) and all(step.status == "completed" for step in steps)
+
+    def _checkpoints_from_execution_steps(self, steps: list[ExecutionStep]) -> list[Checkpoint]:
+        checkpoints: list[Checkpoint] = []
+        for index, step in enumerate(steps, start=1):
+            status = "pending"
+            if step.status == "completed":
+                status = "approved"
+            elif step.status == "running":
+                status = "awaiting_review"
+            elif step.status in {"failed", "paused"}:
+                status = step.status
+            checkpoints.append(
+                Checkpoint(
+                    checkpoint_id=f"CP{index}",
+                    title=step.title,
+                    long_term_refs=[step.step_id],
+                    target_block=index,
+                    status=status,
+                    created_at=step.started_at or now_utc_iso(),
+                    reached_at=step.completed_at if step.status == "completed" else step.started_at,
+                    approved_at=step.completed_at if step.status == "completed" else None,
+                    review_notes=step.notes,
+                    commit_hashes=[step.commit_hash] if step.commit_hash else [],
+                    pushed=bool(step.commit_hash),
+                )
+            )
+        return checkpoints
+
     def _run_single_block(
         self,
         context: ProjectContext,
@@ -316,6 +655,7 @@ class Orchestrator:
         memory: MemoryStore,
         reporter: Reporter,
         work_items: list[str] | None = None,
+        candidate_override: CandidateTask | None = None,
     ) -> None:
         context.loop_state.block_index += 1
         block_index = context.loop_state.block_index
@@ -323,22 +663,39 @@ class Orchestrator:
         context.metadata.last_run_at = now_utc_iso()
         safe_revision = context.metadata.current_safe_revision or self.git.current_revision(context.paths.repo_dir)
 
-        long_term_text = read_text(context.paths.long_term_plan_file)
-        remaining_limit = max(1, context.runtime.max_blocks - block_index + 1)
-        mid_items, mid_term_text = self._plan_block_items(
-            context=context,
-            runner=runner,
-            long_term_text=long_term_text,
-            work_items=work_items,
-            max_items=min(remaining_limit, 6),
-        )
-        write_text(context.paths.mid_term_plan_file, mid_term_text)
-
-        memory_context = memory.render_context(mid_term_text)
-        candidates = candidate_tasks_from_mid_term(mid_items, memory_context)
-        selected = select_candidate(candidates)
+        if candidate_override is None:
+            long_term_text = read_text(context.paths.long_term_plan_file)
+            remaining_limit = max(1, context.runtime.max_blocks - block_index + 1)
+            mid_items, mid_term_text = self._plan_block_items(
+                context=context,
+                runner=runner,
+                long_term_text=long_term_text,
+                work_items=work_items,
+                max_items=min(remaining_limit, 6),
+            )
+            write_text(context.paths.mid_term_plan_file, mid_term_text)
+            memory_context = memory.render_context(mid_term_text)
+            candidates = candidate_tasks_from_mid_term(mid_items, memory_context)
+            selected = select_candidate(candidates)
+            context.loop_state.last_candidates = [candidate.to_dict() for candidate in candidates]
+        else:
+            selected = candidate_override
+            mid_term_text, _ = build_mid_term_plan_from_plan_items(
+                execution_steps_to_plan_items(
+                    [
+                        ExecutionStep(
+                            step_id=selected.long_term_refs[0] if selected.long_term_refs else f"LT{block_index}",
+                            title=selected.title,
+                            test_command=context.runtime.test_cmd,
+                        )
+                    ]
+                ),
+                "This block follows the user-reviewed execution step.",
+            )
+            write_text(context.paths.mid_term_plan_file, mid_term_text)
+            memory_context = memory.render_context(mid_term_text)
+            context.loop_state.last_candidates = [selected.to_dict()]
         context.loop_state.current_task = selected.title
-        context.loop_state.last_candidates = [candidate.to_dict() for candidate in candidates]
         write_active_task(context, selected, memory_context)
 
         block_commit_hashes: list[str] = []

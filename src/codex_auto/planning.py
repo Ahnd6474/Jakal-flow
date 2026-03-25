@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from html import escape
 from importlib import resources
 from pathlib import Path
 
-from .models import CandidateTask, Checkpoint, ProjectContext
+from .models import CandidateTask, Checkpoint, ExecutionStep, ProjectContext
 from .utils import compact_text, now_utc_iso, read_text, similarity_score, tokenize, write_text
 
 
@@ -285,6 +286,102 @@ def work_breakdown_prompt(
     )
 
 
+def prompt_to_execution_plan_prompt(
+    context: ProjectContext,
+    repo_inputs: dict[str, str],
+    user_prompt: str,
+    default_test_command: str,
+    max_steps: int,
+) -> str:
+    return "\n".join(
+        [
+            f"You are planning a Codex execution flow for the local project at {context.paths.repo_dir}.",
+            "Follow any AGENTS.md rules in the repository.",
+            "Break the user's request into small execution checkpoints.",
+            "Each checkpoint must end with a concrete local verification command.",
+            "Prefer narrow steps that can reasonably finish with one commit and push.",
+            f"Use `{default_test_command}` as the default verification command unless a narrower command is clearly better.",
+            f"Return exactly one JSON object with a top-level 'tasks' array containing 3 to {max(3, max_steps)} items.",
+            "JSON shape:",
+            '{',
+            '  "summary": "one short paragraph",',
+            '  "tasks": [',
+            '    {',
+            '      "title": "short actionable step",',
+            '      "description": "why this step exists",',
+            '      "test_command": "local command to verify the step",',
+            '      "success_criteria": "what passing means"',
+            "    }",
+            "  ]",
+            '}',
+            "Do not include markdown fences or commentary outside the JSON.",
+            "",
+            "Repository summary:",
+            f"README:\n{repo_inputs['readme']}",
+            "",
+            f"AGENTS:\n{repo_inputs['agents']}",
+            "",
+            f"Docs:\n{repo_inputs['docs']}",
+            "",
+            "User request:",
+            user_prompt.strip(),
+        ]
+    )
+
+
+def parse_execution_plan_response(
+    response_text: str,
+    default_test_command: str,
+    limit: int = 8,
+) -> tuple[str, list[ExecutionStep]]:
+    raw = response_text.strip()
+    if not raw:
+        return "", []
+    fenced = re.search(r"```(?:json)?\s*(.+?)\s*```", raw, re.DOTALL)
+    if fenced:
+        raw = fenced.group(1).strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return "", []
+
+    summary = ""
+    tasks_payload: object = []
+    if isinstance(payload, dict):
+        summary = str(payload.get("summary", "")).strip()
+        tasks_payload = payload.get("tasks", [])
+    elif isinstance(payload, list):
+        tasks_payload = payload
+    if not isinstance(tasks_payload, list):
+        return summary, []
+
+    steps: list[ExecutionStep] = []
+    seen: set[str] = set()
+    for index, item in enumerate(tasks_payload, start=1):
+        if len(steps) >= max(1, limit):
+            break
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        if len(tokenize(title)) < 2:
+            continue
+        dedupe_key = title.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        steps.append(
+            ExecutionStep(
+                step_id=f"LT{len(steps) + 1}",
+                title=title,
+                description=str(item.get("description", "")).strip(),
+                test_command=str(item.get("test_command", "")).strip() or default_test_command,
+                success_criteria=str(item.get("success_criteria", "")).strip(),
+                status="pending",
+            )
+        )
+    return summary, steps
+
+
 def parse_work_breakdown_response(response_text: str, limit: int = 6) -> list[PlanItem]:
     raw = response_text.strip()
     if not raw:
@@ -375,6 +472,7 @@ def implementation_prompt(
         "Update README or docs only if they match actual verified behavior.",
         f"Managed planning documents live outside the repo at {context.paths.docs_dir}.",
         f"Pass type: {pass_name}.",
+        f"Verification command for this step: {context.runtime.test_cmd}",
         "",
         "Active task:",
         candidate.title,
@@ -504,3 +602,110 @@ def checkpoint_timeline_markdown(checkpoints: list[Checkpoint]) -> str:
             ]
         )
     return "\n".join(lines)
+
+
+def execution_plan_markdown(
+    context: ProjectContext,
+    project_prompt: str,
+    summary: str,
+    steps: list[ExecutionStep],
+) -> str:
+    lines = [
+        "# Long-Term Plan",
+        "",
+        f"- Repository: {context.metadata.display_name or context.metadata.slug}",
+        f"- Working directory: {context.paths.repo_dir}",
+        f"- Source: {context.metadata.repo_url}",
+        f"- Branch: {context.metadata.branch}",
+        f"- Generated at: {now_utc_iso()}",
+        "",
+        "## User Prompt",
+        project_prompt.strip() or "No prompt recorded.",
+        "",
+        "## Execution Summary",
+        summary.strip() or "Codex-generated execution plan for the current repository state.",
+        "",
+        "## Strategic Goals",
+    ]
+    if not steps:
+        lines.append("- LT1: Establish a minimal, testable first step and verify it locally.")
+    for step in steps:
+        lines.extend(
+            [
+                f"- {step.step_id}: {step.title}",
+                f"  - Verification: {step.test_command or 'Use the default test command.'}",
+                f"  - Success criteria: {step.success_criteria or 'Verification command completes successfully.'}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Non-Goals",
+            "- Do not skip verification for any planned step.",
+            "- Do not widen scope beyond the current prompt unless the user updates the plan.",
+            "",
+            "## Operating Constraints",
+            "- Treat each planned step as a checkpoint.",
+            "- Commit and push after a verified step when an origin remote is configured.",
+            "- Users may edit only steps that have not started yet.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def execution_steps_to_plan_items(steps: list[ExecutionStep]) -> list[PlanItem]:
+    return [PlanItem(item_id=step.step_id, text=step.title) for step in steps if step.title.strip()]
+
+
+def execution_plan_svg(title: str, steps: list[ExecutionStep]) -> str:
+    width = 1180
+    box_width = 220
+    box_height = 108
+    gap_x = 32
+    gap_y = 36
+    margin_x = 40
+    margin_y = 56
+    per_row = 4
+    rows = max(1, (len(steps) + per_row - 1) // per_row)
+    height = margin_y * 2 + rows * box_height + max(0, rows - 1) * gap_y + 80
+    palette = {
+        "completed": ("#0f766e", "#ecfeff"),
+        "running": ("#1d4ed8", "#eff6ff"),
+        "paused": ("#7c3aed", "#f5f3ff"),
+        "failed": ("#b91c1c", "#fef2f2"),
+        "pending": ("#cbd5e1", "#0f172a"),
+    }
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img">',
+        '<rect width="100%" height="100%" fill="#f8fafc" />',
+        f'<text x="{margin_x}" y="34" fill="#0f172a" font-family="Segoe UI, Malgun Gothic, sans-serif" font-size="24" font-weight="700">{escape(title)}</text>',
+    ]
+    for index, step in enumerate(steps):
+        row = index // per_row
+        col = index % per_row
+        x = margin_x + col * (box_width + gap_x)
+        y = margin_y + row * (box_height + gap_y)
+        status = step.status if step.status in palette else "pending"
+        fill, text_fill = palette[status]
+        title_text = compact_text(step.title, 70)
+        test_text = compact_text(step.test_command or "default test command", 58)
+        parts.extend(
+            [
+                f'<rect x="{x}" y="{y}" rx="20" ry="20" width="{box_width}" height="{box_height}" fill="{fill}" />',
+                f'<text x="{x + 18}" y="{y + 28}" fill="{text_fill}" font-family="Segoe UI, Malgun Gothic, sans-serif" font-size="14" font-weight="700">{escape(step.step_id)}</text>',
+                f'<text x="{x + 18}" y="{y + 54}" fill="{text_fill}" font-family="Segoe UI, Malgun Gothic, sans-serif" font-size="13">{escape(title_text)}</text>',
+                f'<text x="{x + 18}" y="{y + 82}" fill="{text_fill}" font-family="Segoe UI, Malgun Gothic, sans-serif" font-size="11">{escape(test_text)}</text>',
+            ]
+        )
+        if col < per_row - 1 and index + 1 < len(steps) and (index + 1) // per_row == row:
+            next_x = x + box_width + gap_x
+            center_y = y + box_height / 2
+            parts.extend(
+                [
+                    f'<line x1="{x + box_width + 6}" y1="{center_y}" x2="{next_x - 10}" y2="{center_y}" stroke="#94a3b8" stroke-width="4" stroke-linecap="round" />',
+                    f'<polygon points="{next_x - 18},{center_y - 8} {next_x - 2},{center_y} {next_x - 18},{center_y + 8}" fill="#94a3b8" />',
+                ]
+            )
+    parts.append("</svg>")
+    return "\n".join(parts)
