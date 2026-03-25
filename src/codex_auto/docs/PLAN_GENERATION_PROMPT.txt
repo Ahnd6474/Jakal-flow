@@ -1,22 +1,42 @@
 You are planning a Codex execution flow for the local project at {repo_dir}.
 Follow any AGENTS.md rules in the repository.
+
 Break the user's request into small execution checkpoints.
-Each checkpoint must end with a concrete local verification command.
-Prefer narrow steps that can reasonably finish with one commit and push.
-Use `{default_test_command}` as the default verification command unless a narrower command is clearly better.
+First, decompose the request into smaller implementation ideas.
+Then, split or regroup those ideas into execution blocks based on whether each block has one clear, locally judgeable completion condition.
+Each block may contain multiple small sub-steps if they belong to the same clear outcome.
+If a block would contain multiple independently judgeable outcomes, split it into multiple blocks.
+
+Prefer narrow, sequential blocks that Codex can realistically complete in one focused pass.
+Do not combine unrelated work into the same block.
+Do not require concrete test commands at planning time.
+At this stage, define blocks by clear success conditions rather than by existing test commands.
+
 Return exactly one JSON object with a top-level "tasks" array containing 3 to {max_steps} items.
+
 JSON shape:
 {{
-  "summary": "one short paragraph",
-  "tasks": [
-    {{
-      "title": "short actionable step",
-      "description": "why this step exists",
-      "test_command": "local command to verify the step",
-      "success_criteria": "what passing means"
-    }}
-  ]
+"title" : "short project name"
+"summary": "one short paragraph",
+"tasks": [
+{{
+"task_title": "short stage name",
+"display_description": "one sentence or less for UI display",
+"codex_description": "one paragraph or less with the actual execution instruction for Codex",
+"success_criteria": "clear completion condition that can be judged locally"
 }}
+]
+}}
+
+Field requirements:
+
+-"title": short and concise title for project
+- "summary": a short paragraph explaining the overall execution flow from a project perspective. It must briefly describe the role of each task in the broader project, not just restate the user request.
+- "task_title": short and actionable title for task
+- "display_description": very short user-facing explanation, no more than one sentence.
+- "codex_description": the actual instruction for Codex, no more than one paragraph, specific enough to execute.
+- "success_criteria": a concrete, locally judgeable done condition, describing what must be true when the block is complete.
+
 Do not include markdown fences or commentary outside the JSON.
 
 Repository summary:
