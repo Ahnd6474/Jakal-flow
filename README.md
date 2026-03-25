@@ -68,7 +68,7 @@ The GUI lets you:
 - generate a test-driven execution plan from a free-form prompt
 - edit the Codex plan-generation and step-execution prompt templates in `src/codex_auto/docs/*.txt`
 - review an interactive flow chart of the generated steps
-- edit pending steps, including add/delete/reorder and per-step test commands
+- edit pending steps, including add/delete/reorder, UI descriptions, Codex instructions, and per-step test commands
 - execute the remaining steps sequentially and show progress directly in the flow chart
 - execute each step with one search-enabled Codex pass instead of multiple implementation passes
 - treat each completed step as a checkpoint and push after verification when `origin` is configured

@@ -215,7 +215,8 @@ class Checkpoint:
 class ExecutionStep:
     step_id: str
     title: str
-    description: str = ""
+    display_description: str = ""
+    codex_description: str = ""
     test_command: str = ""
     success_criteria: str = ""
     status: str = "pending"
@@ -229,10 +230,14 @@ class ExecutionStep:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExecutionStep":
+        legacy_description = str(data.get("description", "")).strip()
+        display_description = str(data.get("display_description", "")).strip() or legacy_description
+        codex_description = str(data.get("codex_description", "")).strip() or legacy_description or display_description
         return cls(
             step_id=str(data.get("step_id", "")).strip() or "LT1",
-            title=str(data.get("title", "")).strip(),
-            description=str(data.get("description", "")).strip(),
+            title=str(data.get("title", data.get("task_title", ""))).strip(),
+            display_description=display_description,
+            codex_description=codex_description,
             test_command=str(data.get("test_command", "")).strip(),
             success_criteria=str(data.get("success_criteria", "")).strip(),
             status=str(data.get("status", "pending")).strip() or "pending",
@@ -245,6 +250,7 @@ class ExecutionStep:
 
 @dataclass(slots=True)
 class ExecutionPlanState:
+    plan_title: str = ""
     project_prompt: str = ""
     summary: str = ""
     default_test_command: str = "python -m pytest"
@@ -256,13 +262,14 @@ class ExecutionPlanState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExecutionPlanState":
-        raw_steps = data.get("steps", [])
+        raw_steps = data.get("steps", data.get("tasks", []))
         steps = []
         if isinstance(raw_steps, list):
             for item in raw_steps:
                 if isinstance(item, dict):
                     steps.append(ExecutionStep.from_dict(item))
         return cls(
+            plan_title=str(data.get("plan_title", data.get("title", ""))).strip(),
             project_prompt=str(data.get("project_prompt", "")).strip(),
             summary=str(data.get("summary", "")).strip(),
             default_test_command=str(data.get("default_test_command", "python -m pytest")).strip() or "python -m pytest",

@@ -306,7 +306,6 @@ def prompt_to_execution_plan_prompt(
     context: ProjectContext,
     repo_inputs: dict[str, str],
     user_prompt: str,
-    default_test_command: str,
     max_steps: int,
     template_text: str | None = None,
 ) -> str:
@@ -314,7 +313,6 @@ def prompt_to_execution_plan_prompt(
     try:
         return template.format(
             repo_dir=context.paths.repo_dir,
-            default_test_command=default_test_command,
             max_steps=max(3, max_steps),
             readme=repo_inputs["readme"],
             agents=repo_inputs["agents"],
@@ -329,27 +327,29 @@ def parse_execution_plan_response(
     response_text: str,
     default_test_command: str,
     limit: int = 8,
-) -> tuple[str, list[ExecutionStep]]:
+) -> tuple[str, str, list[ExecutionStep]]:
     raw = response_text.strip()
     if not raw:
-        return "", []
+        return "", "", []
     fenced = re.search(r"```(?:json)?\s*(.+?)\s*```", raw, re.DOTALL)
     if fenced:
         raw = fenced.group(1).strip()
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
-        return "", []
+        return "", "", []
 
+    plan_title = ""
     summary = ""
     tasks_payload: object = []
     if isinstance(payload, dict):
+        plan_title = str(payload.get("title", "")).strip()
         summary = str(payload.get("summary", "")).strip()
-        tasks_payload = payload.get("tasks", [])
+        tasks_payload = payload.get("tasks", payload.get("steps", []))
     elif isinstance(payload, list):
         tasks_payload = payload
     if not isinstance(tasks_payload, list):
-        return summary, []
+        return plan_title, summary, []
 
     steps: list[ExecutionStep] = []
     seen: set[str] = set()
@@ -358,24 +358,27 @@ def parse_execution_plan_response(
             break
         if not isinstance(item, dict):
             continue
-        title = str(item.get("title", "")).strip()
-        if len(tokenize(title)) < 2:
+        title = str(item.get("task_title", item.get("title", ""))).strip()
+        if not title:
             continue
         dedupe_key = title.lower()
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
+        display_description = str(item.get("display_description", item.get("description", ""))).strip()
+        codex_description = str(item.get("codex_description", "")).strip() or display_description or title
         steps.append(
             ExecutionStep(
                 step_id=f"LT{len(steps) + 1}",
                 title=title,
-                description=str(item.get("description", "")).strip(),
+                display_description=display_description,
+                codex_description=codex_description,
                 test_command=str(item.get("test_command", "")).strip() or default_test_command,
                 success_criteria=str(item.get("success_criteria", "")).strip(),
                 status="pending",
             )
         )
-    return summary, steps
+    return plan_title, summary, steps
 
 
 def parse_work_breakdown_response(response_text: str, limit: int = 6) -> list[PlanItem]:
@@ -453,6 +456,7 @@ def implementation_prompt(
     candidate: CandidateTask,
     memory_context: str,
     pass_name: str,
+    execution_step: ExecutionStep | None = None,
     template_text: str | None = None,
 ) -> str:
     long_term = read_text(context.paths.long_term_plan_file)
@@ -460,13 +464,31 @@ def implementation_prompt(
     scope_guard = read_text(context.paths.scope_guard_file)
     research_notes = read_text(context.paths.research_notes_file)
     template = template_text or load_source_prompt_template(STEP_EXECUTION_PROMPT_FILENAME)
+    task_title = execution_step.title if execution_step else candidate.title
+    display_description = execution_step.display_description.strip() if execution_step else ""
+    codex_description = execution_step.codex_description.strip() if execution_step else ""
+    test_command = context.runtime.test_cmd
+    if execution_step and execution_step.test_command.strip():
+        test_command = execution_step.test_command.strip()
+    if not display_description:
+        display_description = task_title
+    if not codex_description:
+        codex_description = candidate.rationale.strip() or display_description or task_title
+    success_criteria = (
+        execution_step.success_criteria.strip()
+        if execution_step and execution_step.success_criteria.strip()
+        else f"The verification command `{test_command}` exits successfully."
+    )
     try:
         return template.format(
             repo_dir=context.paths.repo_dir,
             docs_dir=context.paths.docs_dir,
             pass_name=pass_name,
-            test_command=context.runtime.test_cmd,
-            task_title=candidate.title,
+            test_command=test_command,
+            task_title=task_title,
+            display_description=display_description,
+            codex_description=codex_description,
+            success_criteria=success_criteria,
             candidate_rationale=candidate.rationale,
             memory_context=memory_context,
             long_term_plan=compact_text(long_term, 4000),
@@ -563,6 +585,7 @@ def checkpoint_timeline_markdown(checkpoints: list[Checkpoint]) -> str:
 
 def execution_plan_markdown(
     context: ProjectContext,
+    plan_title: str,
     project_prompt: str,
     summary: str,
     steps: list[ExecutionStep],
@@ -575,6 +598,9 @@ def execution_plan_markdown(
         f"- Source: {context.metadata.repo_url}",
         f"- Branch: {context.metadata.branch}",
         f"- Generated at: {now_utc_iso()}",
+        "",
+        "## Plan Title",
+        plan_title.strip() or context.metadata.display_name or context.metadata.slug,
         "",
         "## User Prompt",
         project_prompt.strip() or "No prompt recorded.",
@@ -590,6 +616,8 @@ def execution_plan_markdown(
         lines.extend(
             [
                 f"- {step.step_id}: {step.title}",
+                f"  - UI description: {step.display_description or step.title}",
+                f"  - Codex instruction: {step.codex_description or step.display_description or step.title}",
                 f"  - Verification: {step.test_command or 'Use the default test command.'}",
                 f"  - Success criteria: {step.success_criteria or 'Verification command completes successfully.'}",
             ]
@@ -618,7 +646,7 @@ def execution_steps_to_plan_items(steps: list[ExecutionStep]) -> list[PlanItem]:
 def execution_plan_svg(title: str, steps: list[ExecutionStep]) -> str:
     width = 1180
     box_width = 220
-    box_height = 108
+    box_height = 120
     gap_x = 32
     gap_y = 36
     margin_x = 40
@@ -646,13 +674,14 @@ def execution_plan_svg(title: str, steps: list[ExecutionStep]) -> str:
         status = step.status if step.status in palette else "pending"
         fill, text_fill = palette[status]
         title_text = compact_text(step.title, 70)
-        test_text = compact_text(step.test_command or "default test command", 58)
+        detail_text = compact_text(step.display_description or step.test_command or "default verification", 58)
         parts.extend(
             [
                 f'<rect x="{x}" y="{y}" rx="20" ry="20" width="{box_width}" height="{box_height}" fill="{fill}" />',
                 f'<text x="{x + 18}" y="{y + 28}" fill="{text_fill}" font-family="Segoe UI, Malgun Gothic, sans-serif" font-size="14" font-weight="700">{escape(step.step_id)}</text>',
                 f'<text x="{x + 18}" y="{y + 54}" fill="{text_fill}" font-family="Segoe UI, Malgun Gothic, sans-serif" font-size="13">{escape(title_text)}</text>',
-                f'<text x="{x + 18}" y="{y + 82}" fill="{text_fill}" font-family="Segoe UI, Malgun Gothic, sans-serif" font-size="11">{escape(test_text)}</text>',
+                f'<text x="{x + 18}" y="{y + 82}" fill="{text_fill}" font-family="Segoe UI, Malgun Gothic, sans-serif" font-size="11">{escape(detail_text)}</text>',
+                f'<text x="{x + 18}" y="{y + 102}" fill="{text_fill}" font-family="Segoe UI, Malgun Gothic, sans-serif" font-size="11">{escape(status)}</text>',
             ]
         )
         if col < per_row - 1 and index + 1 < len(steps) and (index + 1) // per_row == row:

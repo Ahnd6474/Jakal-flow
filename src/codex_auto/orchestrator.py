@@ -130,7 +130,6 @@ class Orchestrator:
             context=context,
             repo_inputs=repo_inputs,
             user_prompt=project_prompt,
-            default_test_command=runtime.test_cmd,
             max_steps=max_steps,
             template_text=planning_prompt_template,
         )
@@ -141,15 +140,18 @@ class Orchestrator:
             block_index=max(0, context.loop_state.block_index),
             search_enabled=False,
         )
+        plan_title = ""
         summary = ""
         steps: list[ExecutionStep] = []
         if result.returncode == 0:
-            summary, steps = parse_execution_plan_response(result.last_message or "", runtime.test_cmd, limit=max_steps)
+            plan_title, summary, steps = parse_execution_plan_response(result.last_message or "", runtime.test_cmd, limit=max_steps)
         if not steps:
             steps = [
                 ExecutionStep(
                     step_id="LT1",
                     title=project_prompt.strip() or "Implement the requested improvement safely",
+                    display_description="Define the first safe implementation checkpoint.",
+                    codex_description=project_prompt.strip() or "Implement the requested improvement safely.",
                     test_command=runtime.test_cmd,
                     success_criteria="Run the configured verification command successfully.",
                 )
@@ -157,6 +159,7 @@ class Orchestrator:
             summary = summary or "Fallback execution plan created because Codex did not return a machine-readable breakdown."
 
         plan_state = ExecutionPlanState(
+            plan_title=plan_title.strip() or context.metadata.display_name or context.metadata.slug,
             project_prompt=project_prompt.strip(),
             summary=summary.strip(),
             default_test_command=runtime.test_cmd,
@@ -204,7 +207,8 @@ class Orchestrator:
                 ExecutionStep(
                     step_id=f"LT{index}",
                     title=step.title.strip(),
-                    description=step.description.strip(),
+                    display_description=step.display_description.strip(),
+                    codex_description=step.codex_description.strip() or step.display_description.strip() or step.title.strip(),
                     test_command=step.test_command.strip() or plan_state.default_test_command or context.runtime.test_cmd,
                     success_criteria=step.success_criteria.strip(),
                     status=step.status if step.status else "pending",
@@ -215,6 +219,7 @@ class Orchestrator:
                 )
             )
         state = ExecutionPlanState(
+            plan_title=plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug,
             project_prompt=plan_state.project_prompt.strip(),
             summary=plan_state.summary.strip(),
             default_test_command=plan_state.default_test_command.strip() or context.runtime.test_cmd,
@@ -224,7 +229,7 @@ class Orchestrator:
         write_json(context.paths.execution_plan_file, state.to_dict())
         write_text(
             context.paths.long_term_plan_file,
-            execution_plan_markdown(context, state.project_prompt, state.summary, state.steps),
+            execution_plan_markdown(context, state.plan_title, state.project_prompt, state.summary, state.steps),
         )
         mid_term_text, _ = build_mid_term_plan_from_plan_items(
             execution_steps_to_plan_items(state.steps),
@@ -235,8 +240,8 @@ class Orchestrator:
         checkpoints = self._checkpoints_from_execution_steps(state.steps)
         write_json(context.paths.checkpoint_state_file, {"checkpoints": [checkpoint.to_dict() for checkpoint in checkpoints]})
         write_text(context.paths.checkpoint_timeline_file, checkpoint_timeline_markdown(checkpoints))
-        title = context.metadata.display_name or context.metadata.slug
-        write_text(context.paths.execution_flow_svg_file, execution_plan_svg(f"{title} execution flow", state.steps))
+        flow_title = state.plan_title or context.metadata.display_name or context.metadata.slug
+        write_text(context.paths.execution_flow_svg_file, execution_plan_svg(f"{flow_title} execution flow", state.steps))
         return state
 
     def run_saved_execution_step(
@@ -307,6 +312,7 @@ class Orchestrator:
                 memory=memory,
                 reporter=reporter,
                 candidate_override=candidate,
+                execution_step_override=target_step,
             )
             context.metadata.last_run_at = now_utc_iso()
             block_logs = read_jsonl(context.paths.block_log_file)
@@ -620,8 +626,11 @@ class Orchestrator:
             )
 
     def _execution_step_rationale(self, step: ExecutionStep, test_command: str) -> str:
-        details = step.description or "Complete the saved execution checkpoint with a small, safe change."
+        details = step.codex_description or step.display_description or "Complete the saved execution checkpoint with a small, safe change."
         success = step.success_criteria or "The verification command exits successfully."
+        ui_hint = step.display_description.strip()
+        if ui_hint and ui_hint != details:
+            return f"UI description: {ui_hint}. Execution instruction: {details} Verification command: {test_command}. Success criteria: {success}"
         return f"{details} Verification command: {test_command}. Success criteria: {success}"
 
     def _all_steps_completed(self, steps: list[ExecutionStep]) -> bool:
@@ -662,6 +671,7 @@ class Orchestrator:
         reporter: Reporter,
         work_items: list[str] | None = None,
         candidate_override: CandidateTask | None = None,
+        execution_step_override: ExecutionStep | None = None,
     ) -> None:
         context.loop_state.block_index += 1
         block_index = context.loop_state.block_index
@@ -722,6 +732,7 @@ class Orchestrator:
             safe_revision=safe_revision,
             search_enabled=True,
             memory_context_override=memory_context,
+            execution_step=execution_step_override,
         )
         block_changed_files.extend(search_pass.changed_files)
         if search_tests is None:
@@ -832,6 +843,7 @@ class Orchestrator:
         safe_revision: str,
         search_enabled: bool,
         memory_context_override: str | None = None,
+        execution_step: ExecutionStep | None = None,
     ) -> tuple:
         memory_context = memory_context_override or "No additional memory context."
         execution_prompt_template = load_source_prompt_template(STEP_EXECUTION_PROMPT_FILENAME)
@@ -840,6 +852,7 @@ class Orchestrator:
             candidate=candidate,
             memory_context=memory_context,
             pass_name=pass_name,
+            execution_step=execution_step,
             template_text=execution_prompt_template,
         )
         run_result = runner.run_pass(

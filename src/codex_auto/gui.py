@@ -242,16 +242,20 @@ class CodexAutoGUI:
         self.step_test_entry = ttk.Entry(editor_panel, textvariable=self.step_test_var)
         self.step_test_entry.grid(row=3, column=1, sticky="ew", pady=6)
 
-        ttk.Label(editor_panel, text="Description").grid(row=4, column=0, sticky="nw", padx=(0, 10), pady=6)
+        ttk.Label(editor_panel, text="Display Description").grid(row=4, column=0, sticky="nw", padx=(0, 10), pady=6)
         self.step_description_text = ScrolledText(editor_panel, height=5, wrap="word")
         self.step_description_text.grid(row=4, column=1, sticky="ew", pady=6)
 
-        ttk.Label(editor_panel, text="Success Criteria").grid(row=5, column=0, sticky="nw", padx=(0, 10), pady=6)
+        ttk.Label(editor_panel, text="Codex Instruction").grid(row=5, column=0, sticky="nw", padx=(0, 10), pady=6)
+        self.step_codex_text = ScrolledText(editor_panel, height=6, wrap="word")
+        self.step_codex_text.grid(row=5, column=1, sticky="ew", pady=6)
+
+        ttk.Label(editor_panel, text="Success Criteria").grid(row=6, column=0, sticky="nw", padx=(0, 10), pady=6)
         self.step_success_text = ScrolledText(editor_panel, height=4, wrap="word")
-        self.step_success_text.grid(row=5, column=1, sticky="ew", pady=6)
+        self.step_success_text.grid(row=6, column=1, sticky="ew", pady=6)
 
         actions = ttk.Frame(editor_panel)
-        actions.grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
+        actions.grid(row=7, column=0, columnspan=2, sticky="w", pady=(14, 0))
         ttk.Button(actions, text="Save Step", command=self.save_selected_step).pack(side=LEFT)
         ttk.Button(actions, text="Add Step", command=self.add_step_after_selection).pack(side=LEFT, padx=(8, 0))
         ttk.Button(actions, text="Delete Step", command=self.delete_selected_step).pack(side=LEFT, padx=(8, 0))
@@ -461,12 +465,13 @@ class CodexAutoGUI:
         return json.dumps(
             {
                 "display_name": project.metadata.display_name or project.metadata.slug,
+                "plan_title": plan.plan_title,
                 "repo_path": str(project.metadata.repo_path),
                 "origin_url": project.metadata.origin_url,
                 "branch": project.metadata.branch,
                 "status": project.metadata.current_status,
                 "safe_revision": project.metadata.current_safe_revision,
-                "default_test_command": project.runtime.test_cmd,
+                "default_test_command": plan.default_test_command or project.runtime.test_cmd,
                 "remaining_steps": remaining,
                 "recent_blocks": recent_blocks,
                 "flow_svg": str(project.paths.execution_flow_svg_file),
@@ -743,7 +748,10 @@ class CodexAutoGUI:
         self.effort_var.set(project.runtime.effort)
         self.test_cmd_var.set(plan_state.default_test_command or project.runtime.test_cmd)
         self.max_steps_var.set(str(max(len(plan_state.steps), project.runtime.max_blocks, 1)))
-        self.current_project_label_var.set(f"{project.metadata.display_name or project.metadata.slug}  [{project.metadata.branch}]")
+        project_label = project.metadata.display_name or project.metadata.slug
+        if plan_state.plan_title.strip():
+            project_label = f"{project_label} | {plan_state.plan_title.strip()}"
+        self.current_project_label_var.set(f"{project_label}  [{project.metadata.branch}]")
         self.current_step_label_var.set(self._progress_caption(plan_state))
         self.prompt_text.delete("1.0", END)
         self.prompt_text.insert("1.0", plan_state.project_prompt)
@@ -778,6 +786,7 @@ class CodexAutoGUI:
         if not cleaned_steps and self._prompt_value():
             raise ValueError("There is a prompt, but the editable flow is empty. Generate a plan or add steps manually.")
         return ExecutionPlanState(
+            plan_title=self.current_plan.plan_title.strip(),
             project_prompt=self._prompt_value(),
             summary=self.current_plan.summary.strip(),
             default_test_command=self.test_cmd_var.get().strip() or "python -m pytest",
@@ -806,7 +815,8 @@ class CodexAutoGUI:
             raise ValueError("Selected step title cannot be empty.")
         step.title = title
         step.test_command = test_command
-        step.description = self.step_description_text.get("1.0", END).strip()
+        step.display_description = self.step_description_text.get("1.0", END).strip()
+        step.codex_description = self.step_codex_text.get("1.0", END).strip()
         step.success_criteria = self.step_success_text.get("1.0", END).strip()
 
     def select_step(self, step_id: str) -> None:
@@ -834,8 +844,10 @@ class CodexAutoGUI:
         self.step_title_var.set("")
         self.step_test_var.set(self.test_cmd_var.get().strip() or "python -m pytest")
         self.step_description_text.configure(state="normal")
+        self.step_codex_text.configure(state="normal")
         self.step_success_text.configure(state="normal")
         self.step_description_text.delete("1.0", END)
+        self.step_codex_text.delete("1.0", END)
         self.step_success_text.delete("1.0", END)
         if step is None:
             editable = True
@@ -847,12 +859,14 @@ class CodexAutoGUI:
             self.selected_step_status_var.set(step.status)
             self.step_title_var.set(step.title)
             self.step_test_var.set(step.test_command or self.test_cmd_var.get().strip() or "python -m pytest")
-            self.step_description_text.insert("1.0", step.description)
+            self.step_description_text.insert("1.0", step.display_description)
+            self.step_codex_text.insert("1.0", step.codex_description)
             self.step_success_text.insert("1.0", step.success_criteria)
         state = "normal" if editable else "disabled"
         self.step_title_entry.configure(state=state)
         self.step_test_entry.configure(state=state)
         self.step_description_text.configure(state=state)
+        self.step_codex_text.configure(state=state)
         self.step_success_text.configure(state=state)
 
     def save_selected_step(self) -> None:
@@ -890,6 +904,8 @@ class CodexAutoGUI:
         new_step = ExecutionStep(
             step_id=f"LT{len(self.current_plan.steps) + 1}",
             title="New pending step",
+            display_description="Describe the checkpoint for the user.",
+            codex_description="Describe the implementation work Codex should perform for this checkpoint.",
             test_command=self.test_cmd_var.get().strip() or "python -m pytest",
             status="pending",
         )
@@ -995,7 +1011,7 @@ class CodexAutoGUI:
             self.flow_canvas.create_text(
                 x1 + 14,
                 y1 + 74,
-                text=textwrap.shorten(step.test_command or "default test command", width=42, placeholder="..."),
+                text=textwrap.shorten(step.display_description or step.test_command or "No step summary.", width=42, placeholder="..."),
                 anchor="w",
                 fill=text_fill,
                 font=("Malgun Gothic", 10),
