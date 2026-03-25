@@ -39,7 +39,7 @@ from .planning import (
     load_source_prompt_template,
 )
 from .reporting import Reporter
-from .utils import decode_process_output, now_utc_iso, read_json, read_jsonl, read_text, write_json, write_text
+from .utils import decode_process_output, now_utc_iso, read_json, read_last_jsonl, read_text, write_json, write_text
 from .workspace import WorkspaceManager
 
 
@@ -296,7 +296,8 @@ class Orchestrator:
         runner = CodexRunner(context.runtime.codex_path)
         memory = MemoryStore(context.paths)
         reporter = Reporter(context)
-        before_blocks = len(read_jsonl(context.paths.block_log_file))
+        previous_block = read_last_jsonl(context.paths.block_log_file)
+        previous_block_index = int(previous_block.get("block_index", -1)) if previous_block else -1
         candidate = CandidateTask(
             candidate_id=target_step.step_id,
             title=target_step.title,
@@ -315,8 +316,10 @@ class Orchestrator:
                 execution_step_override=target_step,
             )
             context.metadata.last_run_at = now_utc_iso()
-            block_logs = read_jsonl(context.paths.block_log_file)
-            latest_block = block_logs[-1] if len(block_logs) > before_blocks else None
+            latest_block = read_last_jsonl(context.paths.block_log_file)
+            latest_block_index = int(latest_block.get("block_index", -1)) if latest_block else -1
+            if latest_block_index <= previous_block_index:
+                latest_block = None
             if latest_block and latest_block.get("status") == "completed":
                 target_step.status = "completed"
                 target_step.completed_at = now_utc_iso()

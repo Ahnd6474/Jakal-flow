@@ -5,6 +5,7 @@ import json
 import locale
 import os
 import re
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,24 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
         if line.strip():
             entries.append(json.loads(line))
     return entries
+
+
+def read_jsonl_tail(path: Path, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0 or not path.exists():
+        return []
+    tail: deque[dict[str, Any]] = deque(maxlen=limit)
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                tail.append(json.loads(line))
+    return list(tail)
+
+
+def read_last_jsonl(path: Path) -> dict[str, Any] | None:
+    items = read_jsonl_tail(path, 1)
+    if not items:
+        return None
+    return items[0]
 
 
 def decode_process_output(data: bytes) -> str:

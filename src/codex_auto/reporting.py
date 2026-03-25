@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .models import ProjectContext, TestRunResult
-from .utils import append_jsonl, append_text, now_utc_iso, read_jsonl, write_json, write_text
+from .utils import append_jsonl, append_text, now_utc_iso, read_jsonl_tail, write_json, write_text
 
 
 class Reporter:
@@ -23,8 +23,8 @@ class Reporter:
         write_text(self.context.paths.block_review_file, content)
 
     def write_status_report(self) -> Path:
-        passes = read_jsonl(self.context.paths.pass_log_file)[-20:]
-        blocks = read_jsonl(self.context.paths.block_log_file)[-20:]
+        passes = read_jsonl_tail(self.context.paths.pass_log_file, 20)
+        blocks = read_jsonl_tail(self.context.paths.block_log_file, 20)
         report = {
             "generated_at": now_utc_iso(),
             "repository": self.context.metadata.to_dict(),
@@ -37,7 +37,7 @@ class Reporter:
         return path
 
     def render_history(self, limit: int = 10) -> str:
-        entries = read_jsonl(self.context.paths.block_log_file)[-limit:]
+        entries = read_jsonl_tail(self.context.paths.block_log_file, limit)
         if not entries:
             return "No block history recorded."
         lines = []

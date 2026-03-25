@@ -8,7 +8,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from codex_auto.environment import ensure_gitignore
-from codex_auto.models import ExecutionStep
+from codex_auto.gui import _plan_state_with_running_step
+from codex_auto.models import ExecutionPlanState, ExecutionStep
 from codex_auto.planning import (
     PLAN_GENERATION_PROMPT_FILENAME,
     STEP_EXECUTION_PROMPT_FILENAME,
@@ -17,6 +18,7 @@ from codex_auto.planning import (
     parse_execution_plan_response,
     source_prompt_template_path,
 )
+from codex_auto.utils import append_jsonl, read_jsonl_tail, read_last_jsonl
 
 
 class ExecutionPlanHelperTests(unittest.TestCase):
@@ -83,6 +85,21 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("#0f766e", svg)
         self.assertIn("#cbd5e1", svg)
 
+    def test_plan_state_with_running_step_marks_selected_step_immediately(self) -> None:
+        original = ExecutionPlanState(
+            steps=[
+                ExecutionStep(step_id="LT1", title="First", status="pending"),
+                ExecutionStep(step_id="LT2", title="Second", status="running"),
+                ExecutionStep(step_id="LT3", title="Third", status="pending"),
+            ]
+        )
+        updated = _plan_state_with_running_step(original, "LT3")
+
+        self.assertEqual(original.steps[1].status, "running")
+        self.assertEqual(updated.steps[0].status, "pending")
+        self.assertEqual(updated.steps[1].status, "paused")
+        self.assertEqual(updated.steps[2].status, "running")
+
     def test_source_prompt_templates_exist_and_keep_expected_placeholders(self) -> None:
         plan_template = load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)
         step_template = load_source_prompt_template(STEP_EXECUTION_PROMPT_FILENAME)
@@ -113,6 +130,22 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertFalse(changed_second)
         self.assertIn(".venv/", content)
         self.assertIn("__pycache__/", content)
+
+    def test_jsonl_tail_helpers_only_return_recent_entries(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp_jsonl_tail_test"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        log_file = temp_dir / "events.jsonl"
+
+        for index in range(1, 6):
+            append_jsonl(log_file, {"index": index})
+
+        tail = read_jsonl_tail(log_file, 2)
+        last = read_last_jsonl(log_file)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        self.assertEqual([item["index"] for item in tail], [4, 5])
+        self.assertEqual(last, {"index": 5})
 
 
 if __name__ == "__main__":

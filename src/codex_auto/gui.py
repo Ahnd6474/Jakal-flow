@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import queue
 import textwrap
@@ -12,7 +13,40 @@ from tkinter.scrolledtext import ScrolledText
 
 from .models import ExecutionPlanState, ExecutionStep, ProjectContext, RuntimeOptions
 from .orchestrator import Orchestrator
-from .utils import read_jsonl
+from .utils import read_jsonl_tail
+
+
+def _plan_state_with_running_step(plan_state: ExecutionPlanState, step_id: str) -> ExecutionPlanState:
+    updated_steps: list[ExecutionStep] = []
+    for step in plan_state.steps:
+        status = step.status
+        if step.step_id == step_id and step.status != "completed":
+            status = "running"
+        elif step.status == "running":
+            status = "paused"
+        updated_steps.append(
+            ExecutionStep(
+                step_id=step.step_id,
+                title=step.title,
+                display_description=step.display_description,
+                codex_description=step.codex_description,
+                test_command=step.test_command,
+                success_criteria=step.success_criteria,
+                status=status,
+                started_at=step.started_at,
+                completed_at=step.completed_at,
+                commit_hash=step.commit_hash,
+                notes=step.notes,
+            )
+        )
+    return ExecutionPlanState(
+        plan_title=plan_state.plan_title,
+        project_prompt=plan_state.project_prompt,
+        summary=plan_state.summary,
+        default_test_command=plan_state.default_test_command,
+        last_updated_at=plan_state.last_updated_at,
+        steps=updated_steps,
+    )
 
 
 class CodexAutoGUI:
@@ -46,6 +80,8 @@ class CodexAutoGUI:
         self.current_plan = ExecutionPlanState()
         self.selected_step_id: str | None = None
         self.flow_node_tags: dict[str, list[int]] = {}
+        self._orchestrator_instance: Orchestrator | None = None
+        self._orchestrator_root: Path | None = None
 
         self._configure_style()
         self._build_layout()
@@ -304,7 +340,7 @@ class CodexAutoGUI:
         self.snapshot_text.insert("1.0", text)
 
     def _schedule_queue_poll(self) -> None:
-        self.root.after(150, self._poll_queue)
+        self.root.after(75, self._poll_queue)
 
     def _poll_queue(self) -> None:
         while True:
@@ -318,6 +354,9 @@ class CodexAutoGUI:
                 self.status_var.set(str(payload))
             elif kind == "projects":
                 self._render_project_list(payload if isinstance(payload, list) else [])
+            elif kind == "project_row":
+                if isinstance(payload, ProjectContext):
+                    self._upsert_project_row(payload)
             elif kind == "loaded_project":
                 project, plan_state, switch_to_flow = payload  # type: ignore[misc]
                 self._load_project_into_ui(project, plan_state, switch_to_flow=bool(switch_to_flow))
@@ -331,7 +370,11 @@ class CodexAutoGUI:
         self._schedule_queue_poll()
 
     def _orchestrator(self) -> Orchestrator:
-        return Orchestrator(Path(self.workspace_root_var.get().strip() or ".codex-auto-workspace"))
+        workspace_root = Path(self.workspace_root_var.get().strip() or ".codex-auto-workspace").resolve()
+        if self._orchestrator_instance is None or self._orchestrator_root != workspace_root:
+            self._orchestrator_instance = Orchestrator(workspace_root)
+            self._orchestrator_root = workspace_root
+        return self._orchestrator_instance
 
     def _runtime(self) -> RuntimeOptions:
         try:
@@ -457,11 +500,27 @@ class CodexAutoGUI:
                     self._on_project_selected(None)
                     break
 
-    def _project_summary(self, project: ProjectContext) -> str:
-        orchestrator = self._orchestrator()
-        plan = orchestrator.load_execution_plan_state(project)
+    def _upsert_project_row(self, project: ProjectContext) -> None:
+        repo_id = project.metadata.repo_id
+        self.project_rows[repo_id] = project
+        values = (
+            project.metadata.display_name or project.metadata.slug,
+            project.metadata.branch,
+            project.metadata.current_status,
+            project.metadata.last_run_at or "",
+            str(project.metadata.repo_path),
+        )
+        if self.project_tree.exists(repo_id):
+            self.project_tree.item(repo_id, values=values)
+        else:
+            self.project_tree.insert("", END, iid=repo_id, values=values)
+        if self.current_project is not None and self.current_project.metadata.repo_id == repo_id:
+            self.current_project = project
+
+    def _project_summary(self, project: ProjectContext, plan_state: ExecutionPlanState | None = None) -> str:
+        plan = plan_state or self._orchestrator().load_execution_plan_state(project)
         remaining = [step.step_id for step in plan.steps if step.status != "completed"]
-        recent_blocks = read_jsonl(project.paths.block_log_file)[-5:]
+        recent_blocks = read_jsonl_tail(project.paths.block_log_file, 5)
         return json.dumps(
             {
                 "display_name": project.metadata.display_name or project.metadata.slug,
@@ -540,8 +599,8 @@ class CodexAutoGUI:
             )
             plan_state = orchestrator.load_execution_plan_state(project)
             self.queue.put(("loaded_project", (project, plan_state, True)))
-            self.queue.put(("projects", orchestrator.list_projects()))
-            self.queue.put(("snapshot", self._project_summary(project)))
+            self.queue.put(("project_row", project))
+            self.queue.put(("snapshot", self._project_summary(project, plan_state)))
 
         self._run_async("Prepare environment", worker)
 
@@ -581,8 +640,8 @@ class CodexAutoGUI:
                 origin_url=origin_url,
             )
             self.queue.put(("loaded_project", (project, plan_state, True)))
-            self.queue.put(("projects", orchestrator.list_projects()))
-            self.queue.put(("snapshot", self._project_summary(project)))
+            self.queue.put(("project_row", project))
+            self.queue.put(("snapshot", self._project_summary(project, plan_state)))
 
         self._run_async("Generate plan", worker)
 
@@ -611,8 +670,8 @@ class CodexAutoGUI:
                 origin_url=origin_url,
             )
             self.queue.put(("loaded_project", (project, saved, True)))
-            self.queue.put(("projects", orchestrator.list_projects()))
-            self.queue.put(("snapshot", self._project_summary(project)))
+            self.queue.put(("project_row", project))
+            self.queue.put(("snapshot", self._project_summary(project, saved)))
 
         self._run_async("Save edited plan", worker)
 
@@ -651,8 +710,8 @@ class CodexAutoGUI:
                 origin_url=origin_url,
             )
             self.queue.put(("loaded_project", (project, saved, True)))
-            self.queue.put(("projects", orchestrator.list_projects()))
-            self.queue.put(("snapshot", self._project_summary(project)))
+            self.queue.put(("project_row", project))
+            self.queue.put(("snapshot", self._project_summary(project, saved)))
 
         self._run_async("Reset plan", worker)
 
@@ -684,11 +743,17 @@ class CodexAutoGUI:
                 origin_url=origin_url,
             )
             self.queue.put(("loaded_project", (project, saved, True)))
-            self.queue.put(("projects", orchestrator.list_projects()))
+            self.queue.put(("project_row", project))
+            self.queue.put(("snapshot", self._project_summary(project, saved)))
             for step in [item for item in saved.steps if item.status != "completed"]:
                 if self.stop_after_step_event.is_set():
                     self.queue.put(("log", "[info] Stop requested. Execution paused before the next step."))
                     break
+                running_project = deepcopy(project)
+                running_project.metadata.current_status = f"running:step:{step.step_id}"
+                running_plan = _plan_state_with_running_step(saved, step.step_id)
+                self.queue.put(("loaded_project", (running_project, running_plan, True)))
+                self.queue.put(("project_row", running_project))
                 self.queue.put(("status", f"Running {step.step_id}: {step.title}"))
                 self.queue.put(("log", f"[run] {step.step_id} - {step.title}"))
                 try:
@@ -704,12 +769,12 @@ class CodexAutoGUI:
                     if latest_project is not None:
                         latest_plan = orchestrator.load_execution_plan_state(latest_project)
                         self.queue.put(("loaded_project", (latest_project, latest_plan, True)))
-                        self.queue.put(("projects", orchestrator.list_projects()))
-                        self.queue.put(("snapshot", self._project_summary(latest_project)))
+                        self.queue.put(("project_row", latest_project))
+                        self.queue.put(("snapshot", self._project_summary(latest_project, latest_plan)))
                     raise
                 self.queue.put(("loaded_project", (project, saved, True)))
-                self.queue.put(("projects", orchestrator.list_projects()))
-                self.queue.put(("snapshot", self._project_summary(project)))
+                self.queue.put(("project_row", project))
+                self.queue.put(("snapshot", self._project_summary(project, saved)))
                 self.queue.put(("log", f"[step] {result_step.step_id} -> {result_step.status}"))
                 if result_step.status != "completed":
                     break
