@@ -196,6 +196,7 @@ class CodexAutoGUI:
         prompt_actions.pack(fill=X, pady=(10, 0))
         ttk.Button(prompt_actions, text="Generate Plan With Codex", command=self.generate_plan).pack(side=LEFT)
         ttk.Button(prompt_actions, text="Save Edited Plan", command=self.save_plan).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(prompt_actions, text="Reset Plan", command=self.reset_plan).pack(side=LEFT, padx=(8, 0))
         ttk.Button(prompt_actions, text="Run Remaining Steps", command=self.run_plan).pack(side=LEFT, padx=(8, 0))
         ttk.Button(prompt_actions, text="Stop After Current Step", command=self.stop_after_current_step).pack(side=LEFT, padx=(8, 0))
         ttk.Button(prompt_actions, text="Reload Project", command=self.reload_current_project).pack(side=LEFT, padx=(8, 0))
@@ -609,6 +610,46 @@ class CodexAutoGUI:
             self.queue.put(("snapshot", self._project_summary(project)))
 
         self._run_async("Save edited plan", worker)
+
+    def reset_plan(self) -> None:
+        if self.current_project is None:
+            messagebox.showinfo("codex-auto", "Open a project first.")
+            return
+        has_content = bool(self.current_plan.steps or self.current_plan.summary.strip() or self._prompt_value())
+        if not has_content:
+            messagebox.showinfo("codex-auto", "The current plan is already empty.")
+            return
+        completed = [step.step_id for step in self.current_plan.steps if step.status == "completed"]
+        prompt = "Reset the saved prompt and remove all execution steps for this project?"
+        if completed:
+            prompt += f"\n\nCompleted steps will also be cleared: {', '.join(completed)}."
+        if not messagebox.askyesno("codex-auto", prompt):
+            return
+        try:
+            runtime = self._runtime()
+            project_dir = Path(self.current_project.metadata.repo_path)
+            branch = self.current_project.metadata.branch
+            origin_url = self.current_project.metadata.origin_url or self.origin_url_var.get().strip()
+            empty_plan = ExecutionPlanState(default_test_command=self.test_cmd_var.get().strip() or runtime.test_cmd)
+        except Exception as exc:
+            messagebox.showerror("codex-auto", str(exc))
+            return
+
+        orchestrator = self._orchestrator()
+
+        def worker() -> None:
+            project, saved = orchestrator.update_execution_plan(
+                project_dir=project_dir,
+                runtime=runtime,
+                plan_state=empty_plan,
+                branch=branch,
+                origin_url=origin_url,
+            )
+            self.queue.put(("loaded_project", (project, saved, True)))
+            self.queue.put(("projects", orchestrator.list_projects()))
+            self.queue.put(("snapshot", self._project_summary(project)))
+
+        self._run_async("Reset plan", worker)
 
     def run_plan(self) -> None:
         if self.current_project is None:
