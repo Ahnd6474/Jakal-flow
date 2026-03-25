@@ -23,6 +23,7 @@
       </a>
       <nav class="nav">
         <a href="#product">제품</a>
+        <a href="#release">릴리즈</a>
         <a href="#workflow">워크플로우</a>
         <a href="#readiness">배포 준비</a>
         <a href="#contact">문의</a>
@@ -38,6 +39,11 @@
             codex-auto는 장기 계획, 작업 분해, 블록 실행, 테스트, 롤백, 체크포인트 기록을 하나의 흐름으로 연결합니다.
             나중에 앱으로 배포해도 흔들리지 않도록, 자동화보다 운영 구조를 먼저 설계한 도구입니다.
           </p>
+          <div class="release-inline">
+            <span class="release-chip live">App Release Prep</span>
+            <span class="release-chip">Desktop GUI</span>
+            <span class="release-chip">GitHub Pages</span>
+          </div>
           <div class="hero-actions">
             <a class="button button-primary" href="README.md">문서 보기</a>
             <a class="button button-secondary" href="mailto:ahnd6474@gmail.com">연락하기</a>
@@ -125,9 +131,57 @@
                     <strong>블록 완료 후 GitHub</strong>
                   </article>
                 </div>
+
+                <div class="preview-footer">
+                  <div>
+                    <span>릴리즈 상태</span>
+                    <strong>Private alpha</strong>
+                  </div>
+                  <div>
+                    <span>대상 형식</span>
+                    <strong>Desktop app</strong>
+                  </div>
+                  <div>
+                    <span>핵심 포인트</span>
+                    <strong>실행 전 배분, 실행 후 검증</strong>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section class="section release-section" id="release">
+        <div class="section-heading">
+          <p class="eyebrow">Release</p>
+          <h2>배포를 염두에 둔 앱 릴리즈 페이지 구조</h2>
+        </div>
+        <div class="release-grid">
+          <article class="release-card hero-release">
+            <span class="release-label">Version</span>
+            <strong>v0.1 Alpha</strong>
+            <p>현재는 데스크톱 자동화 워크스페이스로 다듬는 단계이며, 이후 앱 패키징과 배포를 목표로 합니다.</p>
+            <div class="release-actions">
+              <a class="button button-primary" href="mailto:ahnd6474@gmail.com?subject=codex-auto%20alpha%20문의">알파 문의</a>
+              <a class="button button-secondary" href="README.md">기능 문서</a>
+            </div>
+          </article>
+          <article class="release-card">
+            <span class="release-label">Platform</span>
+            <strong>Windows-first desktop</strong>
+            <p>Tkinter GUI 기반으로 동작하며, 앱 형태로 재포장하기 쉬운 운영 화면을 우선 설계했습니다.</p>
+          </article>
+          <article class="release-card">
+            <span class="release-label">Audience</span>
+            <strong>반복 개선이 필요한 개발 팀</strong>
+            <p>여러 저장소를 한 번에 관리하면서, Codex 주도 반복 개선을 통제하고 싶은 팀에 맞춰져 있습니다.</p>
+          </article>
+          <article class="release-card">
+            <span class="release-label">Promise</span>
+            <strong>보여주기보다 운영 우선</strong>
+            <p>로그, 상태, 체크포인트, 롤백을 기본으로 두어 릴리즈 후에도 설명 가능한 자동화를 유지합니다.</p>
+          </article>
         </div>
       </section>
 
@@ -193,6 +247,34 @@
           <article class="feature-card">
             <strong>GUI 중심 확장성</strong>
             <p>지금은 데스크톱 GUI, 이후에는 배포용 앱 UX로 옮기기 좋습니다.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section screenshot-section">
+        <div class="section-copy">
+          <p class="eyebrow">Preview</p>
+          <h2>릴리즈 페이지에 필요한 제품 컷을 미리 담아둡니다</h2>
+          <p>
+            실제 스크린샷이 준비되면 이 영역을 앱 화면 이미지, 기능 컷, 체크포인트 흐름 이미지로 바꿔서
+            다운로드 페이지나 릴리즈 노트 페이지로 확장할 수 있습니다.
+          </p>
+        </div>
+        <div class="shot-grid">
+          <article class="shot-card">
+            <span>01</span>
+            <strong>실행 타임라인</strong>
+            <p>어디까지 진행됐는지 즉시 보이는 운영 화면</p>
+          </article>
+          <article class="shot-card">
+            <span>02</span>
+            <strong>작업 분해</strong>
+            <p>Codex가 생성한 블록을 확인하고 수정하는 흐름</p>
+          </article>
+          <article class="shot-card">
+            <span>03</span>
+            <strong>검증과 동기화</strong>
+            <p>테스트, 롤백, GitHub 반영 상태를 한 눈에 확인</p>
           </article>
         </div>
       </section>
