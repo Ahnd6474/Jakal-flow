@@ -56,6 +56,7 @@ class Orchestrator:
         runtime: RuntimeOptions,
         branch: str = "main",
         origin_url: str = "",
+        display_name: str = "",
     ) -> ProjectContext:
         resolved_dir = project_dir.resolve()
         created_repo = self.git.ensure_repository(resolved_dir, branch)
@@ -71,6 +72,7 @@ class Orchestrator:
                 branch=active_branch,
                 runtime=runtime,
                 origin_url=detected_origin or origin_url.strip(),
+                display_name=display_name.strip(),
             )
         else:
             context = existing
@@ -80,7 +82,7 @@ class Orchestrator:
             context.metadata.repo_url = detected_origin or origin_url.strip() or str(resolved_dir)
             context.metadata.origin_url = detected_origin or origin_url.strip() or None
             context.metadata.repo_kind = "local"
-            context.metadata.display_name = resolved_dir.name
+            context.metadata.display_name = display_name.strip() or context.metadata.display_name or resolved_dir.name
 
         self.git.configure_local_identity(
             context.paths.repo_dir,
@@ -106,7 +108,7 @@ class Orchestrator:
         context.metadata.repo_url = self.git.remote_url(context.paths.repo_dir, "origin") or str(context.paths.repo_dir)
         context.metadata.origin_url = self.git.remote_url(context.paths.repo_dir, "origin")
         context.metadata.repo_kind = "local"
-        context.metadata.display_name = context.paths.repo_dir.name
+        context.metadata.display_name = display_name.strip() or context.metadata.display_name or context.paths.repo_dir.name
         context.loop_state.current_safe_revision = safe_revision
         context.loop_state.stop_requested = False
         context.loop_state.stop_reason = None

@@ -118,6 +118,7 @@ class WorkspaceManager:
         branch: str,
         runtime: RuntimeOptions,
         origin_url: str = "",
+        display_name: str = "",
     ) -> ProjectContext:
         self.ensure_workspace()
         resolved_dir = project_dir.resolve()
@@ -142,7 +143,7 @@ class WorkspaceManager:
             context.metadata.repo_path = resolved_dir
             context.metadata.branch = branch
             context.metadata.repo_kind = "local"
-            context.metadata.display_name = resolved_dir.name
+            context.metadata.display_name = display_name.strip() or context.metadata.display_name or resolved_dir.name
             context.metadata.origin_url = origin_url or context.metadata.origin_url
             context.metadata.repo_url = origin_url or str(resolved_dir)
             self.save_project(context)
@@ -158,7 +159,7 @@ class WorkspaceManager:
             repo_path=resolved_dir,
             created_at=created_at,
             repo_kind="local",
-            display_name=resolved_dir.name,
+            display_name=display_name.strip() or resolved_dir.name,
             origin_url=origin_url or None,
         )
         loop_state = LoopState(repo_id=repo_id, repo_slug=slug)

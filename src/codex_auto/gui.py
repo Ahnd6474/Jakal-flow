@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
 import queue
 import textwrap
 import threading
@@ -11,20 +12,40 @@ from tkinter import BOTH, END, LEFT, RIGHT, W, X, Y, Canvas, StringVar, Tk, file
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
-from .model_selection import (
-    DEFAULT_CODEX_BASE_SLUG,
-    DEFAULT_CODEX_VARIANT_SLUG,
-    DEFAULT_MODEL_SLUG,
-    MODEL_MODE_CODEX,
-    MODEL_MODE_SLUG,
-    ModelSelection,
-    model_selection_from_runtime,
-    normalize_model_mode,
-    validate_reasoning_effort,
-)
+from .model_selection import DEFAULT_MODEL_PRESET_ID, MODEL_PRESETS, model_preset_by_id, model_preset_from_runtime
 from .models import ExecutionPlanState, ExecutionStep, ProjectContext, RuntimeOptions
 from .orchestrator import Orchestrator
 from .utils import read_jsonl_tail
+
+
+DEFAULT_GUI_WORKSPACE_DIRNAME = ".codex-auto-workspace"
+GITHUB_CONNECTION_EXISTING = "existing"
+GITHUB_CONNECTION_MANUAL = "manual"
+GITHUB_CONNECTION_NONE = "none"
+CUSTOM_MODEL_PRESET_ID = "__custom__"
+
+
+def _default_gui_workspace_root() -> Path:
+    explicit = os.environ.get("CODEX_AUTO_GUI_WORKSPACE")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    legacy = (Path.cwd() / DEFAULT_GUI_WORKSPACE_DIRNAME).resolve()
+    if legacy.exists():
+        return legacy
+    return (Path.home() / DEFAULT_GUI_WORKSPACE_DIRNAME).resolve()
+
+
+def _project_initials(name: str) -> str:
+    compact = " ".join(name.split()).strip()
+    if not compact:
+        return "PR"
+    tokens = [token for token in compact.replace("_", " ").replace("-", " ").split() if token]
+    if len(tokens) >= 2:
+        return (tokens[0][0] + tokens[1][0]).upper()[:2]
+    letters = "".join(char for char in compact if char.isalnum())
+    if not letters:
+        return "PR"
+    return letters[:2].upper()
 
 
 def _plan_state_with_running_step(plan_state: ExecutionPlanState, step_id: str) -> ExecutionPlanState:
@@ -108,46 +129,42 @@ class CodexAutoGUI:
         self.busy = False
         self.stop_after_step_event = threading.Event()
 
-        self.workspace_root_var = StringVar(value=".codex-auto-workspace")
+        self.workspace_root = _default_gui_workspace_root()
+        self.project_name_var = StringVar()
         self.project_dir_var = StringVar()
         self.branch_var = StringVar(value="main")
         self.origin_url_var = StringVar()
-        self.model_mode_var = StringVar(value=MODEL_MODE_SLUG)
-        self.model_slug_input_var = StringVar(value=DEFAULT_MODEL_SLUG)
-        self.codex_base_slug_var = StringVar(value=DEFAULT_CODEX_BASE_SLUG)
-        self.codex_variant_slug_var = StringVar(value=DEFAULT_CODEX_VARIANT_SLUG)
-        self.model_var = StringVar(value=DEFAULT_MODEL_SLUG)
-        self.effort_var = StringVar(value="medium")
+        self.github_connection_var = StringVar(value=GITHUB_CONNECTION_EXISTING)
+        self.model_preset_var = StringVar(value=DEFAULT_MODEL_PRESET_ID)
+        self.model_var = StringVar(value=model_preset_by_id(DEFAULT_MODEL_PRESET_ID).model)
         self.runtime_summary_var = StringVar(value="")
         self.test_cmd_var = StringVar(value="python -m pytest")
         self.max_steps_var = StringVar(value="5")
         self.status_var = StringVar(value="Ready")
-        self.stage_title_var = StringVar(value="Workspace Setup")
-        self.stage_hint_var = StringVar(value="Choose a local repository and runtime model, then prepare the workspace.")
+        self.setup_form_title_var = StringVar(value="Create Managed Project")
+        self.setup_form_hint_var = StringVar(value="Pick a directory, give it a simple name, choose the GitHub link mode, and open the flow.")
+        self.primary_action_var = StringVar(value="Create Project And Open Flow")
         self.current_project_label_var = StringVar(value="No project selected")
         self.current_step_label_var = StringVar(value="No plan loaded")
         self.selected_step_id_var = StringVar(value="")
         self.selected_step_status_var = StringVar(value="")
 
         self.project_rows: dict[str, ProjectContext] = {}
+        self.selected_project_id: str | None = None
         self.current_project: ProjectContext | None = None
         self.current_plan = ExecutionPlanState()
         self.selected_step_id: str | None = None
         self.flow_node_tags: dict[str, list[int]] = {}
         self._orchestrator_instance: Orchestrator | None = None
         self._orchestrator_root: Path | None = None
-        for variable in (
-            self.model_mode_var,
-            self.model_slug_input_var,
-            self.codex_base_slug_var,
-            self.codex_variant_slug_var,
-            self.effort_var,
-        ):
-            variable.trace_add("write", self._on_runtime_model_changed)
+        self._custom_model_choice: tuple[str, str] | None = None
+        self.model_preset_var.trace_add("write", self._on_runtime_model_changed)
+        self.github_connection_var.trace_add("write", self._on_github_connection_changed)
 
         self._configure_style()
         self._build_layout()
         self._load_runtime_inputs(RuntimeOptions())
+        self._sync_github_mode_ui()
         self._show_stage("setup")
         self._schedule_queue_poll()
         self.refresh_projects()
@@ -161,17 +178,18 @@ class CodexAutoGUI:
         app_bg = "#f4efe8"
         panel_bg = "#fffaf5"
         surface_bg = "#fffdf9"
-        hero_bg = "#2f4858"
         ink = "#22313a"
         soft_ink = "#6d7b83"
         border = "#e3d8cb"
         accent = "#c9795d"
         accent_active = "#b6664b"
         accent_soft = "#f6e2d7"
+        selected_bg = "#f8e8df"
         style.configure("App.TFrame", background=app_bg)
         style.configure("Toolbar.TFrame", background=app_bg)
-        style.configure("Hero.TFrame", background=hero_bg)
         style.configure("Card.TFrame", background=panel_bg)
+        style.configure("ProjectCard.TFrame", background=surface_bg, borderwidth=1, relief="solid", bordercolor=border)
+        style.configure("ProjectCardSelected.TFrame", background=selected_bg, borderwidth=2, relief="solid", bordercolor=accent)
         style.configure(
             "Card.TLabelframe",
             background=panel_bg,
@@ -182,13 +200,15 @@ class CodexAutoGUI:
             darkcolor=border,
         )
         style.configure("Card.TLabelframe.Label", background=panel_bg, foreground=ink, font=("Malgun Gothic", 10, "bold"))
-        style.configure("Hero.TLabel", background=hero_bg, foreground="#fff8f2", font=("Malgun Gothic", 24, "bold"))
-        style.configure("HeroSub.TLabel", background=hero_bg, foreground="#dbe7ec", font=("Malgun Gothic", 10))
-        style.configure("HeroChip.TLabel", background="#40606f", foreground="#fff8f2", font=("Malgun Gothic", 9, "bold"))
         style.configure("Muted.TLabel", background=app_bg, foreground=soft_ink, font=("Malgun Gothic", 10))
         style.configure("CardMuted.TLabel", background=panel_bg, foreground=soft_ink, font=("Malgun Gothic", 10))
+        style.configure("ProjectTitle.TLabel", background=surface_bg, foreground=ink, font=("Malgun Gothic", 11, "bold"))
+        style.configure("ProjectTitleSelected.TLabel", background=selected_bg, foreground=ink, font=("Malgun Gothic", 11, "bold"))
+        style.configure("ProjectMeta.TLabel", background=surface_bg, foreground=soft_ink, font=("Malgun Gothic", 9))
+        style.configure("ProjectMetaSelected.TLabel", background=selected_bg, foreground=soft_ink, font=("Malgun Gothic", 9))
         style.configure("Field.TLabel", background=panel_bg, foreground=ink, font=("Malgun Gothic", 10, "bold"))
         style.configure("Value.TLabel", background=panel_bg, foreground=ink, font=("Malgun Gothic", 10))
+        style.configure("Section.TLabel", background=panel_bg, foreground=ink, font=("Malgun Gothic", 16, "bold"))
         style.configure("Stage.TLabel", background=app_bg, foreground=ink, font=("Malgun Gothic", 18, "bold"))
         style.configure("StageHint.TLabel", background=app_bg, foreground=soft_ink, font=("Malgun Gothic", 10))
         style.configure("StatusPill.TLabel", background=accent_soft, foreground="#8a4d39", font=("Malgun Gothic", 10, "bold"))
@@ -222,32 +242,6 @@ class CodexAutoGUI:
         root_frame = ttk.Frame(self.root, padding=18, style="App.TFrame")
         root_frame.pack(fill=BOTH, expand=True)
 
-        hero = ttk.Frame(root_frame, padding=0, style="Hero.TFrame")
-        hero.pack(fill=X)
-        hero_body = ttk.Frame(hero, padding=20, style="Hero.TFrame")
-        hero_body.pack(fill=X)
-        ttk.Label(hero_body, text="codex-auto", style="Hero.TLabel", anchor="w").pack(fill=X)
-        ttk.Label(
-            hero_body,
-            text="Prepare a repo, choose the runtime model, generate a safe flow, and run it step by step.",
-            style="HeroSub.TLabel",
-            anchor="w",
-            padding=(0, 8, 0, 0),
-        ).pack(fill=X)
-        hero_chips = ttk.Frame(hero_body, style="Hero.TFrame")
-        hero_chips.pack(fill=X, pady=(14, 0))
-        ttk.Label(hero_chips, text="Workspace setup", style="HeroChip.TLabel", padding=(10, 6)).pack(side=LEFT)
-        ttk.Label(hero_chips, text="Model slug builder", style="HeroChip.TLabel", padding=(10, 6)).pack(side=LEFT, padx=(8, 0))
-        ttk.Label(hero_chips, text="Editable flow execution", style="HeroChip.TLabel", padding=(10, 6)).pack(side=LEFT, padx=(8, 0))
-
-        stage_row = ttk.Frame(root_frame, style="App.TFrame")
-        stage_row.pack(fill=X, pady=(16, 10))
-        stage_text = ttk.Frame(stage_row, style="App.TFrame")
-        stage_text.pack(side=LEFT, fill=X, expand=True)
-        ttk.Label(stage_text, textvariable=self.stage_title_var, style="Stage.TLabel").pack(anchor="w")
-        ttk.Label(stage_text, textvariable=self.stage_hint_var, style="StageHint.TLabel").pack(anchor="w", pady=(4, 0))
-        ttk.Label(stage_row, textvariable=self.status_var, style="StatusPill.TLabel", padding=(14, 8)).pack(side=RIGHT)
-
         main = ttk.Panedwindow(root_frame, orient="vertical")
         main.pack(fill=BOTH, expand=True)
 
@@ -264,179 +258,143 @@ class CodexAutoGUI:
         self._build_bottom_panel(bottom)
 
     def _build_setup_stage(self, parent: ttk.Frame) -> None:
-        ttk.Label(
-            parent,
-            text="Start here: pick a workspace, reopen an existing managed project if needed, or set up a new local repository.",
-            style="Muted.TLabel",
-            anchor="w",
-        ).pack(fill=X, pady=(0, 10))
-
-        top_bar = ttk.Frame(parent, style="Toolbar.TFrame")
-        top_bar.pack(fill=X, pady=(0, 12))
-        ttk.Label(top_bar, text="Workspace Root", style="Muted.TLabel").pack(side=LEFT)
-        ttk.Entry(top_bar, textvariable=self.workspace_root_var, width=60).pack(side=LEFT, padx=(8, 8), fill=X, expand=True)
-        ttk.Button(top_bar, text="Browse", command=self._choose_workspace_root, style="Secondary.TButton").pack(side=LEFT)
-        ttk.Button(top_bar, text="Refresh", command=self.refresh_projects, style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
-
         split = ttk.Panedwindow(parent, orient="horizontal")
         split.pack(fill=BOTH, expand=True)
 
         left = ttk.LabelFrame(split, text="Managed Projects", padding=12, style="Card.TLabelframe")
-        right = ttk.LabelFrame(split, text="Environment Setup", padding=12, style="Card.TLabelframe")
+        right = ttk.LabelFrame(split, text="Project Setup", padding=12, style="Card.TLabelframe")
         split.add(left, weight=44)
         split.add(right, weight=56)
 
         ttk.Label(
             left,
-            text="Open a managed project from the list, or load its settings back into the setup form before running again.",
+            text="Create a new managed project first, or reopen an existing one from the list below.",
             style="CardMuted.TLabel",
             anchor="w",
         ).pack(fill=X, pady=(0, 10))
 
-        columns = ("name", "branch", "status", "updated", "path")
-        self.project_tree = ttk.Treeview(left, columns=columns, show="headings", height=18)
-        for key, title, width in [
-            ("name", "Project", 180),
-            ("branch", "Branch", 100),
-            ("status", "Status", 160),
-            ("updated", "Updated", 170),
-            ("path", "Directory", 430),
-        ]:
-            self.project_tree.heading(key, text=title)
-            self.project_tree.column(key, width=width, anchor=W)
-        self.project_tree.pack(fill=BOTH, expand=True)
-        self.project_tree.bind("<<TreeviewSelect>>", self._on_project_selected)
-
         project_actions = ttk.Frame(left, style="Card.TFrame")
         project_actions.pack(fill=X, pady=(10, 0))
-        ttk.Button(project_actions, text="Open Flow", command=self.open_selected_project, style="Primary.TButton").pack(side=LEFT)
-        ttk.Button(project_actions, text="Load Into Form", command=self.load_selected_project_into_form, style="Secondary.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(project_actions, text="Create New", command=self.start_new_project, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(project_actions, text="Refresh", command=self.refresh_projects, style="Secondary.TButton").pack(side=LEFT, padx=(8, 0))
+
+        browser_wrap = ttk.Frame(left, style="Card.TFrame")
+        browser_wrap.pack(fill=BOTH, expand=True, pady=(12, 0))
+        self.project_browser_canvas = Canvas(browser_wrap, background="#fffaf5", highlightthickness=0)
+        browser_scroll = ttk.Scrollbar(browser_wrap, orient="vertical", command=self.project_browser_canvas.yview)
+        self.project_browser_canvas.configure(yscrollcommand=browser_scroll.set)
+        self.project_browser_canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        browser_scroll.pack(side=RIGHT, fill=Y)
+        self.project_browser_frame = ttk.Frame(self.project_browser_canvas, style="Card.TFrame")
+        self.project_browser_window = self.project_browser_canvas.create_window((0, 0), window=self.project_browser_frame, anchor="nw")
+        self.project_browser_frame.bind(
+            "<Configure>",
+            lambda _event: self.project_browser_canvas.configure(scrollregion=self.project_browser_canvas.bbox("all")),
+        )
+        self.project_browser_canvas.bind("<Configure>", self._on_project_browser_resized)
 
         self.project_summary_text = ScrolledText(left, height=10, wrap="word")
         self.project_summary_text.pack(fill=BOTH, expand=False, pady=(12, 0))
         self._configure_text_surface(self.project_summary_text)
-        self.project_summary_text.insert("1.0", "Project details and recent execution activity will appear here.")
+        self.project_summary_text.insert("1.0", "Select a managed project to see its summary.")
 
         form = ttk.Frame(right, style="Card.TFrame")
         form.pack(fill=BOTH, expand=True)
         form.columnconfigure(1, weight=1)
+        ttk.Label(form, textvariable=self.setup_form_title_var, style="Section.TLabel", anchor="w").grid(
+            row=0,
+            column=0,
+            columnspan=3,
+            sticky="ew",
+        )
         ttk.Label(
             form,
-            text="Choose the local repository, default test command, and runtime model. The main action prepares the repo and opens the editable flow.",
+            textvariable=self.setup_form_hint_var,
+            style="CardMuted.TLabel",
+            anchor="w",
+        ).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(4, 14))
+
+        ttk.Label(form, text="Project Name", style="Field.TLabel").grid(row=2, column=0, sticky=W, padx=(0, 12), pady=8)
+        ttk.Entry(form, textvariable=self.project_name_var).grid(row=2, column=1, columnspan=2, sticky="ew", pady=8)
+
+        ttk.Label(form, text="Working Directory", style="Field.TLabel").grid(row=3, column=0, sticky=W, padx=(0, 12), pady=8)
+        ttk.Entry(form, textvariable=self.project_dir_var).grid(row=3, column=1, sticky="ew", pady=8)
+        ttk.Button(form, text="Browse", command=self._choose_project_dir, style="Secondary.TButton").grid(row=3, column=2, padx=(8, 0), pady=8)
+
+        github_card = ttk.LabelFrame(form, text="GitHub Connection", padding=12, style="Card.TLabelframe")
+        github_card.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        ttk.Label(
+            github_card,
+            text="Choose how this project should connect to GitHub. Only the selected path is shown.",
             style="CardMuted.TLabel",
             anchor="w",
         ).grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+        ttk.Radiobutton(
+            github_card,
+            text="Use existing origin in this folder",
+            value=GITHUB_CONNECTION_EXISTING,
+            variable=self.github_connection_var,
+            style="Card.TRadiobutton",
+        ).grid(row=1, column=0, sticky=W, pady=4)
+        ttk.Radiobutton(
+            github_card,
+            text="Paste a GitHub repository URL",
+            value=GITHUB_CONNECTION_MANUAL,
+            variable=self.github_connection_var,
+            style="Card.TRadiobutton",
+        ).grid(row=2, column=0, sticky=W, pady=4)
+        ttk.Radiobutton(
+            github_card,
+            text="Do not connect GitHub yet",
+            value=GITHUB_CONNECTION_NONE,
+            variable=self.github_connection_var,
+            style="Card.TRadiobutton",
+        ).grid(row=3, column=0, sticky=W, pady=4)
+        self.origin_url_label = ttk.Label(github_card, text="GitHub URL", style="Field.TLabel")
+        self.origin_url_label.grid(row=4, column=0, sticky=W, padx=(0, 12), pady=(10, 6))
+        self.origin_url_entry = ttk.Entry(github_card, textvariable=self.origin_url_var)
+        self.origin_url_entry.grid(row=5, column=0, sticky="ew", pady=(0, 2))
+        github_card.columnconfigure(0, weight=1)
 
-        rows = [
-            ("Project Directory", self.project_dir_var),
-            ("Branch", self.branch_var),
-            ("Origin URL (optional)", self.origin_url_var),
-            ("Default Test Command", self.test_cmd_var),
-        ]
-        for row, (label, variable) in enumerate(rows, start=1):
-            ttk.Label(form, text=label, style="Field.TLabel").grid(row=row, column=0, sticky=W, padx=(0, 12), pady=8)
-            ttk.Entry(form, textvariable=variable).grid(row=row, column=1, sticky="ew", pady=8)
-            if label == "Project Directory":
-                ttk.Button(form, text="Browse", command=self._choose_project_dir, style="Secondary.TButton").grid(row=row, column=2, padx=(8, 0), pady=8)
+        ttk.Label(form, text="Verification Command", style="Field.TLabel").grid(row=5, column=0, sticky=W, padx=(0, 12), pady=8)
+        ttk.Entry(form, textvariable=self.test_cmd_var).grid(row=5, column=1, columnspan=2, sticky="ew", pady=8)
 
         runtime_card = ttk.LabelFrame(form, text="Execution Model", padding=12, style="Card.TLabelframe")
-        runtime_card.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        runtime_card.columnconfigure(1, weight=1)
+        runtime_card.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(14, 0))
         ttk.Label(
             runtime_card,
-            text="Pick a model the easy way. Type a full slug directly or compose a Codex slug from editable parts.",
+            text="Choose one working preset. The UI no longer builds custom Codex slug combinations that may not exist.",
             style="CardMuted.TLabel",
             anchor="w",
-        ).grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 10))
-
-        ttk.Label(runtime_card, text="Mode", style="Field.TLabel").grid(row=1, column=0, sticky=W, padx=(0, 12), pady=6)
-        mode_row = ttk.Frame(runtime_card, style="Card.TFrame")
-        mode_row.grid(row=1, column=1, columnspan=2, sticky=W, pady=6)
-        ttk.Radiobutton(mode_row, text="Codex Builder", value=MODEL_MODE_CODEX, variable=self.model_mode_var, style="Card.TRadiobutton").pack(side=LEFT)
-        ttk.Radiobutton(mode_row, text="Direct Slug", value=MODEL_MODE_SLUG, variable=self.model_mode_var, style="Card.TRadiobutton").pack(side=LEFT, padx=(12, 0))
-
-        ttk.Label(runtime_card, text="Direct Slug", style="Field.TLabel").grid(row=2, column=0, sticky=W, padx=(0, 12), pady=6)
-        self.direct_model_entry = ttk.Entry(runtime_card, textvariable=self.model_slug_input_var)
-        self.direct_model_entry.grid(row=2, column=1, columnspan=2, sticky="ew", pady=6)
-
-        ttk.Label(runtime_card, text="Codex Base Slug", style="Field.TLabel").grid(row=3, column=0, sticky=W, padx=(0, 12), pady=6)
-        self.codex_base_entry = ttk.Entry(runtime_card, textvariable=self.codex_base_slug_var)
-        self.codex_base_entry.grid(row=3, column=1, sticky="ew", pady=6)
-        ttk.Label(runtime_card, text="Examples: gpt-5.4, gpt-5.1, codex-mini", style="CardMuted.TLabel").grid(
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        self.model_options_frame = ttk.Frame(runtime_card, style="Card.TFrame")
+        self.model_options_frame.grid(row=1, column=0, sticky="ew")
+        runtime_card.columnconfigure(0, weight=1)
+        self._build_model_options()
+        self.custom_model_notice = ttk.Label(runtime_card, text="", style="CardMuted.TLabel", anchor="w")
+        self.custom_model_notice.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        ttk.Label(runtime_card, textvariable=self.runtime_summary_var, style="Value.TLabel", anchor="w").grid(
             row=3,
-            column=2,
-            sticky=W,
-            padx=(12, 0),
-            pady=6,
+            column=0,
+            sticky="ew",
+            pady=(8, 0),
         )
-
-        ttk.Label(runtime_card, text="Codex Variant", style="Field.TLabel").grid(row=4, column=0, sticky=W, padx=(0, 12), pady=6)
-        self.codex_variant_entry = ttk.Entry(runtime_card, textvariable=self.codex_variant_slug_var)
-        self.codex_variant_entry.grid(row=4, column=1, sticky="ew", pady=6)
-        ttk.Label(runtime_card, text="Examples: codex, codex-max, latest", style="CardMuted.TLabel").grid(
-            row=4,
-            column=2,
-            sticky=W,
-            padx=(12, 0),
-            pady=6,
-        )
-
-        ttk.Label(runtime_card, text="Resolved Slug", style="Field.TLabel").grid(row=5, column=0, sticky=W, padx=(0, 12), pady=6)
-        ttk.Label(runtime_card, textvariable=self.model_var, style="Value.TLabel").grid(row=5, column=1, columnspan=2, sticky=W, pady=6)
-
-        ttk.Label(runtime_card, text="Reasoning Effort", style="Field.TLabel").grid(row=6, column=0, sticky=W, padx=(0, 12), pady=6)
-        ttk.Combobox(runtime_card, textvariable=self.effort_var, values=["low", "medium", "high", "xhigh"], state="readonly", width=20).grid(
-            row=6,
-            column=1,
-            sticky=W,
-            pady=6,
-        )
-        ttk.Label(
-            runtime_card,
-            text="The resolved slug is saved in project_config.json, so future model additions do not require UI updates.",
-            style="CardMuted.TLabel",
-            anchor="w",
-        ).grid(row=7, column=0, columnspan=3, sticky="ew", pady=(4, 0))
-
-        ttk.Label(form, text="Max Planned Steps", style="Field.TLabel").grid(row=6, column=0, sticky=W, padx=(0, 12), pady=8)
-        ttk.Entry(form, textvariable=self.max_steps_var, width=10).grid(row=6, column=1, sticky=W, pady=8)
-
-        assumptions = ttk.LabelFrame(form, text="What This Run Assumes", padding=12, style="Card.TLabelframe")
-        assumptions.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(16, 0))
-        for text in [
-            "GitHub login and Codex CLI login already exist on this machine.",
-            "Codex execution uses approval=never and sandbox=danger-full-access.",
-            "Stage 1 creates `.venv` and ensures `.gitignore` covers common Python artifacts.",
-            "Stage execution commits and pushes after each verified step when `origin` is configured.",
-        ]:
-            ttk.Label(assumptions, text=text, style="CardMuted.TLabel", anchor="w").pack(fill=X, pady=2)
-
-        flow_overview = ttk.LabelFrame(form, text="Runtime Flow Chart", padding=12, style="Card.TLabelframe")
-        flow_overview.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(16, 0))
-        self.setup_flow_canvas = Canvas(flow_overview, background="#fffdf9", height=246, highlightthickness=0)
-        self.setup_flow_canvas.pack(fill=X, expand=True)
-        self.setup_flow_canvas.bind("<Configure>", lambda _event: self._draw_setup_flow_chart())
-        ttk.Label(
-            flow_overview,
-            text="The selected model slug is reused for plan generation, step execution, and closeout.",
-            style="CardMuted.TLabel",
-            anchor="w",
-        ).pack(fill=X, pady=(10, 0))
 
         setup_actions = ttk.Frame(form, style="Card.TFrame")
-        setup_actions.grid(row=9, column=0, columnspan=3, sticky="w", pady=(18, 0))
-        ttk.Button(setup_actions, text="Prepare Environment and Open Flow", command=self.prepare_environment, style="Primary.TButton").pack(side=LEFT)
-        ttk.Button(setup_actions, text="Open Current Flow", command=self.open_selected_project, style="Secondary.TButton").pack(side=LEFT, padx=(8, 0))
+        setup_actions.grid(row=7, column=0, columnspan=3, sticky="w", pady=(18, 0))
+        ttk.Button(setup_actions, textvariable=self.primary_action_var, command=self.save_project_setup, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(setup_actions, text="Open Selected Flow", command=self.open_selected_project, style="Secondary.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(setup_actions, text="Reset Form", command=self.start_new_project, style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
 
     def _build_flow_stage(self, parent: ttk.Frame) -> None:
-        header = ttk.Frame(parent, style="App.TFrame")
-        header.pack(fill=X, pady=(0, 12))
-        ttk.Button(header, text="Back To Setup", command=lambda: self._show_stage("setup"), style="Quiet.TButton").pack(side=LEFT)
-        ttk.Label(header, textvariable=self.current_project_label_var, style="Stage.TLabel").pack(side=LEFT, padx=(12, 0))
-        ttk.Label(header, textvariable=self.current_step_label_var, style="StatusPill.TLabel", padding=(12, 8)).pack(side=RIGHT)
-
         prompt_frame = ttk.LabelFrame(parent, text="Prompt And Plan", padding=12, style="Card.TLabelframe")
         prompt_frame.pack(fill=X)
+        top_actions = ttk.Frame(prompt_frame, style="Card.TFrame")
+        top_actions.pack(fill=X, pady=(0, 8))
+        ttk.Button(top_actions, text="Back To Projects", command=lambda: self._show_stage("setup"), style="Quiet.TButton").pack(side=LEFT)
+        ttk.Label(top_actions, textvariable=self.status_var, style="StatusPill.TLabel", padding=(12, 8)).pack(side=RIGHT)
+        ttk.Label(prompt_frame, textvariable=self.current_project_label_var, style="Section.TLabel", anchor="w").pack(fill=X)
+        ttk.Label(prompt_frame, textvariable=self.current_step_label_var, style="CardMuted.TLabel", anchor="w").pack(fill=X, pady=(4, 10))
         ttk.Label(
             prompt_frame,
             text="Describe the goal in plain language. Generate the plan, adjust the flow if needed, then run the remaining steps.",
@@ -562,137 +520,174 @@ class CodexAutoGUI:
             selectforeground="#22313a",
         )
 
-    def _current_model_selection(self) -> ModelSelection:
-        return ModelSelection(
-            mode=self.model_mode_var.get().strip(),
-            direct_slug=self.model_slug_input_var.get().strip(),
-            codex_base_slug=self.codex_base_slug_var.get().strip(),
-            codex_variant_slug=self.codex_variant_slug_var.get().strip(),
-            effort=self.effort_var.get().strip(),
+    def _build_model_options(self) -> None:
+        for child in self.model_options_frame.winfo_children():
+            child.destroy()
+        for row, preset in enumerate(MODEL_PRESETS):
+            option = ttk.Frame(self.model_options_frame, style="Card.TFrame")
+            option.grid(row=row, column=0, sticky="ew", pady=(0, 8))
+            ttk.Radiobutton(
+                option,
+                text=f"{preset.label}  ({preset.model})",
+                value=preset.preset_id,
+                variable=self.model_preset_var,
+                style="Card.TRadiobutton",
+            ).pack(anchor="w")
+            ttk.Label(option, text=preset.description, style="CardMuted.TLabel", anchor="w").pack(fill=X, padx=(26, 0), pady=(2, 0))
+        self.custom_model_row = ttk.Frame(self.model_options_frame, style="Card.TFrame")
+        self.custom_model_row.grid(row=len(MODEL_PRESETS), column=0, sticky="ew")
+        self.custom_model_radio = ttk.Radiobutton(
+            self.custom_model_row,
+            text="Saved Custom Model",
+            value=CUSTOM_MODEL_PRESET_ID,
+            variable=self.model_preset_var,
+            style="Card.TRadiobutton",
         )
+        self.custom_model_radio.pack(anchor="w")
+        self.custom_model_label = ttk.Label(self.custom_model_row, text="", style="CardMuted.TLabel", anchor="w")
+        self.custom_model_label.pack(fill=X, padx=(26, 0), pady=(2, 0))
+        self.custom_model_row.grid_remove()
+
+    def _selected_runtime_model(self) -> tuple[str, str, str]:
+        preset_id = self.model_preset_var.get().strip()
+        if preset_id == CUSTOM_MODEL_PRESET_ID and self._custom_model_choice is not None:
+            model, effort = self._custom_model_choice
+            return "", model, effort
+        preset = model_preset_by_id(preset_id or DEFAULT_MODEL_PRESET_ID)
+        return preset.preset_id, preset.model, preset.effort
 
     def _load_runtime_inputs(self, runtime: RuntimeOptions) -> None:
-        selection = model_selection_from_runtime(runtime)
-        self.model_mode_var.set(selection.normalized_mode())
-        self.model_slug_input_var.set(selection.direct_slug)
-        self.codex_base_slug_var.set(selection.codex_base_slug)
-        self.codex_variant_slug_var.set(selection.codex_variant_slug)
-        self.effort_var.set(selection.normalized_effort())
+        preset = model_preset_from_runtime(runtime)
+        if preset is not None:
+            self._custom_model_choice = None
+            self.model_preset_var.set(preset.preset_id)
+        else:
+            model = runtime.model.strip() or model_preset_by_id(DEFAULT_MODEL_PRESET_ID).model
+            effort = runtime.effort.strip() or "high"
+            self._custom_model_choice = (model, effort)
+            self.model_preset_var.set(CUSTOM_MODEL_PRESET_ID)
         self._sync_runtime_model_ui()
 
     def _on_runtime_model_changed(self, *_args: object) -> None:
         self._sync_runtime_model_ui()
 
     def _sync_runtime_model_ui(self) -> None:
-        mode = normalize_model_mode(self.model_mode_var.get())
-        if self.model_mode_var.get() != mode:
-            self.model_mode_var.set(mode)
-            return
-        direct_state = "normal" if mode == MODEL_MODE_SLUG else "disabled"
-        codex_state = "normal" if mode == MODEL_MODE_CODEX else "disabled"
-        if hasattr(self, "direct_model_entry"):
-            self.direct_model_entry.configure(state=direct_state)
-        if hasattr(self, "codex_base_entry"):
-            self.codex_base_entry.configure(state=codex_state)
-        if hasattr(self, "codex_variant_entry"):
-            self.codex_variant_entry.configure(state=codex_state)
-        try:
-            selection = self._current_model_selection()
-            resolved_slug = selection.resolved_slug()
-            summary = selection.summary()
-        except ValueError as exc:
-            resolved_slug = ""
-            summary = f"Model slug is incomplete: {exc}"
-        self.model_var.set(resolved_slug)
-        self.runtime_summary_var.set(summary)
-        if hasattr(self, "setup_flow_canvas"):
-            self._draw_setup_flow_chart()
-
-    def _draw_setup_flow_chart(self) -> None:
-        self.setup_flow_canvas.delete("all")
-        width = max(self.setup_flow_canvas.winfo_width(), 720)
-        box_width = 204
-        box_height = 74
-        margin_x = 24
-        margin_y = 20
-        gap_x = 24
-        gap_y = 48
-        nodes = [
-            ("1. Setup", "Prepare repo, .venv, and safe revision."),
-            ("2. Model", self.model_var.get().strip() or "Resolve the execution slug."),
-            ("3. Plan", "Generate the editable execution plan."),
-            ("4. Review", "Edit flow nodes, tests, and Codex instructions."),
-            ("5. Execute", "Run each pending step with verification."),
-            ("6. Closeout", "Finalize reports, commit, and optional push."),
-        ]
-        positions: list[tuple[float, float, float, float]] = []
-        for index, (title, body) in enumerate(nodes):
-            row = index // 3
-            col = index % 3
-            x1 = margin_x + col * (box_width + gap_x)
-            y1 = margin_y + row * (box_height + gap_y)
-            x2 = x1 + box_width
-            y2 = y1 + box_height
-            positions.append((x1, y1, x2, y2))
-            fill = "#f8e8df" if index == 1 else "#fffaf6"
-            outline = "#cf8b6c" if index == 1 else "#e6d9cc"
-            self.setup_flow_canvas.create_rectangle(x1 + 4, y1 + 5, x2 + 4, y2 + 5, fill="#efe4d8", outline="#efe4d8", width=0)
-            self.setup_flow_canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=2)
-            self.setup_flow_canvas.create_text(
-                x1 + 12,
-                y1 + 18,
-                text=title,
-                anchor="w",
-                fill="#22313a",
-                font=("Malgun Gothic", 11, "bold"),
-            )
-            self.setup_flow_canvas.create_text(
-                x1 + 12,
-                y1 + 44,
-                text=textwrap.shorten(body, width=34, placeholder="..."),
-                anchor="w",
-                fill="#6d7b83",
-                font=("Malgun Gothic", 9),
-            )
-        for index in range(len(positions) - 1):
-            x1, y1, x2, y2 = positions[index]
-            next_x1, next_y1, next_x2, _next_y2 = positions[index + 1]
-            if y1 == next_y1:
-                center_y = y1 + box_height / 2
-                self.setup_flow_canvas.create_line(x2 + 6, center_y, next_x1 - 6, center_y, fill="#d1bcac", width=3, arrow="last")
-                continue
-            current_center_x = (x1 + x2) / 2
-            next_center_x = (next_x1 + next_x2) / 2
-            mid_y = y2 + gap_y / 2
-            self.setup_flow_canvas.create_line(
-                current_center_x,
-                y2 + 4,
-                current_center_x,
-                mid_y,
-                next_center_x,
-                mid_y,
-                next_center_x,
-                next_y1 - 6,
-                fill="#d1bcac",
-                width=3,
-                arrow="last",
-                smooth=False,
-            )
-        total_width = min(width, margin_x * 2 + box_width * 3 + gap_x * 2)
-        total_height = margin_y * 2 + box_height * 2 + gap_y
-        self.setup_flow_canvas.configure(scrollregion=(0, 0, total_width, total_height))
+        preset_id, model, effort = self._selected_runtime_model()
+        self.model_var.set(model)
+        if preset_id == CUSTOM_MODEL_PRESET_ID or not preset_id:
+            self.runtime_summary_var.set(f"Saved custom model {model} | reasoning {effort}")
+        else:
+            preset = model_preset_by_id(preset_id)
+            self.runtime_summary_var.set(preset.summary())
+        if self._custom_model_choice is not None and hasattr(self, "custom_model_row"):
+            custom_model, custom_effort = self._custom_model_choice
+            self.custom_model_label.configure(text=f"{custom_model} | reasoning {custom_effort}")
+            self.custom_model_notice.configure(text="A previously saved custom model is still available for this project.")
+            self.custom_model_row.grid()
+        elif hasattr(self, "custom_model_row"):
+            if self.model_preset_var.get() == CUSTOM_MODEL_PRESET_ID:
+                self.model_preset_var.set(DEFAULT_MODEL_PRESET_ID)
+            self.custom_model_notice.configure(text="")
+            self.custom_model_row.grid_remove()
 
     def _show_stage(self, name: str) -> None:
         for child in self.stage_container.winfo_children():
             child.pack_forget()
         if name == "flow":
-            self.stage_title_var.set("Plan And Run")
-            self.stage_hint_var.set("Turn the request into a step-by-step flow, then execute and close out the project safely.")
             self.flow_stage.pack(fill=BOTH, expand=True)
             return
-        self.stage_title_var.set("Workspace Setup")
-        self.stage_hint_var.set("Choose a local repository and runtime model, then prepare the workspace.")
         self.setup_stage.pack(fill=BOTH, expand=True)
+
+    def _on_github_connection_changed(self, *_args: object) -> None:
+        self._sync_github_mode_ui()
+
+    def _sync_github_mode_ui(self) -> None:
+        visible = self.github_connection_var.get().strip() == GITHUB_CONNECTION_MANUAL
+        if hasattr(self, "origin_url_label"):
+            if visible:
+                self.origin_url_label.grid()
+                self.origin_url_entry.grid()
+            else:
+                self.origin_url_label.grid_remove()
+                self.origin_url_entry.grid_remove()
+
+    def _build_project_card(self, parent: ttk.Frame, project: ProjectContext, selected: bool) -> None:
+        frame_style = "ProjectCardSelected.TFrame" if selected else "ProjectCard.TFrame"
+        title_style = "ProjectTitleSelected.TLabel" if selected else "ProjectTitle.TLabel"
+        meta_style = "ProjectMetaSelected.TLabel" if selected else "ProjectMeta.TLabel"
+        card = ttk.Frame(parent, style=frame_style, padding=12)
+        card.pack(fill=X, pady=(0, 10))
+        icon_bg = "#f8e8df" if selected else "#fffdf9"
+        icon = Canvas(card, width=58, height=46, background=icon_bg, highlightthickness=0)
+        icon.pack(side=LEFT, padx=(0, 12))
+        icon.create_rectangle(8, 16, 50, 36, fill="#efc39f", outline="#d49062", width=1)
+        icon.create_polygon(8, 16, 18, 10, 32, 10, 38, 16, fill="#f4d7bd", outline="#d49062", width=1)
+        icon.create_text(29, 26, text=_project_initials(project.metadata.display_name or project.metadata.slug), fill="#7b462f", font=("Malgun Gothic", 9, "bold"))
+
+        body = ttk.Frame(card, style=frame_style)
+        body.pack(side=LEFT, fill=BOTH, expand=True)
+        ttk.Label(body, text=project.metadata.display_name or project.metadata.slug, style=title_style, anchor="w").pack(fill=X)
+        ttk.Label(body, text=project.metadata.current_status, style=meta_style, anchor="w").pack(fill=X, pady=(2, 0))
+        ttk.Label(body, text=str(project.metadata.repo_path), style=meta_style, anchor="w").pack(fill=X, pady=(2, 0))
+        detail = project.metadata.origin_url or f"Branch {project.metadata.branch}"
+        ttk.Label(body, text=detail, style=meta_style, anchor="w").pack(fill=X, pady=(2, 0))
+
+        callback = lambda _event, repo_id=project.metadata.repo_id: self._select_project_card(repo_id)
+        self._bind_click_recursive(card, callback)
+
+    def _bind_click_recursive(self, widget: object, callback: object) -> None:
+        if hasattr(widget, "bind"):
+            widget.bind("<Button-1>", callback)
+        if hasattr(widget, "winfo_children"):
+            for child in widget.winfo_children():
+                self._bind_click_recursive(child, callback)
+
+    def _on_project_browser_resized(self, event: object) -> None:
+        if hasattr(self, "project_browser_canvas") and hasattr(self, "project_browser_window"):
+            width = getattr(event, "width", None)
+            if isinstance(width, int):
+                self.project_browser_canvas.itemconfigure(self.project_browser_window, width=width)
+
+    def _select_project_card(self, repo_id: str) -> None:
+        self.selected_project_id = repo_id
+        project = self._selected_project()
+        if project is None:
+            return
+        self._populate_project_form(project)
+        self.project_summary_text.delete("1.0", END)
+        self.project_summary_text.insert("1.0", self._project_summary(project))
+        self._render_project_list(list(self.project_rows.values()))
+
+    def _populate_project_form(self, project: ProjectContext) -> None:
+        self.project_name_var.set(project.metadata.display_name or project.metadata.slug)
+        self.project_dir_var.set(str(project.metadata.repo_path))
+        self.branch_var.set(project.metadata.branch)
+        self.origin_url_var.set(project.metadata.origin_url or "")
+        self.github_connection_var.set(GITHUB_CONNECTION_MANUAL if project.metadata.origin_url else GITHUB_CONNECTION_EXISTING)
+        self._load_runtime_inputs(project.runtime)
+        self.test_cmd_var.set(project.runtime.test_cmd)
+        self.max_steps_var.set(str(max(project.runtime.max_blocks, 1)))
+        self.setup_form_title_var.set("Project Settings")
+        self.setup_form_hint_var.set("Adjust the saved name, directory, GitHub link mode, or runtime preset before opening the flow again.")
+        self.primary_action_var.set("Save Project And Open Flow")
+
+    def start_new_project(self) -> None:
+        self.selected_project_id = None
+        self.project_name_var.set("")
+        self.project_dir_var.set("")
+        self.branch_var.set("main")
+        self.origin_url_var.set("")
+        self.github_connection_var.set(GITHUB_CONNECTION_EXISTING)
+        self.test_cmd_var.set("python -m pytest")
+        self.max_steps_var.set("5")
+        self._custom_model_choice = None
+        self.model_preset_var.set(DEFAULT_MODEL_PRESET_ID)
+        self.setup_form_title_var.set("Create Managed Project")
+        self.setup_form_hint_var.set("Pick a directory, give it a simple name, choose the GitHub link mode, and open the flow.")
+        self.primary_action_var.set("Create Project And Open Flow")
+        self.project_summary_text.delete("1.0", END)
+        self.project_summary_text.insert("1.0", "Create a new managed project or select one from the list.")
+        self._render_project_list(list(self.project_rows.values()))
 
     def _set_busy(self, busy: bool, status_text: str) -> None:
         self.busy = busy
@@ -741,7 +736,7 @@ class CodexAutoGUI:
         self._schedule_queue_poll()
 
     def _orchestrator(self) -> Orchestrator:
-        workspace_root = Path(self.workspace_root_var.get().strip() or ".codex-auto-workspace").resolve()
+        workspace_root = self.workspace_root
         if self._orchestrator_instance is None or self._orchestrator_root != workspace_root:
             self._orchestrator_instance = Orchestrator(workspace_root)
             self._orchestrator_root = workspace_root
@@ -752,14 +747,12 @@ class CodexAutoGUI:
             max_blocks = max(1, int(self.max_steps_var.get().strip() or "5"))
         except ValueError as exc:
             raise ValueError("Max planned steps must be an integer.") from exc
-        selection = self._current_model_selection()
-        effort = validate_reasoning_effort(selection.effort or "medium")
+        preset_id, model, effort = self._selected_runtime_model()
         return RuntimeOptions(
-            model=selection.resolved_slug(),
-            model_selection_mode=selection.normalized_mode(),
-            model_slug_input=selection.direct_slug.strip(),
-            codex_base_slug=selection.codex_base_slug.strip(),
-            codex_variant_slug=selection.codex_variant_slug.strip(),
+            model=model,
+            model_preset=preset_id,
+            model_selection_mode="slug",
+            model_slug_input=model,
             effort=effort,
             approval_mode="never",
             sandbox_mode="danger-full-access",
@@ -771,10 +764,9 @@ class CodexAutoGUI:
         )
 
     def _selected_project(self) -> ProjectContext | None:
-        selection = self.project_tree.selection()
-        if not selection:
+        if not self.selected_project_id:
             return None
-        return self.project_rows.get(selection[0])
+        return self.project_rows.get(self.selected_project_id)
 
     def _project_dir(self) -> Path:
         project_dir = self.project_dir_var.get().strip()
@@ -785,16 +777,12 @@ class CodexAutoGUI:
     def _prompt_value(self) -> str:
         return self.prompt_text.get("1.0", END).strip()
 
-    def _choose_workspace_root(self) -> None:
-        chosen = filedialog.askdirectory(initialdir=str(Path.cwd()))
-        if chosen:
-            self.workspace_root_var.set(chosen)
-            self.refresh_projects()
-
     def _choose_project_dir(self) -> None:
         chosen = filedialog.askdirectory(initialdir=str(Path.cwd()))
         if chosen:
             self.project_dir_var.set(chosen)
+            if not self.project_name_var.get().strip():
+                self.project_name_var.set(Path(chosen).name)
 
     def _run_async(self, label: str, worker: callable) -> None:
         if self.busy:
@@ -837,7 +825,6 @@ class CodexAutoGUI:
             elif status.endswith("failed") or status in {"failed", "closeout_failed"}:
                 failed += 1
         return {
-            "workspace_root": str(Path(self.workspace_root_var.get().strip() or ".codex-auto-workspace").resolve()),
             "project_count": len(projects),
             "ready_like": ready,
             "running": running,
@@ -845,100 +832,75 @@ class CodexAutoGUI:
         }
 
     def _render_project_list(self, projects: list[ProjectContext]) -> None:
-        self.project_rows = {}
-        selected = self.project_tree.selection()
-        selected_id = selected[0] if selected else None
-        for item in self.project_tree.get_children():
-            self.project_tree.delete(item)
-        for project in projects:
-            self.project_rows[project.metadata.repo_id] = project
-            self.project_tree.insert(
-                "",
-                END,
-                iid=project.metadata.repo_id,
-                values=(
-                    project.metadata.display_name or project.metadata.slug,
-                    project.metadata.branch,
-                    project.metadata.current_status,
-                    project.metadata.last_run_at or "",
-                    str(project.metadata.repo_path),
-                ),
+        ordered = sorted(projects, key=lambda item: item.metadata.created_at, reverse=True)
+        self.project_rows = {project.metadata.repo_id: project for project in ordered}
+        if self.selected_project_id not in self.project_rows:
+            if self.current_project is not None and self.current_project.metadata.repo_id in self.project_rows:
+                self.selected_project_id = self.current_project.metadata.repo_id
+            else:
+                self.selected_project_id = None
+        for child in self.project_browser_frame.winfo_children():
+            child.destroy()
+        if not ordered:
+            ttk.Label(
+                self.project_browser_frame,
+                text="No managed projects yet. Use Create New to register the first directory.",
+                style="CardMuted.TLabel",
+                anchor="w",
+            ).pack(fill=X, pady=(0, 10))
+        for project in ordered:
+            self._build_project_card(
+                self.project_browser_frame,
+                project,
+                selected=project.metadata.repo_id == self.selected_project_id,
             )
-        if selected_id and selected_id in self.project_rows:
-            self.project_tree.selection_set(selected_id)
-            self._on_project_selected(None)
-        elif self.current_project is not None:
-            for repo_id, project in self.project_rows.items():
-                if project.metadata.repo_id == self.current_project.metadata.repo_id:
-                    self.project_tree.selection_set(repo_id)
-                    self._on_project_selected(None)
-                    break
+        if self.selected_project_id and self.selected_project_id in self.project_rows:
+            project = self.project_rows[self.selected_project_id]
+            self.project_summary_text.delete("1.0", END)
+            self.project_summary_text.insert("1.0", self._project_summary(project))
+        elif not ordered:
+            self.project_summary_text.delete("1.0", END)
+            self.project_summary_text.insert("1.0", "Create a new managed project to get started.")
 
     def _upsert_project_row(self, project: ProjectContext) -> None:
         repo_id = project.metadata.repo_id
         self.project_rows[repo_id] = project
-        values = (
-            project.metadata.display_name or project.metadata.slug,
-            project.metadata.branch,
-            project.metadata.current_status,
-            project.metadata.last_run_at or "",
-            str(project.metadata.repo_path),
-        )
-        if self.project_tree.exists(repo_id):
-            self.project_tree.item(repo_id, values=values)
-        else:
-            self.project_tree.insert("", END, iid=repo_id, values=values)
+        if self.selected_project_id is None:
+            self.selected_project_id = repo_id
         if self.current_project is not None and self.current_project.metadata.repo_id == repo_id:
             self.current_project = project
+        self._render_project_list(list(self.project_rows.values()))
 
     def _project_summary(self, project: ProjectContext, plan_state: ExecutionPlanState | None = None) -> str:
         plan = plan_state or self._orchestrator().load_execution_plan_state(project)
         remaining = [step.step_id for step in plan.steps if step.status != "completed"]
         recent_blocks = read_jsonl_tail(project.paths.block_log_file, 5)
-        return json.dumps(
-            {
-                "display_name": project.metadata.display_name or project.metadata.slug,
-                "plan_title": plan.plan_title,
-                "repo_path": str(project.metadata.repo_path),
-                "origin_url": project.metadata.origin_url,
-                "branch": project.metadata.branch,
-                "status": project.metadata.current_status,
-                "model": project.runtime.model,
-                "model_selection_mode": project.runtime.model_selection_mode,
-                "reasoning_effort": project.runtime.effort,
-                "safe_revision": project.metadata.current_safe_revision,
-                "default_test_command": plan.default_test_command or project.runtime.test_cmd,
-                "closeout_status": plan.closeout_status,
-                "closeout_report": str(project.paths.closeout_report_file),
-                "closeout_commit_hash": plan.closeout_commit_hash,
-                "remaining_steps": remaining,
-                "recent_blocks": recent_blocks,
-                "flow_svg": str(project.paths.execution_flow_svg_file),
-            },
-            indent=2,
-            ensure_ascii=False,
-        )
-
-    def _on_project_selected(self, _event: object | None) -> None:
-        project = self._selected_project()
-        if project is None:
-            return
-        self.current_project = project
-        self.project_summary_text.delete("1.0", END)
-        self.project_summary_text.insert("1.0", self._project_summary(project))
-        self.project_dir_var.set(str(project.metadata.repo_path))
-        self.branch_var.set(project.metadata.branch)
-        self.origin_url_var.set(project.metadata.origin_url or "")
-        self._load_runtime_inputs(project.runtime)
-        self.test_cmd_var.set(project.runtime.test_cmd)
-        self.max_steps_var.set(str(project.runtime.max_blocks))
+        recent_statuses = [str(item.get("status", "")) for item in recent_blocks][-3:]
+        lines = [
+            f"Name: {project.metadata.display_name or project.metadata.slug}",
+            f"Directory: {project.metadata.repo_path}",
+            f"GitHub: {project.metadata.origin_url or 'Not connected'}",
+            f"Branch: {project.metadata.branch}",
+            f"Status: {project.metadata.current_status}",
+            f"Model: {project.runtime.model}  ({project.runtime.effort})",
+            f"Verification: {plan.default_test_command or project.runtime.test_cmd}",
+            f"Remaining Steps: {', '.join(remaining) if remaining else 'None'}",
+            f"Closeout: {plan.closeout_status}",
+        ]
+        if plan.plan_title.strip():
+            lines.append(f"Plan Title: {plan.plan_title.strip()}")
+        if project.metadata.last_run_at:
+            lines.append(f"Last Run: {project.metadata.last_run_at}")
+        if recent_statuses:
+            lines.append(f"Recent Blocks: {', '.join(recent_statuses)}")
+        return "\n".join(lines)
 
     def load_selected_project_into_form(self) -> None:
         project = self._selected_project()
         if project is None:
             messagebox.showinfo("codex-auto", "Select a managed project first.")
             return
-        self._on_project_selected(None)
+        self._select_project_card(project.metadata.repo_id)
         self._append_log(f"[info] Loaded {project.metadata.display_name or project.metadata.slug} into the setup form.")
 
     def open_selected_project(self) -> None:
@@ -951,18 +913,36 @@ class CodexAutoGUI:
                 return
             project = self._orchestrator().local_project(project_dir)
             if project is None:
-                messagebox.showinfo("codex-auto", "Prepare the environment first or select a managed project.")
+                messagebox.showinfo("codex-auto", "Save the project first or select a managed project.")
                 return
         orchestrator = self._orchestrator()
         plan_state = orchestrator.load_execution_plan_state(project)
         self._load_project_into_ui(project, plan_state, switch_to_flow=True)
 
-    def prepare_environment(self) -> None:
+    def _display_name_from_form(self) -> str:
+        provided = self.project_name_var.get().strip()
+        if provided:
+            return provided
+        return self._project_dir().name
+
+    def _origin_url_from_form(self) -> str:
+        mode = self.github_connection_var.get().strip()
+        if mode == GITHUB_CONNECTION_NONE:
+            return ""
+        if mode == GITHUB_CONNECTION_MANUAL:
+            origin_url = self.origin_url_var.get().strip()
+            if not origin_url:
+                raise ValueError("GitHub URL is required when the manual connection mode is selected.")
+            return origin_url
+        return ""
+
+    def save_project_setup(self) -> None:
         try:
             project_dir = self._project_dir()
             runtime = self._runtime()
             branch = self.branch_var.get().strip() or "main"
-            origin_url = self.origin_url_var.get().strip()
+            origin_url = self._origin_url_from_form()
+            display_name = self._display_name_from_form()
         except Exception as exc:
             messagebox.showerror("codex-auto", str(exc))
             return
@@ -975,13 +955,14 @@ class CodexAutoGUI:
                 runtime=runtime,
                 branch=branch,
                 origin_url=origin_url,
+                display_name=display_name,
             )
             plan_state = orchestrator.load_execution_plan_state(project)
             self.queue.put(("loaded_project", (project, plan_state, True)))
             self.queue.put(("project_row", project))
             self.queue.put(("snapshot", self._project_summary(project, plan_state)))
 
-        self._run_async("Prepare environment", worker)
+        self._run_async("Save project setup", worker)
 
     def generate_plan(self) -> None:
         if self.current_project is None:
@@ -1230,11 +1211,9 @@ class CodexAutoGUI:
 
     def _load_project_into_ui(self, project: ProjectContext, plan_state: ExecutionPlanState, switch_to_flow: bool) -> None:
         self.current_project = project
+        self.selected_project_id = project.metadata.repo_id
         self.current_plan = plan_state
-        self.project_dir_var.set(str(project.metadata.repo_path))
-        self.branch_var.set(project.metadata.branch)
-        self.origin_url_var.set(project.metadata.origin_url or "")
-        self._load_runtime_inputs(project.runtime)
+        self._populate_project_form(project)
         self.test_cmd_var.set(plan_state.default_test_command or project.runtime.test_cmd)
         self.max_steps_var.set(str(max(len(plan_state.steps), project.runtime.max_blocks, 1)))
         project_label = project.metadata.display_name or project.metadata.slug
@@ -1258,6 +1237,7 @@ class CodexAutoGUI:
                 "plan": plan_state.to_dict(),
             }
         )
+        self._render_project_list(list(self.project_rows.values()))
         if switch_to_flow:
             self._show_stage("flow")
 

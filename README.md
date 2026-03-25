@@ -56,14 +56,14 @@ python gui_main.py
 
 The GUI lets you:
 
-- stage the workflow into two screens: environment setup first, prompt-driven execution second
-- choose the local project directory that Codex will work in
-- prepare the project directory with `.venv` and `.gitignore`
+- start from a simplified project screen: choose a working directory, a display name, and a GitHub connection mode
+- keep managed projects in a reusable list with a folder-style icon and user-defined display name
+- create or reopen a managed project without exposing the workspace root in the UI
+- prepare the project directory with `.venv` and `.gitignore` automatically when the project is saved
 - run Codex with `approval=never` and `sandbox=danger-full-access` from the GUI
-- choose the runtime model either as a direct slug or as a Codex slug built from editable slug parts
+- choose from a small set of verified coding model presets instead of composing arbitrary Codex slugs
 - generate a test-driven execution plan from a free-form prompt
 - edit the Codex prompt templates in `src/codex_auto/docs/`
-- review a setup-stage runtime flow chart and an interactive flow chart of the generated steps
 - edit pending steps, including add/delete/reorder, UI descriptions, Codex instructions, and per-step test commands
 - execute the remaining steps sequentially and show progress directly in the flow chart
 - run a final closeout pass after all steps complete to optimize, verify, smoke-test when feasible, and write a handoff report
@@ -82,8 +82,8 @@ python -m codex_auto init-repo \
   --repo-url https://github.com/example/project.git \
   --branch main \
   --workspace-root .codex-auto-workspace \
-  --model gpt-5.4 \
-  --effort medium \
+  --model gpt-5.3-codex \
+  --effort high \
   --plan-prompt "Build a safe project plan for this repository focused on a narrow MVP and strong tests." \
   --approval-mode never \
   --sandbox-mode workspace-write \
@@ -97,8 +97,8 @@ python -m codex_auto run \
   --repo-url https://github.com/example/project.git \
   --branch main \
   --workspace-root .codex-auto-workspace \
-  --model gpt-5.4 \
-  --effort medium \
+  --model gpt-5.3-codex \
+  --effort high \
   --approval-mode never \
   --sandbox-mode workspace-write \
   --test-cmd "python -m pytest" \
@@ -112,8 +112,8 @@ python -m codex_auto resume \
   --repo-url https://github.com/example/project.git \
   --branch main \
   --workspace-root .codex-auto-workspace \
-  --model gpt-5.4 \
-  --effort medium \
+  --model gpt-5.3-codex \
+  --effort high \
   --approval-mode never \
   --sandbox-mode workspace-write \
   --test-cmd "python -m pytest" \
@@ -193,7 +193,7 @@ Source prompt and scope templates:
 ## Notes
 
 - `codex exec` is invoked through subprocess in non-interactive mode and JSON event streams are saved under `logs/block_*/`
-- the GUI saves the resolved execution model as a slug in `project_config.json`, so newly released model slugs can be entered without a code update
+- the GUI saves both the resolved execution model slug and the selected preset in `project_config.json`; previously saved custom model slugs are still preserved
 - `reasoning.effort` is passed through to Codex using `low`, `medium`, `high`, or `xhigh`
 - token usage is aggregated from `turn.completed` JSON events and surfaced in the GUI dashboard and pass logs
 - each repository gets its own isolated workspace subtree; no mutable state is shared across projects

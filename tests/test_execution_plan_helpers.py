@@ -8,11 +8,14 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from codex_auto.environment import ensure_gitignore
-from codex_auto.gui import _plan_state_with_running_step
+from codex_auto.gui import _plan_state_with_running_step, _project_initials
 from codex_auto.model_selection import (
+    DEFAULT_MODEL_PRESET_ID,
     MODEL_MODE_CODEX,
     MODEL_MODE_SLUG,
     ModelSelection,
+    model_preset_by_id,
+    model_preset_from_runtime,
     model_selection_from_runtime,
 )
 from codex_auto.models import ExecutionPlanState, ExecutionStep, RuntimeOptions
@@ -125,11 +128,15 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(updated.steps[1].status, "paused")
         self.assertEqual(updated.steps[2].status, "running")
 
-    def test_model_selection_resolves_direct_slug_without_builder(self) -> None:
-        selection = ModelSelection(mode=MODEL_MODE_SLUG, direct_slug="gpt-5.4", effort="high")
+    def test_project_initials_prefers_first_two_tokens(self) -> None:
+        self.assertEqual(_project_initials("Alpha Beta"), "AB")
+        self.assertEqual(_project_initials("solo"), "SO")
 
-        self.assertEqual(selection.resolved_slug(), "gpt-5.4")
-        self.assertEqual(selection.summary(), "Model gpt-5.4 | Direct slug | reasoning high")
+    def test_model_selection_resolves_direct_slug_without_builder(self) -> None:
+        selection = ModelSelection(mode=MODEL_MODE_SLUG, direct_slug="gpt-5.3-codex", effort="high")
+
+        self.assertEqual(selection.resolved_slug(), "gpt-5.3-codex")
+        self.assertEqual(selection.summary(), "Model gpt-5.3-codex | Direct slug | reasoning high")
 
     def test_model_selection_resolves_codex_slug_from_slug_parts(self) -> None:
         selection = ModelSelection(
@@ -151,6 +158,21 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(selection.codex_base_slug, "gpt-5.1")
         self.assertEqual(selection.codex_variant_slug, "codex-max")
         self.assertEqual(selection.direct_slug, "gpt-5.1-codex-max")
+
+    def test_model_preset_helpers_match_runtime(self) -> None:
+        preset = model_preset_by_id(DEFAULT_MODEL_PRESET_ID)
+        runtime = RuntimeOptions(model=preset.model, model_preset=preset.preset_id, effort=preset.effort)
+
+        resolved = model_preset_from_runtime(runtime)
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.preset_id, preset.preset_id)
+        self.assertEqual(resolved.model, "gpt-5.3-codex")
+
+    def test_model_preset_helpers_return_none_for_custom_runtime(self) -> None:
+        runtime = RuntimeOptions(model="custom-preview-model", model_preset="", effort="medium")
+
+        self.assertIsNone(model_preset_from_runtime(runtime))
 
     def test_source_prompt_templates_exist_and_keep_expected_placeholders(self) -> None:
         plan_template = load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)

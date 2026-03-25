@@ -8,9 +8,47 @@ MODEL_MODE_SLUG = "slug"
 MODEL_MODE_CODEX = "codex"
 VALID_MODEL_MODES = {MODEL_MODE_SLUG, MODEL_MODE_CODEX}
 VALID_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
-DEFAULT_MODEL_SLUG = "gpt-5.4"
-DEFAULT_CODEX_BASE_SLUG = "gpt-5.4"
+DEFAULT_MODEL_SLUG = "gpt-5.3-codex"
+DEFAULT_CODEX_BASE_SLUG = "gpt-5.3"
 DEFAULT_CODEX_VARIANT_SLUG = "codex"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelPreset:
+    preset_id: str
+    label: str
+    model: str
+    effort: str
+    description: str
+
+    def summary(self) -> str:
+        return f"{self.label} | {self.model} | reasoning {self.effort}"
+
+
+MODEL_PRESETS: tuple[ModelPreset, ...] = (
+    ModelPreset(
+        preset_id="recommended",
+        label="Recommended",
+        model="gpt-5.3-codex",
+        effort="high",
+        description="Strongest default for long-running coding work.",
+    ),
+    ModelPreset(
+        preset_id="balanced",
+        label="Balanced",
+        model="gpt-5.2-codex",
+        effort="medium",
+        description="Lower cost while keeping strong long-horizon coding behavior.",
+    ),
+    ModelPreset(
+        preset_id="fast",
+        label="Fast",
+        model="gpt-5.1-codex-mini",
+        effort="medium",
+        description="Faster preset for smaller changes and quick verification loops.",
+    ),
+)
+DEFAULT_MODEL_PRESET_ID = MODEL_PRESETS[0].preset_id
 
 
 def normalize_model_mode(value: str, fallback: str = MODEL_MODE_SLUG) -> str:
@@ -32,6 +70,33 @@ def validate_reasoning_effort(value: str) -> str:
     if effort not in VALID_REASONING_EFFORTS:
         raise ValueError("Reasoning effort must be one of low, medium, high, xhigh.")
     return effort
+
+
+def model_preset_by_id(preset_id: str, fallback: str = DEFAULT_MODEL_PRESET_ID) -> ModelPreset:
+    requested = preset_id.strip().lower()
+    for preset in MODEL_PRESETS:
+        if preset.preset_id == requested:
+            return preset
+    for preset in MODEL_PRESETS:
+        if preset.preset_id == fallback:
+            return preset
+    return MODEL_PRESETS[0]
+
+
+def model_preset_from_runtime(runtime: RuntimeOptions) -> ModelPreset | None:
+    if runtime.model_preset.strip():
+        explicit = model_preset_by_id(runtime.model_preset, fallback="")
+        if explicit.preset_id == runtime.model_preset.strip().lower():
+            return explicit
+    model = runtime.model.strip().lower()
+    effort = normalize_reasoning_effort(runtime.effort)
+    for preset in MODEL_PRESETS:
+        if preset.model.lower() == model and preset.effort == effort:
+            return preset
+    for preset in MODEL_PRESETS:
+        if preset.model.lower() == model:
+            return preset
+    return None
 
 
 def join_slug_parts(*parts: str) -> str:
