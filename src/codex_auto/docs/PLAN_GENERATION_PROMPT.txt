@@ -11,6 +11,9 @@ Prefer narrow, sequential blocks that Codex can realistically complete in one fo
 Do not combine unrelated work into the same block.
 Do not require concrete test commands at planning time.
 At this stage, define blocks by clear success conditions rather than by existing test commands.
+Follow the user's prompt, but optimize the plan for a fully runnable prototype rather than for market competitiveness or polish.
+If the requested outcome cannot be completed reliably without setup, integration, validation, cleanup, or supporting implementation work that the user did not explicitly mention, include that work in the plan.
+Treat only directly necessary supporting work as in scope; do not add speculative roadmap items or optional expansion beyond the requested prototype outcome.
 
 Return exactly one JSON object with a top-level "tasks" array containing 3 to {max_steps} items.
 
