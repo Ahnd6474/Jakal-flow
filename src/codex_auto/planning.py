@@ -17,8 +17,24 @@ class PlanItem:
     text: str
 
 
+PLAN_GENERATION_PROMPT_FILENAME = "PLAN_GENERATION_PROMPT.txt"
+STEP_EXECUTION_PROMPT_FILENAME = "STEP_EXECUTION_PROMPT.txt"
+
+
 def load_template(name: str) -> str:
     return resources.files("codex_auto").joinpath("templates", name).read_text(encoding="utf-8")
+
+
+def source_docs_dir() -> Path:
+    return Path(__file__).resolve().parent / "docs"
+
+
+def source_prompt_template_path(name: str) -> Path:
+    return source_docs_dir() / name
+
+
+def load_source_prompt_template(name: str) -> str:
+    return source_prompt_template_path(name).read_text(encoding="utf-8")
 
 
 def scan_repository_inputs(repo_dir: Path) -> dict[str, str]:
@@ -292,41 +308,21 @@ def prompt_to_execution_plan_prompt(
     user_prompt: str,
     default_test_command: str,
     max_steps: int,
+    template_text: str | None = None,
 ) -> str:
-    return "\n".join(
-        [
-            f"You are planning a Codex execution flow for the local project at {context.paths.repo_dir}.",
-            "Follow any AGENTS.md rules in the repository.",
-            "Break the user's request into small execution checkpoints.",
-            "Each checkpoint must end with a concrete local verification command.",
-            "Prefer narrow steps that can reasonably finish with one commit and push.",
-            f"Use `{default_test_command}` as the default verification command unless a narrower command is clearly better.",
-            f"Return exactly one JSON object with a top-level 'tasks' array containing 3 to {max(3, max_steps)} items.",
-            "JSON shape:",
-            '{',
-            '  "summary": "one short paragraph",',
-            '  "tasks": [',
-            '    {',
-            '      "title": "short actionable step",',
-            '      "description": "why this step exists",',
-            '      "test_command": "local command to verify the step",',
-            '      "success_criteria": "what passing means"',
-            "    }",
-            "  ]",
-            '}',
-            "Do not include markdown fences or commentary outside the JSON.",
-            "",
-            "Repository summary:",
-            f"README:\n{repo_inputs['readme']}",
-            "",
-            f"AGENTS:\n{repo_inputs['agents']}",
-            "",
-            f"Docs:\n{repo_inputs['docs']}",
-            "",
-            "User request:",
-            user_prompt.strip(),
-        ]
-    )
+    template = template_text or load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)
+    try:
+        return template.format(
+            repo_dir=context.paths.repo_dir,
+            default_test_command=default_test_command,
+            max_steps=max(3, max_steps),
+            readme=repo_inputs["readme"],
+            agents=repo_inputs["agents"],
+            docs=repo_inputs["docs"],
+            user_prompt=user_prompt.strip(),
+        )
+    except KeyError as exc:
+        raise ValueError(f"Unknown placeholder in plan generation prompt template: {exc.args[0]}") from exc
 
 
 def parse_execution_plan_response(
@@ -457,70 +453,31 @@ def implementation_prompt(
     candidate: CandidateTask,
     memory_context: str,
     pass_name: str,
-    use_research: bool = False,
+    template_text: str | None = None,
 ) -> str:
     long_term = read_text(context.paths.long_term_plan_file)
     mid_term = read_text(context.paths.mid_term_plan_file)
     scope_guard = read_text(context.paths.scope_guard_file)
     research_notes = read_text(context.paths.research_notes_file)
-    instructions = [
-        f"You are working inside the managed repository at {context.paths.repo_dir}.",
-        "Follow any AGENTS.md rules in the repository.",
-        "Treat docs/LONG_TERM_PLAN.md as immutable unless the user explicitly unlocks it.",
-        "Do not expand scope beyond the active task and scope guard.",
-        "Prefer small reversible changes with direct tests.",
-        "Update README or docs only if they match actual verified behavior.",
-        f"Managed planning documents live outside the repo at {context.paths.docs_dir}.",
-        f"Pass type: {pass_name}.",
-        f"Verification command for this step: {context.runtime.test_cmd}",
-        "",
-        "Active task:",
-        candidate.title,
-        "",
-        "Candidate rationale:",
-        candidate.rationale,
-        "",
-        memory_context,
-        "",
-        "Long-term plan:",
-        compact_text(long_term, 4000),
-        "",
-        "Mid-term plan:",
-        compact_text(mid_term, 2500),
-        "",
-        "Scope guard:",
-        compact_text(scope_guard, 2500),
-    ]
-    if use_research:
-        instructions.extend(
-            [
-                "",
-                "Research notes from the previous step or seed context:",
-                compact_text(research_notes, 2500),
-                "",
-                "Use web search only to retrieve directly relevant official documentation, benchmarks, or literature for the current task.",
-                f"Write concise findings to {context.paths.research_notes_file} before or alongside implementation.",
-            ]
+    template = template_text or load_source_prompt_template(STEP_EXECUTION_PROMPT_FILENAME)
+    try:
+        return template.format(
+            repo_dir=context.paths.repo_dir,
+            docs_dir=context.paths.docs_dir,
+            pass_name=pass_name,
+            test_command=context.runtime.test_cmd,
+            task_title=candidate.title,
+            candidate_rationale=candidate.rationale,
+            memory_context=memory_context,
+            long_term_plan=compact_text(long_term, 4000),
+            mid_term_plan=compact_text(mid_term, 2500),
+            scope_guard=compact_text(scope_guard, 2500),
+            research_notes=compact_text(research_notes, 2500),
+            research_notes_file=context.paths.research_notes_file,
+            extra_prompt=context.runtime.extra_prompt.strip() or "None.",
         )
-    if context.runtime.extra_prompt.strip():
-        instructions.extend(
-            [
-                "",
-                "Additional user instructions:",
-                context.runtime.extra_prompt.strip(),
-            ]
-        )
-    instructions.extend(
-        [
-            "",
-            "Required output behavior:",
-            "- Implement the task directly in code where justified.",
-            "- Add or update tests when practical.",
-            "- Keep changes traceable and limited.",
-            "- If no safe improvement is possible, explain why in docs/BLOCK_REVIEW.md instead of making speculative edits.",
-        ]
-    )
-    return "\n".join(instructions)
+    except KeyError as exc:
+        raise ValueError(f"Unknown placeholder in step execution prompt template: {exc.args[0]}") from exc
 
 
 def reflection_markdown(task: str, test_summary: str, changed_files: list[str], commit_hashes: list[str]) -> str:

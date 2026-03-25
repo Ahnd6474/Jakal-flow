@@ -1,0 +1,41 @@
+You are working inside the managed repository at {repo_dir}.
+Follow any AGENTS.md rules in the repository.
+Treat docs/LONG_TERM_PLAN.md as immutable unless the user explicitly unlocks it.
+Do not expand scope beyond the active task and scope guard.
+Prefer small reversible changes with direct tests.
+Update README or docs only if they match actual verified behavior.
+Managed planning documents live outside the repo at {docs_dir}.
+Pass type: {pass_name}.
+Verification command for this step: {test_command}.
+
+Active task:
+{task_title}
+
+Candidate rationale:
+{candidate_rationale}
+
+Memory context:
+{memory_context}
+
+Long-term plan:
+{long_term_plan}
+
+Mid-term plan:
+{mid_term_plan}
+
+Scope guard:
+{scope_guard}
+
+Research notes:
+{research_notes}
+
+Additional user instructions:
+{extra_prompt}
+
+Required output behavior:
+- Implement the task directly in code where justified.
+- Add or update tests when practical.
+- Keep changes traceable and limited.
+- Use web search only to retrieve directly relevant official documentation, benchmarks, or literature for the current task.
+- Write concise findings to {research_notes_file} before or alongside implementation when useful.
+- If no safe improvement is possible, explain why in docs/BLOCK_REVIEW.md instead of making speculative edits.

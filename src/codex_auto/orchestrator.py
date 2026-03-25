@@ -9,6 +9,8 @@ from .git_ops import GitOps
 from .memory import MemoryStore
 from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, ProjectContext, RuntimeOptions, TestRunResult
 from .planning import (
+    PLAN_GENERATION_PROMPT_FILENAME,
+    STEP_EXECUTION_PROMPT_FILENAME,
     attempt_history_entry,
     assess_repository_maturity,
     build_mid_term_plan,
@@ -34,6 +36,8 @@ from .planning import (
     validate_mid_term_subset,
     work_breakdown_prompt,
     write_active_task,
+    load_source_prompt_template,
+    source_prompt_template_path,
 )
 from .reporting import Reporter
 from .utils import decode_process_output, now_utc_iso, read_json, read_jsonl, read_text, write_json, write_text
@@ -119,6 +123,11 @@ class Orchestrator:
         origin_url: str = "",
     ) -> tuple[ProjectContext, ExecutionPlanState]:
         context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
+        if project_prompt.strip():
+            project_prompt = self.save_user_prompt(context, project_prompt)
+        else:
+            project_prompt = self.load_user_prompt(context)
+        planning_prompt_template = load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)
         repo_inputs = scan_repository_inputs(context.paths.repo_dir)
         runner = CodexRunner(context.runtime.codex_path)
         prompt = prompt_to_execution_plan_prompt(
@@ -127,6 +136,7 @@ class Orchestrator:
             user_prompt=project_prompt,
             default_test_command=runtime.test_cmd,
             max_steps=max_steps,
+            template_text=planning_prompt_template,
         )
         result = runner.run_pass(
             context=context,
@@ -174,6 +184,8 @@ class Orchestrator:
         state = ExecutionPlanState.from_dict(payload)
         if not state.default_test_command:
             state.default_test_command = context.runtime.test_cmd
+        if not state.project_prompt.strip():
+            state.project_prompt = self.load_user_prompt(context)
         return state
 
     def update_execution_plan(
@@ -185,6 +197,7 @@ class Orchestrator:
         origin_url: str = "",
     ) -> tuple[ProjectContext, ExecutionPlanState]:
         context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
+        self.save_user_prompt(context, plan_state.project_prompt)
         saved = self.save_execution_plan_state(context, plan_state)
         context.metadata.current_status = "plan_ready" if saved.steps else "setup_ready"
         context.metadata.last_run_at = now_utc_iso()
@@ -215,6 +228,7 @@ class Orchestrator:
             last_updated_at=now_utc_iso(),
             steps=normalized_steps,
         )
+        self.save_user_prompt(context, state.project_prompt)
         write_json(context.paths.execution_plan_file, state.to_dict())
         write_text(
             context.paths.long_term_plan_file,
@@ -612,6 +626,25 @@ class Orchestrator:
                 context.paths.execution_flow_svg_file,
                 execution_plan_svg(f"{context.metadata.display_name or context.metadata.slug} execution flow", []),
             )
+        if not context.paths.user_prompt_file.exists():
+            write_text(context.paths.user_prompt_file, "")
+
+    def load_user_prompt(self, context: ProjectContext) -> str:
+        self._ensure_project_documents(context)
+        return read_text(context.paths.user_prompt_file).strip()
+
+    def save_user_prompt(self, context: ProjectContext, user_prompt: str) -> str:
+        self._ensure_project_documents(context)
+        write_text(context.paths.user_prompt_file, user_prompt.strip() + ("\n" if user_prompt.strip() else ""))
+        return user_prompt.strip()
+
+    def prompt_file_paths(self, context: ProjectContext) -> dict[str, str]:
+        self._ensure_project_documents(context)
+        return {
+            "user_prompt_file": str(context.paths.user_prompt_file),
+            "planning_prompt_template_file": str(source_prompt_template_path(PLAN_GENERATION_PROMPT_FILENAME)),
+            "execution_prompt_template_file": str(source_prompt_template_path(STEP_EXECUTION_PROMPT_FILENAME)),
+        }
 
     def _execution_step_rationale(self, step: ExecutionStep, test_command: str) -> str:
         details = step.description or "Complete the saved execution checkpoint with a small, safe change."
@@ -702,112 +735,58 @@ class Orchestrator:
         block_changed_files: list[str] = []
         selected_task = selected.title
 
-        for pass_name in ["block-a-pass-1", "block-a-pass-2"]:
-            if context.loop_state.stop_requested:
-                context.loop_state.stop_reason = "user stop requested"
-                context.metadata.current_status = "ready"
-                return
-            pass_result, test_result, commit_hash = self._execute_pass(
-                context=context,
-                runner=runner,
-                reporter=reporter,
-                block_index=block_index,
-                candidate=selected,
-                pass_name=pass_name,
-                safe_revision=safe_revision,
-                search_enabled=False,
-                memory_context_override=memory_context,
-            )
-            block_changed_files.extend(pass_result.changed_files)
-            if test_result is None:
-                context.loop_state.counters.regression_failures += 1
-                context.loop_state.stop_reason = self._stop_reason(context)
-                memory.record_failure(
-                    task=selected_task,
-                    summary=f"{pass_name} failed. Changes rolled back to {safe_revision}.",
-                    tags=["implementation", "regression"],
-                    block_index=block_index,
-                    commit_hash=None,
-                )
-                reporter.write_block_review(
-                    reflection_markdown(selected_task, "Implementation pass failed; rolled back.", [], [])
-                )
-                reporter.append_attempt_history(
-                    attempt_history_entry(block_index, selected_task, "rolled back after regression", [])
-                )
-                reporter.log_block(
-                    {
-                        "repository_id": context.metadata.repo_id,
-                        "repository_slug": context.metadata.slug,
-                        "block_index": block_index,
-                        "status": "rolled_back",
-                        "selected_task": selected_task,
-                        "changed_files": [],
-                        "test_summary": "regression failure",
-                        "commit_hashes": [],
-                        "rollback_status": "rolled_back_to_safe_revision",
-                    }
-                )
-                return
-            if commit_hash:
-                block_commit_hashes.append(commit_hash)
-                context.metadata.current_safe_revision = commit_hash
-                context.loop_state.current_safe_revision = commit_hash
-                safe_revision = commit_hash
-
-        research_memory = memory.render_context(selected_task)
         if context.loop_state.stop_requested:
             context.loop_state.stop_reason = "user stop requested"
             context.metadata.current_status = "ready"
             return
-        research_pass, research_tests, research_commit = self._execute_pass(
+        search_pass, search_tests, search_commit = self._execute_pass(
             context=context,
             runner=runner,
             reporter=reporter,
             block_index=block_index,
             candidate=selected,
-            pass_name="block-b-research-pass",
+            pass_name="block-search-pass",
             safe_revision=safe_revision,
             search_enabled=True,
-            memory_context_override=research_memory,
+            memory_context_override=memory_context,
         )
-        block_changed_files.extend(research_pass.changed_files)
-        if research_tests is None:
+        block_changed_files.extend(search_pass.changed_files)
+        if search_tests is None:
             context.loop_state.counters.regression_failures += 1
             context.loop_state.stop_reason = self._stop_reason(context)
             memory.record_failure(
                 task=selected_task,
-                summary="Research-backed pass regressed tests and was rolled back.",
-                tags=["research", "regression"],
+                summary="Search-enabled Codex pass regressed tests and was rolled back.",
+                tags=["search", "regression"],
                 block_index=block_index,
                 commit_hash=None,
             )
             reporter.write_block_review(
-                reflection_markdown(selected_task, "Research-backed pass failed; rolled back.", [], block_commit_hashes)
+                reflection_markdown(selected_task, "Search-enabled pass failed; rolled back.", [], [])
             )
             reporter.append_attempt_history(
-                attempt_history_entry(block_index, selected_task, "research pass rolled back", block_commit_hashes)
+                attempt_history_entry(block_index, selected_task, "search pass rolled back", [])
             )
             reporter.log_block(
                 {
                     "repository_id": context.metadata.repo_id,
                     "repository_slug": context.metadata.slug,
                     "block_index": block_index,
-                    "status": "partial_success_then_rollback",
+                    "status": "rolled_back",
                     "selected_task": selected_task,
-                    "changed_files": sorted(set(block_changed_files)),
-                    "test_summary": "research regression failure",
-                    "commit_hashes": block_commit_hashes,
+                    "changed_files": [],
+                    "test_summary": "search regression failure",
+                    "commit_hashes": [],
                     "rollback_status": "rolled_back_to_safe_revision",
                 }
             )
             return
-        if research_commit:
-            block_commit_hashes.append(research_commit)
-            context.metadata.current_safe_revision = research_commit
-            context.loop_state.current_safe_revision = research_commit
+        if search_commit:
+            block_commit_hashes.append(search_commit)
+            context.metadata.current_safe_revision = search_commit
+            context.loop_state.current_safe_revision = search_commit
 
-        if context.runtime.allow_push and block_commit_hashes:
+        if context.runtime.allow_push and block_commit_hashes and self.git.remote_url(context.paths.repo_dir, "origin"):
             self.git.push(context.paths.repo_dir, context.metadata.branch)
 
         made_progress = bool(block_commit_hashes)
@@ -818,7 +797,7 @@ class Orchestrator:
             context.loop_state.counters.no_progress_blocks += 1
             context.loop_state.counters.empty_cycles += 1
 
-        test_summary = research_tests.summary if research_tests else "No research-backed test run."
+        test_summary = search_tests.summary if search_tests else "No search-enabled test run."
         reporter.write_block_review(
             reflection_markdown(selected_task, test_summary, sorted(set(block_changed_files)), block_commit_hashes)
         )
@@ -840,8 +819,8 @@ class Orchestrator:
         if made_progress:
             memory.record_success(
                 task=selected_task,
-                summary=f"Completed block with {len(block_commit_hashes)} safe commit(s).",
-                tags=["implementation", "research"],
+                summary="Completed block with one search-enabled Codex pass.",
+                tags=["search", "implementation"],
                 block_index=block_index,
                 commit_hash=block_commit_hashes[-1],
             )
@@ -882,12 +861,13 @@ class Orchestrator:
         memory_context_override: str | None = None,
     ) -> tuple:
         memory_context = memory_context_override or "No additional memory context."
+        execution_prompt_template = load_source_prompt_template(STEP_EXECUTION_PROMPT_FILENAME)
         prompt = implementation_prompt(
             context=context,
             candidate=candidate,
             memory_context=memory_context,
             pass_name=pass_name,
-            use_research=search_enabled,
+            template_text=execution_prompt_template,
         )
         run_result = runner.run_pass(
             context=context,

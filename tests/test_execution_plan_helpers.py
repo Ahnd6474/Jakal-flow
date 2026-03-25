@@ -9,7 +9,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from codex_auto.environment import ensure_gitignore
 from codex_auto.models import ExecutionStep
-from codex_auto.planning import execution_plan_svg, parse_execution_plan_response
+from codex_auto.planning import (
+    PLAN_GENERATION_PROMPT_FILENAME,
+    STEP_EXECUTION_PROMPT_FILENAME,
+    execution_plan_svg,
+    load_source_prompt_template,
+    parse_execution_plan_response,
+    source_prompt_template_path,
+)
 
 
 class ExecutionPlanHelperTests(unittest.TestCase):
@@ -57,6 +64,17 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("LT2", svg)
         self.assertIn("#0f766e", svg)
         self.assertIn("#cbd5e1", svg)
+
+    def test_source_prompt_templates_exist_and_keep_expected_placeholders(self) -> None:
+        plan_template = load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)
+        step_template = load_source_prompt_template(STEP_EXECUTION_PROMPT_FILENAME)
+
+        self.assertTrue(source_prompt_template_path(PLAN_GENERATION_PROMPT_FILENAME).exists())
+        self.assertTrue(source_prompt_template_path(STEP_EXECUTION_PROMPT_FILENAME).exists())
+        self.assertIn("{repo_dir}", plan_template)
+        self.assertIn("{user_prompt}", plan_template)
+        self.assertIn("{default_test_command}", plan_template)
+        self.assertIn("{task_title}", step_template)
 
     def test_ensure_gitignore_adds_missing_entries_once(self) -> None:
         project_dir = Path(__file__).resolve().parents[1] / ".tmp_gitignore_test"

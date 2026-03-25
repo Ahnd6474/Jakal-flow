@@ -1,0 +1,33 @@
+You are planning a Codex execution flow for the local project at {repo_dir}.
+Follow any AGENTS.md rules in the repository.
+Break the user's request into small execution checkpoints.
+Each checkpoint must end with a concrete local verification command.
+Prefer narrow steps that can reasonably finish with one commit and push.
+Use `{default_test_command}` as the default verification command unless a narrower command is clearly better.
+Return exactly one JSON object with a top-level "tasks" array containing 3 to {max_steps} items.
+JSON shape:
+{{
+  "summary": "one short paragraph",
+  "tasks": [
+    {{
+      "title": "short actionable step",
+      "description": "why this step exists",
+      "test_command": "local command to verify the step",
+      "success_criteria": "what passing means"
+    }}
+  ]
+}}
+Do not include markdown fences or commentary outside the JSON.
+
+Repository summary:
+README:
+{readme}
+
+AGENTS:
+{agents}
+
+Docs:
+{docs}
+
+User request:
+{user_prompt}

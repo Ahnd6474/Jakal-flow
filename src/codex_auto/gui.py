@@ -195,6 +195,9 @@ class CodexAutoGUI:
         prompt_actions = ttk.Frame(prompt_frame)
         prompt_actions.pack(fill=X, pady=(10, 0))
         ttk.Button(prompt_actions, text="Generate Plan With Codex", command=self.generate_plan).pack(side=LEFT)
+        ttk.Button(prompt_actions, text="Load Prompt TXT", command=self.load_prompt_from_file).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(prompt_actions, text="Save Prompt TXT", command=self.save_prompt_to_file).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(prompt_actions, text="Show Prompt Files", command=self.show_prompt_file_paths).pack(side=LEFT, padx=(8, 0))
         ttk.Button(prompt_actions, text="Save Edited Plan", command=self.save_plan).pack(side=LEFT, padx=(8, 0))
         ttk.Button(prompt_actions, text="Run Remaining Steps", command=self.run_plan).pack(side=LEFT, padx=(8, 0))
         ttk.Button(prompt_actions, text="Stop After Current Step", command=self.stop_after_current_step).pack(side=LEFT, padx=(8, 0))
@@ -455,6 +458,7 @@ class CodexAutoGUI:
     def _project_summary(self, project: ProjectContext) -> str:
         orchestrator = self._orchestrator()
         plan = orchestrator.load_execution_plan_state(project)
+        prompt_files = orchestrator.prompt_file_paths(project)
         remaining = [step.step_id for step in plan.steps if step.status != "completed"]
         recent_blocks = read_jsonl(project.paths.block_log_file)[-5:]
         return json.dumps(
@@ -469,6 +473,7 @@ class CodexAutoGUI:
                 "remaining_steps": remaining,
                 "recent_blocks": recent_blocks,
                 "flow_svg": str(project.paths.execution_flow_svg_file),
+                "prompt_files": prompt_files,
             },
             indent=2,
             ensure_ascii=False,
@@ -543,9 +548,15 @@ class CodexAutoGUI:
         if self.current_project is None:
             messagebox.showinfo("codex-auto", "Prepare or open a project first.")
             return
+        orchestrator = self._orchestrator()
         prompt = self._prompt_value()
         if not prompt:
-            messagebox.showerror("codex-auto", "Prompt is required to generate the plan.")
+            prompt = orchestrator.load_user_prompt(self.current_project)
+            if prompt:
+                self.prompt_text.delete("1.0", END)
+                self.prompt_text.insert("1.0", prompt)
+        if not prompt:
+            messagebox.showerror("codex-auto", "Prompt is required to generate the plan. Fill the editor or save it in USER_PROMPT.txt first.")
             return
         if any(step.status == "completed" for step in self.current_plan.steps):
             messagebox.showerror("codex-auto", "The plan already has completed steps. Edit the remaining steps manually instead of regenerating.")
@@ -563,8 +574,6 @@ class CodexAutoGUI:
             messagebox.showerror("codex-auto", str(exc))
             return
 
-        orchestrator = self._orchestrator()
-
         def worker() -> None:
             project, plan_state = orchestrator.generate_execution_plan(
                 project_dir=project_dir,
@@ -579,6 +588,42 @@ class CodexAutoGUI:
             self.queue.put(("snapshot", self._project_summary(project)))
 
         self._run_async("Generate plan", worker)
+
+    def load_prompt_from_file(self) -> None:
+        if self.current_project is None:
+            messagebox.showinfo("codex-auto", "Open a project first.")
+            return
+        orchestrator = self._orchestrator()
+        prompt_text = orchestrator.load_user_prompt(self.current_project)
+        self.prompt_text.delete("1.0", END)
+        self.prompt_text.insert("1.0", prompt_text)
+        self._append_log("[info] Loaded prompt text from USER_PROMPT.txt.")
+
+    def save_prompt_to_file(self) -> None:
+        if self.current_project is None:
+            messagebox.showinfo("codex-auto", "Open a project first.")
+            return
+        orchestrator = self._orchestrator()
+        prompt_text = orchestrator.save_user_prompt(self.current_project, self._prompt_value())
+        self.prompt_text.delete("1.0", END)
+        self.prompt_text.insert("1.0", prompt_text)
+        self._append_log("[info] Saved prompt text to USER_PROMPT.txt.")
+
+    def show_prompt_file_paths(self) -> None:
+        if self.current_project is None:
+            messagebox.showinfo("codex-auto", "Open a project first.")
+            return
+        paths = self._orchestrator().prompt_file_paths(self.current_project)
+        messagebox.showinfo(
+            "codex-auto",
+            "\n".join(
+                [
+                    f"User prompt: {paths['user_prompt_file']}",
+                    f"Plan template: {paths['planning_prompt_template_file']}",
+                    f"Execution template: {paths['execution_prompt_template_file']}",
+                ]
+            ),
+        )
 
     def save_plan(self) -> None:
         if self.current_project is None:
