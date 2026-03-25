@@ -22,8 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
             default=".codex-auto-workspace",
             help="Root directory for isolated managed projects",
         )
-        target.add_argument("--model", default="gpt-5.4", help="Codex model name")
-        target.add_argument("--effort", default="medium", help="Reasoning effort: low, medium, high, xhigh")
+        target.add_argument("--model", default="gpt-5.4", help="Model slug passed to Codex CLI")
+        target.add_argument("--effort", default="medium", help="Reasoning effort override: low, medium, high, xhigh")
         target.add_argument("--extra-prompt", default="", help="Additional user instructions appended to Codex prompts")
         target.add_argument(
             "--init-plan-prompt",

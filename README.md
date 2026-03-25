@@ -65,9 +65,10 @@ The GUI lets you:
 - choose the local project directory that Codex will work in
 - prepare the project directory with `.venv` and `.gitignore`
 - run Codex with `approval=never` and `sandbox=danger-full-access` from the GUI
+- choose the runtime model either as a direct slug or as a Codex slug built from editable slug parts
 - generate a test-driven execution plan from a free-form prompt
 - edit the Codex plan-generation and step-execution prompt templates in `src/codex_auto/docs/*.txt`
-- review an interactive flow chart of the generated steps
+- review a setup-stage runtime flow chart and an interactive flow chart of the generated steps
 - edit pending steps, including add/delete/reorder, UI descriptions, Codex instructions, and per-step test commands
 - execute the remaining steps sequentially and show progress directly in the flow chart
 - run a final closeout pass after all steps complete to optimize, verify, smoke-test when feasible, and write a handoff report
@@ -189,11 +190,12 @@ The tool creates or maintains these files for each managed repository project:
 
 Sample planning template:
 
-- `templates/LONG_TERM_PLAN.sample.md`
+- `src/codex_auto/templates/LONG_TERM_PLAN.sample.md`
 
 ## Notes
 
 - `codex exec` is invoked through subprocess in non-interactive mode and JSON event streams are saved under `logs/block_*/`
+- the GUI saves the resolved execution model as a slug in `project_config.json`, so newly released model slugs can be entered without a code update
 - `reasoning.effort` is passed through to Codex using `low`, `medium`, `high`, or `xhigh`
 - token usage is aggregated from `turn.completed` JSON events and surfaced in the GUI dashboard and pass logs
 - each repository gets its own isolated workspace subtree; no mutable state is shared across projects

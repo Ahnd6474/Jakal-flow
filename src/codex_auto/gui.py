@@ -11,6 +11,17 @@ from tkinter import BOTH, END, LEFT, RIGHT, W, X, Y, Canvas, StringVar, Tk, file
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
+from .model_selection import (
+    DEFAULT_CODEX_BASE_SLUG,
+    DEFAULT_CODEX_VARIANT_SLUG,
+    DEFAULT_MODEL_SLUG,
+    MODEL_MODE_CODEX,
+    MODEL_MODE_SLUG,
+    ModelSelection,
+    model_selection_from_runtime,
+    normalize_model_mode,
+    validate_reasoning_effort,
+)
 from .models import ExecutionPlanState, ExecutionStep, ProjectContext, RuntimeOptions
 from .orchestrator import Orchestrator
 from .utils import read_jsonl_tail
@@ -100,8 +111,13 @@ class CodexAutoGUI:
         self.project_dir_var = StringVar()
         self.branch_var = StringVar(value="main")
         self.origin_url_var = StringVar()
-        self.model_var = StringVar(value="gpt-5.4")
+        self.model_mode_var = StringVar(value=MODEL_MODE_SLUG)
+        self.model_slug_input_var = StringVar(value=DEFAULT_MODEL_SLUG)
+        self.codex_base_slug_var = StringVar(value=DEFAULT_CODEX_BASE_SLUG)
+        self.codex_variant_slug_var = StringVar(value=DEFAULT_CODEX_VARIANT_SLUG)
+        self.model_var = StringVar(value=DEFAULT_MODEL_SLUG)
         self.effort_var = StringVar(value="medium")
+        self.runtime_summary_var = StringVar(value="")
         self.test_cmd_var = StringVar(value="python -m pytest")
         self.max_steps_var = StringVar(value="5")
         self.status_var = StringVar(value="Ready")
@@ -118,9 +134,18 @@ class CodexAutoGUI:
         self.flow_node_tags: dict[str, list[int]] = {}
         self._orchestrator_instance: Orchestrator | None = None
         self._orchestrator_root: Path | None = None
+        for variable in (
+            self.model_mode_var,
+            self.model_slug_input_var,
+            self.codex_base_slug_var,
+            self.codex_variant_slug_var,
+            self.effort_var,
+        ):
+            variable.trace_add("write", self._on_runtime_model_changed)
 
         self._configure_style()
         self._build_layout()
+        self._load_runtime_inputs(RuntimeOptions())
         self._show_stage("setup")
         self._schedule_queue_poll()
         self.refresh_projects()
@@ -228,17 +253,64 @@ class CodexAutoGUI:
             if label == "Project Directory":
                 ttk.Button(form, text="Browse", command=self._choose_project_dir).grid(row=row, column=2, padx=(8, 0), pady=8)
 
-        ttk.Label(form, text="Model").grid(row=4, column=0, sticky=W, padx=(0, 12), pady=8)
-        ttk.Combobox(form, textvariable=self.model_var, values=["gpt-5.4", "gpt-5"], width=20).grid(row=4, column=1, sticky=W, pady=8)
+        runtime_card = ttk.LabelFrame(form, text="Execution Model", padding=12, style="Card.TLabelframe")
+        runtime_card.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        runtime_card.columnconfigure(1, weight=1)
 
-        ttk.Label(form, text="Reasoning Effort").grid(row=5, column=0, sticky=W, padx=(0, 12), pady=8)
-        ttk.Combobox(form, textvariable=self.effort_var, values=["low", "medium", "high", "xhigh"], state="readonly", width=20).grid(row=5, column=1, sticky=W, pady=8)
+        ttk.Label(runtime_card, text="Mode").grid(row=0, column=0, sticky=W, padx=(0, 12), pady=6)
+        mode_row = ttk.Frame(runtime_card)
+        mode_row.grid(row=0, column=1, columnspan=2, sticky=W, pady=6)
+        ttk.Radiobutton(mode_row, text="Codex Builder", value=MODEL_MODE_CODEX, variable=self.model_mode_var).pack(side=LEFT)
+        ttk.Radiobutton(mode_row, text="Direct Slug", value=MODEL_MODE_SLUG, variable=self.model_mode_var).pack(side=LEFT, padx=(12, 0))
 
-        ttk.Label(form, text="Max Planned Steps").grid(row=6, column=0, sticky=W, padx=(0, 12), pady=8)
-        ttk.Entry(form, textvariable=self.max_steps_var, width=10).grid(row=6, column=1, sticky=W, pady=8)
+        ttk.Label(runtime_card, text="Direct Slug").grid(row=1, column=0, sticky=W, padx=(0, 12), pady=6)
+        self.direct_model_entry = ttk.Entry(runtime_card, textvariable=self.model_slug_input_var)
+        self.direct_model_entry.grid(row=1, column=1, columnspan=2, sticky="ew", pady=6)
+
+        ttk.Label(runtime_card, text="Codex Base Slug").grid(row=2, column=0, sticky=W, padx=(0, 12), pady=6)
+        self.codex_base_entry = ttk.Entry(runtime_card, textvariable=self.codex_base_slug_var)
+        self.codex_base_entry.grid(row=2, column=1, sticky="ew", pady=6)
+        ttk.Label(runtime_card, text="Examples: gpt-5.4, gpt-5.1, codex-mini", style="Muted.TLabel").grid(
+            row=2,
+            column=2,
+            sticky=W,
+            padx=(12, 0),
+            pady=6,
+        )
+
+        ttk.Label(runtime_card, text="Codex Variant").grid(row=3, column=0, sticky=W, padx=(0, 12), pady=6)
+        self.codex_variant_entry = ttk.Entry(runtime_card, textvariable=self.codex_variant_slug_var)
+        self.codex_variant_entry.grid(row=3, column=1, sticky="ew", pady=6)
+        ttk.Label(runtime_card, text="Examples: codex, codex-max, latest", style="Muted.TLabel").grid(
+            row=3,
+            column=2,
+            sticky=W,
+            padx=(12, 0),
+            pady=6,
+        )
+
+        ttk.Label(runtime_card, text="Resolved Slug").grid(row=4, column=0, sticky=W, padx=(0, 12), pady=6)
+        ttk.Label(runtime_card, textvariable=self.model_var).grid(row=4, column=1, columnspan=2, sticky=W, pady=6)
+
+        ttk.Label(runtime_card, text="Reasoning Effort").grid(row=5, column=0, sticky=W, padx=(0, 12), pady=6)
+        ttk.Combobox(runtime_card, textvariable=self.effort_var, values=["low", "medium", "high", "xhigh"], state="readonly", width=20).grid(
+            row=5,
+            column=1,
+            sticky=W,
+            pady=6,
+        )
+        ttk.Label(
+            runtime_card,
+            text="The resolved slug is saved in project_config.json, so future model additions do not require UI updates.",
+            style="Muted.TLabel",
+            anchor="w",
+        ).grid(row=6, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+
+        ttk.Label(form, text="Max Planned Steps").grid(row=5, column=0, sticky=W, padx=(0, 12), pady=8)
+        ttk.Entry(form, textvariable=self.max_steps_var, width=10).grid(row=5, column=1, sticky=W, pady=8)
 
         assumptions = ttk.LabelFrame(form, text="Assumptions and Fixed Runtime", padding=12, style="Card.TLabelframe")
-        assumptions.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(16, 0))
+        assumptions.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(16, 0))
         for text in [
             "GitHub login and Codex CLI login already exist on this machine.",
             "Codex execution uses approval=never and sandbox=danger-full-access.",
@@ -246,6 +318,18 @@ class CodexAutoGUI:
             "Stage execution commits and pushes after each verified step when `origin` is configured.",
         ]:
             ttk.Label(assumptions, text=text, style="Muted.TLabel", anchor="w").pack(fill=X, pady=2)
+
+        flow_overview = ttk.LabelFrame(form, text="Runtime Flow Chart", padding=12, style="Card.TLabelframe")
+        flow_overview.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(16, 0))
+        self.setup_flow_canvas = Canvas(flow_overview, background="#ffffff", height=246, highlightthickness=0)
+        self.setup_flow_canvas.pack(fill=X, expand=True)
+        self.setup_flow_canvas.bind("<Configure>", lambda _event: self._draw_setup_flow_chart())
+        ttk.Label(
+            flow_overview,
+            text="The selected model slug is reused for plan generation, step execution, and closeout.",
+            style="Muted.TLabel",
+            anchor="w",
+        ).pack(fill=X, pady=(10, 0))
 
         setup_actions = ttk.Frame(form)
         setup_actions.grid(row=8, column=0, columnspan=3, sticky="w", pady=(18, 0))
@@ -273,6 +357,7 @@ class CodexAutoGUI:
         ttk.Button(prompt_actions, text="Run Closeout", command=self.run_closeout).pack(side=LEFT, padx=(8, 0))
         ttk.Button(prompt_actions, text="Stop After Current Step", command=self.stop_after_current_step).pack(side=LEFT, padx=(8, 0))
         ttk.Button(prompt_actions, text="Reload Project", command=self.reload_current_project).pack(side=LEFT, padx=(8, 0))
+        ttk.Label(prompt_frame, textvariable=self.runtime_summary_var, style="Muted.TLabel", anchor="w").pack(fill=X, pady=(10, 0))
 
         split = ttk.Panedwindow(parent, orient="horizontal")
         split.pack(fill=BOTH, expand=True, pady=(12, 0))
@@ -350,6 +435,125 @@ class CodexAutoGUI:
         self.snapshot_text = ScrolledText(snapshot_tab, height=12, wrap="word")
         self.snapshot_text.pack(fill=BOTH, expand=True)
 
+    def _current_model_selection(self) -> ModelSelection:
+        return ModelSelection(
+            mode=self.model_mode_var.get().strip(),
+            direct_slug=self.model_slug_input_var.get().strip(),
+            codex_base_slug=self.codex_base_slug_var.get().strip(),
+            codex_variant_slug=self.codex_variant_slug_var.get().strip(),
+            effort=self.effort_var.get().strip(),
+        )
+
+    def _load_runtime_inputs(self, runtime: RuntimeOptions) -> None:
+        selection = model_selection_from_runtime(runtime)
+        self.model_mode_var.set(selection.normalized_mode())
+        self.model_slug_input_var.set(selection.direct_slug)
+        self.codex_base_slug_var.set(selection.codex_base_slug)
+        self.codex_variant_slug_var.set(selection.codex_variant_slug)
+        self.effort_var.set(selection.normalized_effort())
+        self._sync_runtime_model_ui()
+
+    def _on_runtime_model_changed(self, *_args: object) -> None:
+        self._sync_runtime_model_ui()
+
+    def _sync_runtime_model_ui(self) -> None:
+        mode = normalize_model_mode(self.model_mode_var.get())
+        if self.model_mode_var.get() != mode:
+            self.model_mode_var.set(mode)
+            return
+        direct_state = "normal" if mode == MODEL_MODE_SLUG else "disabled"
+        codex_state = "normal" if mode == MODEL_MODE_CODEX else "disabled"
+        if hasattr(self, "direct_model_entry"):
+            self.direct_model_entry.configure(state=direct_state)
+        if hasattr(self, "codex_base_entry"):
+            self.codex_base_entry.configure(state=codex_state)
+        if hasattr(self, "codex_variant_entry"):
+            self.codex_variant_entry.configure(state=codex_state)
+        try:
+            selection = self._current_model_selection()
+            resolved_slug = selection.resolved_slug()
+            summary = selection.summary()
+        except ValueError as exc:
+            resolved_slug = ""
+            summary = f"Model slug is incomplete: {exc}"
+        self.model_var.set(resolved_slug)
+        self.runtime_summary_var.set(summary)
+        if hasattr(self, "setup_flow_canvas"):
+            self._draw_setup_flow_chart()
+
+    def _draw_setup_flow_chart(self) -> None:
+        self.setup_flow_canvas.delete("all")
+        width = max(self.setup_flow_canvas.winfo_width(), 720)
+        box_width = 204
+        box_height = 74
+        margin_x = 24
+        margin_y = 20
+        gap_x = 24
+        gap_y = 48
+        nodes = [
+            ("1. Setup", "Prepare repo, .venv, and safe revision."),
+            ("2. Model", self.model_var.get().strip() or "Resolve the execution slug."),
+            ("3. Plan", "Generate the editable execution plan."),
+            ("4. Review", "Edit flow nodes, tests, and Codex instructions."),
+            ("5. Execute", "Run each pending step with verification."),
+            ("6. Closeout", "Finalize reports, commit, and optional push."),
+        ]
+        positions: list[tuple[float, float, float, float]] = []
+        for index, (title, body) in enumerate(nodes):
+            row = index // 3
+            col = index % 3
+            x1 = margin_x + col * (box_width + gap_x)
+            y1 = margin_y + row * (box_height + gap_y)
+            x2 = x1 + box_width
+            y2 = y1 + box_height
+            positions.append((x1, y1, x2, y2))
+            fill = "#e0f2fe" if index == 1 else "#f8fafc"
+            outline = "#0ea5e9" if index == 1 else "#cbd5e1"
+            self.setup_flow_canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=2)
+            self.setup_flow_canvas.create_text(
+                x1 + 12,
+                y1 + 18,
+                text=title,
+                anchor="w",
+                fill="#0f172a",
+                font=("Malgun Gothic", 11, "bold"),
+            )
+            self.setup_flow_canvas.create_text(
+                x1 + 12,
+                y1 + 44,
+                text=textwrap.shorten(body, width=34, placeholder="..."),
+                anchor="w",
+                fill="#475569",
+                font=("Malgun Gothic", 9),
+            )
+        for index in range(len(positions) - 1):
+            x1, y1, x2, y2 = positions[index]
+            next_x1, next_y1, next_x2, _next_y2 = positions[index + 1]
+            if y1 == next_y1:
+                center_y = y1 + box_height / 2
+                self.setup_flow_canvas.create_line(x2 + 6, center_y, next_x1 - 6, center_y, fill="#94a3b8", width=3, arrow="last")
+                continue
+            current_center_x = (x1 + x2) / 2
+            next_center_x = (next_x1 + next_x2) / 2
+            mid_y = y2 + gap_y / 2
+            self.setup_flow_canvas.create_line(
+                current_center_x,
+                y2 + 4,
+                current_center_x,
+                mid_y,
+                next_center_x,
+                mid_y,
+                next_center_x,
+                next_y1 - 6,
+                fill="#94a3b8",
+                width=3,
+                arrow="last",
+                smooth=False,
+            )
+        total_width = min(width, margin_x * 2 + box_width * 3 + gap_x * 2)
+        total_height = margin_y * 2 + box_height * 2 + gap_y
+        self.setup_flow_canvas.configure(scrollregion=(0, 0, total_width, total_height))
+
     def _show_stage(self, name: str) -> None:
         for child in self.stage_container.winfo_children():
             child.pack_forget()
@@ -418,11 +622,14 @@ class CodexAutoGUI:
             max_blocks = max(1, int(self.max_steps_var.get().strip() or "5"))
         except ValueError as exc:
             raise ValueError("Max planned steps must be an integer.") from exc
-        effort = self.effort_var.get().strip().lower() or "medium"
-        if effort not in {"low", "medium", "high", "xhigh"}:
-            raise ValueError("Reasoning effort must be one of low, medium, high, xhigh.")
+        selection = self._current_model_selection()
+        effort = validate_reasoning_effort(selection.effort or "medium")
         return RuntimeOptions(
-            model=self.model_var.get().strip() or "gpt-5.4",
+            model=selection.resolved_slug(),
+            model_selection_mode=selection.normalized_mode(),
+            model_slug_input=selection.direct_slug.strip(),
+            codex_base_slug=selection.codex_base_slug.strip(),
+            codex_variant_slug=selection.codex_variant_slug.strip(),
             effort=effort,
             approval_mode="never",
             sandbox_mode="danger-full-access",
@@ -566,6 +773,9 @@ class CodexAutoGUI:
                 "origin_url": project.metadata.origin_url,
                 "branch": project.metadata.branch,
                 "status": project.metadata.current_status,
+                "model": project.runtime.model,
+                "model_selection_mode": project.runtime.model_selection_mode,
+                "reasoning_effort": project.runtime.effort,
                 "safe_revision": project.metadata.current_safe_revision,
                 "default_test_command": plan.default_test_command or project.runtime.test_cmd,
                 "closeout_status": plan.closeout_status,
@@ -589,8 +799,7 @@ class CodexAutoGUI:
         self.project_dir_var.set(str(project.metadata.repo_path))
         self.branch_var.set(project.metadata.branch)
         self.origin_url_var.set(project.metadata.origin_url or "")
-        self.model_var.set(project.runtime.model)
-        self.effort_var.set(project.runtime.effort)
+        self._load_runtime_inputs(project.runtime)
         self.test_cmd_var.set(project.runtime.test_cmd)
         self.max_steps_var.set(str(project.runtime.max_blocks))
 
@@ -895,8 +1104,7 @@ class CodexAutoGUI:
         self.project_dir_var.set(str(project.metadata.repo_path))
         self.branch_var.set(project.metadata.branch)
         self.origin_url_var.set(project.metadata.origin_url or "")
-        self.model_var.set(project.runtime.model)
-        self.effort_var.set(project.runtime.effort)
+        self._load_runtime_inputs(project.runtime)
         self.test_cmd_var.set(plan_state.default_test_command or project.runtime.test_cmd)
         self.max_steps_var.set(str(max(len(plan_state.steps), project.runtime.max_blocks, 1)))
         project_label = project.metadata.display_name or project.metadata.slug
@@ -1147,26 +1355,49 @@ class CodexAutoGUI:
             "paused": ("#7c3aed", "#f5f3ff"),
             "failed": ("#b91c1c", "#fef2f2"),
             "pending": ("#cbd5e1", "#0f172a"),
+            "not_started": ("#cbd5e1", "#0f172a"),
         }
+        nodes: list[dict[str, str]] = [
+            {
+                "kind": "step",
+                "node_id": step.step_id,
+                "title": step.title,
+                "body": step.display_description or step.test_command or "No step summary.",
+                "status": step.status,
+            }
+            for step in steps
+        ]
+        nodes.append(
+            {
+                "kind": "closeout",
+                "node_id": "CLOSEOUT",
+                "title": "Project closeout",
+                "body": self.current_plan.closeout_notes or "Finalize reports, verify final state, and capture the closeout commit.",
+                "status": self.current_plan.closeout_status or "not_started",
+            }
+        )
+        positions: list[tuple[float, float, float, float]] = []
 
-        for index, step in enumerate(steps):
+        for index, node in enumerate(nodes):
             row = index // per_row
             col = index % per_row
             x1 = margin_x + col * (box_width + gap_x)
             y1 = margin_y + row * (box_height + gap_y)
             x2 = x1 + box_width
             y2 = y1 + box_height
-            status = step.status if step.status in colors else "pending"
+            positions.append((x1, y1, x2, y2))
+            status = node["status"] if node["status"] in colors else "pending"
             fill, text_fill = colors[status]
-            outline = "#0f172a" if step.step_id == self.selected_step_id else fill
-            width = 3 if step.step_id == self.selected_step_id else 1
-            tags = ("step", step.step_id)
+            selected = node["kind"] == "step" and node["node_id"] == self.selected_step_id
+            outline = "#0f172a" if selected else fill
+            width = 3 if selected else 1
+            tags = ("step", node["node_id"])
             self.flow_canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=width, tags=tags)
-            self.flow_canvas.create_text(x1 + 14, y1 + 18, text=step.step_id, anchor="w", fill=text_fill, font=("Malgun Gothic", 12, "bold"), tags=tags)
+            self.flow_canvas.create_text(x1 + 14, y1 + 18, text=node["node_id"], anchor="w", fill=text_fill, font=("Malgun Gothic", 12, "bold"), tags=tags)
             self.flow_canvas.create_text(
                 x1 + 14,
                 y1 + 46,
-                text=textwrap.shorten(step.title, width=38, placeholder="..."),
+                text=textwrap.shorten(node["title"], width=38, placeholder="..."),
                 anchor="w",
                 fill=text_fill,
                 font=("Malgun Gothic", 11, "bold"),
@@ -1175,7 +1406,7 @@ class CodexAutoGUI:
             self.flow_canvas.create_text(
                 x1 + 14,
                 y1 + 74,
-                text=textwrap.shorten(step.display_description or step.test_command or "No step summary.", width=42, placeholder="..."),
+                text=textwrap.shorten(node["body"], width=42, placeholder="..."),
                 anchor="w",
                 fill=text_fill,
                 font=("Malgun Gothic", 10),
@@ -1190,15 +1421,34 @@ class CodexAutoGUI:
                 font=("Malgun Gothic", 10),
                 tags=tags,
             )
-            self.flow_canvas.tag_bind(step.step_id, "<Button-1>", lambda _event, step_id=step.step_id: self.select_step(step_id))
+            if node["kind"] == "step":
+                self.flow_canvas.tag_bind(node["node_id"], "<Button-1>", lambda _event, step_id=node["node_id"]: self.select_step(step_id))
 
-            if col < per_row - 1 and index + 1 < len(steps) and (index + 1) // per_row == row:
+        for index in range(len(positions) - 1):
+            x1, y1, x2, y2 = positions[index]
+            next_x1, next_y1, next_x2, _next_y2 = positions[index + 1]
+            if y1 == next_y1:
                 center_y = y1 + box_height / 2
-                start_x = x2 + 6
-                end_x = x2 + gap_x - 6
-                self.flow_canvas.create_line(start_x, center_y, end_x, center_y, fill="#94a3b8", width=4, arrow="last")
+                self.flow_canvas.create_line(x2 + 6, center_y, next_x1 - 6, center_y, fill="#94a3b8", width=4, arrow="last")
+                continue
+            current_center_x = (x1 + x2) / 2
+            next_center_x = (next_x1 + next_x2) / 2
+            mid_y = y2 + gap_y / 2
+            self.flow_canvas.create_line(
+                current_center_x,
+                y2 + 4,
+                current_center_x,
+                mid_y,
+                next_center_x,
+                mid_y,
+                next_center_x,
+                next_y1 - 6,
+                fill="#94a3b8",
+                width=4,
+                arrow="last",
+            )
 
-        rows = (len(steps) + per_row - 1) // per_row
+        rows = (len(nodes) + per_row - 1) // per_row
         width = margin_x * 2 + per_row * box_width + max(0, per_row - 1) * gap_x
         height = margin_y * 2 + rows * box_height + max(0, rows - 1) * gap_y
         self.flow_canvas.configure(scrollregion=(0, 0, width, height))

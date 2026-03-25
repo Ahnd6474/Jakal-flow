@@ -9,7 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from codex_auto.environment import ensure_gitignore
 from codex_auto.gui import _plan_state_with_running_step
-from codex_auto.models import ExecutionPlanState, ExecutionStep
+from codex_auto.model_selection import (
+    MODEL_MODE_CODEX,
+    MODEL_MODE_SLUG,
+    ModelSelection,
+    model_selection_from_runtime,
+)
+from codex_auto.models import ExecutionPlanState, ExecutionStep, RuntimeOptions
 from codex_auto.planning import (
     FINALIZATION_PROMPT_FILENAME,
     PLAN_GENERATION_PROMPT_FILENAME,
@@ -117,6 +123,33 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(updated.steps[0].status, "pending")
         self.assertEqual(updated.steps[1].status, "paused")
         self.assertEqual(updated.steps[2].status, "running")
+
+    def test_model_selection_resolves_direct_slug_without_builder(self) -> None:
+        selection = ModelSelection(mode=MODEL_MODE_SLUG, direct_slug="gpt-5.4", effort="high")
+
+        self.assertEqual(selection.resolved_slug(), "gpt-5.4")
+        self.assertEqual(selection.summary(), "Model gpt-5.4 | Direct slug | reasoning high")
+
+    def test_model_selection_resolves_codex_slug_from_slug_parts(self) -> None:
+        selection = ModelSelection(
+            mode=MODEL_MODE_CODEX,
+            direct_slug="ignored",
+            codex_base_slug="gpt-5.1",
+            codex_variant_slug="codex-max",
+            effort="medium",
+        )
+
+        self.assertEqual(selection.resolved_slug(), "gpt-5.1-codex-max")
+
+    def test_model_selection_from_runtime_infers_codex_builder_inputs(self) -> None:
+        runtime = RuntimeOptions(model="gpt-5.1-codex-max", effort="low")
+
+        selection = model_selection_from_runtime(runtime)
+
+        self.assertEqual(selection.mode, MODEL_MODE_CODEX)
+        self.assertEqual(selection.codex_base_slug, "gpt-5.1")
+        self.assertEqual(selection.codex_variant_slug, "codex-max")
+        self.assertEqual(selection.direct_slug, "gpt-5.1-codex-max")
 
     def test_source_prompt_templates_exist_and_keep_expected_placeholders(self) -> None:
         plan_template = load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)
