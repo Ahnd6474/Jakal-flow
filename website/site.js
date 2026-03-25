@@ -1,4 +1,4 @@
-const CONSENT_KEY = "codex_auto_analytics_consent";
+﻿const CONSENT_KEY = "codex_auto_analytics_consent";
 const LANGUAGE_KEY = "codex_auto_language";
 
 const translations = {

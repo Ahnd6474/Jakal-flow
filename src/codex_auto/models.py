@@ -82,7 +82,7 @@ class LoopState:
     last_candidates: list[dict[str, Any]] = field(default_factory=list)
     last_commit_hash: str | None = None
     current_safe_revision: str | None = None
-    long_term_plan_locked: bool = True
+    plan_locked: bool = True
     stop_reason: str | None = None
     stop_requested: bool = False
     current_checkpoint_id: str | None = None
@@ -107,7 +107,7 @@ class ProjectPaths:
     metadata_file: Path
     project_config_file: Path
     loop_state_file: Path
-    long_term_plan_file: Path
+    plan_file: Path
     mid_term_plan_file: Path
     scope_guard_file: Path
     active_task_file: Path
@@ -142,7 +142,7 @@ class CandidateTask:
     candidate_id: str
     title: str
     rationale: str
-    long_term_refs: list[str]
+    plan_refs: list[str]
     score: float
 
     def to_dict(self) -> dict[str, Any]:
@@ -202,7 +202,7 @@ class TestRunResult:
 class Checkpoint:
     checkpoint_id: str
     title: str
-    long_term_refs: list[str]
+    plan_refs: list[str]
     target_block: int
     status: str = "pending"
     created_at: str | None = None

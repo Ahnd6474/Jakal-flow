@@ -102,6 +102,7 @@ class CodexAutoGUI:
         self.root.title("codex-auto")
         self.root.geometry("1560x980")
         self.root.minsize(1280, 840)
+        self.root.configure(background="#f4efe8")
 
         self.queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.busy = False
@@ -121,7 +122,8 @@ class CodexAutoGUI:
         self.test_cmd_var = StringVar(value="python -m pytest")
         self.max_steps_var = StringVar(value="5")
         self.status_var = StringVar(value="Ready")
-        self.stage_title_var = StringVar(value="Stage 1. Environment Setup")
+        self.stage_title_var = StringVar(value="Workspace Setup")
+        self.stage_hint_var = StringVar(value="Choose a local repository and runtime model, then prepare the workspace.")
         self.current_project_label_var = StringVar(value="No project selected")
         self.current_step_label_var = StringVar(value="No plan loaded")
         self.selected_step_id_var = StringVar(value="")
@@ -156,33 +158,95 @@ class CodexAutoGUI:
             style.theme_use("clam")
         except Exception:
             pass
-        style.configure("App.TFrame", background="#eef2f6")
-        style.configure("Card.TLabelframe", background="#ffffff", borderwidth=1)
-        style.configure("Card.TLabelframe.Label", background="#ffffff", foreground="#1f2937", font=("Malgun Gothic", 10, "bold"))
-        style.configure("Hero.TLabel", background="#132238", foreground="#f8fafc", font=("Malgun Gothic", 22, "bold"))
-        style.configure("HeroSub.TLabel", background="#132238", foreground="#cbd5e1", font=("Malgun Gothic", 10))
-        style.configure("Muted.TLabel", background="#eef2f6", foreground="#475569", font=("Malgun Gothic", 10))
-        style.configure("Stage.TLabel", background="#eef2f6", foreground="#0f172a", font=("Malgun Gothic", 14, "bold"))
+        app_bg = "#f4efe8"
+        panel_bg = "#fffaf5"
+        surface_bg = "#fffdf9"
+        hero_bg = "#2f4858"
+        ink = "#22313a"
+        soft_ink = "#6d7b83"
+        border = "#e3d8cb"
+        accent = "#c9795d"
+        accent_active = "#b6664b"
+        accent_soft = "#f6e2d7"
+        style.configure("App.TFrame", background=app_bg)
+        style.configure("Toolbar.TFrame", background=app_bg)
+        style.configure("Hero.TFrame", background=hero_bg)
+        style.configure("Card.TFrame", background=panel_bg)
+        style.configure(
+            "Card.TLabelframe",
+            background=panel_bg,
+            borderwidth=1,
+            relief="solid",
+            bordercolor=border,
+            lightcolor=panel_bg,
+            darkcolor=border,
+        )
+        style.configure("Card.TLabelframe.Label", background=panel_bg, foreground=ink, font=("Malgun Gothic", 10, "bold"))
+        style.configure("Hero.TLabel", background=hero_bg, foreground="#fff8f2", font=("Malgun Gothic", 24, "bold"))
+        style.configure("HeroSub.TLabel", background=hero_bg, foreground="#dbe7ec", font=("Malgun Gothic", 10))
+        style.configure("HeroChip.TLabel", background="#40606f", foreground="#fff8f2", font=("Malgun Gothic", 9, "bold"))
+        style.configure("Muted.TLabel", background=app_bg, foreground=soft_ink, font=("Malgun Gothic", 10))
+        style.configure("CardMuted.TLabel", background=panel_bg, foreground=soft_ink, font=("Malgun Gothic", 10))
+        style.configure("Field.TLabel", background=panel_bg, foreground=ink, font=("Malgun Gothic", 10, "bold"))
+        style.configure("Value.TLabel", background=panel_bg, foreground=ink, font=("Malgun Gothic", 10))
+        style.configure("Stage.TLabel", background=app_bg, foreground=ink, font=("Malgun Gothic", 18, "bold"))
+        style.configure("StageHint.TLabel", background=app_bg, foreground=soft_ink, font=("Malgun Gothic", 10))
+        style.configure("StatusPill.TLabel", background=accent_soft, foreground="#8a4d39", font=("Malgun Gothic", 10, "bold"))
+        style.configure("Primary.TButton", background=accent, foreground="#fffaf6", padding=(16, 9), borderwidth=0, font=("Malgun Gothic", 10, "bold"))
+        style.map(
+            "Primary.TButton",
+            background=[("active", accent_active), ("pressed", accent_active), ("disabled", "#dbc1b4")],
+            foreground=[("disabled", "#fff6f1")],
+        )
+        style.configure("Secondary.TButton", background=surface_bg, foreground=ink, padding=(14, 9), borderwidth=1, bordercolor=border)
+        style.map("Secondary.TButton", background=[("active", "#f6efe8"), ("pressed", "#efe6de")])
+        style.configure("Quiet.TButton", background=panel_bg, foreground=soft_ink, padding=(12, 8), borderwidth=0)
+        style.map("Quiet.TButton", background=[("active", "#f7f1ea"), ("pressed", "#f1e9e1")])
+        style.configure("TEntry", fieldbackground=surface_bg, foreground=ink, bordercolor=border, insertcolor=ink, padding=8)
+        style.configure("TCombobox", fieldbackground=surface_bg, foreground=ink, bordercolor=border, padding=7)
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", surface_bg)],
+            background=[("readonly", surface_bg)],
+            foreground=[("readonly", ink)],
+        )
+        style.configure("Treeview", background=surface_bg, fieldbackground=surface_bg, foreground=ink, rowheight=30, borderwidth=0)
+        style.map("Treeview", background=[("selected", "#f3dfd2")], foreground=[("selected", ink)])
+        style.configure("Treeview.Heading", background="#f7efe7", foreground="#5d4b43", relief="flat", padding=(10, 8), font=("Malgun Gothic", 9, "bold"))
+        style.configure("TNotebook", background=app_bg, borderwidth=0)
+        style.configure("TNotebook.Tab", background="#efe6dc", foreground="#6b5b53", padding=(16, 8), font=("Malgun Gothic", 9, "bold"))
+        style.map("TNotebook.Tab", background=[("selected", panel_bg)], foreground=[("selected", ink)])
+        style.configure("Card.TRadiobutton", background=panel_bg, foreground=ink, font=("Malgun Gothic", 10))
 
     def _build_layout(self) -> None:
-        root_frame = ttk.Frame(self.root, padding=16, style="App.TFrame")
+        root_frame = ttk.Frame(self.root, padding=18, style="App.TFrame")
         root_frame.pack(fill=BOTH, expand=True)
 
-        hero = ttk.Frame(root_frame, style="App.TFrame")
+        hero = ttk.Frame(root_frame, padding=0, style="Hero.TFrame")
         hero.pack(fill=X)
-        ttk.Label(hero, text="codex-auto", style="Hero.TLabel", anchor="w", padding=(18, 18, 18, 4)).pack(fill=X)
+        hero_body = ttk.Frame(hero, padding=20, style="Hero.TFrame")
+        hero_body.pack(fill=X)
+        ttk.Label(hero_body, text="codex-auto", style="Hero.TLabel", anchor="w").pack(fill=X)
         ttk.Label(
-            hero,
-            text="GitHub login and Codex CLI login are assumed. Stage 1 prepares a local project directory. Stage 2 builds and runs an editable test-driven flow.",
+            hero_body,
+            text="Prepare a repo, choose the runtime model, generate a safe flow, and run it step by step.",
             style="HeroSub.TLabel",
             anchor="w",
-            padding=(18, 0, 18, 18),
+            padding=(0, 8, 0, 0),
         ).pack(fill=X)
+        hero_chips = ttk.Frame(hero_body, style="Hero.TFrame")
+        hero_chips.pack(fill=X, pady=(14, 0))
+        ttk.Label(hero_chips, text="Workspace setup", style="HeroChip.TLabel", padding=(10, 6)).pack(side=LEFT)
+        ttk.Label(hero_chips, text="Model slug builder", style="HeroChip.TLabel", padding=(10, 6)).pack(side=LEFT, padx=(8, 0))
+        ttk.Label(hero_chips, text="Editable flow execution", style="HeroChip.TLabel", padding=(10, 6)).pack(side=LEFT, padx=(8, 0))
 
         stage_row = ttk.Frame(root_frame, style="App.TFrame")
-        stage_row.pack(fill=X, pady=(12, 8))
-        ttk.Label(stage_row, textvariable=self.stage_title_var, style="Stage.TLabel").pack(side=LEFT)
-        ttk.Label(stage_row, textvariable=self.status_var, style="Muted.TLabel").pack(side=RIGHT)
+        stage_row.pack(fill=X, pady=(16, 10))
+        stage_text = ttk.Frame(stage_row, style="App.TFrame")
+        stage_text.pack(side=LEFT, fill=X, expand=True)
+        ttk.Label(stage_text, textvariable=self.stage_title_var, style="Stage.TLabel").pack(anchor="w")
+        ttk.Label(stage_text, textvariable=self.stage_hint_var, style="StageHint.TLabel").pack(anchor="w", pady=(4, 0))
+        ttk.Label(stage_row, textvariable=self.status_var, style="StatusPill.TLabel", padding=(14, 8)).pack(side=RIGHT)
 
         main = ttk.Panedwindow(root_frame, orient="vertical")
         main.pack(fill=BOTH, expand=True)
@@ -200,12 +264,19 @@ class CodexAutoGUI:
         self._build_bottom_panel(bottom)
 
     def _build_setup_stage(self, parent: ttk.Frame) -> None:
-        top_bar = ttk.Frame(parent, style="App.TFrame")
+        ttk.Label(
+            parent,
+            text="Start here: pick a workspace, reopen an existing managed project if needed, or set up a new local repository.",
+            style="Muted.TLabel",
+            anchor="w",
+        ).pack(fill=X, pady=(0, 10))
+
+        top_bar = ttk.Frame(parent, style="Toolbar.TFrame")
         top_bar.pack(fill=X, pady=(0, 12))
         ttk.Label(top_bar, text="Workspace Root", style="Muted.TLabel").pack(side=LEFT)
         ttk.Entry(top_bar, textvariable=self.workspace_root_var, width=60).pack(side=LEFT, padx=(8, 8), fill=X, expand=True)
-        ttk.Button(top_bar, text="Browse", command=self._choose_workspace_root).pack(side=LEFT)
-        ttk.Button(top_bar, text="Refresh", command=self.refresh_projects).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(top_bar, text="Browse", command=self._choose_workspace_root, style="Secondary.TButton").pack(side=LEFT)
+        ttk.Button(top_bar, text="Refresh", command=self.refresh_projects, style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
 
         split = ttk.Panedwindow(parent, orient="horizontal")
         split.pack(fill=BOTH, expand=True)
@@ -214,6 +285,13 @@ class CodexAutoGUI:
         right = ttk.LabelFrame(split, text="Environment Setup", padding=12, style="Card.TLabelframe")
         split.add(left, weight=44)
         split.add(right, weight=56)
+
+        ttk.Label(
+            left,
+            text="Open a managed project from the list, or load its settings back into the setup form before running again.",
+            style="CardMuted.TLabel",
+            anchor="w",
+        ).pack(fill=X, pady=(0, 10))
 
         columns = ("name", "branch", "status", "updated", "path")
         self.project_tree = ttk.Treeview(left, columns=columns, show="headings", height=18)
@@ -229,17 +307,25 @@ class CodexAutoGUI:
         self.project_tree.pack(fill=BOTH, expand=True)
         self.project_tree.bind("<<TreeviewSelect>>", self._on_project_selected)
 
-        project_actions = ttk.Frame(left)
+        project_actions = ttk.Frame(left, style="Card.TFrame")
         project_actions.pack(fill=X, pady=(10, 0))
-        ttk.Button(project_actions, text="Open Flow", command=self.open_selected_project).pack(side=LEFT)
-        ttk.Button(project_actions, text="Load Into Form", command=self.load_selected_project_into_form).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(project_actions, text="Open Flow", command=self.open_selected_project, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(project_actions, text="Load Into Form", command=self.load_selected_project_into_form, style="Secondary.TButton").pack(side=LEFT, padx=(8, 0))
 
         self.project_summary_text = ScrolledText(left, height=10, wrap="word")
         self.project_summary_text.pack(fill=BOTH, expand=False, pady=(12, 0))
+        self._configure_text_surface(self.project_summary_text)
+        self.project_summary_text.insert("1.0", "Project details and recent execution activity will appear here.")
 
-        form = ttk.Frame(right)
+        form = ttk.Frame(right, style="Card.TFrame")
         form.pack(fill=BOTH, expand=True)
         form.columnconfigure(1, weight=1)
+        ttk.Label(
+            form,
+            text="Choose the local repository, default test command, and runtime model. The main action prepares the repo and opens the editable flow.",
+            style="CardMuted.TLabel",
+            anchor="w",
+        ).grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 10))
 
         rows = [
             ("Project Directory", self.project_dir_var),
@@ -247,41 +333,36 @@ class CodexAutoGUI:
             ("Origin URL (optional)", self.origin_url_var),
             ("Default Test Command", self.test_cmd_var),
         ]
-        for row, (label, variable) in enumerate(rows):
-            ttk.Label(form, text=label).grid(row=row, column=0, sticky=W, padx=(0, 12), pady=8)
+        for row, (label, variable) in enumerate(rows, start=1):
+            ttk.Label(form, text=label, style="Field.TLabel").grid(row=row, column=0, sticky=W, padx=(0, 12), pady=8)
             ttk.Entry(form, textvariable=variable).grid(row=row, column=1, sticky="ew", pady=8)
             if label == "Project Directory":
-                ttk.Button(form, text="Browse", command=self._choose_project_dir).grid(row=row, column=2, padx=(8, 0), pady=8)
+                ttk.Button(form, text="Browse", command=self._choose_project_dir, style="Secondary.TButton").grid(row=row, column=2, padx=(8, 0), pady=8)
 
         runtime_card = ttk.LabelFrame(form, text="Execution Model", padding=12, style="Card.TLabelframe")
-        runtime_card.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        runtime_card.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(12, 0))
         runtime_card.columnconfigure(1, weight=1)
+        ttk.Label(
+            runtime_card,
+            text="Pick a model the easy way. Type a full slug directly or compose a Codex slug from editable parts.",
+            style="CardMuted.TLabel",
+            anchor="w",
+        ).grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 10))
 
-        ttk.Label(runtime_card, text="Mode").grid(row=0, column=0, sticky=W, padx=(0, 12), pady=6)
-        mode_row = ttk.Frame(runtime_card)
-        mode_row.grid(row=0, column=1, columnspan=2, sticky=W, pady=6)
-        ttk.Radiobutton(mode_row, text="Codex Builder", value=MODEL_MODE_CODEX, variable=self.model_mode_var).pack(side=LEFT)
-        ttk.Radiobutton(mode_row, text="Direct Slug", value=MODEL_MODE_SLUG, variable=self.model_mode_var).pack(side=LEFT, padx=(12, 0))
+        ttk.Label(runtime_card, text="Mode", style="Field.TLabel").grid(row=1, column=0, sticky=W, padx=(0, 12), pady=6)
+        mode_row = ttk.Frame(runtime_card, style="Card.TFrame")
+        mode_row.grid(row=1, column=1, columnspan=2, sticky=W, pady=6)
+        ttk.Radiobutton(mode_row, text="Codex Builder", value=MODEL_MODE_CODEX, variable=self.model_mode_var, style="Card.TRadiobutton").pack(side=LEFT)
+        ttk.Radiobutton(mode_row, text="Direct Slug", value=MODEL_MODE_SLUG, variable=self.model_mode_var, style="Card.TRadiobutton").pack(side=LEFT, padx=(12, 0))
 
-        ttk.Label(runtime_card, text="Direct Slug").grid(row=1, column=0, sticky=W, padx=(0, 12), pady=6)
+        ttk.Label(runtime_card, text="Direct Slug", style="Field.TLabel").grid(row=2, column=0, sticky=W, padx=(0, 12), pady=6)
         self.direct_model_entry = ttk.Entry(runtime_card, textvariable=self.model_slug_input_var)
-        self.direct_model_entry.grid(row=1, column=1, columnspan=2, sticky="ew", pady=6)
+        self.direct_model_entry.grid(row=2, column=1, columnspan=2, sticky="ew", pady=6)
 
-        ttk.Label(runtime_card, text="Codex Base Slug").grid(row=2, column=0, sticky=W, padx=(0, 12), pady=6)
+        ttk.Label(runtime_card, text="Codex Base Slug", style="Field.TLabel").grid(row=3, column=0, sticky=W, padx=(0, 12), pady=6)
         self.codex_base_entry = ttk.Entry(runtime_card, textvariable=self.codex_base_slug_var)
-        self.codex_base_entry.grid(row=2, column=1, sticky="ew", pady=6)
-        ttk.Label(runtime_card, text="Examples: gpt-5.4, gpt-5.1, codex-mini", style="Muted.TLabel").grid(
-            row=2,
-            column=2,
-            sticky=W,
-            padx=(12, 0),
-            pady=6,
-        )
-
-        ttk.Label(runtime_card, text="Codex Variant").grid(row=3, column=0, sticky=W, padx=(0, 12), pady=6)
-        self.codex_variant_entry = ttk.Entry(runtime_card, textvariable=self.codex_variant_slug_var)
-        self.codex_variant_entry.grid(row=3, column=1, sticky="ew", pady=6)
-        ttk.Label(runtime_card, text="Examples: codex, codex-max, latest", style="Muted.TLabel").grid(
+        self.codex_base_entry.grid(row=3, column=1, sticky="ew", pady=6)
+        ttk.Label(runtime_card, text="Examples: gpt-5.4, gpt-5.1, codex-mini", style="CardMuted.TLabel").grid(
             row=3,
             column=2,
             sticky=W,
@@ -289,12 +370,23 @@ class CodexAutoGUI:
             pady=6,
         )
 
-        ttk.Label(runtime_card, text="Resolved Slug").grid(row=4, column=0, sticky=W, padx=(0, 12), pady=6)
-        ttk.Label(runtime_card, textvariable=self.model_var).grid(row=4, column=1, columnspan=2, sticky=W, pady=6)
+        ttk.Label(runtime_card, text="Codex Variant", style="Field.TLabel").grid(row=4, column=0, sticky=W, padx=(0, 12), pady=6)
+        self.codex_variant_entry = ttk.Entry(runtime_card, textvariable=self.codex_variant_slug_var)
+        self.codex_variant_entry.grid(row=4, column=1, sticky="ew", pady=6)
+        ttk.Label(runtime_card, text="Examples: codex, codex-max, latest", style="CardMuted.TLabel").grid(
+            row=4,
+            column=2,
+            sticky=W,
+            padx=(12, 0),
+            pady=6,
+        )
 
-        ttk.Label(runtime_card, text="Reasoning Effort").grid(row=5, column=0, sticky=W, padx=(0, 12), pady=6)
+        ttk.Label(runtime_card, text="Resolved Slug", style="Field.TLabel").grid(row=5, column=0, sticky=W, padx=(0, 12), pady=6)
+        ttk.Label(runtime_card, textvariable=self.model_var, style="Value.TLabel").grid(row=5, column=1, columnspan=2, sticky=W, pady=6)
+
+        ttk.Label(runtime_card, text="Reasoning Effort", style="Field.TLabel").grid(row=6, column=0, sticky=W, padx=(0, 12), pady=6)
         ttk.Combobox(runtime_card, textvariable=self.effort_var, values=["low", "medium", "high", "xhigh"], state="readonly", width=20).grid(
-            row=5,
+            row=6,
             column=1,
             sticky=W,
             pady=6,
@@ -302,62 +394,69 @@ class CodexAutoGUI:
         ttk.Label(
             runtime_card,
             text="The resolved slug is saved in project_config.json, so future model additions do not require UI updates.",
-            style="Muted.TLabel",
+            style="CardMuted.TLabel",
             anchor="w",
-        ).grid(row=6, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        ).grid(row=7, column=0, columnspan=3, sticky="ew", pady=(4, 0))
 
-        ttk.Label(form, text="Max Planned Steps").grid(row=5, column=0, sticky=W, padx=(0, 12), pady=8)
-        ttk.Entry(form, textvariable=self.max_steps_var, width=10).grid(row=5, column=1, sticky=W, pady=8)
+        ttk.Label(form, text="Max Planned Steps", style="Field.TLabel").grid(row=6, column=0, sticky=W, padx=(0, 12), pady=8)
+        ttk.Entry(form, textvariable=self.max_steps_var, width=10).grid(row=6, column=1, sticky=W, pady=8)
 
-        assumptions = ttk.LabelFrame(form, text="Assumptions and Fixed Runtime", padding=12, style="Card.TLabelframe")
-        assumptions.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(16, 0))
+        assumptions = ttk.LabelFrame(form, text="What This Run Assumes", padding=12, style="Card.TLabelframe")
+        assumptions.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(16, 0))
         for text in [
             "GitHub login and Codex CLI login already exist on this machine.",
             "Codex execution uses approval=never and sandbox=danger-full-access.",
             "Stage 1 creates `.venv` and ensures `.gitignore` covers common Python artifacts.",
             "Stage execution commits and pushes after each verified step when `origin` is configured.",
         ]:
-            ttk.Label(assumptions, text=text, style="Muted.TLabel", anchor="w").pack(fill=X, pady=2)
+            ttk.Label(assumptions, text=text, style="CardMuted.TLabel", anchor="w").pack(fill=X, pady=2)
 
         flow_overview = ttk.LabelFrame(form, text="Runtime Flow Chart", padding=12, style="Card.TLabelframe")
-        flow_overview.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(16, 0))
-        self.setup_flow_canvas = Canvas(flow_overview, background="#ffffff", height=246, highlightthickness=0)
+        flow_overview.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(16, 0))
+        self.setup_flow_canvas = Canvas(flow_overview, background="#fffdf9", height=246, highlightthickness=0)
         self.setup_flow_canvas.pack(fill=X, expand=True)
         self.setup_flow_canvas.bind("<Configure>", lambda _event: self._draw_setup_flow_chart())
         ttk.Label(
             flow_overview,
             text="The selected model slug is reused for plan generation, step execution, and closeout.",
-            style="Muted.TLabel",
+            style="CardMuted.TLabel",
             anchor="w",
         ).pack(fill=X, pady=(10, 0))
 
-        setup_actions = ttk.Frame(form)
-        setup_actions.grid(row=8, column=0, columnspan=3, sticky="w", pady=(18, 0))
-        ttk.Button(setup_actions, text="Prepare Environment and Open Flow", command=self.prepare_environment).pack(side=LEFT)
-        ttk.Button(setup_actions, text="Open Current Flow", command=self.open_selected_project).pack(side=LEFT, padx=(8, 0))
+        setup_actions = ttk.Frame(form, style="Card.TFrame")
+        setup_actions.grid(row=9, column=0, columnspan=3, sticky="w", pady=(18, 0))
+        ttk.Button(setup_actions, text="Prepare Environment and Open Flow", command=self.prepare_environment, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(setup_actions, text="Open Current Flow", command=self.open_selected_project, style="Secondary.TButton").pack(side=LEFT, padx=(8, 0))
 
     def _build_flow_stage(self, parent: ttk.Frame) -> None:
         header = ttk.Frame(parent, style="App.TFrame")
         header.pack(fill=X, pady=(0, 12))
-        ttk.Button(header, text="Back To Setup", command=lambda: self._show_stage("setup")).pack(side=LEFT)
+        ttk.Button(header, text="Back To Setup", command=lambda: self._show_stage("setup"), style="Quiet.TButton").pack(side=LEFT)
         ttk.Label(header, textvariable=self.current_project_label_var, style="Stage.TLabel").pack(side=LEFT, padx=(12, 0))
-        ttk.Label(header, textvariable=self.current_step_label_var, style="Muted.TLabel").pack(side=RIGHT)
+        ttk.Label(header, textvariable=self.current_step_label_var, style="StatusPill.TLabel", padding=(12, 8)).pack(side=RIGHT)
 
-        prompt_frame = ttk.LabelFrame(parent, text="Stage 2. Prompt And Plan", padding=12, style="Card.TLabelframe")
+        prompt_frame = ttk.LabelFrame(parent, text="Prompt And Plan", padding=12, style="Card.TLabelframe")
         prompt_frame.pack(fill=X)
+        ttk.Label(
+            prompt_frame,
+            text="Describe the goal in plain language. Generate the plan, adjust the flow if needed, then run the remaining steps.",
+            style="CardMuted.TLabel",
+            anchor="w",
+        ).pack(fill=X, pady=(0, 8))
         self.prompt_text = ScrolledText(prompt_frame, height=5, wrap="word")
         self.prompt_text.pack(fill=X)
+        self._configure_text_surface(self.prompt_text)
 
-        prompt_actions = ttk.Frame(prompt_frame)
+        prompt_actions = ttk.Frame(prompt_frame, style="Card.TFrame")
         prompt_actions.pack(fill=X, pady=(10, 0))
-        ttk.Button(prompt_actions, text="Generate Plan With Codex", command=self.generate_plan).pack(side=LEFT)
-        ttk.Button(prompt_actions, text="Save Edited Plan", command=self.save_plan).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(prompt_actions, text="Reset Plan", command=self.reset_plan).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(prompt_actions, text="Run Remaining Steps", command=self.run_plan).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(prompt_actions, text="Run Closeout", command=self.run_closeout).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(prompt_actions, text="Stop After Current Step", command=self.stop_after_current_step).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(prompt_actions, text="Reload Project", command=self.reload_current_project).pack(side=LEFT, padx=(8, 0))
-        ttk.Label(prompt_frame, textvariable=self.runtime_summary_var, style="Muted.TLabel", anchor="w").pack(fill=X, pady=(10, 0))
+        ttk.Button(prompt_actions, text="Generate Plan With Codex", command=self.generate_plan, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(prompt_actions, text="Save Edited Plan", command=self.save_plan, style="Secondary.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(prompt_actions, text="Reset Plan", command=self.reset_plan, style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(prompt_actions, text="Run Remaining Steps", command=self.run_plan, style="Primary.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(prompt_actions, text="Run Closeout", command=self.run_closeout, style="Secondary.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(prompt_actions, text="Stop After Current Step", command=self.stop_after_current_step, style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(prompt_actions, text="Reload Project", command=self.reload_current_project, style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Label(prompt_frame, textvariable=self.runtime_summary_var, style="CardMuted.TLabel", anchor="w").pack(fill=X, pady=(10, 0))
 
         split = ttk.Panedwindow(parent, orient="horizontal")
         split.pack(fill=BOTH, expand=True, pady=(12, 0))
@@ -369,7 +468,7 @@ class CodexAutoGUI:
 
         flow_canvas_wrap = ttk.Frame(flow_panel)
         flow_canvas_wrap.pack(fill=BOTH, expand=True)
-        self.flow_canvas = Canvas(flow_canvas_wrap, background="#ffffff", highlightthickness=0)
+        self.flow_canvas = Canvas(flow_canvas_wrap, background="#fffdf9", highlightthickness=0)
         flow_x = ttk.Scrollbar(flow_canvas_wrap, orient="horizontal", command=self.flow_canvas.xview)
         flow_y = ttk.Scrollbar(flow_canvas_wrap, orient="vertical", command=self.flow_canvas.yview)
         self.flow_canvas.configure(xscrollcommand=flow_x.set, yscrollcommand=flow_y.set)
@@ -380,60 +479,88 @@ class CodexAutoGUI:
         ttk.Label(
             flow_panel,
             text="Flow is editable for pending steps only. Each completed node represents a verified checkpoint with commit/push when available.",
-            style="Muted.TLabel",
+            style="CardMuted.TLabel",
             anchor="w",
         ).pack(fill=X, pady=(10, 0))
 
         editor_panel.columnconfigure(1, weight=1)
-        ttk.Label(editor_panel, text="Step ID").grid(row=0, column=0, sticky=W, padx=(0, 10), pady=6)
-        ttk.Label(editor_panel, textvariable=self.selected_step_id_var).grid(row=0, column=1, sticky=W, pady=6)
-        ttk.Label(editor_panel, text="Status").grid(row=1, column=0, sticky=W, padx=(0, 10), pady=6)
-        ttk.Label(editor_panel, textvariable=self.selected_step_status_var).grid(row=1, column=1, sticky=W, pady=6)
+        ttk.Label(
+            editor_panel,
+            text="Select a pending step in the flow to refine its title, Codex instruction, test command, and success criteria.",
+            style="CardMuted.TLabel",
+            anchor="w",
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        ttk.Label(editor_panel, text="Step ID", style="Field.TLabel").grid(row=1, column=0, sticky=W, padx=(0, 10), pady=6)
+        ttk.Label(editor_panel, textvariable=self.selected_step_id_var, style="Value.TLabel").grid(row=1, column=1, sticky=W, pady=6)
+        ttk.Label(editor_panel, text="Status", style="Field.TLabel").grid(row=2, column=0, sticky=W, padx=(0, 10), pady=6)
+        ttk.Label(editor_panel, textvariable=self.selected_step_status_var, style="Value.TLabel").grid(row=2, column=1, sticky=W, pady=6)
 
-        ttk.Label(editor_panel, text="Title").grid(row=2, column=0, sticky=W, padx=(0, 10), pady=6)
+        ttk.Label(editor_panel, text="Title", style="Field.TLabel").grid(row=3, column=0, sticky=W, padx=(0, 10), pady=6)
         self.step_title_var = StringVar()
         self.step_title_entry = ttk.Entry(editor_panel, textvariable=self.step_title_var)
-        self.step_title_entry.grid(row=2, column=1, sticky="ew", pady=6)
+        self.step_title_entry.grid(row=3, column=1, sticky="ew", pady=6)
 
-        ttk.Label(editor_panel, text="Test Command").grid(row=3, column=0, sticky=W, padx=(0, 10), pady=6)
+        ttk.Label(editor_panel, text="Test Command", style="Field.TLabel").grid(row=4, column=0, sticky=W, padx=(0, 10), pady=6)
         self.step_test_var = StringVar()
         self.step_test_entry = ttk.Entry(editor_panel, textvariable=self.step_test_var)
-        self.step_test_entry.grid(row=3, column=1, sticky="ew", pady=6)
+        self.step_test_entry.grid(row=4, column=1, sticky="ew", pady=6)
 
-        ttk.Label(editor_panel, text="Display Description").grid(row=4, column=0, sticky="nw", padx=(0, 10), pady=6)
+        ttk.Label(editor_panel, text="Display Description", style="Field.TLabel").grid(row=5, column=0, sticky="nw", padx=(0, 10), pady=6)
         self.step_description_text = ScrolledText(editor_panel, height=5, wrap="word")
-        self.step_description_text.grid(row=4, column=1, sticky="ew", pady=6)
+        self.step_description_text.grid(row=5, column=1, sticky="ew", pady=6)
+        self._configure_text_surface(self.step_description_text)
 
-        ttk.Label(editor_panel, text="Codex Instruction").grid(row=5, column=0, sticky="nw", padx=(0, 10), pady=6)
+        ttk.Label(editor_panel, text="Codex Instruction", style="Field.TLabel").grid(row=6, column=0, sticky="nw", padx=(0, 10), pady=6)
         self.step_codex_text = ScrolledText(editor_panel, height=6, wrap="word")
-        self.step_codex_text.grid(row=5, column=1, sticky="ew", pady=6)
+        self.step_codex_text.grid(row=6, column=1, sticky="ew", pady=6)
+        self._configure_text_surface(self.step_codex_text)
 
-        ttk.Label(editor_panel, text="Success Criteria").grid(row=6, column=0, sticky="nw", padx=(0, 10), pady=6)
+        ttk.Label(editor_panel, text="Success Criteria", style="Field.TLabel").grid(row=7, column=0, sticky="nw", padx=(0, 10), pady=6)
         self.step_success_text = ScrolledText(editor_panel, height=4, wrap="word")
-        self.step_success_text.grid(row=6, column=1, sticky="ew", pady=6)
+        self.step_success_text.grid(row=7, column=1, sticky="ew", pady=6)
+        self._configure_text_surface(self.step_success_text)
 
-        actions = ttk.Frame(editor_panel)
-        actions.grid(row=7, column=0, columnspan=2, sticky="w", pady=(14, 0))
-        ttk.Button(actions, text="Save Step", command=self.save_selected_step).pack(side=LEFT)
-        ttk.Button(actions, text="Add Step", command=self.add_step_after_selection).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(actions, text="Delete Step", command=self.delete_selected_step).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(actions, text="Move Up", command=lambda: self.move_selected_step(-1)).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(actions, text="Move Down", command=lambda: self.move_selected_step(1)).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(actions, text="Clear Selection", command=self.clear_step_selection).pack(side=LEFT, padx=(8, 0))
+        actions = ttk.Frame(editor_panel, style="Card.TFrame")
+        actions.grid(row=8, column=0, columnspan=2, sticky="w", pady=(14, 0))
+        ttk.Button(actions, text="Save Step", command=self.save_selected_step, style="Primary.TButton").pack(side=LEFT)
+        ttk.Button(actions, text="Add Step", command=self.add_step_after_selection, style="Secondary.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(actions, text="Delete Step", command=self.delete_selected_step, style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(actions, text="Move Up", command=lambda: self.move_selected_step(-1), style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(actions, text="Move Down", command=lambda: self.move_selected_step(1), style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
+        ttk.Button(actions, text="Clear Selection", command=self.clear_step_selection, style="Quiet.TButton").pack(side=LEFT, padx=(8, 0))
 
     def _build_bottom_panel(self, parent: ttk.Frame) -> None:
         notebook = ttk.Notebook(parent)
         notebook.pack(fill=BOTH, expand=True)
 
-        activity_tab = ttk.Frame(notebook)
-        snapshot_tab = ttk.Frame(notebook)
+        activity_tab = ttk.Frame(notebook, style="Card.TFrame")
+        snapshot_tab = ttk.Frame(notebook, style="Card.TFrame")
         notebook.add(activity_tab, text="Activity")
         notebook.add(snapshot_tab, text="Snapshot")
 
         self.log_text = ScrolledText(activity_tab, height=12, wrap="word")
         self.log_text.pack(fill=BOTH, expand=True)
+        self._configure_text_surface(self.log_text, background="#fffaf6")
         self.snapshot_text = ScrolledText(snapshot_tab, height=12, wrap="word")
         self.snapshot_text.pack(fill=BOTH, expand=True)
+        self._configure_text_surface(self.snapshot_text, background="#fffaf6")
+
+    def _configure_text_surface(self, widget: ScrolledText, background: str = "#fffdf9") -> None:
+        widget.configure(
+            background=background,
+            foreground="#22313a",
+            borderwidth=0,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#e3d8cb",
+            highlightcolor="#d0b9a9",
+            insertbackground="#22313a",
+            padx=10,
+            pady=10,
+            font=("Malgun Gothic", 10),
+            selectbackground="#f1ddcf",
+            selectforeground="#22313a",
+        )
 
     def _current_model_selection(self) -> ModelSelection:
         return ModelSelection(
@@ -507,15 +634,16 @@ class CodexAutoGUI:
             x2 = x1 + box_width
             y2 = y1 + box_height
             positions.append((x1, y1, x2, y2))
-            fill = "#e0f2fe" if index == 1 else "#f8fafc"
-            outline = "#0ea5e9" if index == 1 else "#cbd5e1"
+            fill = "#f8e8df" if index == 1 else "#fffaf6"
+            outline = "#cf8b6c" if index == 1 else "#e6d9cc"
+            self.setup_flow_canvas.create_rectangle(x1 + 4, y1 + 5, x2 + 4, y2 + 5, fill="#efe4d8", outline="#efe4d8", width=0)
             self.setup_flow_canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=2)
             self.setup_flow_canvas.create_text(
                 x1 + 12,
                 y1 + 18,
                 text=title,
                 anchor="w",
-                fill="#0f172a",
+                fill="#22313a",
                 font=("Malgun Gothic", 11, "bold"),
             )
             self.setup_flow_canvas.create_text(
@@ -523,7 +651,7 @@ class CodexAutoGUI:
                 y1 + 44,
                 text=textwrap.shorten(body, width=34, placeholder="..."),
                 anchor="w",
-                fill="#475569",
+                fill="#6d7b83",
                 font=("Malgun Gothic", 9),
             )
         for index in range(len(positions) - 1):
@@ -531,7 +659,7 @@ class CodexAutoGUI:
             next_x1, next_y1, next_x2, _next_y2 = positions[index + 1]
             if y1 == next_y1:
                 center_y = y1 + box_height / 2
-                self.setup_flow_canvas.create_line(x2 + 6, center_y, next_x1 - 6, center_y, fill="#94a3b8", width=3, arrow="last")
+                self.setup_flow_canvas.create_line(x2 + 6, center_y, next_x1 - 6, center_y, fill="#d1bcac", width=3, arrow="last")
                 continue
             current_center_x = (x1 + x2) / 2
             next_center_x = (next_x1 + next_x2) / 2
@@ -545,7 +673,7 @@ class CodexAutoGUI:
                 mid_y,
                 next_center_x,
                 next_y1 - 6,
-                fill="#94a3b8",
+                fill="#d1bcac",
                 width=3,
                 arrow="last",
                 smooth=False,
@@ -558,10 +686,12 @@ class CodexAutoGUI:
         for child in self.stage_container.winfo_children():
             child.pack_forget()
         if name == "flow":
-            self.stage_title_var.set("Stage 2. Prompt, Editable Flow, and Execution")
+            self.stage_title_var.set("Plan And Run")
+            self.stage_hint_var.set("Turn the request into a step-by-step flow, then execute and close out the project safely.")
             self.flow_stage.pack(fill=BOTH, expand=True)
             return
-        self.stage_title_var.set("Stage 1. Environment Setup")
+        self.stage_title_var.set("Workspace Setup")
+        self.stage_hint_var.set("Choose a local repository and runtime model, then prepare the workspace.")
         self.setup_stage.pack(fill=BOTH, expand=True)
 
     def _set_busy(self, busy: bool, status_text: str) -> None:
@@ -1350,12 +1480,12 @@ class CodexAutoGUI:
         margin_y = 24
         per_row = 3
         colors = {
-            "completed": ("#0f766e", "#ecfeff"),
-            "running": ("#1d4ed8", "#eff6ff"),
-            "paused": ("#7c3aed", "#f5f3ff"),
-            "failed": ("#b91c1c", "#fef2f2"),
-            "pending": ("#cbd5e1", "#0f172a"),
-            "not_started": ("#cbd5e1", "#0f172a"),
+            "completed": ("#e6f4ec", "#28533b"),
+            "running": ("#eaf2fb", "#35526b"),
+            "paused": ("#fbf0dd", "#8a5a1d"),
+            "failed": ("#fbe7e3", "#8a4035"),
+            "pending": ("#fffaf6", "#22313a"),
+            "not_started": ("#fffaf6", "#22313a"),
         }
         nodes: list[dict[str, str]] = [
             {
@@ -1389,9 +1519,10 @@ class CodexAutoGUI:
             status = node["status"] if node["status"] in colors else "pending"
             fill, text_fill = colors[status]
             selected = node["kind"] == "step" and node["node_id"] == self.selected_step_id
-            outline = "#0f172a" if selected else fill
-            width = 3 if selected else 1
+            outline = "#c9795d" if selected else "#e6d9cc"
+            width = 3 if selected else 2
             tags = ("step", node["node_id"])
+            self.flow_canvas.create_rectangle(x1 + 5, y1 + 6, x2 + 5, y2 + 6, fill="#efe4d8", outline="#efe4d8", width=0)
             self.flow_canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=width, tags=tags)
             self.flow_canvas.create_text(x1 + 14, y1 + 18, text=node["node_id"], anchor="w", fill=text_fill, font=("Malgun Gothic", 12, "bold"), tags=tags)
             self.flow_canvas.create_text(
@@ -1429,7 +1560,7 @@ class CodexAutoGUI:
             next_x1, next_y1, next_x2, _next_y2 = positions[index + 1]
             if y1 == next_y1:
                 center_y = y1 + box_height / 2
-                self.flow_canvas.create_line(x2 + 6, center_y, next_x1 - 6, center_y, fill="#94a3b8", width=4, arrow="last")
+                self.flow_canvas.create_line(x2 + 6, center_y, next_x1 - 6, center_y, fill="#d1bcac", width=4, arrow="last", smooth=True)
                 continue
             current_center_x = (x1 + x2) / 2
             next_center_x = (next_x1 + next_x2) / 2
@@ -1443,9 +1574,10 @@ class CodexAutoGUI:
                 mid_y,
                 next_center_x,
                 next_y1 - 6,
-                fill="#94a3b8",
+                fill="#d1bcac",
                 width=4,
                 arrow="last",
+                smooth=True,
             )
 
         rows = (len(nodes) + per_row - 1) // per_row

@@ -4,7 +4,6 @@ import json
 import re
 from dataclasses import dataclass
 from html import escape
-from importlib import resources
 from pathlib import Path
 
 from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, ProjectContext
@@ -20,10 +19,7 @@ class PlanItem:
 PLAN_GENERATION_PROMPT_FILENAME = "PLAN_GENERATION_PROMPT.txt"
 STEP_EXECUTION_PROMPT_FILENAME = "STEP_EXECUTION_PROMPT.txt"
 FINALIZATION_PROMPT_FILENAME = "FINALIZATION_PROMPT.txt"
-
-
-def load_template(name: str) -> str:
-    return resources.files("codex_auto").joinpath("templates", name).read_text(encoding="utf-8")
+SCOPE_GUARD_TEMPLATE_FILENAME = "SCOPE_GUARD_TEMPLATE.md"
 
 
 def source_docs_dir() -> Path:
@@ -73,39 +69,60 @@ def assess_repository_maturity(repo_dir: Path, repo_inputs: dict[str, str]) -> t
     return score >= 2, details
 
 
-def generate_long_term_plan(context: ProjectContext, repo_inputs: dict[str, str]) -> str:
-    template = load_template("LONG_TERM_PLAN.sample.md")
+def generate_project_plan(context: ProjectContext, repo_inputs: dict[str, str]) -> str:
     repo_name = context.metadata.repo_url.rstrip("/").split("/")[-1].removesuffix(".git")
     seed_goals = _derive_seed_goals(repo_inputs)
-    return template.format(
-        repo_name=repo_name,
-        repo_url=context.metadata.repo_url,
-        branch=context.metadata.branch,
-        created_at=now_utc_iso(),
-        readme_summary=repo_inputs["readme"],
-        agents_summary=repo_inputs["agents"],
-        docs_summary=repo_inputs["docs"],
-        goal_1=seed_goals[0],
-        goal_2=seed_goals[1],
-        goal_3=seed_goals[2],
-    )
+    lines = [
+        "# Project Plan",
+        "",
+        f"- Repository: {repo_name}",
+        f"- Source: {context.metadata.repo_url}",
+        f"- Branch: {context.metadata.branch}",
+        f"- Generated at: {now_utc_iso()}",
+        "",
+        "## Repository Context",
+        "### README",
+        repo_inputs["readme"],
+        "",
+        "### AGENTS",
+        repo_inputs["agents"],
+        "",
+        "### Docs",
+        repo_inputs["docs"],
+        "",
+        "## Focus Areas",
+        f"- PL1: {seed_goals[0]}",
+        f"- PL2: {seed_goals[1]}",
+        f"- PL3: {seed_goals[2]}",
+        "",
+        "## Non-Goals",
+        "- Do not expand scope beyond the requested repository changes.",
+        "- Do not update docs ahead of verified implementation.",
+        "",
+        "## Operating Constraints",
+        "- Prefer small, reversible changes with direct tests.",
+        "- Keep repository naming and structure consistent with the existing codebase.",
+        "",
+    ]
+    return "\n".join(lines)
 
 
-def is_long_term_plan_markdown(text: str) -> bool:
+def is_plan_markdown(text: str) -> bool:
     normalized = text.strip()
     if not normalized:
         return False
-    if normalized.lower().startswith("# long-term plan"):
+    lowered = normalized.lower()
+    if lowered.startswith("# project plan") or lowered.startswith("# execution plan"):
         return True
-    plan_ids = re.findall(r"\bLT\d+\b", normalized)
+    plan_ids = re.findall(r"\b(?:PL|ST)\d+\b", normalized)
     return len(plan_ids) >= 2
 
 
-def bootstrap_long_term_plan_prompt(context: ProjectContext, repo_inputs: dict[str, str], user_prompt: str) -> str:
+def bootstrap_plan_prompt(context: ProjectContext, repo_inputs: dict[str, str], user_prompt: str) -> str:
     return "\n".join(
         [
-            "Draft a long-term plan in markdown and write it to the managed planning file outside the repo.",
-            f"Target file: {context.paths.long_term_plan_file}",
+            "Draft a project plan in markdown and write it to the managed planning file outside the repo.",
+            f"Target file: {context.paths.plan_file}",
             "The repository is early-stage or insufficiently documented, so the plan must be prompt-based.",
             "Use the user's prompt as the primary product direction.",
             "Keep the plan concrete, scoped, and testable.",
@@ -126,9 +143,9 @@ def bootstrap_long_term_plan_prompt(context: ProjectContext, repo_inputs: dict[s
             user_prompt.strip(),
             "",
             "Required plan structure:",
-            "- Title: Long-Term Plan",
+            "- Title: Project Plan",
             "- Repository metadata",
-            "- Strategic goals as LT1, LT2, LT3...",
+            "- Focus areas as PL1, PL2, PL3...",
             "- Non-goals",
             "- Operating constraints",
             "",
@@ -152,7 +169,7 @@ def _derive_seed_goals(repo_inputs: dict[str, str]) -> list[str]:
 
 
 def ensure_scope_guard(context: ProjectContext) -> str:
-    template = load_template("SCOPE_GUARD.template.md")
+    template = load_source_prompt_template(SCOPE_GUARD_TEMPLATE_FILENAME)
     return template.format(
         repo_url=context.metadata.repo_url,
         branch=context.metadata.branch,
@@ -168,7 +185,7 @@ def extract_plan_items(plan_text: str) -> list[PlanItem]:
             continue
         match = re.match(r"[-*]\s+\[[ xX]\]\s+((?P<id>[A-Z]{2,}\d+):\s+)?(?P<body>.+)", stripped)
         if match:
-            item_id = match.group("id") or f"LT{len(items) + 1}"
+            item_id = match.group("id") or f"PL{len(items) + 1}"
             items.append(PlanItem(item_id=item_id, text=match.group("body").strip()))
             continue
         match = re.match(r"[-*]\s+(?P<id>[A-Z]{2,}\d+):\s+(?P<body>.+)", stripped)
@@ -185,14 +202,14 @@ def extract_plan_items(plan_text: str) -> list[PlanItem]:
     return deduped[:20]
 
 
-def build_mid_term_plan(long_term_text: str, limit: int = 5) -> tuple[str, list[PlanItem]]:
-    items = extract_plan_items(long_term_text)
+def build_mid_term_plan(plan_text: str, limit: int = 5) -> tuple[str, list[PlanItem]]:
+    items = extract_plan_items(plan_text)
     positive_items = [item for item in items if not item.text.lower().startswith("do not")]
     chosen = positive_items[:limit] if positive_items else []
     lines = [
         "# Mid-Term Plan",
         "",
-        "This plan is regenerated only at block boundaries and must remain a strict subset of the long-term plan.",
+        "This plan is regenerated only at block boundaries and must remain a strict subset of the saved project plan.",
         "",
     ]
     if not chosen:
@@ -229,12 +246,12 @@ def build_mid_term_plan_from_plan_items(items: list[PlanItem], description: str)
     return "\n".join(lines), items
 
 
-def validate_mid_term_subset(mid_term_text: str, long_term_text: str) -> tuple[bool, list[str]]:
-    long_term_ids = {item.item_id for item in extract_plan_items(long_term_text)}
+def validate_mid_term_subset(mid_term_text: str, plan_text: str) -> tuple[bool, list[str]]:
+    plan_ids = {item.item_id for item in extract_plan_items(plan_text)}
     violations: list[str] = []
     for line in mid_term_text.splitlines():
         match = re.search(r"->\s*([A-Z]{2,}\d+)", line)
-        if match and match.group(1) not in long_term_ids:
+        if match and match.group(1) not in plan_ids:
             violations.append(line.strip())
     return not violations, violations
 
@@ -249,7 +266,7 @@ def candidate_tasks_from_mid_term(mid_items: list[PlanItem], memory_context: str
                 candidate_id=f"C{index}",
                 title=item.text,
                 rationale=rationale,
-                long_term_refs=[item.item_id],
+                plan_refs=[item.item_id],
                 score=score,
             )
         )
@@ -258,8 +275,8 @@ def candidate_tasks_from_mid_term(mid_items: list[PlanItem], memory_context: str
             CandidateTask(
                 candidate_id="C1",
                 title="Stabilize one narrow, testable issue already present in the repository",
-                rationale="Fallback task when the long-term plan is not machine-readable.",
-                long_term_refs=[],
+                rationale="Fallback task when the saved plan is not machine-readable.",
+                plan_refs=[],
                 score=0.5,
             )
         )
@@ -269,7 +286,7 @@ def candidate_tasks_from_mid_term(mid_items: list[PlanItem], memory_context: str
 def work_breakdown_prompt(
     context: ProjectContext,
     repo_inputs: dict[str, str],
-    long_term_text: str,
+    plan_text: str,
     memory_context: str,
     max_items: int,
 ) -> str:
@@ -283,7 +300,7 @@ def work_breakdown_prompt(
             f"Return exactly one JSON object with a top-level 'tasks' array containing at most {max(1, max_items)} items.",
             "Each task must be an object with:",
             '- "title": short actionable task title',
-            '- "primary_ref": matching LT id such as LT1 when possible, otherwise use ""',
+            '- "primary_ref": matching plan id such as PL1 when possible, otherwise use ""',
             '- "reason": one short sentence',
             "Do not include markdown fences or any text outside the JSON object.",
             "",
@@ -294,8 +311,8 @@ def work_breakdown_prompt(
             "",
             f"Docs:\n{repo_inputs['docs']}",
             "",
-            "Long-term plan:",
-            compact_text(long_term_text, 5000),
+            "Current plan snapshot:",
+            compact_text(plan_text, 5000),
             "",
             "Memory context:",
             compact_text(memory_context, 2500),
@@ -370,7 +387,7 @@ def parse_execution_plan_response(
         codex_description = str(item.get("codex_description", "")).strip() or display_description or title
         steps.append(
             ExecutionStep(
-                step_id=f"LT{len(steps) + 1}",
+                step_id=f"ST{len(steps) + 1}",
                 title=title,
                 display_description=display_description,
                 codex_description=codex_description,
@@ -437,7 +454,7 @@ def write_active_task(context: ProjectContext, candidate: CandidateTask, memory_
         "",
         f"- Selected at: {now_utc_iso()}",
         f"- Candidate: {candidate.candidate_id}",
-        f"- Scope refs: {', '.join(candidate.long_term_refs) if candidate.long_term_refs else 'none'}",
+        f"- Scope refs: {', '.join(candidate.plan_refs) if candidate.plan_refs else 'none'}",
         "",
         "## Task",
         candidate.title,
@@ -460,7 +477,7 @@ def implementation_prompt(
     execution_step: ExecutionStep | None = None,
     template_text: str | None = None,
 ) -> str:
-    long_term = read_text(context.paths.long_term_plan_file)
+    plan_text = read_text(context.paths.plan_file)
     mid_term = read_text(context.paths.mid_term_plan_file)
     scope_guard = read_text(context.paths.scope_guard_file)
     research_notes = read_text(context.paths.research_notes_file)
@@ -492,7 +509,7 @@ def implementation_prompt(
             success_criteria=success_criteria,
             candidate_rationale=candidate.rationale,
             memory_context=memory_context,
-            long_term_plan=compact_text(long_term, 4000),
+            plan_snapshot=compact_text(plan_text, 4000),
             mid_term_plan=compact_text(mid_term, 2500),
             scope_guard=compact_text(scope_guard, 2500),
             research_notes=compact_text(research_notes, 2500),
@@ -569,14 +586,14 @@ def attempt_history_entry(block_index: int, task: str, outcome: str, commit_hash
     return "\n".join(lines)
 
 
-def build_checkpoint_timeline(long_term_text: str, checkpoint_interval_blocks: int) -> list[Checkpoint]:
-    items = [item for item in extract_plan_items(long_term_text) if not item.text.lower().startswith("do not")]
+def build_checkpoint_timeline(plan_text: str, checkpoint_interval_blocks: int) -> list[Checkpoint]:
+    items = [item for item in extract_plan_items(plan_text) if not item.text.lower().startswith("do not")]
     if not items:
         return [
             Checkpoint(
                 checkpoint_id="CP1",
                 title="Initial stabilization checkpoint",
-                long_term_refs=[],
+                plan_refs=[],
                 target_block=max(1, checkpoint_interval_blocks),
                 created_at=now_utc_iso(),
             )
@@ -587,7 +604,7 @@ def build_checkpoint_timeline(long_term_text: str, checkpoint_interval_blocks: i
             Checkpoint(
                 checkpoint_id=f"CP{index}",
                 title=item.text,
-                long_term_refs=[item.item_id],
+                plan_refs=[item.item_id],
                 target_block=max(1, index * checkpoint_interval_blocks),
                 created_at=now_utc_iso(),
             )
@@ -599,17 +616,17 @@ def checkpoint_timeline_markdown(checkpoints: list[Checkpoint]) -> str:
     lines = [
         "# Checkpoint Timeline",
         "",
-        "This timeline is derived from the long-term plan and is intended for user review at checkpoint boundaries.",
+        "This timeline is derived from the saved plan and is intended for user review at checkpoint boundaries.",
         "",
     ]
     for checkpoint in checkpoints:
-        refs = ", ".join(checkpoint.long_term_refs) if checkpoint.long_term_refs else "none"
+        refs = ", ".join(checkpoint.plan_refs) if checkpoint.plan_refs else "none"
         lines.extend(
             [
                 f"## {checkpoint.checkpoint_id}",
                 f"- Title: {checkpoint.title}",
                 f"- Target block: {checkpoint.target_block}",
-                f"- Long-term refs: {refs}",
+                f"- Plan refs: {refs}",
                 f"- Status: {checkpoint.status}",
                 "",
             ]
@@ -625,7 +642,7 @@ def execution_plan_markdown(
     steps: list[ExecutionStep],
 ) -> str:
     lines = [
-        "# Long-Term Plan",
+        "# Execution Plan",
         "",
         f"- Repository: {context.metadata.display_name or context.metadata.slug}",
         f"- Working directory: {context.paths.repo_dir}",
@@ -642,10 +659,10 @@ def execution_plan_markdown(
         "## Execution Summary",
         summary.strip() or "Codex-generated execution plan for the current repository state.",
         "",
-        "## Strategic Goals",
+        "## Planned Steps",
     ]
     if not steps:
-        lines.append("- LT1: Establish a minimal, testable first step and verify it locally.")
+        lines.append("- ST1: Establish a minimal, testable first step and verify it locally.")
     for step in steps:
         lines.extend(
             [

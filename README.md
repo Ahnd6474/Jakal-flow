@@ -76,6 +76,8 @@ The GUI lets you:
 - treat each completed step as a checkpoint and push after verification when `origin` is configured
 - return to the setup screen and open any previously managed project flow later
 
+Static website assets are kept separately under `website/`.
+
 ## Main Commands
 
 Initialize a managed repository:
