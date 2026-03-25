@@ -73,6 +73,7 @@ export function FlowStage({
   ];
   const usage = detail?.snapshot?.recent_usage || {};
   const statusText = activeJob?.status === "running" ? `${commandLabel(activeJob.command)} in progress` : detail?.project?.current_status || "Ready";
+  const statusClass = activeJob?.status === "running" ? "info" : statusTone(detail?.project?.current_status);
   const activityText = (detail?.activity || []).join("\n");
   const snapshotText = JSON.stringify(detail?.snapshot || {}, null, 2);
 
@@ -85,7 +86,7 @@ export function FlowStage({
             <h2>{detail?.project?.display_name || detail?.project?.slug || "No project selected"}</h2>
             <p>{progressCaption(planDraft)}</p>
           </div>
-          <div className={`status-pill status-pill--${statusTone(statusText)}`}>{statusText}</div>
+          <div className={`status-pill status-pill--${statusClass}`}>{statusText}</div>
         </div>
         <div className="hero-toolbar">
           <button className="button button--ghost" onClick={onBack} type="button">
@@ -156,7 +157,7 @@ export function FlowStage({
                     selected={node.kind === "step" && node.step_id === selectedStepId}
                     onSelect={onSelectStep}
                   />
-                  {index < nodes.length - 1 ? <span className="flow-arrow">→</span> : null}
+                  {index < nodes.length - 1 ? <span className="flow-arrow">{"->"}</span> : null}
                 </div>
               ))
             ) : (

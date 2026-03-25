@@ -102,6 +102,7 @@ fn run_bridge_command(command: &str, payload: Option<Value>, workspace_root: Opt
                 .map_err(|error| format!("Failed to write bridge payload: {error}"))?;
         }
     }
+    drop(child.stdin.take());
 
     let output = child
         .wait_with_output()
