@@ -24,7 +24,6 @@ class WorkspaceManager:
     def build_paths(self, slug: str) -> ProjectPaths:
         project_root = self.projects_root / slug
         docs_dir = project_root / "docs"
-        prompts_dir = docs_dir / "prompts"
         memory_dir = project_root / "memory"
         logs_dir = project_root / "logs"
         reports_dir = project_root / "reports"
@@ -58,7 +57,6 @@ class WorkspaceManager:
             checkpoint_state_file=state_dir / "CHECKPOINTS.json",
             execution_plan_file=state_dir / "EXECUTION_PLAN.json",
             execution_flow_svg_file=docs_dir / "EXECUTION_FLOW.svg",
-            user_prompt_file=prompts_dir / "USER_PROMPT.txt",
         )
 
     def initialize_project(
@@ -74,7 +72,6 @@ class WorkspaceManager:
             paths.project_root,
             paths.repo_dir,
             paths.docs_dir,
-            paths.user_prompt_file.parent,
             paths.memory_dir,
             paths.logs_dir,
             paths.reports_dir,
@@ -129,7 +126,6 @@ class WorkspaceManager:
         for directory in [
             paths.project_root,
             paths.docs_dir,
-            paths.user_prompt_file.parent,
             paths.memory_dir,
             paths.logs_dir,
             paths.reports_dir,

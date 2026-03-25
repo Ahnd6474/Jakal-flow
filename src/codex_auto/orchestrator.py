@@ -37,7 +37,6 @@ from .planning import (
     work_breakdown_prompt,
     write_active_task,
     load_source_prompt_template,
-    source_prompt_template_path,
 )
 from .reporting import Reporter
 from .utils import decode_process_output, now_utc_iso, read_json, read_jsonl, read_text, write_json, write_text
@@ -123,10 +122,7 @@ class Orchestrator:
         origin_url: str = "",
     ) -> tuple[ProjectContext, ExecutionPlanState]:
         context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
-        if project_prompt.strip():
-            project_prompt = self.save_user_prompt(context, project_prompt)
-        else:
-            project_prompt = self.load_user_prompt(context)
+        project_prompt = project_prompt.strip()
         planning_prompt_template = load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)
         repo_inputs = scan_repository_inputs(context.paths.repo_dir)
         runner = CodexRunner(context.runtime.codex_path)
@@ -184,8 +180,6 @@ class Orchestrator:
         state = ExecutionPlanState.from_dict(payload)
         if not state.default_test_command:
             state.default_test_command = context.runtime.test_cmd
-        if not state.project_prompt.strip():
-            state.project_prompt = self.load_user_prompt(context)
         return state
 
     def update_execution_plan(
@@ -197,7 +191,6 @@ class Orchestrator:
         origin_url: str = "",
     ) -> tuple[ProjectContext, ExecutionPlanState]:
         context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
-        self.save_user_prompt(context, plan_state.project_prompt)
         saved = self.save_execution_plan_state(context, plan_state)
         context.metadata.current_status = "plan_ready" if saved.steps else "setup_ready"
         context.metadata.last_run_at = now_utc_iso()
@@ -228,7 +221,6 @@ class Orchestrator:
             last_updated_at=now_utc_iso(),
             steps=normalized_steps,
         )
-        self.save_user_prompt(context, state.project_prompt)
         write_json(context.paths.execution_plan_file, state.to_dict())
         write_text(
             context.paths.long_term_plan_file,
@@ -626,25 +618,6 @@ class Orchestrator:
                 context.paths.execution_flow_svg_file,
                 execution_plan_svg(f"{context.metadata.display_name or context.metadata.slug} execution flow", []),
             )
-        if not context.paths.user_prompt_file.exists():
-            write_text(context.paths.user_prompt_file, "")
-
-    def load_user_prompt(self, context: ProjectContext) -> str:
-        self._ensure_project_documents(context)
-        return read_text(context.paths.user_prompt_file).strip()
-
-    def save_user_prompt(self, context: ProjectContext, user_prompt: str) -> str:
-        self._ensure_project_documents(context)
-        write_text(context.paths.user_prompt_file, user_prompt.strip() + ("\n" if user_prompt.strip() else ""))
-        return user_prompt.strip()
-
-    def prompt_file_paths(self, context: ProjectContext) -> dict[str, str]:
-        self._ensure_project_documents(context)
-        return {
-            "user_prompt_file": str(context.paths.user_prompt_file),
-            "planning_prompt_template_file": str(source_prompt_template_path(PLAN_GENERATION_PROMPT_FILENAME)),
-            "execution_prompt_template_file": str(source_prompt_template_path(STEP_EXECUTION_PROMPT_FILENAME)),
-        }
 
     def _execution_step_rationale(self, step: ExecutionStep, test_command: str) -> str:
         details = step.description or "Complete the saved execution checkpoint with a small, safe change."

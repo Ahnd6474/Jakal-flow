@@ -119,7 +119,6 @@ class ProjectPaths:
     checkpoint_state_file: Path
     execution_plan_file: Path
     execution_flow_svg_file: Path
-    user_prompt_file: Path
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)
