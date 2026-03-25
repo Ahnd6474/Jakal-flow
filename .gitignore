@@ -10,3 +10,4 @@ build/
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/
+.tmp_ui_bridge_tests/
