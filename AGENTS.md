@@ -1,4 +1,4 @@
-# AGENTS.md
+c# AGENTS.md
 
 This repository builds and maintains `codex-auto`, a multi-repository automation CLI.
 
