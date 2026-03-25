@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>codex-auto | AI Repo Operations</title>
   <meta
+    id="meta-description"
     name="description"
     content="codex-auto는 여러 저장소를 안전하게 관리하고, Codex가 작업을 쪼개고 실행하고 검증하도록 돕는 데스크톱 자동화 앱입니다."
   >
@@ -30,34 +31,41 @@
         <span class="brand-mark"></span>
         <span>codex-auto</span>
       </a>
-      <nav class="nav">
-        <a href="#product">Product</a>
-        <a href="#workflow">Workflow</a>
-        <a href="#release">Release</a>
-        <a href="#contact">Contact</a>
-      </nav>
+      <div class="topbar-side">
+        <nav class="nav">
+          <a href="#product" data-i18n="nav_product">Product</a>
+          <a href="#workflow" data-i18n="nav_workflow">Workflow</a>
+          <a href="#release" data-i18n="nav_release">Release</a>
+          <a href="#contact" data-i18n="nav_contact">Contact</a>
+        </nav>
+        <div class="lang-switcher" aria-label="Language switcher">
+          <button class="lang-button active" type="button" data-lang="ko">KO</button>
+          <button class="lang-button" type="button" data-lang="en">EN</button>
+          <button class="lang-button" type="button" data-lang="zh">中文</button>
+          <button class="lang-button" type="button" data-lang="ja">JP</button>
+        </div>
+      </div>
     </header>
 
     <main id="top">
       <section class="hero">
         <div class="hero-copy">
-          <div class="hero-badge">Desktop app in progress</div>
-          <p class="eyebrow">AI Repo Operations</p>
-          <h1>계획부터 검증까지,<br>저장소 개선을<br>실행 가능한 흐름으로.</h1>
-          <p class="hero-text">
-            codex-auto는 여러 저장소를 하나의 운영 화면에서 다루며,
-            Codex가 일을 쪼개고, 블록 단위로 실행하고, 테스트와 롤백까지 관리하도록 설계된 자동화 앱입니다.
+          <div class="hero-badge" data-i18n="hero_badge">Desktop app in progress</div>
+          <p class="eyebrow" data-i18n="hero_eyebrow">AI Repo Operations</p>
+          <h1 data-i18n-html="hero_title">계획부터 검증까지,<br>저장소 개선을<br>실행 가능한 흐름으로.</h1>
+          <p class="hero-text" data-i18n="hero_text">
+            codex-auto는 여러 저장소를 하나의 운영 화면에서 다루며, Codex가 일을 쪼개고, 블록 단위로 실행하고, 테스트와 롤백까지 관리하도록 설계된 자동화 앱입니다.
           </p>
 
           <div class="hero-actions">
-            <a class="button button-primary" href="README.md">Docs</a>
-            <a class="button button-secondary" href="mailto:ahnd6474@gmail.com">Contact</a>
+            <a class="button button-primary" href="README.md" data-i18n="hero_docs">Docs</a>
+            <a class="button button-secondary" href="mailto:ahnd6474@gmail.com" data-i18n="hero_contact">Contact</a>
           </div>
 
           <div class="hero-meta">
-            <span>Multi-repo</span>
-            <span>Strict validation</span>
-            <span>Codex-planned blocks</span>
+            <span data-i18n="hero_meta_1">Multi-repo</span>
+            <span data-i18n="hero_meta_2">Strict validation</span>
+            <span data-i18n="hero_meta_3">Codex-planned blocks</span>
           </div>
         </div>
 
@@ -74,7 +82,7 @@
 
             <div class="stage-body">
               <aside class="stage-sidebar">
-                <p class="sidebar-title">Repositories</p>
+                <p class="sidebar-title" data-i18n="sidebar_title">Repositories</p>
                 <div class="sidebar-item active">api-platform</div>
                 <div class="sidebar-item">desktop-client</div>
                 <div class="sidebar-item">landing-site</div>
@@ -84,54 +92,54 @@
               <div class="stage-main">
                 <div class="stage-headline">
                   <div>
-                    <p class="panel-label">Timeline</p>
-                    <h2>지금 어디까지 진행됐는지,<br>한 번에 보입니다.</h2>
+                    <p class="panel-label" data-i18n="panel_label">Timeline</p>
+                    <h2 data-i18n-html="panel_title">지금 어디까지 진행됐는지,<br>한 번에 보입니다.</h2>
                   </div>
-                  <div class="live-pill">Running</div>
+                  <div class="live-pill" data-i18n="panel_status">Running</div>
                 </div>
 
                 <div class="timeline-bar">
-                  <div class="timeline-step done">입력</div>
-                  <div class="timeline-step done">배분</div>
-                  <div class="timeline-step current">실행</div>
-                  <div class="timeline-step pending">검증</div>
-                  <div class="timeline-step pending">동기화</div>
+                  <div class="timeline-step done" data-i18n="timeline_input">입력</div>
+                  <div class="timeline-step done" data-i18n="timeline_breakdown">배분</div>
+                  <div class="timeline-step current" data-i18n="timeline_execute">실행</div>
+                  <div class="timeline-step pending" data-i18n="timeline_validate">검증</div>
+                  <div class="timeline-step pending" data-i18n="timeline_sync">동기화</div>
                 </div>
 
                 <div class="block-strip">
                   <article class="block-card feature">
                     <span>B2</span>
-                    <strong>테스트 안정화</strong>
-                    <p>실패 재현, 회귀 테스트 추가, safe revision 유지</p>
+                    <strong data-i18n="block_1_title">테스트 안정화</strong>
+                    <p data-i18n="block_1_text">실패 재현, 회귀 테스트 추가, safe revision 유지</p>
                   </article>
                   <article class="block-card">
                     <span>B3</span>
-                    <strong>GUI 단순화</strong>
-                    <p>실행 흐름을 줄이고 진행 정보 가시성 강화</p>
+                    <strong data-i18n="block_2_title">GUI 단순화</strong>
+                    <p data-i18n="block_2_text">실행 흐름을 줄이고 진행 정보 가시성 강화</p>
                   </article>
                   <article class="block-card">
                     <span>B4</span>
-                    <strong>문서 반영</strong>
-                    <p>검증된 동작만 README와 릴리즈 페이지에 반영</p>
+                    <strong data-i18n="block_3_title">문서 반영</strong>
+                    <p data-i18n="block_3_text">검증된 동작만 README와 릴리즈 페이지에 반영</p>
                   </article>
                 </div>
 
                 <div class="ops-grid">
                   <article>
-                    <span>Model</span>
+                    <span data-i18n="ops_model">Model</span>
                     <strong>gpt-5.4</strong>
                   </article>
                   <article>
-                    <span>Reasoning</span>
+                    <span data-i18n="ops_reasoning">Reasoning</span>
                     <strong>high</strong>
                   </article>
                   <article>
-                    <span>Validation</span>
-                    <strong>test after every pass</strong>
+                    <span data-i18n="ops_validation">Validation</span>
+                    <strong data-i18n="ops_validation_value">test after every pass</strong>
                   </article>
                   <article>
-                    <span>Sync</span>
-                    <strong>push after block</strong>
+                    <span data-i18n="ops_sync">Sync</span>
+                    <strong data-i18n="ops_sync_value">push after block</strong>
                   </article>
                 </div>
               </div>
@@ -142,107 +150,107 @@
 
       <section class="section callout">
         <div class="callout-copy">
-          <p class="eyebrow">Positioning</p>
-          <h2>자동화 툴이 아니라,<br>릴리즈 가능한 운영 레이어.</h2>
+          <p class="eyebrow" data-i18n="callout_eyebrow">Positioning</p>
+          <h2 data-i18n-html="callout_title">자동화 툴이 아니라,<br>릴리즈 가능한 운영 레이어.</h2>
         </div>
         <div class="callout-grid">
           <article>
-            <strong>계획</strong>
-            <p>장기 프롬프트와 저장소 문맥을 바탕으로 작업을 세분화합니다.</p>
+            <strong data-i18n="callout_1_title">계획</strong>
+            <p data-i18n="callout_1_text">장기 프롬프트와 저장소 문맥을 바탕으로 작업을 세분화합니다.</p>
           </article>
           <article>
-            <strong>실행</strong>
-            <p>Codex가 블록 단위로 구현을 진행하고 진행 상황을 남깁니다.</p>
+            <strong data-i18n="callout_2_title">실행</strong>
+            <p data-i18n="callout_2_text">Codex가 블록 단위로 구현을 진행하고 진행 상황을 남깁니다.</p>
           </article>
           <article>
-            <strong>검증</strong>
-            <p>매 pass 뒤 테스트하고 실패 시 즉시 rollback 합니다.</p>
+            <strong data-i18n="callout_3_title">검증</strong>
+            <p data-i18n="callout_3_text">매 pass 뒤 테스트하고 실패 시 즉시 rollback 합니다.</p>
           </article>
           <article>
-            <strong>기록</strong>
-            <p>docs, logs, memory, state를 남겨 이후 릴리즈 설명이 가능합니다.</p>
+            <strong data-i18n="callout_4_title">기록</strong>
+            <p data-i18n="callout_4_text">docs, logs, memory, state를 남겨 이후 릴리즈 설명이 가능합니다.</p>
           </article>
         </div>
       </section>
 
       <section class="section workflow" id="workflow">
         <div class="section-header">
-          <p class="eyebrow">Workflow</p>
-          <h2>사람은 방향을 주고,<br>Codex는 블록으로 움직입니다.</h2>
+          <p class="eyebrow" data-i18n="workflow_eyebrow">Workflow</p>
+          <h2 data-i18n-html="workflow_title">사람은 방향을 주고,<br>Codex는 블록으로 움직입니다.</h2>
         </div>
         <div class="workflow-grid">
           <article class="workflow-card">
             <span>01</span>
-            <strong>Input</strong>
-            <p>장기 프롬프트 또는 개선할 저장소를 입력으로 받습니다.</p>
+            <strong data-i18n="workflow_1_title">Input</strong>
+            <p data-i18n="workflow_1_text">장기 프롬프트 또는 개선할 저장소를 입력으로 받습니다.</p>
           </article>
           <article class="workflow-card">
             <span>02</span>
-            <strong>Codex Breakdown</strong>
-            <p>Codex가 실제 구현 가능한 블록 목록과 우선순위를 제안합니다.</p>
+            <strong data-i18n="workflow_2_title">Codex Breakdown</strong>
+            <p data-i18n="workflow_2_text">Codex가 실제 구현 가능한 블록 목록과 우선순위를 제안합니다.</p>
           </article>
           <article class="workflow-card">
             <span>03</span>
-            <strong>Execution Loop</strong>
-            <p>블록이 끝날 때까지 구현, 테스트, 기록을 반복합니다.</p>
+            <strong data-i18n="workflow_3_title">Execution Loop</strong>
+            <p data-i18n="workflow_3_text">블록이 끝날 때까지 구현, 테스트, 기록을 반복합니다.</p>
           </article>
           <article class="workflow-card">
             <span>04</span>
-            <strong>Checkpoint</strong>
-            <p>승인 경계와 GitHub 동기화를 통해 릴리즈 흐름을 유지합니다.</p>
+            <strong data-i18n="workflow_4_title">Checkpoint</strong>
+            <p data-i18n="workflow_4_text">승인 경계와 GitHub 동기화를 통해 릴리즈 흐름을 유지합니다.</p>
           </article>
         </div>
       </section>
 
       <section class="section showcase">
         <div class="section-header">
-          <p class="eyebrow">Why It Feels Different</p>
-          <h2>제품처럼 보이고,<br>운영 도구처럼 작동합니다.</h2>
+          <p class="eyebrow" data-i18n="showcase_eyebrow">Why It Feels Different</p>
+          <h2 data-i18n-html="showcase_title">제품처럼 보이고,<br>운영 도구처럼 작동합니다.</h2>
         </div>
         <div class="showcase-grid">
           <article class="showcase-card large">
-            <strong>멀티 저장소 구조</strong>
-            <p>repo, docs, memory, logs, reports, state를 저장소별로 분리해 섞이지 않게 관리합니다.</p>
+            <strong data-i18n="showcase_1_title">멀티 저장소 구조</strong>
+            <p data-i18n="showcase_1_text">repo, docs, memory, logs, reports, state를 저장소별로 분리해 섞이지 않게 관리합니다.</p>
           </article>
           <article class="showcase-card">
-            <strong>엄격한 검증</strong>
-            <p>테스트 실패 시 safe revision으로 바로 되돌아갑니다.</p>
+            <strong data-i18n="showcase_2_title">엄격한 검증</strong>
+            <p data-i18n="showcase_2_text">테스트 실패 시 safe revision으로 바로 되돌아갑니다.</p>
           </article>
           <article class="showcase-card">
-            <strong>진행 타임라인</strong>
-            <p>현재 블록, 남은 흐름, Codex 상태를 직관적으로 보여줍니다.</p>
+            <strong data-i18n="showcase_3_title">진행 타임라인</strong>
+            <p data-i18n="showcase_3_text">현재 블록, 남은 흐름, Codex 상태를 직관적으로 보여줍니다.</p>
           </article>
           <article class="showcase-card">
-            <strong>앱 확장 전제</strong>
-            <p>데스크톱 GUI에서 시작해 릴리즈 가능한 제품 경험으로 확장하기 쉽습니다.</p>
+            <strong data-i18n="showcase_4_title">앱 확장 전제</strong>
+            <p data-i18n="showcase_4_text">데스크톱 GUI에서 시작해 릴리즈 가능한 제품 경험으로 확장하기 쉽습니다.</p>
           </article>
         </div>
       </section>
 
       <section class="section release" id="release">
         <div class="section-header">
-          <p class="eyebrow">Release</p>
-          <h2>앱 릴리즈 페이지에 필요한 정보도<br>지금부터 정리합니다.</h2>
+          <p class="eyebrow" data-i18n="release_eyebrow">Release</p>
+          <h2 data-i18n-html="release_title">앱 릴리즈 페이지에 필요한 정보도<br>지금부터 정리합니다.</h2>
         </div>
         <div class="release-grid">
           <article class="release-card primary">
-            <span class="release-label">Version</span>
-            <strong>Alpha preview</strong>
-            <p>현재는 워크스페이스와 실행 흐름을 다듬는 단계이며, 이후 데스크톱 앱 패키징을 목표로 합니다.</p>
+            <span class="release-label" data-i18n="release_card_1_label">Version</span>
+            <strong data-i18n="release_card_1_title">Alpha preview</strong>
+            <p data-i18n="release_card_1_text">현재는 워크스페이스와 실행 흐름을 다듬는 단계이며, 이후 데스크톱 앱 패키징을 목표로 합니다.</p>
             <div class="release-actions">
-              <a class="button button-primary" href="mailto:ahnd6474@gmail.com?subject=codex-auto%20alpha">Alpha access</a>
-              <a class="button button-secondary" href="README.md">Read docs</a>
+              <a class="button button-primary" href="mailto:ahnd6474@gmail.com?subject=codex-auto%20alpha" data-i18n="release_card_1_cta">Alpha access</a>
+              <a class="button button-secondary" href="README.md" data-i18n="release_card_1_docs">Read docs</a>
             </div>
           </article>
           <article class="release-card">
-            <span class="release-label">Platform</span>
-            <strong>Windows-first desktop</strong>
-            <p>Tkinter GUI를 바탕으로 실제 운영 화면과 데스크톱 배포 경험을 함께 준비하고 있습니다.</p>
+            <span class="release-label" data-i18n="release_card_2_label">Platform</span>
+            <strong data-i18n="release_card_2_title">Windows-first desktop</strong>
+            <p data-i18n="release_card_2_text">Tkinter GUI를 바탕으로 실제 운영 화면과 데스크톱 배포 경험을 함께 준비하고 있습니다.</p>
           </article>
           <article class="release-card">
-            <span class="release-label">Audience</span>
-            <strong>반복 개선이 필요한 개발 팀</strong>
-            <p>한두 개가 아니라 여러 저장소를 안정적으로 돌려야 하는 팀에 맞춘 구조입니다.</p>
+            <span class="release-label" data-i18n="release_card_3_label">Audience</span>
+            <strong data-i18n="release_card_3_title">반복 개선이 필요한 개발 팀</strong>
+            <p data-i18n="release_card_3_text">한두 개가 아니라 여러 저장소를 안정적으로 돌려야 하는 팀에 맞춘 구조입니다.</p>
           </article>
         </div>
       </section>
@@ -250,37 +258,16 @@
       <section class="section contact" id="contact">
         <div class="contact-card">
           <div>
-            <p class="eyebrow">Contact</p>
-            <h2>도입 문의, 협업, 제품화 논의</h2>
-            <p class="contact-text">
+            <p class="eyebrow" data-i18n="contact_eyebrow">Contact</p>
+            <h2 data-i18n="contact_title">도입 문의, 협업, 제품화 논의</h2>
+            <p class="contact-text" data-i18n="contact_text">
               codex-auto를 내부 자동화 도구나 배포 가능한 앱으로 확장하려면 아래 메일로 연락할 수 있습니다.
             </p>
           </div>
           <div class="contact-actions">
             <a class="contact-link" href="mailto:ahnd6474@gmail.com">ahnd6474@gmail.com</a>
-            <a class="button button-primary" href="mailto:ahnd6474@gmail.com?subject=codex-auto%20문의">Send email</a>
+            <a class="button button-primary" href="mailto:ahnd6474@gmail.com?subject=codex-auto%20문의" data-i18n="contact_cta">Send email</a>
           </div>
-        </div>
-      </section>
-
-      <section class="section privacy">
-        <div class="section-header">
-          <p class="eyebrow">Privacy</p>
-          <h2>방문 통계와 UX 개선을 위해 분석 도구를 사용합니다.</h2>
-        </div>
-        <div class="privacy-grid">
-          <article class="privacy-card">
-            <strong>Google Analytics 4</strong>
-            <p>방문 수, 유입 경로, 주요 버튼 클릭 같은 사이트 성과를 확인하는 데 사용합니다.</p>
-          </article>
-          <article class="privacy-card">
-            <strong>동의 기반 로딩</strong>
-            <p>분석 스크립트는 사용자가 허용한 경우에만 로드되며, 선택은 이 브라우저에 저장됩니다.</p>
-          </article>
-          <article class="privacy-card">
-            <strong>사이트 정보</strong>
-            <p>GitHub Pages 배포 주소는 `ahnd6474.github.io/codex_auto`이며 현재 GA4 측정 ID는 `G-ZD7MP818RD`입니다.</p>
-          </article>
         </div>
       </section>
     </main>
@@ -288,7 +275,7 @@
     <footer class="footer">
       <p>codex-auto</p>
       <div class="footer-links">
-        <button class="footer-button" type="button" data-open-consent>쿠키 설정</button>
+        <button class="footer-button" type="button" data-open-consent data-i18n="footer_cookie">쿠키 설정</button>
         <a href="mailto:ahnd6474@gmail.com">ahnd6474@gmail.com</a>
       </div>
     </footer>
@@ -296,12 +283,12 @@
 
   <div class="consent-banner" data-consent-banner hidden>
     <div class="consent-copy">
-      <strong>분석 도구 사용 안내</strong>
-      <p>이 페이지는 방문 통계 확인을 위해 Google Analytics 4를 사용할 수 있습니다.</p>
+      <strong data-i18n="consent_title">분석 도구 사용 안내</strong>
+      <p data-i18n="consent_text">이 페이지는 방문 통계 확인을 위해 Google Analytics 4를 사용할 수 있습니다.</p>
     </div>
     <div class="consent-actions">
-      <button class="button button-secondary" type="button" data-consent-decline>거부</button>
-      <button class="button button-primary" type="button" data-consent-accept>허용</button>
+      <button class="button button-secondary" type="button" data-consent-decline data-i18n="consent_decline">거부</button>
+      <button class="button button-primary" type="button" data-consent-accept data-i18n="consent_accept">허용</button>
     </div>
   </div>
 </body>

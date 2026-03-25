@@ -134,6 +134,37 @@ h2,
   font-size: 0.95rem;
 }
 
+.topbar-side {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.lang-switcher {
+  display: inline-flex;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.lang-button {
+  border: 0;
+  min-width: 46px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lang-button.active {
+  color: #07110e;
+  background: linear-gradient(135deg, var(--accent), #baf9de);
+}
+
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
@@ -706,7 +737,8 @@ h1 {
 
   .topbar,
   .contact-card,
-  .footer {
+  .footer,
+  .topbar-side {
     flex-direction: column;
     align-items: flex-start;
     border-radius: 28px;
