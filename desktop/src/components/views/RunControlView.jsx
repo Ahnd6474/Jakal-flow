@@ -132,12 +132,6 @@ export function RunControlView({
                 <span>Title</span>
                 <input value={selectedStep.title || ""} onChange={(event) => onUpdateStepField("title", event.target.value)} disabled={!editableStep} />
               </label>
-<<<<<<< HEAD
-=======
-              <label className="field">
-                <span>Test Command</span>
-                <input value={selectedStep.test_command || ""} onChange={(event) => onUpdateStepField("test_command", event.target.value)} disabled={!editableStep} />
-              </label>
               <label className="field">
                 <span>GPT Reasoning</span>
                 <select
@@ -152,7 +146,6 @@ export function RunControlView({
                   ))}
                 </select>
               </label>
->>>>>>> 7c5785962b84689e3ab33347ef1f640643dd9470
               <label className="field field--wide">
                 <span>Description</span>
                 <textarea value={selectedStep.display_description || ""} onChange={(event) => onUpdateStepField("display_description", event.target.value)} disabled={!editableStep} />
