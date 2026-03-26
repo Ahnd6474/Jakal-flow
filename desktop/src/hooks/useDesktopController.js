@@ -141,7 +141,11 @@ export function useDesktopController() {
     });
     if (!preserveDirtyPlan) {
       setPlanDraft(cloneValue(detail.plan));
-      setSelectedStepId(firstSelectableStepId(detail.plan));
+      if (options.preserveSelectedStep) {
+        setSelectedStepId((current) => current || firstSelectableStepId(detail.plan));
+      } else {
+        setSelectedStepId(firstSelectableStepId(detail.plan));
+      }
       setPlanDirty(false);
     }
   }
@@ -260,7 +264,7 @@ export function useDesktopController() {
 
       if (selectedProjectId) {
         const detail = await bridgeRequest("load-project", { repo_id: selectedProjectId }, workspaceRoot || null);
-        applyProjectDetail(detail);
+        applyProjectDetail(detail, { preserveSelectedStep: true });
       } else if (listing.projects?.length) {
         setSelectedProjectId(listing.projects[0].repo_id);
       }
@@ -272,6 +276,7 @@ export function useDesktopController() {
   }
 
   async function loadProject(repoId) {
+    const previousProjectId = selectedProjectId;
     setPendingAction("load-project");
     setSelectedProjectId(repoId);
     try {
@@ -279,6 +284,7 @@ export function useDesktopController() {
       applyProjectDetail(detail);
       return detail;
     } catch (error) {
+      setSelectedProjectId(previousProjectId);
       setMessage(messagePayload("error", String(error)));
       return null;
     } finally {
