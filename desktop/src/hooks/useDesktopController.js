@@ -39,13 +39,13 @@ export function useDesktopController() {
   const [modelCatalog, setModelCatalog] = useState([]);
   const [projects, setProjects] = useState([]);
   const [workspaceStats, setWorkspaceStats] = useState(null);
-  const [selectedProjectId, setSelectedProjectId] = usePersistentState("codex-auto:selected-project", "");
-  const [storedProgramSettings, setStoredProgramSettings] = usePersistentState("codex-auto:program-settings", null);
+  const [selectedProjectId, setSelectedProjectId] = usePersistentState("jakal-flow:selected-project", "");
+  const [storedProgramSettings, setStoredProgramSettings] = usePersistentState("jakal-flow:program-settings", null);
   const [projectForm, setProjectForm] = useState(blankProjectForm(null));
   const [programSettings, setProgramSettings] = useState(programSettingsFromRuntime(null));
   const [projectDetail, setProjectDetail] = useState(null);
   const [planDraft, setPlanDraft] = useState({ steps: [], project_prompt: "", closeout_status: "not_started" });
-  const [selectedStepId, setSelectedStepId] = usePersistentState("codex-auto:selected-step", "");
+  const [selectedStepId, setSelectedStepId] = usePersistentState("jakal-flow:selected-step", "");
   const [planDirty, setPlanDirty] = useState(false);
   const [pendingAction, setPendingAction] = useState("");
   const [loadingProjectId, setLoadingProjectId] = useState("");
@@ -57,13 +57,13 @@ export function useDesktopController() {
     public_base_url: "",
   });
 
-  const [centerTab, setCenterTab] = usePersistentState("codex-auto:center-tab", "run");
-  const [bottomTab, setBottomTab] = usePersistentState("codex-auto:bottom-tab", "json");
-  const [sidebarTab, setSidebarTab] = usePersistentState("codex-auto:sidebar-tab", "projects");
-  const [bottomCollapsed, setBottomCollapsed] = usePersistentState("codex-auto:bottom-collapsed", false);
-  const [bottomHeight, setBottomHeight] = usePersistentState("codex-auto:bottom-height", 250);
-  const [projectFilter, setProjectFilter] = usePersistentState("codex-auto:project-filter", "");
-  const [workspaceFilter, setWorkspaceFilter] = usePersistentState("codex-auto:workspace-filter", "");
+  const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "run");
+  const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
+  const [sidebarTab, setSidebarTab] = usePersistentState("jakal-flow:sidebar-tab", "projects");
+  const [bottomCollapsed, setBottomCollapsed] = usePersistentState("jakal-flow:bottom-collapsed", false);
+  const [bottomHeight, setBottomHeight] = usePersistentState("jakal-flow:bottom-height", 250);
+  const [projectFilter, setProjectFilter] = usePersistentState("jakal-flow:project-filter", "");
+  const [workspaceFilter, setWorkspaceFilter] = usePersistentState("jakal-flow:workspace-filter", "");
   const defaultRuntime = useMemo(() => applyProgramSettings(baseRuntime, storedProgramSettings), [baseRuntime, storedProgramSettings]);
 
   const busy = Boolean(pendingAction || (activeJob && activeJob.status === "running"));

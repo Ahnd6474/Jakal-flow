@@ -9,8 +9,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from codex_auto.environment import ensure_gitignore
-from codex_auto.model_selection import (
+from jakal_flow.environment import ensure_gitignore
+from jakal_flow.model_selection import (
     DEFAULT_MODEL_PRESET_ID,
     MODEL_MODE_CODEX,
     MODEL_MODE_SLUG,
@@ -20,9 +20,9 @@ from codex_auto.model_selection import (
     model_selection_from_runtime,
     normalize_model_preset_id,
 )
-from codex_auto.models import ExecutionPlanState, ExecutionStep, RuntimeOptions
-from codex_auto.orchestrator import Orchestrator
-from codex_auto.planning import (
+from jakal_flow.models import ExecutionPlanState, ExecutionStep, RuntimeOptions
+from jakal_flow.orchestrator import Orchestrator
+from jakal_flow.planning import (
     FINALIZATION_PROMPT_FILENAME,
     PLAN_GENERATION_PROMPT_FILENAME,
     REFERENCE_GUIDE_FILENAME,
@@ -37,7 +37,7 @@ from codex_auto.planning import (
     scan_repository_inputs,
     source_prompt_template_path,
 )
-from codex_auto.utils import append_jsonl, read_jsonl_tail, read_last_jsonl
+from jakal_flow.utils import append_jsonl, read_jsonl_tail, read_last_jsonl
 
 
 class ExecutionPlanHelperTests(unittest.TestCase):
@@ -189,7 +189,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             )
 
         try:
-            with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch.object(
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch.object(
                 orchestrator,
                 "_run_single_block",
                 side_effect=fake_run_single_block,
@@ -306,7 +306,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("{user_prompt}", plan_template)
         self.assertIn("{max_steps}", plan_template)
         self.assertIn("{reference_notes}", plan_template)
-        self.assertIn("src/codex_auto/docs/REFERENCE_GUIDE.md", plan_template)
+        self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", plan_template)
         self.assertIn("{task_title}", step_template)
         self.assertIn("{display_description}", step_template)
         self.assertIn("{codex_description}", step_template)
@@ -345,10 +345,10 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             shutil.rmtree(temp_root, ignore_errors=True)
 
         self.assertIn("Use the following priority order while planning:", plan_prompt)
-        self.assertIn("src/codex_auto/docs/REFERENCE_GUIDE.md", plan_prompt)
+        self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", plan_prompt)
         self.assertIn("JavaScript", plan_prompt)
         self.assertIn("1. Follow AGENTS.md and explicit repository constraints first.", bootstrap_prompt)
-        self.assertIn("src/codex_auto/docs/REFERENCE_GUIDE.md", bootstrap_prompt)
+        self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", bootstrap_prompt)
         self.assertIn("JavaScript", bootstrap_prompt)
 
     def test_ensure_gitignore_adds_missing_entries_once(self) -> None:

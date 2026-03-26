@@ -91,7 +91,7 @@ class _CodexAppServerSession:
             "initialize",
             {
                 "clientInfo": {
-                    "name": "codex-auto",
+                    "name": "jakal-flow",
                     "version": "0.1.0",
                 }
             },

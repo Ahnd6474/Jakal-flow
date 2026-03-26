@@ -1,10 +1,10 @@
 c# AGENTS.md
 
-This repository builds and maintains `codex-auto`, a multi-repository automation CLI.
+This repository builds and maintains `jakal-flow`, a multi-repository automation CLI.
 
 ## Operating Rules
 
-1. Preserve the current modular layout under `src/codex_auto/`.
+1. Preserve the current modular layout under `src/jakal_flow/`.
 2. Keep the tool multi-repository. Do not collapse state, logs, memory, or docs into a single-repository design.
 3. Prefer standard-library Python unless a dependency clearly improves reliability enough to justify itself.
 4. Treat traceability as a first-class requirement. New behavior should keep or improve structured logs, state files, and report generation.

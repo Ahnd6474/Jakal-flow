@@ -7,7 +7,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from codex_auto.cli import main
+from jakal_flow.cli import main
 
 
 if __name__ == "__main__":

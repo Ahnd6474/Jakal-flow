@@ -41,7 +41,7 @@ class GitHubClient:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "codex-auto",
+            "User-Agent": "jakal-flow",
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -97,7 +97,7 @@ class GitHubClient:
             data=payload,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "codex-auto",
+                "User-Agent": "jakal-flow",
             },
             method="POST",
         )
@@ -126,7 +126,7 @@ class GitHubClient:
                 data=payload,
                 headers={
                     "Accept": "application/json",
-                    "User-Agent": "codex-auto",
+                    "User-Agent": "jakal-flow",
                 },
                 method="POST",
             )
@@ -195,7 +195,7 @@ class GitHubClient:
             data=payload,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "codex-auto",
+                "User-Agent": "jakal-flow",
             },
             method="POST",
         )

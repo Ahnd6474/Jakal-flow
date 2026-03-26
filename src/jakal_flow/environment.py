@@ -46,7 +46,7 @@ def ensure_gitignore(project_dir: Path, entries: list[str] | None = None) -> boo
     if new_lines and new_lines[-1].strip():
         new_lines.append("")
     if not new_lines:
-        new_lines.append("# codex-auto")
+        new_lines.append("# jakal-flow")
     elif new_lines[-1].strip():
         new_lines.append("")
     new_lines.extend(additions)

@@ -97,7 +97,7 @@ class Orchestrator:
         if created_repo or not self.git.has_commits(context.paths.repo_dir):
             safe_revision = self.git.create_initial_commit(
                 context.paths.repo_dir,
-                "chore: initialize codex-auto workspace",
+                "chore: initialize jakal-flow workspace",
             )
         else:
             safe_revision = self.git.current_revision(context.paths.repo_dir)
@@ -1151,7 +1151,7 @@ class Orchestrator:
 
     def _commit_message(self, block_index: int, pass_name: str, task: str) -> str:
         safe_task = " ".join(task.split())[:72]
-        return f"codex-auto(block {block_index} {pass_name}): {safe_task}"
+        return f"jakal-flow(block {block_index} {pass_name}): {safe_task}"
 
     def _stop_reason(self, context: ProjectContext) -> str | None:
         counters = context.loop_state.counters

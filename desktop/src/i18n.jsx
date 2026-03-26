@@ -5,7 +5,7 @@ import { usePersistentState } from "./hooks/usePersistentState";
 const I18nContext = createContext(null);
 
 export function I18nProvider({ children }) {
-  const [storedLanguage, setStoredLanguage] = usePersistentState("codex-auto:language", detectInitialLanguage());
+  const [storedLanguage, setStoredLanguage] = usePersistentState("jakal-flow:language", detectInitialLanguage());
   const language = normalizeLanguage(storedLanguage);
 
   const value = useMemo(

@@ -14,8 +14,8 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from codex_auto.orchestrator import Orchestrator
-from codex_auto.share import (
+from jakal_flow.orchestrator import Orchestrator
+from jakal_flow.share import (
     ShareSession,
     create_share_session,
     load_share_sessions,
@@ -25,9 +25,9 @@ from codex_auto.share import (
     save_share_sessions,
     validate_share_session,
 )
-from codex_auto.share_server import ShareHTTPServer, ShareRequestHandler
-from codex_auto.ui_bridge import run_command
-from codex_auto.utils import append_jsonl
+from jakal_flow.share_server import ShareHTTPServer, ShareRequestHandler
+from jakal_flow.ui_bridge import run_command
+from jakal_flow.utils import append_jsonl
 
 
 def local_temp_root() -> Path:
@@ -60,8 +60,8 @@ def create_project(workspace_root: Path, repo_dir: Path) -> tuple[Orchestrator, 
             "max_blocks": 4,
         },
     }
-    with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
-        "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+    with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+        "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
         side_effect=lambda *args, **kwargs: _fake_codex_snapshot(),
     ):
         run_command("save-project-setup", workspace_root, payload)
@@ -101,8 +101,8 @@ def _fake_codex_snapshot() -> mock.Mock:
 
 
 class ShareMonitoringTests(unittest.TestCase):
-    @mock.patch("codex_auto.share.os.name", "nt")
-    @mock.patch("codex_auto.share.subprocess.run")
+    @mock.patch("jakal_flow.share.os.name", "nt")
+    @mock.patch("jakal_flow.share.subprocess.run")
     def test_process_is_running_handles_non_utf8_tasklist_output(self, run_mock: mock.Mock) -> None:
         run_mock.return_value = mock.Mock(stdout=b"\xc0\xfd\xbc\xd3 python.exe                 4321")
 

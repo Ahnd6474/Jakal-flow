@@ -10,7 +10,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from codex_auto.ui_bridge import run_command, runtime_from_payload
+from jakal_flow.ui_bridge import run_command, runtime_from_payload
 
 
 def local_temp_root() -> Path:
@@ -137,7 +137,7 @@ class UIBridgeTests(unittest.TestCase):
 
     def test_bootstrap_exposes_workspace_and_model_presets(self) -> None:
         with TemporaryTestDir() as temp_dir:
-            with mock.patch("codex_auto.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
                 payload = run_command("bootstrap", temp_dir)
 
         self.assertEqual(payload["workspace_root"], str(temp_dir.resolve()))
@@ -168,8 +168,8 @@ class UIBridgeTests(unittest.TestCase):
                 },
             }
 
-            with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
-                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
                 side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
             ):
                 detail = run_command("save-project-setup", workspace_root, payload)
@@ -189,7 +189,7 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(len(listing["projects"]), 1)
             self.assertEqual(listing["projects"][0]["display_name"], "Demo Project")
 
-            with mock.patch("codex_auto.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
                 loaded = run_command(
                     "load-project",
                     workspace_root,
@@ -220,8 +220,8 @@ class UIBridgeTests(unittest.TestCase):
                 },
             }
 
-            with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
-                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
                 side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
             ):
                 detail = run_command("save-project-setup", workspace_root, payload)
@@ -263,8 +263,8 @@ class UIBridgeTests(unittest.TestCase):
                 },
             }
 
-            with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
-                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
                 side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
             ):
                 detail = run_command("save-project-setup", workspace_root, setup_payload)
@@ -302,8 +302,8 @@ class UIBridgeTests(unittest.TestCase):
                 },
             }
 
-            with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
-                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
                 side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
             ):
                 saved = run_command("save-plan", workspace_root, save_plan_payload)
@@ -324,7 +324,7 @@ class UIBridgeTests(unittest.TestCase):
             )
             self.assertEqual(stop_payload["run_control"]["stop_after_current_step"], True)
 
-            with mock.patch("codex_auto.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
                 loaded = run_command(
                     "load-project",
                     workspace_root,
@@ -359,8 +359,8 @@ class UIBridgeTests(unittest.TestCase):
                 },
             }
 
-            with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
-                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
                 side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
             ):
                 detail = run_command("save-project-setup", workspace_root, payload)
@@ -390,7 +390,7 @@ class UIBridgeTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with mock.patch("codex_auto.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
                 loaded = run_command(
                     "load-project",
                     workspace_root,
@@ -425,14 +425,14 @@ class UIBridgeTests(unittest.TestCase):
                 },
             }
 
-            with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
-                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
                 side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
             ):
                 run_command("save-project-setup", workspace_root, payload)
 
             with mock.patch(
-                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
                 side_effect=AssertionError("Codex status refresh should be skipped."),
             ):
                 loaded = run_command(
@@ -473,8 +473,8 @@ class UIBridgeTests(unittest.TestCase):
                 },
             }
 
-            with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
-                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
                 side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
             ):
                 run_command("save-project-setup", workspace_root, payload)
@@ -484,7 +484,7 @@ class UIBridgeTests(unittest.TestCase):
                 self.assertTrue(server_status["running"])
                 self.assertTrue(str(server_status["base_url"]).startswith("http://127.0.0.1:"))
 
-                with mock.patch("codex_auto.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
+                with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
                     created = run_command(
                         "create_share_session",
                         workspace_root,
@@ -503,7 +503,7 @@ class UIBridgeTests(unittest.TestCase):
                 self.assertEqual(created["share"]["server"]["config"]["bind_host"], "0.0.0.0")
                 self.assertEqual(created["share"]["server"]["config"]["public_base_url"], "https://share.example.com/base")
 
-                with mock.patch("codex_auto.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
+                with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
                     revoked = run_command(
                         "revoke_share_session",
                         workspace_root,

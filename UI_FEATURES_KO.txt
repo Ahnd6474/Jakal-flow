@@ -1,11 +1,11 @@
-codex-auto Desktop UI 기능 정리
+jakal-flow Desktop UI 기능 정리
 =========================================
 
 개요
 ----
-- codex-auto의 현재 데스크톱 UI는 React + Tauri 기반 2-스테이지 화면 구조(설정 화면 + 실행 플로우 화면)로 동작한다.
+- jakal-flow의 현재 데스크톱 UI는 React + Tauri 기반 2-스테이지 화면 구조(설정 화면 + 실행 플로우 화면)로 동작한다.
 - 목적은 여러 저장소를 워크스페이스 안에서 관리하고, Codex 기반 실행 계획 생성/편집/실행/closeout까지 하나의 데스크톱 흐름으로 처리하는 것이다.
-- Python 오케스트레이션 백엔드는 유지되며, 데스크톱 UI는 `python -m codex_auto.ui_bridge`를 통해 연결된다.
+- Python 오케스트레이션 백엔드는 유지되며, 데스크톱 UI는 `python -m jakal_flow.ui_bridge`를 통해 연결된다.
 
 실행
 ----

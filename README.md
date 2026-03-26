@@ -1,6 +1,6 @@
-# codex-auto
+# jakal-flow
 
-`codex-auto` is a production-oriented Python CLI for managing multiple repositories inside an isolated workspace and repeatedly running a traceable Codex-driven improvement loop against them.
+`jakal-flow` is a production-oriented Python CLI for managing multiple repositories inside an isolated workspace and repeatedly running a traceable Codex-driven improvement loop against them.
 
 It is designed around a saved project plan:
 
@@ -10,7 +10,7 @@ It is designed around a saved project plan:
 
 ## Flow
 
-![codex-auto flow chart](assets/readme-flow-ko.svg)
+![jakal-flow flow chart](assets/readme-flow-ko.svg)
 
 ## Project Layout
 
@@ -42,7 +42,7 @@ Development prerequisites:
 
 - Node.js 20+
 - Rust toolchain with Tauri prerequisites for your OS
-- Python 3.11+ available to the Tauri shell so it can call `python -m codex_auto.ui_bridge`
+- Python 3.11+ available to the Tauri shell so it can call `python -m jakal_flow.ui_bridge`
 
 Run the desktop shell in development:
 
@@ -87,10 +87,10 @@ The core app still keeps network exposure separate from orchestration. It starts
 Initialize a managed repository:
 
 ```bash
-python -m codex_auto init-repo \
+python -m jakal_flow init-repo \
   --repo-url https://github.com/example/project.git \
   --branch main \
-  --workspace-root .codex-auto-workspace \
+  --workspace-root .jakal-flow-workspace \
   --model gpt-5.4 \
   --effort high \
   --plan-prompt "Build a safe project plan for this repository focused on a narrow MVP and strong tests." \
@@ -102,10 +102,10 @@ python -m codex_auto init-repo \
 Run two improvement blocks:
 
 ```bash
-python -m codex_auto run \
+python -m jakal_flow run \
   --repo-url https://github.com/example/project.git \
   --branch main \
-  --workspace-root .codex-auto-workspace \
+  --workspace-root .jakal-flow-workspace \
   --model gpt-5.4 \
   --effort high \
   --approval-mode never \
@@ -117,10 +117,10 @@ python -m codex_auto run \
 Resume a managed repository:
 
 ```bash
-python -m codex_auto resume \
+python -m jakal_flow resume \
   --repo-url https://github.com/example/project.git \
   --branch main \
-  --workspace-root .codex-auto-workspace \
+  --workspace-root .jakal-flow-workspace \
   --model gpt-5.4 \
   --effort high \
   --approval-mode never \
@@ -132,15 +132,15 @@ python -m codex_auto resume \
 List all managed repositories:
 
 ```bash
-python -m codex_auto list-repos --workspace-root .codex-auto-workspace
+python -m jakal_flow list-repos --workspace-root .jakal-flow-workspace
 ```
 
 Inspect status, history, and reports:
 
 ```bash
-python -m codex_auto status --repo-url https://github.com/example/project.git --branch main
-python -m codex_auto history --repo-url https://github.com/example/project.git --branch main --limit 20
-python -m codex_auto report --repo-url https://github.com/example/project.git --branch main
+python -m jakal_flow status --repo-url https://github.com/example/project.git --branch main
+python -m jakal_flow history --repo-url https://github.com/example/project.git --branch main --limit 20
+python -m jakal_flow report --repo-url https://github.com/example/project.git --branch main
 ```
 
 ## How It Works
@@ -150,7 +150,7 @@ Initialization:
 1. Creates an isolated project directory under the workspace
 2. Clones or updates the target repository into `repo/`
 3. Scans `README.md`, `AGENTS.md`, and `repo/docs/**`
-4. Uses `src/codex_auto/docs/REFERENCE_GUIDE.md` as the default planning preference guide when the request leaves implementation choices unspecified
+4. Uses `src/jakal_flow/docs/REFERENCE_GUIDE.md` as the default planning preference guide when the request leaves implementation choices unspecified
 5. Creates or refreshes `docs/PLAN.md` from repository context or an optional plan prompt
 6. Creates `docs/SCOPE_GUARD.md`, `docs/MID_TERM_PLAN.md`, memory files, and loop state
 7. Builds a checkpoint timeline from the saved plan
@@ -198,11 +198,11 @@ The tool creates or maintains these files for each managed repository project:
 
 Source prompt and scope templates:
 
-- `src/codex_auto/docs/REFERENCE_GUIDE.md`
-- `src/codex_auto/docs/PLAN_GENERATION_PROMPT.txt`
-- `src/codex_auto/docs/STEP_EXECUTION_PROMPT.txt`
-- `src/codex_auto/docs/FINALIZATION_PROMPT.txt`
-- `src/codex_auto/docs/SCOPE_GUARD_TEMPLATE.md`
+- `src/jakal_flow/docs/REFERENCE_GUIDE.md`
+- `src/jakal_flow/docs/PLAN_GENERATION_PROMPT.txt`
+- `src/jakal_flow/docs/STEP_EXECUTION_PROMPT.txt`
+- `src/jakal_flow/docs/FINALIZATION_PROMPT.txt`
+- `src/jakal_flow/docs/SCOPE_GUARD_TEMPLATE.md`
 
 ## Notes
 

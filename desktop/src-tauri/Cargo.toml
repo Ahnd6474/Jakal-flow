@@ -1,11 +1,11 @@
 [package]
-name = "codex-auto-desktop"
+name = "jakal-flow-desktop"
 version = "0.1.0"
 edition = "2021"
-description = "React + Tauri desktop shell for codex-auto"
+description = "React + Tauri desktop shell for jakal-flow"
 
 [lib]
-name = "codex_auto_desktop_lib"
+name = "jakal_flow_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

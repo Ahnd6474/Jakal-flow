@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the codex-auto desktop shell",
+  "description": "Default capability for the jakal-flow desktop shell",
   "windows": ["main"],
   "permissions": ["core:default", "dialog:default"]
 }
