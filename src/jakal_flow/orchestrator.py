@@ -11,7 +11,7 @@ from .codex_runner import CodexRunner
 from .git_ops import GitOps
 from .memory import MemoryStore
 from .model_selection import normalize_reasoning_effort
-from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, LoopState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions, TestRunResult
+from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, LoopState, MLExperimentRecord, MLModeState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions, TestRunResult
 from .planning import (
     FINALIZATION_PROMPT_FILENAME,
     attempt_history_entry,
@@ -47,7 +47,7 @@ from .planning import (
     load_source_prompt_template,
 )
 from .reporting import Reporter
-from .utils import ensure_dir, now_utc_iso, read_json, read_last_jsonl, read_text, write_json, write_text
+from .utils import ensure_dir, normalize_workflow_mode, now_utc_iso, read_json, read_last_jsonl, read_text, write_json, write_text
 from .verification import VerificationRunner
 from .workspace import WorkspaceManager
 
@@ -135,7 +135,8 @@ class Orchestrator:
     ) -> tuple[ProjectContext, ExecutionPlanState]:
         context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
         project_prompt = project_prompt.strip()
-        planning_prompt_template = load_plan_generation_prompt_template(self._normalize_execution_mode(runtime.execution_mode))
+        workflow_mode = normalize_workflow_mode(runtime.workflow_mode)
+        planning_prompt_template = load_plan_generation_prompt_template(self._normalize_execution_mode(runtime.execution_mode), workflow_mode)
         repo_inputs = scan_repository_inputs(context.paths.repo_dir)
         runner = CodexRunner(context.runtime.codex_path)
         prompt = prompt_to_execution_plan_prompt(
@@ -181,12 +182,14 @@ class Orchestrator:
             plan_title=plan_title.strip() or context.metadata.display_name or context.metadata.slug,
             project_prompt=project_prompt.strip(),
             summary=summary.strip(),
+            workflow_mode=workflow_mode,
             execution_mode=self._normalize_execution_mode(runtime.execution_mode),
             default_test_command=runtime.test_cmd,
             last_updated_at=now_utc_iso(),
             steps=steps,
         )
         self.save_execution_plan_state(context, plan_state)
+        self._initialize_ml_mode_state(context, plan_state, project_prompt, cycle_index=self._next_ml_cycle_index(context))
         context.metadata.current_status = "plan_ready"
         context.metadata.last_run_at = now_utc_iso()
         self.workspace.save_project(context)
@@ -196,11 +199,13 @@ class Orchestrator:
         payload = read_json(context.paths.execution_plan_file, default=None)
         if not isinstance(payload, dict):
             return ExecutionPlanState(
+                workflow_mode=normalize_workflow_mode(context.runtime.workflow_mode),
                 default_test_command=context.runtime.test_cmd,
                 last_updated_at=now_utc_iso(),
                 steps=[],
             )
         state = ExecutionPlanState.from_dict(payload)
+        state.workflow_mode = normalize_workflow_mode(state.workflow_mode or context.runtime.workflow_mode)
         if not state.default_test_command:
             state.default_test_command = context.runtime.test_cmd
         fallback_effort = normalize_reasoning_effort(context.runtime.effort, fallback="high")
@@ -225,6 +230,7 @@ class Orchestrator:
 
     def save_execution_plan_state(self, context: ProjectContext, plan_state: ExecutionPlanState) -> ExecutionPlanState:
         execution_mode = self._normalize_execution_mode(plan_state.execution_mode or context.runtime.execution_mode)
+        workflow_mode = normalize_workflow_mode(plan_state.workflow_mode or context.runtime.workflow_mode)
         normalized_steps = self._normalize_execution_steps(context, plan_state.steps, plan_state.default_test_command, execution_mode)
         closeout_ready = self._all_steps_completed(normalized_steps)
         closeout_status = plan_state.closeout_status.strip() or "not_started"
@@ -242,6 +248,7 @@ class Orchestrator:
             plan_title=plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug,
             project_prompt=plan_state.project_prompt.strip(),
             summary=plan_state.summary.strip(),
+            workflow_mode=workflow_mode,
             execution_mode=execution_mode,
             default_test_command=plan_state.default_test_command.strip() or context.runtime.test_cmd,
             last_updated_at=now_utc_iso(),
@@ -255,7 +262,7 @@ class Orchestrator:
         write_json(context.paths.execution_plan_file, state.to_dict())
         write_text(
             context.paths.plan_file,
-            execution_plan_markdown(context, state.plan_title, state.project_prompt, state.summary, state.execution_mode, state.steps),
+            execution_plan_markdown(context, state.plan_title, state.project_prompt, state.summary, state.workflow_mode, state.execution_mode, state.steps),
         )
         mid_term_text, _ = build_mid_term_plan_from_plan_items(
             execution_steps_to_plan_items(state.steps),
@@ -362,6 +369,7 @@ class Orchestrator:
                     completed_at=step.completed_at,
                     commit_hash=step.commit_hash,
                     notes=step.notes.strip(),
+                    metadata=deepcopy(step.metadata) if isinstance(step.metadata, dict) else {},
                 )
             )
         if execution_mode == "parallel" and self._plan_uses_dag_parallelism(normalized_steps):
@@ -981,11 +989,16 @@ class Orchestrator:
             block_log_file=logs_dir / "blocks.jsonl",
             checkpoint_state_file=state_dir / "CHECKPOINTS.json",
             execution_plan_file=state_dir / "EXECUTION_PLAN.json",
+            ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
+            ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
+            ml_experiment_reports_dir=state_dir / "ml_experiments",
             ui_control_file=state_dir / "UI_RUN_CONTROL.json",
             ui_event_log_file=logs_dir / "ui_events.jsonl",
             execution_flow_svg_file=docs_dir / "EXECUTION_FLOW.svg",
             closeout_report_file=docs_dir / "CLOSEOUT_REPORT.md",
             closeout_report_docx_file=reports_dir / "CLOSEOUT_REPORT.docx",
+            ml_experiment_report_file=docs_dir / "ML_EXPERIMENT_REPORT.md",
+            ml_experiment_results_svg_file=docs_dir / "ML_EXPERIMENT_RESULTS.svg",
         )
 
     def _copy_parallel_worker_support_files(self, context: ProjectContext, worker_paths: ProjectPaths) -> None:
