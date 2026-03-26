@@ -70,7 +70,10 @@ class _FakeSession:
 
 class CodexAppServerTests(unittest.TestCase):
     def test_fetch_codex_backend_snapshot_formats_models_and_rate_limits(self) -> None:
-        with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", _FakeSession):
+        with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", _FakeSession), mock.patch(
+            "jakal_flow.codex_app_server.discover_local_model_catalog",
+            return_value=[],
+        ):
             snapshot = fetch_codex_backend_snapshot("codex.cmd")
 
         self.assertTrue(snapshot.available)
@@ -82,11 +85,60 @@ class CodexAppServerTests(unittest.TestCase):
         self.assertEqual(snapshot.model_catalog[1]["supported_reasoning_efforts"], ["low", "high"])
 
     def test_fetch_codex_backend_snapshot_returns_fallback_when_app_server_fails(self) -> None:
-        with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", side_effect=RuntimeError("boom")):
+        with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", side_effect=RuntimeError("boom")), mock.patch(
+            "jakal_flow.codex_app_server.discover_local_model_catalog",
+            return_value=[],
+        ):
             snapshot = fetch_codex_backend_snapshot("codex.cmd")
 
         self.assertFalse(snapshot.available)
         self.assertEqual(snapshot.model_catalog[0]["model"], "auto")
+        self.assertIn("boom", snapshot.error)
+
+    def test_fetch_codex_backend_snapshot_appends_local_models(self) -> None:
+        local_entry = {
+            "id": "ollama:qwen2.5-coder:0.5b",
+            "model": "qwen2.5-coder:0.5b",
+            "display_name": "qwen2.5-coder:0.5b (Ollama)",
+            "description": "Local Ollama model",
+            "hidden": False,
+            "is_default": False,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"],
+            "provider": "oss",
+            "local_provider": "ollama",
+        }
+        with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", _FakeSession), mock.patch(
+            "jakal_flow.codex_app_server.discover_local_model_catalog",
+            return_value=[local_entry],
+        ):
+            snapshot = fetch_codex_backend_snapshot("codex.cmd")
+
+        self.assertTrue(snapshot.available)
+        self.assertEqual(snapshot.model_catalog[-1]["model"], "qwen2.5-coder:0.5b")
+        self.assertEqual(snapshot.model_catalog[-1]["provider"], "oss")
+
+    def test_fetch_codex_backend_snapshot_stays_available_with_local_models_when_codex_fails(self) -> None:
+        local_entry = {
+            "id": "ollama:qwen2.5-coder:0.5b",
+            "model": "qwen2.5-coder:0.5b",
+            "display_name": "qwen2.5-coder:0.5b (Ollama)",
+            "description": "Local Ollama model",
+            "hidden": False,
+            "is_default": False,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"],
+            "provider": "oss",
+            "local_provider": "ollama",
+        }
+        with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", side_effect=RuntimeError("boom")), mock.patch(
+            "jakal_flow.codex_app_server.discover_local_model_catalog",
+            return_value=[local_entry],
+        ):
+            snapshot = fetch_codex_backend_snapshot("codex.cmd")
+
+        self.assertTrue(snapshot.available)
+        self.assertEqual(snapshot.model_catalog[1]["model"], "qwen2.5-coder:0.5b")
         self.assertIn("boom", snapshot.error)
 
 

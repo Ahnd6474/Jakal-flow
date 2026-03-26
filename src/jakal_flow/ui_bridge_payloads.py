@@ -148,13 +148,19 @@ def project_summary(orchestrator: Orchestrator, project: ProjectContext, plan_st
     remaining = [step.step_id for step in plan.steps if step.status != "completed"]
     recent_blocks = read_jsonl_tail(project.paths.block_log_file, 5)
     recent_statuses = [str(item.get("status", "")) for item in recent_blocks][-3:]
+    runtime_provider = str(getattr(project.runtime, "model_provider", "openai") or "openai").strip()
+    local_provider = str(getattr(project.runtime, "local_model_provider", "") or "").strip()
+    if runtime_provider == "oss":
+        provider_summary = f"local/{local_provider or 'oss'}"
+    else:
+        provider_summary = "openai"
     lines = [
         f"Name: {project.metadata.display_name or project.metadata.slug}",
         f"Directory: {project.metadata.repo_path}",
         f"GitHub: {project.metadata.origin_url or 'Not connected'}",
         f"Branch: {project.metadata.branch}",
         f"Status: {project.metadata.current_status}",
-        f"Model: {project.runtime.model}  ({project.runtime.effort})",
+        f"Model: {project.runtime.model}  ({project.runtime.effort}) [{provider_summary}]",
         f"Verification: {plan.default_test_command or project.runtime.test_cmd}",
         f"Remaining Steps: {', '.join(remaining) if remaining else 'None'}",
         f"Closeout: {plan.closeout_status}",

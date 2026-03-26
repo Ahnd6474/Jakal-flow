@@ -3,8 +3,12 @@ import {
   AUTO_REASONING_OPTION,
   autoRoutingPresetLabel,
   configReasoningOptions,
+  defaultModelForRuntime,
   defaultReasoningOption,
+  filterModelCatalogByProvider,
   findModelCatalogEntry,
+  normalizedLocalModelProvider,
+  normalizedModelProvider,
   reasoningEffortLabel,
   runtimeSummary,
   selectedConfigReasoning,
@@ -69,6 +73,27 @@ function updateRuntimeModel(currentRuntime, modelCatalog, nextModel, nextEffort 
   };
 }
 
+function updateRuntimeProvider(currentRuntime, modelCatalog, nextProvider, nextLocalProvider = null) {
+  const modelProvider = nextProvider === "oss" ? "oss" : "openai";
+  const localModelProvider = modelProvider === "oss" ? (nextLocalProvider === "lmstudio" ? "lmstudio" : "ollama") : "";
+  const nextRuntime = {
+    ...currentRuntime,
+    model_provider: modelProvider,
+    local_model_provider: localModelProvider,
+    model_preset: "",
+    model_selection_mode: "slug",
+  };
+  const resolvedModel = defaultModelForRuntime(modelCatalog, nextRuntime);
+  return updateRuntimeModel(
+    {
+      ...nextRuntime,
+      model_slug_input: resolvedModel,
+    },
+    filterModelCatalogByProvider(modelCatalog, nextRuntime),
+    resolvedModel,
+  );
+}
+
 export function ConfigEditorView({
   form,
   modelPresets,
@@ -80,12 +105,15 @@ export function ConfigEditorView({
 }) {
   const runtime = form.runtime || {};
   const { language, t } = useI18n();
-  const selectedModel = runtime.model || "auto";
-  const selectedCatalogEntry = findModelCatalogEntry(modelCatalog, selectedModel);
-  const supportedEfforts = configReasoningOptions(modelCatalog, selectedModel, runtime.effort || "medium");
-  const selectedEffort = selectedConfigReasoning(modelCatalog, runtime);
+  const selectedProvider = normalizedModelProvider(runtime);
+  const selectedLocalProvider = normalizedLocalModelProvider(runtime);
+  const scopedModelCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
+  const selectedModel = runtime.model || defaultModelForRuntime(modelCatalog, runtime) || "auto";
+  const selectedCatalogEntry = findModelCatalogEntry(scopedModelCatalog, selectedModel);
+  const supportedEfforts = configReasoningOptions(scopedModelCatalog, selectedModel, runtime.effort || "medium");
+  const selectedEffort = selectedConfigReasoning(scopedModelCatalog, runtime);
 
-  const visibleModels = (modelCatalog || []).filter(
+  const visibleModels = (scopedModelCatalog || []).filter(
     (item) => item && item.model && (item.model !== "auto" || selectedModel === "auto"),
   );
   const allModels = visibleModels.length
@@ -209,6 +237,40 @@ export function ConfigEditorView({
               <span>{t("config.advancedModelSettingsDescription")}</span>
             </div>
             <label className="field">
+              <span>{t("field.modelProvider")}</span>
+              <select
+                value={selectedProvider}
+                onChange={(event) =>
+                  onChangeForm((current) => ({
+                    ...current,
+                    runtime: updateRuntimeProvider(current.runtime, modelCatalog, event.target.value),
+                  }))
+                }
+                disabled={busy}
+              >
+                <option value="openai">{t("option.providerOpenAI")}</option>
+                <option value="oss">{t("option.providerOSS")}</option>
+              </select>
+            </label>
+            {selectedProvider === "oss" ? (
+              <label className="field">
+                <span>{t("field.localProvider")}</span>
+                <select
+                  value={selectedLocalProvider}
+                  onChange={(event) =>
+                    onChangeForm((current) => ({
+                      ...current,
+                      runtime: updateRuntimeProvider(current.runtime, modelCatalog, "oss", event.target.value),
+                    }))
+                  }
+                  disabled={busy}
+                >
+                  <option value="ollama">{t("option.localProviderOllama")}</option>
+                  <option value="lmstudio">{t("option.localProviderLmStudio")}</option>
+                </select>
+              </label>
+            ) : null}
+            <label className="field">
               <span>{t("field.customModelSlug")}</span>
               <input
                 value={runtime.model_slug_input || runtime.model || ""}
@@ -220,7 +282,7 @@ export function ConfigEditorView({
                         ...current.runtime,
                         model_slug_input: event.target.value,
                       },
-                      modelCatalog,
+                      scopedModelCatalog,
                       event.target.value,
                     ),
                   }))
@@ -276,7 +338,7 @@ export function ConfigEditorView({
                 onChange={(event) =>
                   onChangeForm((current) => ({
                     ...current,
-                    runtime: updateRuntimeModel(current.runtime, modelCatalog, event.target.value),
+                    runtime: updateRuntimeModel(current.runtime, scopedModelCatalog, event.target.value),
                   }))
                 }
                 disabled={busy}
@@ -307,7 +369,7 @@ export function ConfigEditorView({
                   onSelect={(nextEffort) =>
                     onChangeForm((current) => ({
                       ...current,
-                      runtime: updateRuntimeModel(current.runtime, modelCatalog, selectedModel, nextEffort),
+                      runtime: updateRuntimeModel(current.runtime, scopedModelCatalog, selectedModel, nextEffort),
                     }))
                   }
                   disabled={busy}

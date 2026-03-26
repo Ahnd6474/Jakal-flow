@@ -12,7 +12,6 @@ from typing import Any
 
 from .codex_app_server import fetch_codex_backend_snapshot
 from .model_constants import AUTO_MODEL_SLUG, DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER
-from .model_constants import AUTO_MODEL_SLUG
 from .model_selection import (
     DEFAULT_MODEL_PRESET_ID,
     MODEL_PRESETS,

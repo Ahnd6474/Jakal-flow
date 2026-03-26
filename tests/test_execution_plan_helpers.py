@@ -830,6 +830,19 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(selection.codex_variant_slug, "codex")
         self.assertEqual(selection.direct_slug, "gpt-5.4-codex")
 
+    def test_model_selection_from_runtime_keeps_oss_models_in_direct_slug_mode(self) -> None:
+        runtime = RuntimeOptions(
+            model_provider="oss",
+            local_model_provider="ollama",
+            model="qwen2.5-coder:0.5b",
+            effort="medium",
+        )
+
+        selection = model_selection_from_runtime(runtime)
+
+        self.assertEqual(selection.mode, MODEL_MODE_SLUG)
+        self.assertEqual(selection.direct_slug, "qwen2.5-coder:0.5b")
+
     def test_model_preset_helpers_match_runtime(self) -> None:
         preset = model_preset_by_id(DEFAULT_MODEL_PRESET_ID)
         runtime = RuntimeOptions(model=preset.model, model_preset=preset.preset_id, effort=preset.effort)

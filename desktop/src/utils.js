@@ -25,6 +25,8 @@ export const AUTO_REASONING_OPTION = "auto";
 export const REASONING_OPTIONS = ["low", "medium", "high", "xhigh"];
 export const MODEL_REASONING_OPTIONS = [AUTO_REASONING_OPTION, ...REASONING_OPTIONS];
 export const PROGRAM_RUNTIME_KEYS = [
+  "model_provider",
+  "local_model_provider",
   "approval_mode",
   "sandbox_mode",
   "checkpoint_interval_blocks",
@@ -37,6 +39,8 @@ export const PROGRAM_RUNTIME_KEYS = [
 export const PROGRAM_UI_KEYS = ["ui_theme"];
 
 const DEFAULT_PROGRAM_RUNTIME = {
+  model_provider: "openai",
+  local_model_provider: "ollama",
   approval_mode: "never",
   sandbox_mode: "danger-full-access",
   checkpoint_interval_blocks: 1,
@@ -499,6 +503,40 @@ export function findModelCatalogEntry(modelCatalog = [], model = "") {
   return modelCatalog.find((item) => String(item?.model || "").trim().toLowerCase() === target) || null;
 }
 
+export function normalizedModelProvider(runtime = {}) {
+  return String(runtime?.model_provider || "openai").trim().toLowerCase() === "oss" ? "oss" : "openai";
+}
+
+export function normalizedLocalModelProvider(runtime = {}) {
+  return String(runtime?.local_model_provider || "ollama").trim().toLowerCase() === "lmstudio" ? "lmstudio" : "ollama";
+}
+
+export function filterModelCatalogByProvider(modelCatalog = [], runtime = {}) {
+  const provider = normalizedModelProvider(runtime);
+  const localProvider = normalizedLocalModelProvider(runtime);
+  return (modelCatalog || []).filter((item) => {
+    const itemProvider = String(item?.provider || "openai").trim().toLowerCase() || "openai";
+    if (itemProvider !== provider) {
+      return false;
+    }
+    if (provider !== "oss") {
+      return true;
+    }
+    const itemLocalProvider = String(item?.local_provider || "").trim().toLowerCase();
+    return !itemLocalProvider || itemLocalProvider === localProvider;
+  });
+}
+
+export function defaultModelForRuntime(modelCatalog = [], runtime = {}) {
+  const scopedCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
+  const visible = scopedCatalog.filter((item) => !item?.hidden);
+  const preferred = visible[0] || scopedCatalog[0] || null;
+  if (preferred?.model) {
+    return preferred.model;
+  }
+  return normalizedModelProvider(runtime) === "oss" ? "" : "auto";
+}
+
 export function supportedReasoningOptions(modelCatalog = [], model = "", fallback = "medium") {
   const entry = findModelCatalogEntry(modelCatalog, model);
   const options = (entry?.supported_reasoning_efforts || []).filter((effort) => REASONING_OPTIONS.includes(effort));
@@ -606,13 +644,17 @@ export function firstSelectableStepId(plan) {
 }
 
 export function runtimeSummary(runtime, modelPresets = [], language = "en", modelCatalog = []) {
+  const providerPrefix =
+    normalizedModelProvider(runtime) === "oss"
+      ? `Local/${normalizedLocalModelProvider(runtime) === "lmstudio" ? "LM Studio" : "Ollama"}`
+      : "OpenAI/Codex";
   const executionSuffix =
     String(runtime?.execution_mode || "serial").trim().toLowerCase() === "parallel"
       ? ` | parallel x${Math.max(1, Number.parseInt(String(runtime?.parallel_workers || 2), 10) || 1)}`
       : " | serial";
   const preset = modelPresets.find((item) => item.preset_id === runtime?.model_preset);
-  if (preset) {
-    const summary = `${preset.summary}${executionSuffix}`;
+  if (preset && normalizedModelProvider(runtime) !== "oss") {
+    const summary = `${providerPrefix} | ${preset.summary}${executionSuffix}`;
     return runtime?.use_fast_mode ? `${summary} | /fast` : summary;
   }
   if (runtime?.model) {
@@ -623,13 +665,13 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
         : reasoningEffortLabel(runtime.effort || "high", language);
     if (normalizeLanguage(language) === "ko") {
       const summary = translate("ko", "runtime.modelSummary", {
-        model: label,
+        model: `${providerPrefix} | ${label}`,
         effort: effortLabel,
       });
       const nextSummary = `${summary}${executionSuffix}`;
       return runtime?.use_fast_mode ? `${nextSummary} | /fast` : nextSummary;
     }
-    const summary = `${label} | reasoning ${effortLabel}${executionSuffix}`;
+    const summary = `${providerPrefix} | ${label} | reasoning ${effortLabel}${executionSuffix}`;
     return runtime?.use_fast_mode ? `${summary} | /fast` : summary;
   }
   return translate(language, "runtime.noModelSelected");

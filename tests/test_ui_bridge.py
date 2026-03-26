@@ -166,6 +166,21 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.model, "gpt-5.4")
         self.assertTrue(runtime.generate_word_report)
 
+    def test_runtime_from_payload_normalizes_local_model_provider(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "oss",
+                "local_model_provider": "",
+                "model": "qwen2.5-coder:0.5b",
+                "model_preset": "high",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "oss")
+        self.assertEqual(runtime.local_model_provider, "ollama")
+        self.assertEqual(runtime.model, "qwen2.5-coder:0.5b")
+        self.assertEqual(runtime.model_preset, "")
+
     def test_bootstrap_exposes_workspace_and_model_presets(self) -> None:
         with TemporaryTestDir() as temp_dir:
             with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):

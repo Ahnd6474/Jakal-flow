@@ -71,6 +71,36 @@ export function AppSettingsView({
             </div>
             <div className="choice-grid">
               <label className="field">
+                <span>{t("field.modelProvider")}</span>
+                <select
+                  value={settings.model_provider || "openai"}
+                  onChange={(event) =>
+                    onChangeSettings((current) => ({
+                      ...current,
+                      model_provider: event.target.value,
+                      local_model_provider: event.target.value === "oss" ? (current.local_model_provider || "ollama") : "",
+                    }))
+                  }
+                  disabled={busy}
+                >
+                  <option value="openai">{t("option.providerOpenAI")}</option>
+                  <option value="oss">{t("option.providerOSS")}</option>
+                </select>
+              </label>
+              {String(settings.model_provider || "openai").trim().toLowerCase() === "oss" ? (
+                <label className="field">
+                  <span>{t("field.localProvider")}</span>
+                  <select
+                    value={settings.local_model_provider || "ollama"}
+                    onChange={(event) => onChangeSettings((current) => ({ ...current, local_model_provider: event.target.value }))}
+                    disabled={busy}
+                  >
+                    <option value="ollama">{t("option.localProviderOllama")}</option>
+                    <option value="lmstudio">{t("option.localProviderLmStudio")}</option>
+                  </select>
+                </label>
+              ) : null}
+              <label className="field">
                 <span>{t("field.approvalMode")}</span>
                 <select
                   value={settings.approval_mode || "never"}

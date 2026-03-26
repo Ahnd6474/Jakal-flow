@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from .codex_app_server import is_auto_model, resolve_codex_path
+from .model_providers import normalize_local_model_provider, normalize_model_provider
 from .models import CodexRunResult, ProjectContext
 from .utils import compact_text, decode_process_output, ensure_dir, parse_json_text, read_text, write_json, write_text
 
@@ -35,7 +36,13 @@ class CodexRunner:
         formatted_prompt = self._format_prompt(context, prompt)
         write_text(prompt_file, formatted_prompt)
 
-        command = [self.codex_path, "-a", context.runtime.approval_mode]
+        command = [self.codex_path]
+        if normalize_model_provider(getattr(context.runtime, "model_provider", "")) == "oss":
+            command.append("--oss")
+            local_provider = normalize_local_model_provider(getattr(context.runtime, "local_model_provider", ""))
+            if local_provider:
+                command.extend(["--local-provider", local_provider])
+        command.extend(["-a", context.runtime.approval_mode])
         if search_enabled:
             command.append("--search")
         command.extend(

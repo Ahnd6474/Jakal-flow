@@ -1,6 +1,6 @@
 # jakal-flow
 
-`jakal-flow` is a production-oriented Python CLI for managing multiple repositories inside an isolated workspace and repeatedly running a traceable Codex-driven improvement loop against them.
+`jakal-flow` is a production-oriented Python CLI for managing multiple repositories inside an isolated workspace and repeatedly running a traceable Codex-driven improvement loop against them through Codex CLI, including both the default OpenAI/Codex cloud models and local OSS providers such as Ollama.
 
 It is designed around a saved project plan:
 
@@ -55,6 +55,7 @@ npm.cmd run tauri:dev
 The Tauri shell keeps the Python orchestration backend and adds:
 
 - a React setup screen for managed projects, GitHub link mode, model preset selection, and verification commands
+- OpenAI/Codex cloud and local OSS model-provider selection, including local provider routing such as Ollama
 - a flow screen with prompt editing, plan generation, step editing, run control, closeout, and stop-after-step requests
 - background job polling through a Python JSON bridge instead of keeping UI execution state only in memory
 - desktop UI trace files under each managed project for stop requests and UI event history
@@ -113,6 +114,23 @@ python -m jakal_flow run \
   --sandbox-mode workspace-write \
   --test-cmd "python -m pytest" \
   --max-blocks 2
+```
+
+Run against a local OSS model through Codex CLI's local-provider mode:
+
+```bash
+python -m jakal_flow run \
+  --repo-url https://github.com/example/project.git \
+  --branch main \
+  --workspace-root .jakal-flow-workspace \
+  --model-provider oss \
+  --local-model-provider ollama \
+  --model qwen2.5-coder:0.5b \
+  --effort medium \
+  --approval-mode never \
+  --sandbox-mode workspace-write \
+  --test-cmd "python -m pytest" \
+  --max-blocks 1
 ```
 
 Resume a managed repository:
@@ -217,6 +235,7 @@ Source prompt and scope templates:
 ## Notes
 
 - `codex exec` is invoked through subprocess in non-interactive mode and JSON event streams are saved under `logs/block_*/`
+- local OSS runs are still executed through Codex CLI, using its `--oss` and `--local-provider` flags when a project runtime selects a local provider
 - the GUI saves both the resolved execution model slug and the selected preset in `project_config.json`; auto-model presets are normalized to `auto`, `low`, `medium`, `high`, or `xhigh`, and previously saved custom model slugs are still preserved
 - `reasoning.effort` is passed through to Codex using `low`, `medium`, `high`, or `xhigh`; saved execution-plan steps can override the project default per step
 - token usage is aggregated from `turn.completed` JSON events and surfaced in the GUI dashboard and pass logs

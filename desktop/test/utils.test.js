@@ -93,6 +93,8 @@ test("program settings helpers keep global runtime controls separate from projec
   });
 
   assert.deepEqual(settings, {
+    model_provider: "openai",
+    local_model_provider: "ollama",
     approval_mode: "untrusted",
     sandbox_mode: "workspace-write",
     checkpoint_interval_blocks: 1,
@@ -116,6 +118,8 @@ test("program settings helpers keep global runtime controls separate from projec
     {
       model: "gpt-5.4",
       test_cmd: "pytest -q",
+      model_provider: "openai",
+      local_model_provider: "ollama",
       approval_mode: "untrusted",
       sandbox_mode: "workspace-write",
       checkpoint_interval_blocks: 1,
@@ -144,6 +148,8 @@ test("program settings helpers keep global runtime controls separate from projec
       runtime: {
         model: "gpt-5.4",
         test_cmd: "pytest -q",
+        model_provider: "openai",
+        local_model_provider: "ollama",
         approval_mode: "untrusted",
         sandbox_mode: "workspace-write",
         checkpoint_interval_blocks: 1,
@@ -558,15 +564,39 @@ test("runtimeSummary reflects execution mode in preset and direct model summarie
       { model_preset: "balanced" },
       [{ preset_id: "balanced", summary: "Balanced preset" }],
     ),
-    "Balanced preset | serial",
+    "OpenAI/Codex | Balanced preset | serial",
   );
-  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low" }, []), "gpt-5.4 | reasoning Low | serial");
-  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "medium", effort_selection_mode: "auto" }, []), "gpt-5.4 | reasoning Auto | serial");
-  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low", use_fast_mode: true }, []), "gpt-5.4 | reasoning Low | serial | /fast");
-  assert.equal(runtimeSummary({ model: "gpt-5.4" }), "gpt-5.4 | reasoning High | serial");
-  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "high", execution_mode: "parallel", parallel_workers: 4 }, []), "gpt-5.4 | reasoning High | parallel x4");
+  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low" }, []), "OpenAI/Codex | gpt-5.4 | reasoning Low | serial");
+  assert.equal(
+    runtimeSummary({ model: "gpt-5.4", effort: "medium", effort_selection_mode: "auto" }, []),
+    "OpenAI/Codex | gpt-5.4 | reasoning Auto | serial",
+  );
+  assert.equal(
+    runtimeSummary({ model: "gpt-5.4", effort: "low", use_fast_mode: true }, []),
+    "OpenAI/Codex | gpt-5.4 | reasoning Low | serial | /fast",
+  );
+  assert.equal(runtimeSummary({ model: "gpt-5.4" }), "OpenAI/Codex | gpt-5.4 | reasoning High | serial");
+  assert.equal(
+    runtimeSummary({ model: "gpt-5.4", effort: "high", execution_mode: "parallel", parallel_workers: 4 }, []),
+    "OpenAI/Codex | gpt-5.4 | reasoning High | parallel x4",
+  );
   assert.equal(runtimeSummary({}, undefined), "No model selected");
-  assert.match(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), /^gpt-5\.4 .* serial$/);
+  assert.match(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), /^OpenAI\/Codex \| gpt-5\.4 .* serial$/);
+});
+
+test("runtimeSummary includes the selected local provider for OSS models", () => {
+  assert.equal(
+    runtimeSummary(
+      {
+        model_provider: "oss",
+        local_model_provider: "ollama",
+        model: "qwen2.5-coder:0.5b",
+        effort: "medium",
+      },
+      [],
+    ),
+    "Local/Ollama | qwen2.5-coder:0.5b | reasoning Medium | serial",
+  );
 });
 
 test("config reasoning helpers keep auto separate from explicit efforts", () => {
