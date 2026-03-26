@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from .process_supervisor import hidden_window_creationflags, terminate_process
+from .process_supervisor import hidden_window_creationflags, hidden_window_startupinfo, terminate_process
 from .utils import decode_process_output, now_utc_iso, read_json, write_json
 
 
@@ -179,6 +179,7 @@ def start_cloudflare_quick_tunnel(workspace_root: Path, target_url: str, cloudfl
         errors="replace",
         bufsize=1,
         creationflags=hidden_window_creationflags(),
+        startupinfo=hidden_window_startupinfo(),
     )
     assert process.stdout is not None
 
