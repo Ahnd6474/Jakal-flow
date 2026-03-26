@@ -13,3 +13,6 @@ desktop/src-tauri/target/
 .tmp_ui_bridge_tests/
 .tmp_step_reasoning_test/
 .tmp_share_tests/
+.tmp_failure_reporting_tests/
+.tmp_serial_parallel_group_test/
+.tmp_parallel_dag_plan_test/

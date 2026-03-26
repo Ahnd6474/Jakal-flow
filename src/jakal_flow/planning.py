@@ -424,6 +424,16 @@ def parse_execution_plan_response(
             fallback=fallback_effort,
         )
         parallel_group = str(item.get("parallel_group", "")).strip()
+        raw_dependencies = item.get("depends_on", [])
+        if isinstance(raw_dependencies, list):
+            depends_on = [str(value).strip() for value in raw_dependencies if str(value).strip()]
+        else:
+            depends_on = [part.strip() for part in str(raw_dependencies).replace("\n", ",").split(",") if part.strip()]
+        raw_owned_paths = item.get("owned_paths", [])
+        if isinstance(raw_owned_paths, list):
+            owned_paths = [str(value).strip() for value in raw_owned_paths if str(value).strip()]
+        else:
+            owned_paths = [part.strip() for part in str(raw_owned_paths).replace("\n", ",").split(",") if part.strip()]
         steps.append(
             ExecutionStep(
                 step_id=str(item.get("step_id", item.get("node_id", ""))).strip() or f"ST{len(steps) + 1}",
@@ -434,8 +444,8 @@ def parse_execution_plan_response(
                 success_criteria=str(item.get("success_criteria", "")).strip(),
                 reasoning_effort=reasoning_effort,
                 parallel_group=parallel_group,
-                depends_on=item.get("depends_on", []),
-                owned_paths=item.get("owned_paths", []),
+                depends_on=depends_on,
+                owned_paths=owned_paths,
                 status="pending",
             )
         )

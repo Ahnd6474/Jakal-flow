@@ -120,8 +120,9 @@ class Reporter:
         recent_tests = read_jsonl_tail(self.context.paths.logs_dir / "test_runs.jsonl", 5)
         generated_at = now_utc_iso()
         safe_name = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in failure_type.strip().lower())
-        safe_name = safe_name.strip("-") or "failure"
-        stem = f"{generated_at.replace(':', '').replace('-', '').replace('+', '').replace('T', 't')}_{safe_name}"
+        safe_name = (safe_name.strip("-") or "failure")[:16]
+        timestamp_token = "".join(char for char in generated_at if char.isdigit())[:14] or "00000000000000"
+        stem = f"{timestamp_token}_{safe_name}"
         payload = {
             "generated_at": generated_at,
             "failure_type": failure_type,
@@ -136,8 +137,8 @@ class Reporter:
             "latest_report": latest_report if isinstance(latest_report, dict) else {},
             "extra": extra or {},
         }
-        json_path = self.context.paths.reports_dir / f"{stem}.pr_failure.json"
-        md_path = self.context.paths.reports_dir / f"{stem}.pr_failure.md"
+        json_path = self.context.paths.reports_dir / f"{stem}.prfail.json"
+        md_path = self.context.paths.reports_dir / f"{stem}.prfail.md"
         write_json(json_path, payload)
         write_text(md_path, self.format_pr_failure_report(payload))
         payload["report_json_file"] = str(json_path)

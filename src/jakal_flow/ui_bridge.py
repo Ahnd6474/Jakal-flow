@@ -399,6 +399,19 @@ def progress_caption(plan_state: ExecutionPlanState) -> str:
         if plan_state.closeout_status == "failed":
             return f"Completed {completed}/{total} steps, closeout failed"
         return f"Completed {completed}/{total} steps, closeout pending"
+    uses_dag = (
+        str(plan_state.execution_mode).strip().lower() == "parallel"
+        and any(step.depends_on or step.owned_paths for step in plan_state.steps)
+    )
+    if uses_dag:
+        completed_ids = {step.step_id for step in plan_state.steps if step.status == "completed"}
+        ready = [
+            step.step_id
+            for step in plan_state.steps
+            if step.status != "completed"
+            and all(dependency in completed_ids for dependency in step.depends_on)
+        ]
+        return f"Completed {completed}/{total} steps, ready: {', '.join(ready) if ready else 'blocked'}"
     next_step = next((step.step_id for step in plan_state.steps if step.status != "completed"), "done")
     return f"Completed {completed}/{total} steps, next: {next_step}"
 
