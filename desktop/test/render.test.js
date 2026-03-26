@@ -122,8 +122,7 @@ function baseWorkspaceProps(overrides = {}) {
       },
     },
     shareSettings: {
-      bind_host: "127.0.0.1",
-      public_base_url: "",
+      bind_host: "0.0.0.0",
     },
     programSettings: {
       developer_mode: false,
@@ -385,6 +384,40 @@ test("IdeToolbar prioritizes the debugging status over the generic active comman
   });
 
   assert.match(html, /Debugging/);
+});
+
+test("AppSettingsView omits the removed subsection helper copy", async () => {
+  const html = await renderBundledComponent(
+    "app-settings-render",
+    "./src/components/views/AppSettingsView.jsx",
+    "AppSettingsView",
+    {
+      settings: {
+        ui_theme: "dark",
+        developer_mode: false,
+        model_provider: "openai",
+        local_model_provider: "ollama",
+        dashboard_visibility: {},
+      },
+      shareSettings: {
+        bind_host: "0.0.0.0",
+      },
+      shareDetail: null,
+      busy: false,
+      onChangeSettings: noop,
+      onGenerateShareLink: noop,
+      onCopyShareLink: noop,
+      onRevokeShareLink: noop,
+      onChangeShareSettings: noop,
+    },
+  );
+
+  assert.doesNotMatch(html, /These preferences affect the desktop shell itself\./);
+  assert.doesNotMatch(html, /Show only the dashboard cards you want to keep visible\./);
+  assert.doesNotMatch(html, /These defaults are reused across projects unless a project-specific field replaces them\./);
+  assert.match(html, /Application/);
+  assert.match(html, /Dashboard/);
+  assert.match(html, /Execution Defaults/);
 });
 
 test("RunProgressPanel renders current work, progress, and recent activity", async () => {
@@ -694,8 +727,7 @@ test("AppSettingsView exposes dashboard visibility controls", async () => {
         dashboard_visibility: {},
       },
       shareSettings: {
-        bind_host: "127.0.0.1",
-        public_base_url: "",
+        bind_host: "0.0.0.0",
       },
       shareDetail: {
         server: {
@@ -719,6 +751,60 @@ test("AppSettingsView exposes dashboard visibility controls", async () => {
   assert.match(html, /Codex Usage/);
   assert.doesNotMatch(html, /Billing Mode/);
   assert.doesNotMatch(html, /Input \$ \/ 1M/);
+});
+
+test("AppSettingsView remote monitor fixes sharing to 0.0.0.0 and share link only", async () => {
+  const html = await renderBundledComponent(
+    "app-settings-share-view-render",
+    "./src/components/views/AppSettingsView.jsx",
+    "AppSettingsView",
+    {
+      settings: {
+        ui_theme: "dark",
+        developer_mode: false,
+        model_provider: "openai",
+        model: "gpt-5.4",
+        model_preset: "",
+        model_selection_mode: "slug",
+        model_slug_input: "gpt-5.4",
+        approval_mode: "never",
+        sandbox_mode: "danger-full-access",
+        checkpoint_interval_blocks: 1,
+        execution_mode: "serial",
+        parallel_workers: 2,
+        codex_path: "codex.cmd",
+        allow_push: true,
+        require_checkpoint_approval: false,
+        dashboard_visibility: {},
+      },
+      shareSettings: {
+        bind_host: "0.0.0.0",
+      },
+      shareDetail: {
+        server: {
+          running: true,
+          base_url: "http://127.0.0.1:43123",
+        },
+        active_session: {
+          share_url: "https://demo.trycloudflare.com/share/view?session=demo&token=secret",
+          local_url: "http://127.0.0.1:43123/share/view?session=demo&token=secret",
+          expires_at: "2026-03-26T11:00:00+00:00",
+        },
+      },
+      busy: false,
+      onChangeSettings: noop,
+      onGenerateShareLink: noop,
+      onCopyShareLink: noop,
+      onRevokeShareLink: noop,
+      onChangeShareSettings: noop,
+    },
+  );
+
+  assert.match(html, /0\.0\.0\.0/);
+  assert.match(html, /Share Link/);
+  assert.doesNotMatch(html, /Local Link/);
+  assert.doesNotMatch(html, /Public Share Base URL/);
+  assert.doesNotMatch(html, /127\.0\.0\.1/);
 });
 
 test("ConfigEditorView no longer renders the advanced settings section", async () => {

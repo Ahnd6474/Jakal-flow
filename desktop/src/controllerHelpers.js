@@ -4,15 +4,13 @@ export function messagePayload(tone, text) {
 
 export function defaultShareSettings() {
   return {
-    bind_host: "127.0.0.1",
-    public_base_url: "",
+    bind_host: "0.0.0.0",
   };
 }
 
 export function shareSettingsFromDetail(detail) {
   return {
-    bind_host: detail?.share?.server?.config?.bind_host || "127.0.0.1",
-    public_base_url: detail?.share?.server?.config?.public_base_url || "",
+    bind_host: detail?.share?.server?.config?.bind_host || "0.0.0.0",
   };
 }
 
@@ -24,6 +22,27 @@ export function emptyPlanDraft() {
     execution_mode: "serial",
     closeout_status: "not_started",
   };
+}
+
+export async function resolveConfirmation(requestConfirmation, fallbackConfirmation, message) {
+  if (typeof requestConfirmation === "function") {
+    try {
+      const result = await requestConfirmation(message);
+      if (result === true || result === false) {
+        return result;
+      }
+    } catch {
+      // Fall back to the browser confirm when the native dialog is unavailable.
+    }
+  }
+  if (typeof fallbackConfirmation === "function") {
+    try {
+      return fallbackConfirmation(message) === true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 export function needsExpandedProjectDetail({
