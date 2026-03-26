@@ -85,6 +85,7 @@ export function CenterWorkspace({
   modelPresets,
   modelCatalog,
   busy,
+  shareBusy,
   onChangeForm,
   onChangeProgramSettings,
   onChooseDirectory,
@@ -268,6 +269,7 @@ export function CenterWorkspace({
             shareSettings={shareSettings}
             shareDetail={detail?.share}
             busy={busy}
+            shareBusy={shareBusy}
             onChangeSettings={onChangeProgramSettings}
             onGenerateShareLink={onGenerateShareLink}
             onCopyShareLink={onCopyShareLink}
