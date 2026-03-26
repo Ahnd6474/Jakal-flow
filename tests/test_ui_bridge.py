@@ -529,7 +529,8 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(loaded["run_control"]["requested_at"], "123")
             self.assertIsNone(loaded["run_control"]["request_source"])
             self.assertEqual(len(loaded["checkpoints"]["items"]), 1)
-            self.assertEqual(loaded["checkpoints"]["pending"]["checkpoint_id"], "CP1")
+            self.assertIsNone(loaded["checkpoints"]["pending"])
+            self.assertEqual(loaded["checkpoints"]["items"][0]["status"], "approved")
 
     def test_approve_checkpoint_respects_string_push_flag_and_clears_pending_checkpoint(self) -> None:
         with TemporaryTestDir() as temp_dir:
@@ -665,6 +666,68 @@ class UIBridgeTests(unittest.TestCase):
 
             self.assertEqual(loaded["checkpoints"]["items"][0]["status"], "running")
             self.assertIsNone(loaded["checkpoints"]["pending"])
+
+    def test_load_project_normalizes_stale_awaiting_review_without_pending_flag(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Stale Review Badge Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "require_checkpoint_approval": True,
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            project_root = Path(detail["project"]["project_root"])
+            checkpoint_path = project_root / "state" / "CHECKPOINTS.json"
+            checkpoint_path.write_text(
+                json.dumps(
+                    {
+                        "checkpoints": [
+                            {
+                                "checkpoint_id": "CP1",
+                                "title": "Review me",
+                                "target_block": 1,
+                                "status": "awaiting_review",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            loop_state_path = project_root / "state" / "LOOP_STATE.json"
+            loop_state = json.loads(loop_state_path.read_text(encoding="utf-8"))
+            loop_state["current_checkpoint_id"] = None
+            loop_state["pending_checkpoint_approval"] = False
+            loop_state_path.write_text(json.dumps(loop_state), encoding="utf-8")
+
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
+                loaded = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "project_dir": str(repo_dir),
+                    },
+                )
+
+            self.assertIsNone(loaded["checkpoints"]["pending"])
+            self.assertEqual(loaded["checkpoints"]["items"][0]["status"], "approved")
 
     def test_save_project_setup_clears_stale_pending_checkpoint_when_approval_is_disabled(self) -> None:
         with TemporaryTestDir() as temp_dir:

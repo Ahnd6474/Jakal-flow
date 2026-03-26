@@ -12,6 +12,8 @@ from typing import Any
 def background_creationflags() -> int:
     if os.name != "nt":
         return 0
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return 0
     return (
         getattr(subprocess, "DETACHED_PROCESS", 0)
         | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -21,6 +23,8 @@ def background_creationflags() -> int:
 
 def hidden_window_creationflags() -> int:
     if os.name != "nt":
+        return 0
+    if os.environ.get("PYTEST_CURRENT_TEST"):
         return 0
     return getattr(subprocess, "CREATE_NO_WINDOW", 0)
 

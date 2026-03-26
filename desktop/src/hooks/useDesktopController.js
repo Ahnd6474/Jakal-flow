@@ -1,6 +1,8 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { bridgeRequest, getBridgeJob, listBridgeJobs, startBridgeJob } from "../api";
+import { bridgeRequest, listBridgeJobs, startBridgeJob, subscribeBridgeEvents } from "../api";
+import { BRIDGE_COMMANDS } from "../bridgeProtocol";
+import { bridgeEventJob, bridgeEventProject, isJobUpdatedEvent, isProjectChangedEvent } from "../controller/bridgeEvents";
 import {
   defaultShareSettings,
   emptyPlanDraft,
@@ -29,9 +31,8 @@ import {
   shouldReplaceVisibleProject,
   workspaceStatsFromProjects,
 } from "../utils";
+import { loadProjectDetail } from "../controller/projectDetails";
 import { usePersistentState } from "./usePersistentState";
-
-const AUTO_SYNC_INTERVAL_MS = 5000;
 
 export function useDesktopController() {
   const { language } = useI18n();
@@ -57,6 +58,8 @@ export function useDesktopController() {
   const [shareSettings, setShareSettings] = useState(() => defaultShareSettings());
   const projectAutosaveTimerRef = useRef(null);
   const lastAppliedDetailSignatureRef = useRef("");
+  const bridgeRefreshInFlightRef = useRef(false);
+  const activeJobRef = useRef(null);
 
   const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "run");
   const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
@@ -67,6 +70,10 @@ export function useDesktopController() {
   const [workspaceFilter, setWorkspaceFilter] = usePersistentState("jakal-flow:workspace-filter", "");
   const deferredProjectFilter = useDeferredValue(projectFilter);
   const defaultRuntime = useMemo(() => applyProgramSettings(baseRuntime, storedProgramSettings), [baseRuntime, storedProgramSettings]);
+  const wantsExpandedDetail = useMemo(
+    () => needsExpandedProjectDetail({ centerTab, sidebarTab, bottomCollapsed, bottomTab }),
+    [bottomCollapsed, bottomTab, centerTab, sidebarTab],
+  );
 
   const busy = Boolean(pendingAction || (activeJob && activeJob.status === "running"));
   const programSettingsDirty = useMemo(() => JSON.stringify(programSettings) !== JSON.stringify(programSettingsFromRuntime(storedProgramSettings)), [programSettings, storedProgramSettings]);
@@ -104,16 +111,19 @@ export function useDesktopController() {
     };
   }, []);
 
+  useEffect(() => {
+    activeJobRef.current = activeJob;
+  }, [activeJob]);
+
+  async function fetchProjectDetailBySelector(selector, options = {}) {
+    return loadProjectDetail(bridgeRequest, selector, workspaceRoot || null, {
+      refreshCodexStatus: options.refreshCodexStatus ?? false,
+      includeFull: (options.detailLevel ?? "full") === "full",
+    });
+  }
+
   async function fetchProjectDetail(repoId, options = {}) {
-    return bridgeRequest(
-      "load-project",
-      {
-        repo_id: repoId,
-        refresh_codex_status: options.refreshCodexStatus ?? true,
-        detail_level: options.detailLevel ?? "full",
-      },
-      workspaceRoot || null,
-    );
+    return fetchProjectDetailBySelector({ repoId }, options);
   }
 
   function applyListingPayload(listing, runningJob = null) {
@@ -130,10 +140,12 @@ export function useDesktopController() {
     if (runningJob) {
       setActiveJobId(runningJob.id);
       setActiveJob(runningJob);
+      activeJobRef.current = runningJob;
       return runningJob;
     }
     setActiveJobId("");
     setActiveJob(preferredJob && preferredJob.status !== "running" ? preferredJob : null);
+    activeJobRef.current = preferredJob && preferredJob.status !== "running" ? preferredJob : null;
     return null;
   }
 
@@ -142,7 +154,7 @@ export function useDesktopController() {
 
     async function initialize() {
       try {
-        const bootstrap = await bridgeRequest("bootstrap");
+        const bootstrap = await bridgeRequest(BRIDGE_COMMANDS.BOOTSTRAP);
         if (cancelled) {
           return;
         }
@@ -154,7 +166,7 @@ export function useDesktopController() {
         setStoredProgramSettings(nextProgramSettings);
         setProgramSettings(nextProgramSettings);
         setProjectForm(blankProjectForm(applyProgramSettings(bootstrap.default_runtime, nextProgramSettings)));
-        const listing = await bridgeRequest("list-projects", null, bootstrap.workspace_root);
+        const listing = await bridgeRequest(BRIDGE_COMMANDS.LIST_PROJECTS, null, bootstrap.workspace_root);
         const runningJob = await syncRunningJobSnapshot();
         if (cancelled) {
           return;
@@ -221,42 +233,79 @@ export function useDesktopController() {
   useEffect(() => {
     let cancelled = false;
 
-    async function tickJob() {
+    async function loadSelectedProject() {
       try {
-        const job = await getBridgeJob(activeJobId);
+        setLoadingProjectId(selectedProjectId);
+        const detail = await fetchProjectDetail(selectedProjectId, {
+          refreshCodexStatus: false,
+          detailLevel: wantsExpandedDetail ? "full" : "core",
+        });
         if (cancelled) {
           return;
         }
+        applyProjectDetail(detail);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadingProjectId("");
+        }
+        if (!cancelled && !pendingAction) {
+          setMessage(messagePayload("error", String(error)));
+        }
+      }
+    }
+
+    if (!selectedProjectId || pendingAction || loadingProjectId) {
+      return undefined;
+    }
+    if (
+      projectDetail?.project?.repo_id === selectedProjectId &&
+      (!wantsExpandedDetail || projectDetail?.detail_level === "full")
+    ) {
+      return undefined;
+    }
+
+    loadSelectedProject();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    defaultRuntime,
+    loadingProjectId,
+    pendingAction,
+    planDirty,
+    projectDetail?.detail_level,
+    projectDetail?.project?.repo_id,
+    selectedProjectId,
+    wantsExpandedDetail,
+    workspaceRoot,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function handleBridgeEvent(eventPayload) {
+      if (!workspaceRoot) {
+        return;
+      }
+      if (isJobUpdatedEvent(eventPayload)) {
+        const job = bridgeEventJob(eventPayload);
         if (!job) {
-          const runningJob = await syncRunningJobSnapshot(activeJobId);
-          if (!runningJob && selectedProjectId) {
-            const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: false, detailLevel: "core" });
-            if (!cancelled) {
-              applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: null });
-            }
-          }
           return;
         }
         setActiveJob(job);
         if (job.status === "running") {
-          if (selectedProjectId) {
-            try {
-              const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: false, detailLevel: "core" });
-              if (!cancelled) {
-                applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: job });
-              }
-            } catch {
-              // Ignore background refresh failures while the job is still running.
-            }
+          activeJobRef.current = job;
+          setActiveJobId(job.id || "");
+        } else if (!cancelled) {
+          activeJobRef.current = null;
+          setActiveJobId("");
+          if (job.result?.project && shouldReplaceVisibleProject(selectedProjectId, job.result.project.repo_id)) {
+            applyProjectDetail(job.result, { preserveDirtyPlan: false, runningJob: null, force: true });
           }
-          return;
-        }
-        setActiveJobId("");
-        if (job.result?.project && shouldReplaceVisibleProject(selectedProjectId, job.result.project.repo_id)) {
-          applyProjectDetail(job.result, { preserveDirtyPlan: false, runningJob: null });
-        }
-        const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
-        if (!cancelled) {
+          const listing = await bridgeRequest(BRIDGE_COMMANDS.LIST_PROJECTS, null, workspaceRoot || null);
+          if (cancelled) {
+            return;
+          }
           applyListingPayload(listing, null);
           setMessage(
             job.status === "completed"
@@ -275,206 +324,67 @@ export function useDesktopController() {
                 ),
           );
         }
-      } catch (error) {
-        if (!cancelled) {
-          try {
-            const runningJob = await syncRunningJobSnapshot(activeJobId);
-            if (!runningJob) {
-              const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
-              if (!cancelled) {
-                applyListingPayload(listing, null);
-              }
-              if (selectedProjectId) {
-                const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: false, detailLevel: "core" });
-                if (!cancelled) {
-                  applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: null });
-                }
-              }
-            }
-          } catch {
-            // Keep the last known state if local job reconciliation also fails.
-          }
-          setMessage(messagePayload("error", String(error)));
-        }
-      }
-    }
-
-    if (!activeJobId) {
-      return undefined;
-    }
-
-    tickJob();
-    const handle = window.setInterval(tickJob, 1000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(handle);
-    };
-  }, [activeJobId, defaultRuntime, language, workspaceRoot]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadSelectedProject() {
-      try {
-        setLoadingProjectId(selectedProjectId);
-        const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: false });
-        if (cancelled) {
-          return;
-        }
-        applyProjectDetail(detail);
-      } catch (error) {
-        if (!cancelled) {
-          setLoadingProjectId("");
-        }
-        if (!cancelled && !pendingAction) {
-          setMessage(messagePayload("error", String(error)));
-        }
-      }
-    }
-
-    if (!selectedProjectId || activeJobId || pendingAction || loadingProjectId) {
-      return undefined;
-    }
-    if (projectDetail?.project?.repo_id === selectedProjectId) {
-      return undefined;
-    }
-
-    loadSelectedProject();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeJobId, defaultRuntime, loadingProjectId, pendingAction, planDirty, projectDetail?.project?.repo_id, selectedProjectId, workspaceRoot]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadExpandedProjectDetail() {
-      try {
-        const detail = await fetchProjectDetail(selectedProjectId, {
-          refreshCodexStatus: centerTab === "dashboard" || (!bottomCollapsed && bottomTab === "tokens"),
-          detailLevel: "full",
-        });
-        if (cancelled) {
-          return;
-        }
-        applyProjectDetail(detail, { preserveSelectedStep: true });
-      } catch (error) {
-        if (!cancelled) {
-          setMessage(messagePayload("error", String(error)));
-        }
-      }
-    }
-
-    if (!selectedProjectId || activeJobId || pendingAction || loadingProjectId) {
-      return undefined;
-    }
-    if (projectDetail?.project?.repo_id !== selectedProjectId) {
-      return undefined;
-    }
-    if (projectDetail?.detail_level === "full") {
-      return undefined;
-    }
-    if (!needsExpandedProjectDetail({ centerTab, sidebarTab, bottomCollapsed, bottomTab })) {
-      return undefined;
-    }
-
-    loadExpandedProjectDetail();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeJobId,
-    bottomCollapsed,
-    bottomTab,
-    centerTab,
-    loadingProjectId,
-    pendingAction,
-    projectDetail?.detail_level,
-    projectDetail?.project?.repo_id,
-    selectedProjectId,
-    sidebarTab,
-    workspaceRoot,
-  ]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let syncInFlight = false;
-
-    async function syncDesktopState() {
-      if (!workspaceRoot || pendingAction || loadingProjectId || syncInFlight) {
         return;
       }
-      syncInFlight = true;
+
+      if (!isProjectChangedEvent(eventPayload) || bridgeRefreshInFlightRef.current) {
+        return;
+      }
+
+      const project = bridgeEventProject(eventPayload);
+      const eventRepoId = String(project?.repo_id || "").trim();
+      bridgeRefreshInFlightRef.current = true;
       try {
-        const runningJob = await syncRunningJobSnapshot(activeJobId);
+        const listing = await bridgeRequest(BRIDGE_COMMANDS.LIST_PROJECTS, null, workspaceRoot || null);
         if (cancelled) {
           return;
         }
-
-        const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
-        if (cancelled) {
-          return;
-        }
-        const nextProjects = applyListingPayload(listing, runningJob || null);
-        if (!selectedProjectId) {
-          if (nextProjects.length) {
-            setSelectedProjectId(nextProjects[0].repo_id);
+        const runningJob = activeJobRef.current?.status === "running" ? activeJobRef.current : null;
+        applyListingPayload(listing, runningJob);
+        if (selectedProjectId && (!eventRepoId || eventRepoId === selectedProjectId)) {
+          const detail = await fetchProjectDetail(selectedProjectId, {
+            refreshCodexStatus: false,
+            detailLevel: wantsExpandedDetail ? "full" : "core",
+          });
+          if (!cancelled) {
+            applyProjectDetail(detail, {
+              preserveSelectedStep: true,
+              runningJob,
+            });
           }
-          return;
-        }
-
-        const repoStillExists = nextProjects.some((project) => project.repo_id === selectedProjectId);
-        if (!repoStillExists) {
-          if (nextProjects.length) {
-            setSelectedProjectId(nextProjects[0].repo_id);
-          } else {
-            clearSelectedProjectState(defaultRuntime);
-          }
-          return;
-        }
-
-        const detailLevel = needsExpandedProjectDetail({ centerTab, sidebarTab, bottomCollapsed, bottomTab }) ? "full" : "core";
-        const detail = await fetchProjectDetail(selectedProjectId, {
-          refreshCodexStatus: false,
-          detailLevel,
-        });
-        if (!cancelled) {
-          applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: runningJob || null });
         }
       } catch {
-        // Keep background sync quiet; manual refresh still surfaces explicit errors.
+        // Keep event-driven refresh failures quiet; manual refresh still surfaces errors.
       } finally {
-        syncInFlight = false;
+        bridgeRefreshInFlightRef.current = false;
       }
     }
 
-    if (!workspaceRoot) {
-      return undefined;
-    }
+    let unlisten = null;
+    const subscription = subscribeBridgeEvents((eventPayload) => {
+      void handleBridgeEvent(eventPayload);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
 
-    void syncDesktopState();
-    const handle = window.setInterval(() => {
-      void syncDesktopState();
-    }, AUTO_SYNC_INTERVAL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(handle);
+      void subscription.then(() => {
+        if (typeof unlisten === "function") {
+          return unlisten();
+        }
+        return null;
+      });
     };
   }, [
-    activeJobId,
-    bottomCollapsed,
-    bottomTab,
-    centerTab,
-    defaultRuntime,
-    loadingProjectId,
-    pendingAction,
+    language,
     selectedProjectId,
-    sidebarTab,
+    wantsExpandedDetail,
     workspaceRoot,
   ]);
 
   async function refreshProjects() {
-    const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
+    const listing = await bridgeRequest(BRIDGE_COMMANDS.LIST_PROJECTS, null, workspaceRoot || null);
     const nextProjects = applyListingPayload(listing, activeJob?.status === "running" ? activeJob : null);
     if (!selectedProjectId && nextProjects.length) {
       setSelectedProjectId(nextProjects[0].repo_id);
@@ -485,11 +395,14 @@ export function useDesktopController() {
     try {
       const runningJob = await syncRunningJobSnapshot(activeJobId);
 
-      const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
+      const listing = await bridgeRequest(BRIDGE_COMMANDS.LIST_PROJECTS, null, workspaceRoot || null);
       const nextProjects = applyListingPayload(listing, runningJob);
 
       if (selectedProjectId) {
-        const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: true });
+        const detail = await fetchProjectDetail(selectedProjectId, {
+          refreshCodexStatus: true,
+          detailLevel: wantsExpandedDetail ? "full" : "core",
+        });
         applyProjectDetail(detail, { preserveSelectedStep: true, runningJob });
       } else if (nextProjects.length) {
         setSelectedProjectId(nextProjects[0].repo_id);
@@ -631,7 +544,7 @@ export function useDesktopController() {
     const formToSave = applyProgramSettingsToForm(formOverride || projectForm, storedProgramSettings);
     await withPending("save-project-setup", async () => {
       const detail = await bridgeRequest(
-        "save-project-setup",
+        BRIDGE_COMMANDS.SAVE_PROJECT_SETUP,
         buildProjectPayload(formToSave),
         workspaceRoot || null,
       );
@@ -683,7 +596,7 @@ export function useDesktopController() {
     }
     await withPending("delete-project", async () => {
       const result = await bridgeRequest(
-        "delete-project",
+        BRIDGE_COMMANDS.DELETE_PROJECT,
         {
           repo_id: selectedProjectId,
         },
@@ -708,7 +621,7 @@ export function useDesktopController() {
     }
     await withPending("delete-project", async () => {
       const result = await bridgeRequest(
-        "delete-project",
+        BRIDGE_COMMANDS.DELETE_PROJECT,
         {
           repo_id: repoId,
         },
@@ -734,7 +647,7 @@ export function useDesktopController() {
       return;
     }
     await withPending("delete-all-projects", async () => {
-      const result = await bridgeRequest("delete-all-projects", {}, workspaceRoot || null);
+      const result = await bridgeRequest(BRIDGE_COMMANDS.DELETE_ALL_PROJECTS, {}, workspaceRoot || null);
       setProjects(result.projects || []);
       setWorkspaceStats(result.workspace || null);
       clearSelectedProjectState(defaultRuntime);
@@ -749,7 +662,7 @@ export function useDesktopController() {
     }
     await withPending("save-plan", async () => {
       const detail = await bridgeRequest(
-        "save-plan",
+        BRIDGE_COMMANDS.SAVE_PLAN,
         buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft),
         workspaceRoot || null,
       );
@@ -775,7 +688,7 @@ export function useDesktopController() {
     }
     await withPending("reset-plan", async () => {
       const detail = await bridgeRequest(
-        "reset-plan",
+        BRIDGE_COMMANDS.RESET_PLAN,
         buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings)),
         workspaceRoot || null,
       );
@@ -829,7 +742,7 @@ export function useDesktopController() {
     if ((planDraft?.steps || []).length && !window.confirm(translate(language, "prompt.confirmRegeneratePlan"))) {
       return;
     }
-    await startJob("generate-plan", {
+    await startJob(BRIDGE_COMMANDS.GENERATE_PLAN, {
       ...buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings)),
       prompt,
       max_steps: Math.max(1, Number.parseInt(String(projectForm.runtime?.max_blocks || 5), 10) || 1),
@@ -841,7 +754,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.createStepBeforeRun")));
       return;
     }
-    await startJob("run-plan", buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
+    await startJob(BRIDGE_COMMANDS.RUN_PLAN, buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
   }
 
   async function runCloseout() {
@@ -856,7 +769,7 @@ export function useDesktopController() {
     if (!window.confirm(translate(language, "prompt.confirmCloseout"))) {
       return;
     }
-    await startJob("run-closeout", buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
+    await startJob(BRIDGE_COMMANDS.RUN_CLOSEOUT, buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
   }
 
   async function requestStop() {
@@ -865,20 +778,16 @@ export function useDesktopController() {
     }
     await withPending("request-stop", async () => {
       await bridgeRequest(
-        "request-stop",
+        BRIDGE_COMMANDS.REQUEST_STOP,
         {
           project_dir: projectForm.project_dir.trim(),
           source: "tauri-react-ui",
         },
         workspaceRoot || null,
       );
-      const detail = await bridgeRequest(
-        "load-project",
-        {
-          project_dir: projectForm.project_dir.trim(),
-          refresh_codex_status: false,
-        },
-        workspaceRoot || null,
+      const detail = await fetchProjectDetailBySelector(
+        { projectDir: projectForm.project_dir.trim() },
+        { refreshCodexStatus: false, detailLevel: wantsExpandedDetail ? "full" : "core" },
       );
       applyProjectDetail(detail, { preserveSelectedStep: true });
       setMessage(messagePayload("info", translate(language, "message.stopRequested")));
@@ -909,7 +818,7 @@ export function useDesktopController() {
     }
     await withPending("create_share_session", async () => {
       const detail = await bridgeRequest(
-        "create_share_session",
+        BRIDGE_COMMANDS.CREATE_SHARE_SESSION,
         {
           project_dir: projectForm.project_dir.trim(),
           created_by: "tauri-react-ui",
@@ -946,7 +855,7 @@ export function useDesktopController() {
     }
     await withPending("revoke_share_session", async () => {
       const detail = await bridgeRequest(
-        "revoke_share_session",
+        BRIDGE_COMMANDS.REVOKE_SHARE_SESSION,
         {
           project_dir: projectForm.project_dir.trim(),
           session_id: sessionId,
@@ -968,7 +877,7 @@ export function useDesktopController() {
     }
     await withPending("approve-checkpoint", async () => {
       const detail = await bridgeRequest(
-        "approve-checkpoint",
+        BRIDGE_COMMANDS.APPROVE_CHECKPOINT,
         {
           repo_id: selectedProjectId,
           push: true,

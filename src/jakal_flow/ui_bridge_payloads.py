@@ -315,13 +315,25 @@ def history_payload(context: ProjectContext) -> dict[str, Any]:
 def checkpoint_payload(context: ProjectContext) -> dict[str, Any]:
     raw = safe_json(context.paths.checkpoint_state_file, default={"checkpoints": []})
     raw_items = raw.get("checkpoints", []) if isinstance(raw, dict) else []
-    checkpoints = [item for item in raw_items if isinstance(item, dict)]
-    pending = next((item for item in checkpoints if item.get("status") == "awaiting_review"), None)
-    if pending is None and context.loop_state.pending_checkpoint_approval and context.loop_state.current_checkpoint_id:
+    waiting_for_approval = bool(context.loop_state.pending_checkpoint_approval)
+    active_checkpoint_id = str(context.loop_state.current_checkpoint_id or "").strip()
+    checkpoints: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        normalized = deepcopy(item)
+        if normalized.get("status") == "awaiting_review" and not waiting_for_approval:
+            normalized["status"] = "approved"
+        checkpoints.append(normalized)
+
+    pending = None
+    if waiting_for_approval and active_checkpoint_id:
         pending = next(
-            (item for item in checkpoints if item.get("checkpoint_id") == context.loop_state.current_checkpoint_id),
+            (item for item in checkpoints if item.get("checkpoint_id") == active_checkpoint_id),
             None,
         )
+    if pending is None and waiting_for_approval:
+        pending = next((item for item in checkpoints if item.get("status") == "awaiting_review"), None)
     return {
         "items": checkpoints,
         "pending": pending,

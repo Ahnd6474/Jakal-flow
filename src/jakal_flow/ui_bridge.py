@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import time
@@ -55,7 +54,6 @@ from .ui_bridge_payloads import (
     managed_workspace_tree,
     progress_caption,
     project_detail_payload,
-    project_share_payload,
     report_payload,
 )
 from .utils import append_jsonl, normalize_workflow_mode, now_utc_iso, parse_json_text, read_json, write_json
