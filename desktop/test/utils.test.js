@@ -113,6 +113,21 @@ test("program settings helpers keep global runtime controls separate from projec
     parallel_workers: 2,
     developer_mode: false,
     ui_theme: "dark",
+    dashboard_visibility: {
+      status: true,
+      remaining_steps: true,
+      checkpoint_pending: true,
+      input_tokens: true,
+      output_tokens: true,
+      estimated_remaining: true,
+      estimated_cost: true,
+      actual_cost: true,
+      codex_plan: true,
+      rate_limits: true,
+      runtime_card: true,
+      codex_usage_card: true,
+      word_report_card: true,
+    },
   });
 
   assert.deepEqual(
