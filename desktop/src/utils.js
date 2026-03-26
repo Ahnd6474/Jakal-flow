@@ -960,6 +960,46 @@ export function firstSelectableStepId(plan) {
   return pending?.step_id || steps[0]?.step_id || "";
 }
 
+export const CLOSEOUT_STEP_ID = "CO1";
+
+export function isSystemStep(step) {
+  return Boolean(step?.metadata?.system_step);
+}
+
+export function planStepsWithCloseout(plan, labels = {}) {
+  const steps = Array.isArray(plan?.steps) ? plan.steps.map((step) => cloneValue(step)) : [];
+  if (!steps.length) {
+    return steps;
+  }
+  const closeoutStatus = String(plan?.closeout_status || "not_started").trim().toLowerCase();
+  let status = "pending";
+  if (closeoutStatus === "running") {
+    status = "running";
+  } else if (closeoutStatus === "completed") {
+    status = "completed";
+  } else if (closeoutStatus === "failed") {
+    status = "failed";
+  }
+  steps.push({
+    step_id: CLOSEOUT_STEP_ID,
+    title: labels.title || "Closeout",
+    display_description: labels.description || labels.title || "Closeout",
+    codex_description: labels.description || labels.title || "Closeout",
+    success_criteria: labels.successCriteria || labels.description || labels.title || "Closeout",
+    reasoning_effort: "high",
+    parallel_group: "",
+    depends_on: steps.map((step) => step.step_id).filter((stepId) => stepId && stepId !== CLOSEOUT_STEP_ID),
+    owned_paths: ["README.md", "docs/CLOSEOUT_REPORT.md"],
+    status,
+    notes: String(plan?.closeout_notes || "").trim(),
+    metadata: {
+      system_step: true,
+      system_step_kind: "closeout",
+    },
+  });
+  return steps;
+}
+
 export function runtimeSummary(runtime, modelPresets = [], language = "en", modelCatalog = []) {
   const provider = normalizedModelProvider(runtime);
   const providerPrefix = providerDisplayName(provider, normalizedLocalModelProvider(runtime));
@@ -1080,7 +1120,7 @@ export function executionProgressCaption(plan, language = "en") {
 }
 
 export function canEditStep(step, busy) {
-  return Boolean(step) && step.status === "pending" && !busy;
+  return Boolean(step) && !isSystemStep(step) && step.status === "pending" && !busy;
 }
 
 export function toolbarProgressCaption(plan) {

@@ -59,6 +59,22 @@ def build_run_command_handlers(
         save_run_control(project, default_run_control())
         append_ui_event(project, "run-started", "Started running the remaining execution steps.")
         try:
+            def run_closeout_pass(latest_project, closeout_message: str):
+                append_ui_event(latest_project, "closeout-started", closeout_message)
+                next_project, next_saved = ctx.orchestrator.run_execution_closeout(
+                    project_dir=project_dir,
+                    runtime=runtime,
+                    branch=branch,
+                    origin_url=origin_url,
+                )
+                append_ui_event(
+                    next_project,
+                    "closeout-finished",
+                    f"Closeout finished with status {next_saved.closeout_status}.",
+                    {"status": next_saved.closeout_status, "commit_hash": next_saved.closeout_commit_hash},
+                )
+                return next_project, next_saved
+
             while True:
                 latest_project = ctx.orchestrator.local_project(project_dir)
                 if latest_project is None:
@@ -66,25 +82,15 @@ def build_run_command_handlers(
                 current_plan = ctx.orchestrator.load_execution_plan_state(latest_project)
                 batches = ctx.orchestrator.pending_execution_batches(current_plan)
                 if not batches:
-                    if normalize_workflow_mode(runtime.workflow_mode) == "ml":
-                        saved = current_plan
-                        project = latest_project
-                        if str(current_plan.closeout_status).strip().lower() != "completed":
-                            append_ui_event(project, "closeout-started", "Started ML cycle closeout.")
-                            project, saved = ctx.orchestrator.run_execution_closeout(
-                                project_dir=project_dir,
-                                runtime=runtime,
-                                branch=branch,
-                                origin_url=origin_url,
-                            )
-                            append_ui_event(
-                                project,
-                                "closeout-finished",
-                                f"ML cycle closeout finished with status {saved.closeout_status}.",
-                                {"status": saved.closeout_status, "commit_hash": saved.closeout_commit_hash},
-                            )
-                            if saved.closeout_status != "completed":
-                                break
+                    workflow_mode = normalize_workflow_mode(runtime.workflow_mode)
+                    saved = current_plan
+                    project = latest_project
+                    if str(current_plan.closeout_status).strip().lower() != "completed":
+                        closeout_message = "Started ML cycle closeout." if workflow_mode == "ml" else "Started project closeout."
+                        project, saved = run_closeout_pass(latest_project, closeout_message)
+                        if saved.closeout_status != "completed":
+                            break
+                    if workflow_mode == "ml":
                         project, saved, continued, reason = ctx.orchestrator.prepare_next_ml_cycle(
                             project_dir=project_dir,
                             runtime=runtime,

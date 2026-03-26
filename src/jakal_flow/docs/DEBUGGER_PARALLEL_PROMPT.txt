@@ -52,8 +52,9 @@ Required debugging workflow:
 2. Diagnose the concrete root cause of the verification failure or merge conflict from the logs and merged code state.
 3. Fix the implementation or conflict resolution with the smallest safe change set that satisfies the original task and success criteria.
 4. Re-run the verification command and leave the repository in a passing state or a cleanly continuable cherry-pick state.
-5. Record concise debugging notes in {research_notes_file} when they materially improve traceability.
-6. If the failure cannot be resolved safely, explain the blocker in docs/BLOCK_REVIEW.md instead of making speculative edits.
+5. Do not edit README.md during debugger recovery. Reserve README updates for planning artifacts outside the repo or the final closeout pass unless the user explicitly says otherwise.
+6. Record concise debugging notes in {research_notes_file} when they materially improve traceability.
+7. If the failure cannot be resolved safely, explain the blocker in docs/BLOCK_REVIEW.md instead of making speculative edits.
 
 Debugger rules:
 - Treat the owned paths above as the primary write scope for this repair.
@@ -63,3 +64,4 @@ Debugger rules:
 - If a test change is truly necessary, keep it minimal, executable, and explain why in {research_notes_file}.
 - Avoid broad cross-node refactors or ownership-breaking changes unless a tiny compatibility patch is strictly required to make the verified batch coherent.
 - Keep the change set merge-friendly, traceable, and limited to the failing task or merged batch.
+- Leave repository-wide handoff docs like README.md alone during debugger recovery.

@@ -52,8 +52,9 @@ Required debugging workflow:
 2. Diagnose the concrete root cause of the verification failure from the logs and current code.
 3. Fix the implementation with the smallest safe change set that satisfies the original task and success criteria.
 4. Re-run the verification command and leave the repository in a passing state.
-5. Record concise debugging notes in {research_notes_file} when they materially improve traceability.
-6. If the failure cannot be resolved safely, explain the blocker in docs/BLOCK_REVIEW.md instead of making speculative edits.
+5. Do not edit README.md during debugger recovery. Reserve README updates for planning artifacts outside the repo or the final closeout pass unless the user explicitly says otherwise.
+6. Record concise debugging notes in {research_notes_file} when they materially improve traceability.
+7. If the failure cannot be resolved safely, explain the blocker in docs/BLOCK_REVIEW.md instead of making speculative edits.
 
 Debugger rules:
 - Default to fixing product code, configuration, or support files before considering test changes.
@@ -61,3 +62,4 @@ Debugger rules:
 - If a test change is truly necessary, keep it minimal, executable, and explain why in {research_notes_file}.
 - Keep the change set traceable and limited to the failing task.
 - Do not broaden the scope into follow-up features or unrelated cleanup.
+- Leave repository-wide handoff docs like README.md alone during debugger recovery.

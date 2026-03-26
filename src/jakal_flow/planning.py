@@ -17,6 +17,9 @@ class PlanItem:
     text: str
 
 
+PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME = "PLAN_DECOMPOSITION_SERIAL_PROMPT.txt"
+PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME = "PLAN_DECOMPOSITION_PARALLEL_PROMPT.txt"
+ML_PLAN_DECOMPOSITION_PROMPT_FILENAME = "ML_PLAN_DECOMPOSITION_PROMPT.txt"
 PLAN_GENERATION_SERIAL_PROMPT_FILENAME = "PLAN_GENERATION_SERIAL_PROMPT.txt"
 PLAN_GENERATION_PARALLEL_PROMPT_FILENAME = "PLAN_GENERATION_PARALLEL_PROMPT.txt"
 PLAN_GENERATION_PROMPT_FILENAME = PLAN_GENERATION_SERIAL_PROMPT_FILENAME
@@ -59,6 +62,14 @@ def plan_generation_prompt_filename(execution_mode: str | None, workflow_mode: s
     return PLAN_GENERATION_SERIAL_PROMPT_FILENAME
 
 
+def plan_decomposition_prompt_filename(execution_mode: str | None, workflow_mode: str | None = None) -> str:
+    if normalize_workflow_mode(workflow_mode) == "ml":
+        return ML_PLAN_DECOMPOSITION_PROMPT_FILENAME
+    if _normalize_execution_mode(execution_mode) == "parallel":
+        return PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME
+    return PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME
+
+
 def step_execution_prompt_filename(execution_mode: str | None, workflow_mode: str | None = None) -> str:
     if normalize_workflow_mode(workflow_mode) == "ml":
         return ML_STEP_EXECUTION_PROMPT_FILENAME
@@ -69,6 +80,10 @@ def step_execution_prompt_filename(execution_mode: str | None, workflow_mode: st
 
 def load_plan_generation_prompt_template(execution_mode: str | None, workflow_mode: str | None = None) -> str:
     return load_source_prompt_template(plan_generation_prompt_filename(execution_mode, workflow_mode))
+
+
+def load_plan_decomposition_prompt_template(execution_mode: str | None, workflow_mode: str | None = None) -> str:
+    return load_source_prompt_template(plan_decomposition_prompt_filename(execution_mode, workflow_mode))
 
 
 def load_step_execution_prompt_template(execution_mode: str | None, workflow_mode: str | None = None) -> str:
@@ -416,6 +431,7 @@ def prompt_to_execution_plan_prompt(
     user_prompt: str,
     max_steps: int,
     execution_mode: str = "serial",
+    planner_outline: str = "",
     template_text: str | None = None,
 ) -> str:
     runtime = getattr(context, "runtime", None)
@@ -432,9 +448,37 @@ def prompt_to_execution_plan_prompt(
             reference_notes=load_reference_guide_text(),
             docs=repo_inputs["docs"],
             user_prompt=user_prompt.strip(),
+            planner_outline=compact_text(planner_outline.strip(), 8000) or "Planner Agent A output unavailable.",
         )
     except KeyError as exc:
         raise ValueError(f"Unknown placeholder in plan generation prompt template: {exc.args[0]}") from exc
+
+
+def prompt_to_plan_decomposition_prompt(
+    context: ProjectContext,
+    repo_inputs: dict[str, str],
+    user_prompt: str,
+    max_steps: int,
+    execution_mode: str = "serial",
+    template_text: str | None = None,
+) -> str:
+    runtime = getattr(context, "runtime", None)
+    workflow_mode = normalize_workflow_mode(getattr(runtime, "workflow_mode", "standard"))
+    template = template_text or load_plan_decomposition_prompt_template(execution_mode, workflow_mode)
+    try:
+        return template.format(
+            repo_dir=context.paths.repo_dir,
+            max_steps=max(3, max_steps),
+            workflow_mode=workflow_mode,
+            execution_mode=execution_mode.strip().lower() or "serial",
+            readme=repo_inputs["readme"],
+            agents=repo_inputs["agents"],
+            reference_notes=load_reference_guide_text(),
+            docs=repo_inputs["docs"],
+            user_prompt=user_prompt.strip(),
+        )
+    except KeyError as exc:
+        raise ValueError(f"Unknown placeholder in plan decomposition prompt template: {exc.args[0]}") from exc
 
 
 def parse_execution_plan_response(
