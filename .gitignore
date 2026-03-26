@@ -12,3 +12,4 @@ desktop/dist/
 desktop/src-tauri/target/
 .tmp_ui_bridge_tests/
 .tmp_step_reasoning_test/
+.tmp_share_tests/
