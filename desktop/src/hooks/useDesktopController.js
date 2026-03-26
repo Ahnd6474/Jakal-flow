@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { bridgeRequest, getBridgeJob, startBridgeJob } from "../api";
+import { bridgeRequest, getBridgeJob, listBridgeJobs, startBridgeJob } from "../api";
 import { useI18n } from "../i18n";
 import { translate } from "../locale";
 import {
@@ -15,8 +15,11 @@ import {
   mergeProjectDetailCodexStatus,
   programSettingsFromRuntime,
   projectFormFromDetail,
+  sanitizeProjectDetailForJobState,
+  sanitizeProjectListForJobState,
   shouldKeepUnsavedPlan,
   shouldReplaceVisibleProject,
+  workspaceStatsFromProjects,
 } from "../utils";
 import { usePersistentState } from "./usePersistentState";
 
@@ -125,6 +128,27 @@ export function useDesktopController() {
     );
   }
 
+  function applyListingPayload(listing, runningJob = null) {
+    const nextProjects = sanitizeProjectListForJobState(listing?.projects || [], runningJob);
+    setProjects(nextProjects);
+    setWorkspaceStats(workspaceStatsFromProjects(nextProjects));
+    return nextProjects;
+  }
+
+  async function syncRunningJobSnapshot(preferredJobId = "") {
+    const jobs = await listBridgeJobs();
+    const preferredJob = preferredJobId ? jobs.find((job) => job.id === preferredJobId) || null : null;
+    const runningJob = preferredJob?.status === "running" ? preferredJob : jobs.find((job) => job.status === "running") || null;
+    if (runningJob) {
+      setActiveJobId(runningJob.id);
+      setActiveJob(runningJob);
+      return runningJob;
+    }
+    setActiveJobId("");
+    setActiveJob(preferredJob && preferredJob.status !== "running" ? preferredJob : null);
+    return null;
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -143,13 +167,13 @@ export function useDesktopController() {
         setProgramSettings(nextProgramSettings);
         setProjectForm(blankProjectForm(applyProgramSettings(bootstrap.default_runtime, nextProgramSettings)));
         const listing = await bridgeRequest("list-projects", null, bootstrap.workspace_root);
+        const runningJob = await syncRunningJobSnapshot();
         if (cancelled) {
           return;
         }
-        setProjects(listing.projects || []);
-        setWorkspaceStats(listing.workspace || null);
-        if (!(listing.projects || []).some((item) => item.repo_id === selectedProjectId)) {
-          setSelectedProjectId(listing.projects?.[0]?.repo_id || "");
+        const nextProjects = applyListingPayload(listing, runningJob);
+        if (!nextProjects.some((item) => item.repo_id === selectedProjectId)) {
+          setSelectedProjectId(nextProjects[0]?.repo_id || "");
         }
       } catch (error) {
         if (!cancelled) {
@@ -165,7 +189,8 @@ export function useDesktopController() {
   }, []);
 
   function applyProjectDetail(detail, options = {}) {
-    const normalizedDetail = mergeProjectDetailCodexStatus(detail, projectDetail?.codex_status, modelCatalog);
+    const mergedDetail = mergeProjectDetailCodexStatus(detail, projectDetail?.codex_status, modelCatalog);
+    const normalizedDetail = sanitizeProjectDetailForJobState(mergedDetail, options.runningJob ?? activeJob);
     const preserveDirtyPlan = shouldKeepUnsavedPlan(
       projectDetail?.project?.repo_id,
       normalizedDetail?.project?.repo_id,
@@ -198,21 +223,40 @@ export function useDesktopController() {
     async function tickJob() {
       try {
         const job = await getBridgeJob(activeJobId);
-        if (cancelled || !job) {
+        if (cancelled) {
+          return;
+        }
+        if (!job) {
+          const runningJob = await syncRunningJobSnapshot(activeJobId);
+          if (!runningJob && selectedProjectId) {
+            const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: false, detailLevel: "core" });
+            if (!cancelled) {
+              applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: null });
+            }
+          }
           return;
         }
         setActiveJob(job);
         if (job.status === "running") {
+          if (selectedProjectId) {
+            try {
+              const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: false, detailLevel: "core" });
+              if (!cancelled) {
+                applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: job });
+              }
+            } catch {
+              // Ignore background refresh failures while the job is still running.
+            }
+          }
           return;
         }
         setActiveJobId("");
         if (job.result?.project && shouldReplaceVisibleProject(selectedProjectId, job.result.project.repo_id)) {
-          applyProjectDetail(job.result, { preserveDirtyPlan: false });
+          applyProjectDetail(job.result, { preserveDirtyPlan: false, runningJob: null });
         }
         const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
         if (!cancelled) {
-          setProjects(listing.projects || []);
-          setWorkspaceStats(listing.workspace || null);
+          applyListingPayload(listing, null);
           setMessage(
             job.status === "completed"
               ? messagePayload(
@@ -232,6 +276,23 @@ export function useDesktopController() {
         }
       } catch (error) {
         if (!cancelled) {
+          try {
+            const runningJob = await syncRunningJobSnapshot(activeJobId);
+            if (!runningJob) {
+              const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
+              if (!cancelled) {
+                applyListingPayload(listing, null);
+              }
+              if (selectedProjectId) {
+                const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: false, detailLevel: "core" });
+                if (!cancelled) {
+                  applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: null });
+                }
+              }
+            }
+          } catch {
+            // Keep the last known state if local job reconciliation also fails.
+          }
           setMessage(messagePayload("error", String(error)));
         }
       }
@@ -242,7 +303,7 @@ export function useDesktopController() {
     }
 
     tickJob();
-    const handle = window.setInterval(tickJob, 2000);
+    const handle = window.setInterval(tickJob, 1000);
     return () => {
       cancelled = true;
       window.clearInterval(handle);
@@ -336,34 +397,24 @@ export function useDesktopController() {
 
   async function refreshProjects() {
     const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
-    setProjects(listing.projects || []);
-    setWorkspaceStats(listing.workspace || null);
-    if (!selectedProjectId && listing.projects?.length) {
-      setSelectedProjectId(listing.projects[0].repo_id);
+    const nextProjects = applyListingPayload(listing, activeJob?.status === "running" ? activeJob : null);
+    if (!selectedProjectId && nextProjects.length) {
+      setSelectedProjectId(nextProjects[0].repo_id);
     }
   }
 
   async function forceRefresh() {
     try {
-      if (activeJobId) {
-        const job = await getBridgeJob(activeJobId);
-        if (job) {
-          setActiveJob(job);
-          if (job.status !== "running") {
-            setActiveJobId("");
-          }
-        }
-      }
+      const runningJob = await syncRunningJobSnapshot(activeJobId);
 
       const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
-      setProjects(listing.projects || []);
-      setWorkspaceStats(listing.workspace || null);
+      const nextProjects = applyListingPayload(listing, runningJob);
 
       if (selectedProjectId) {
         const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: true });
-        applyProjectDetail(detail, { preserveSelectedStep: true });
-      } else if (listing.projects?.length) {
-        setSelectedProjectId(listing.projects[0].repo_id);
+        applyProjectDetail(detail, { preserveSelectedStep: true, runningJob });
+      } else if (nextProjects.length) {
+        setSelectedProjectId(nextProjects[0].repo_id);
       }
 
       setMessage(messagePayload("info", activeJobId ? translate(language, "message.runStateRefreshed") : translate(language, "message.projectStateRefreshed")));
@@ -388,7 +439,7 @@ export function useDesktopController() {
         refreshCodexStatus: options.refreshCodexStatus ?? false,
         detailLevel: options.detailLevel ?? "core",
       });
-      applyProjectDetail(detail);
+      applyProjectDetail(detail, { runningJob: activeJob?.status === "running" ? activeJob : null });
       return detail;
     } catch (error) {
       setLoadingProjectId("");

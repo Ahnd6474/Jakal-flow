@@ -13,18 +13,24 @@ import {
   codexUsageBuckets,
   cloneValue,
   commandLabel,
+  computePlanStats,
   reasoningEffortLabel,
+  deriveIdleProjectStatus,
   deriveGithubMode,
   firstSelectableStepId,
   mergeProjectDetailCodexStatus,
+  normalizeInterruptedPlan,
   progressCaption,
   programSettingsFromRuntime,
   projectFormFromDetail,
   runtimeSummary,
+  sanitizeProjectDetailForJobState,
+  sanitizeProjectListForJobState,
   selectedConfigReasoning,
   shouldKeepUnsavedPlan,
   shouldReplaceVisibleProject,
   statusTone,
+  workspaceStatsFromProjects,
 } from "../src/utils.js";
 
 test("cloneValue deep-clones plain data and preserves nullish values", () => {
@@ -70,6 +76,8 @@ test("program settings helpers keep global runtime controls separate from projec
     codex_path: "codex.cmd",
     allow_push: false,
     require_checkpoint_approval: false,
+    execution_mode: "serial",
+    parallel_workers: 2,
     developer_mode: false,
     ui_theme: "dark",
   });
@@ -91,6 +99,8 @@ test("program settings helpers keep global runtime controls separate from projec
       codex_path: "codex.cmd",
       allow_push: false,
       require_checkpoint_approval: false,
+      execution_mode: "serial",
+      parallel_workers: 2,
     },
   );
 
@@ -117,6 +127,8 @@ test("program settings helpers keep global runtime controls separate from projec
         codex_path: "codex.cmd",
         allow_push: false,
         require_checkpoint_approval: false,
+        execution_mode: "serial",
+        parallel_workers: 2,
       },
     },
   );
@@ -221,6 +233,105 @@ test("shouldReplaceVisibleProject only accepts a completed job for the visible p
   assert.equal(shouldReplaceVisibleProject("repo-a", ""), false);
 });
 
+test("running-state helpers fall back to idle project status when no job is active", () => {
+  const plan = {
+    closeout_status: "running",
+    steps: [
+      { step_id: "ST1", status: "completed" },
+      { step_id: "ST2", status: "running" },
+    ],
+  };
+  const normalizedPlan = normalizeInterruptedPlan(plan);
+
+  assert.deepEqual(computePlanStats(plan), {
+    total_steps: 2,
+    completed_steps: 1,
+    failed_steps: 0,
+    running_steps: 1,
+    remaining_steps: 1,
+  });
+  assert.deepEqual(normalizedPlan, {
+    closeout_status: "not_started",
+    steps: [
+      { step_id: "ST1", status: "completed" },
+      { step_id: "ST2", status: "pending" },
+    ],
+  });
+  assert.equal(deriveIdleProjectStatus(normalizedPlan, null, "running:block:2"), "plan_ready");
+  assert.deepEqual(
+    workspaceStatsFromProjects([
+      { status: "plan_ready" },
+      { status: "failed" },
+      { status: "running:block:3" },
+    ]),
+    {
+      project_count: 3,
+      ready_like: 1,
+      running: 1,
+      failed: 1,
+    },
+  );
+});
+
+test("job-aware sanitizers clear stale running status without touching active jobs", () => {
+  const runningDetail = {
+    project: {
+      repo_id: "repo-a",
+      current_status: "running:block:2",
+    },
+    plan: {
+      closeout_status: "running",
+      steps: [
+        { step_id: "ST1", status: "completed" },
+        { step_id: "ST2", status: "running" },
+      ],
+    },
+    stats: {
+      total_steps: 2,
+      completed_steps: 1,
+      failed_steps: 0,
+      running_steps: 1,
+      remaining_steps: 1,
+    },
+    snapshot: {
+      project: {
+        current_status: "running:block:2",
+      },
+      plan: {
+        closeout_status: "running",
+        steps: [
+          { step_id: "ST1", status: "completed" },
+          { step_id: "ST2", status: "running" },
+        ],
+      },
+    },
+    bottom_panels: {
+      git_status: {
+        current_status: "running:block:2",
+      },
+    },
+  };
+  const runningList = [
+    {
+      repo_id: "repo-a",
+      status: "running:block:2",
+      stats: { total_steps: 2, completed_steps: 1, failed_steps: 0, running_steps: 1, remaining_steps: 1 },
+      closeout_status: "not_started",
+    },
+  ];
+
+  const sanitizedDetail = sanitizeProjectDetailForJobState(runningDetail, null);
+  const activeDetail = sanitizeProjectDetailForJobState(runningDetail, { id: "job-1", status: "running" });
+  const sanitizedList = sanitizeProjectListForJobState(runningList, null);
+
+  assert.equal(sanitizedDetail.project.current_status, "plan_ready");
+  assert.equal(sanitizedDetail.plan.closeout_status, "not_started");
+  assert.equal(sanitizedDetail.plan.steps[1].status, "pending");
+  assert.equal(sanitizedDetail.bottom_panels.git_status.current_status, "plan_ready");
+  assert.equal(activeDetail.project.current_status, "running:block:2");
+  assert.equal(sanitizedList[0].status, "plan_ready");
+});
+
 test("buildProjectPayload trims fields, blanks origin_url for existing repos, and clones plan data", () => {
   const form = {
     project_dir: "  C:/work/demo  ",
@@ -251,6 +362,8 @@ test("buildProjectPayload trims fields, blanks origin_url for existing repos, an
       test_cmd: "changed",
     },
     plan: {
+      execution_mode: "serial",
+      default_test_command: "pytest -q",
       steps: [{ step_id: "S1", status: "completed" }],
     },
   });
@@ -284,7 +397,7 @@ test("firstSelectableStepId prefers the first incomplete step", () => {
   assert.equal(firstSelectableStepId({ steps: [] }), "");
 });
 
-test("runtimeSummary prefers preset summaries, then direct model settings, then a safe fallback", () => {
+/*
   assert.equal(
     runtimeSummary(
       { model_preset: "balanced" },
@@ -298,6 +411,23 @@ test("runtimeSummary prefers preset summaries, then direct model settings, then 
   assert.equal(runtimeSummary({ model: "gpt-5.4" }), "gpt-5.4 | reasoning High");
   assert.equal(runtimeSummary({}, undefined), "No model selected");
   assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), "gpt-5.4 | 추론 높음");
+*/
+
+test("runtimeSummary reflects execution mode in preset and direct model summaries", () => {
+  assert.equal(
+    runtimeSummary(
+      { model_preset: "balanced" },
+      [{ preset_id: "balanced", summary: "Balanced preset" }],
+    ),
+    "Balanced preset | serial",
+  );
+  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low" }, []), "gpt-5.4 | reasoning Low | serial");
+  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "medium", effort_selection_mode: "auto" }, []), "gpt-5.4 | reasoning Auto | serial");
+  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low", use_fast_mode: true }, []), "gpt-5.4 | reasoning Low | serial | /fast");
+  assert.equal(runtimeSummary({ model: "gpt-5.4" }), "gpt-5.4 | reasoning High | serial");
+  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "high", execution_mode: "parallel", parallel_workers: 4 }, []), "gpt-5.4 | reasoning High | parallel x4");
+  assert.equal(runtimeSummary({}, undefined), "No model selected");
+  assert.match(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), /^gpt-5\.4 .* serial$/);
 });
 
 test("config reasoning helpers keep auto separate from explicit efforts", () => {

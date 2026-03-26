@@ -203,6 +203,155 @@ export function shouldReplaceVisibleProject(selectedProjectId, nextProjectId) {
   return !selected || selected === next;
 }
 
+export function computePlanStats(plan = {}) {
+  const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+  const completed = steps.filter((step) => step.status === "completed").length;
+  const failed = steps.filter((step) => step.status === "failed").length;
+  const running = steps.filter((step) => step.status === "running").length;
+  return {
+    total_steps: steps.length,
+    completed_steps: completed,
+    failed_steps: failed,
+    running_steps: running,
+    remaining_steps: Math.max(0, steps.length - completed),
+  };
+}
+
+export function workspaceStatsFromProjects(projects = []) {
+  let running = 0;
+  let readyLike = 0;
+  let failed = 0;
+  for (const project of projects || []) {
+    const status = String(project?.status || "").trim();
+    if (status.startsWith("running:")) {
+      running += 1;
+    } else if (["setup_ready", "plan_ready", "plan_completed", "closed_out", "ready"].includes(status)) {
+      readyLike += 1;
+    } else if (status.endsWith("failed") || status === "failed" || status === "closeout_failed") {
+      failed += 1;
+    }
+  }
+  return {
+    project_count: (projects || []).length,
+    ready_like: readyLike,
+    running,
+    failed,
+  };
+}
+
+export function deriveIdleProjectStatus(plan = null, stats = null, currentStatus = "") {
+  const normalizedCurrentStatus = String(currentStatus || "").trim().toLowerCase();
+  const closeoutStatus = String(plan?.closeout_status || stats?.closeout_status || "").trim().toLowerCase();
+  const effectiveStats = plan ? computePlanStats(plan) : stats || {};
+  const totalSteps = Math.max(0, Number(effectiveStats?.total_steps || 0));
+  const completedSteps = Math.max(0, Number(effectiveStats?.completed_steps || 0));
+  const failedSteps = Math.max(0, Number(effectiveStats?.failed_steps || 0));
+
+  if (closeoutStatus === "completed") {
+    return "closed_out";
+  }
+  if (closeoutStatus === "failed") {
+    return "closeout_failed";
+  }
+  if (normalizedCurrentStatus.endsWith("failed") || failedSteps > 0) {
+    return "failed";
+  }
+  if (totalSteps <= 0) {
+    return "setup_ready";
+  }
+  if (completedSteps >= totalSteps) {
+    return "plan_completed";
+  }
+  return "plan_ready";
+}
+
+export function normalizeInterruptedPlan(plan = null) {
+  const nextPlan = cloneValue(plan) || {};
+  const rawSteps = Array.isArray(nextPlan.steps) ? nextPlan.steps : [];
+  nextPlan.steps = rawSteps.map((step) =>
+    step?.status === "running"
+      ? {
+          ...step,
+          status: "pending",
+        }
+      : step,
+  );
+  if (String(nextPlan.closeout_status || "").trim().toLowerCase() === "running") {
+    nextPlan.closeout_status = "not_started";
+  }
+  return nextPlan;
+}
+
+export function sanitizeProjectListForJobState(projects = [], activeJob = null) {
+  if (activeJob?.status === "running") {
+    return projects;
+  }
+  return (projects || []).map((project) => {
+    const currentStatus = String(project?.status || "").trim();
+    if (!currentStatus.toLowerCase().startsWith("running:")) {
+      return project;
+    }
+    return {
+      ...project,
+      status: deriveIdleProjectStatus(null, { ...(project?.stats || {}), closeout_status: project?.closeout_status }, currentStatus),
+    };
+  });
+}
+
+export function sanitizeProjectDetailForJobState(detail, activeJob = null) {
+  if (!detail || activeJob?.status === "running") {
+    return detail;
+  }
+  const currentStatus = String(detail?.project?.current_status || "").trim();
+  const planHasRunningStep = (detail?.plan?.steps || []).some((step) => step.status === "running");
+  const closeoutRunning = String(detail?.plan?.closeout_status || "").trim().toLowerCase() === "running";
+  if (!currentStatus.toLowerCase().startsWith("running:") && !planHasRunningStep && !closeoutRunning) {
+    return detail;
+  }
+
+  const nextPlan = normalizeInterruptedPlan(detail.plan);
+  const nextStats = computePlanStats(nextPlan);
+  const nextStatus = deriveIdleProjectStatus(nextPlan, nextStats, currentStatus);
+  const nextSnapshot = detail?.snapshot
+    ? {
+        ...detail.snapshot,
+        project: detail.snapshot.project
+          ? {
+              ...detail.snapshot.project,
+              current_status: nextStatus,
+            }
+          : detail.snapshot.project,
+        plan: nextPlan,
+      }
+    : detail.snapshot;
+  const nextBottomPanels = detail?.bottom_panels
+    ? {
+        ...detail.bottom_panels,
+        git_status: detail.bottom_panels.git_status
+          ? {
+              ...detail.bottom_panels.git_status,
+              current_status: nextStatus,
+            }
+          : detail.bottom_panels.git_status,
+      }
+    : detail.bottom_panels;
+
+  return {
+    ...detail,
+    project: detail.project
+      ? {
+          ...detail.project,
+          current_status: nextStatus,
+        }
+      : detail.project,
+    plan: nextPlan,
+    stats: nextStats,
+    progress: toolbarProgressCaption(nextPlan),
+    snapshot: nextSnapshot,
+    bottom_panels: nextBottomPanels,
+  };
+}
+
 export function buildProjectPayload(form, plan = null) {
   const payload = {
     project_dir: form.project_dir.trim(),
