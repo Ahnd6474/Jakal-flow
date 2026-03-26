@@ -10,6 +10,17 @@ export function cloneValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+export function detailApplySignature(detail = null, runningJob = null) {
+  return [
+    String(detail?.project?.repo_id || "").trim(),
+    String(detail?.detail_level || "").trim(),
+    String(detail?.detail_signature || detail?.content_signature || "").trim(),
+    String(detail?.project?.current_status || "").trim(),
+    String(runningJob?.id || "").trim(),
+    String(runningJob?.status || "").trim(),
+  ].join("|");
+}
+
 export const AUTO_REASONING_OPTION = "auto";
 export const REASONING_OPTIONS = ["low", "medium", "high", "xhigh"];
 export const MODEL_REASONING_OPTIONS = [AUTO_REASONING_OPTION, ...REASONING_OPTIONS];

@@ -14,6 +14,7 @@ import {
   codexUsageBuckets,
   cloneValue,
   commandLabel,
+  detailApplySignature,
   computePlanStats,
   deriveExecutionProgress,
   reasoningEffortLabel,
@@ -56,6 +57,26 @@ test("basename handles Windows, POSIX, and empty paths", () => {
   assert.equal(basename("C:\\work\\repo"), "repo");
   assert.equal(basename("/tmp/demo/"), "demo");
   assert.equal(basename(""), "");
+});
+
+test("detailApplySignature tracks payload identity and running job state", () => {
+  const detail = {
+    detail_level: "core",
+    detail_signature: "sig-123",
+    project: {
+      repo_id: "repo-1",
+      current_status: "running:block:2",
+    },
+  };
+
+  assert.equal(
+    detailApplySignature(detail, { id: "job-1", status: "running" }),
+    "repo-1|core|sig-123|running:block:2|job-1|running",
+  );
+  assert.notEqual(
+    detailApplySignature(detail, { id: "job-1", status: "running" }),
+    detailApplySignature(detail, { id: "job-2", status: "running" }),
+  );
 });
 
 test("deriveGithubMode distinguishes manual and existing projects", () => {
@@ -569,7 +590,7 @@ test("config reasoning helpers keep auto separate from explicit efforts", () => 
   assert.equal(selectedConfigReasoning(modelCatalog, { model: "gpt-5.4", effort: "medium", effort_selection_mode: "auto" }), "auto");
   assert.equal(reasoningEffortLabel("auto"), "Auto");
   assert.equal(autoRoutingPresetLabel("low"), "Low Only");
-  assert.equal(autoRoutingPresetLabel("xhigh", "ko"), "XHigh만");
+  assert.equal(autoRoutingPresetLabel("xhigh", "ko"), "매우 높음만");
 });
 
 test("codexUsageBuckets separates 5h, 7d, and spark usage windows", () => {

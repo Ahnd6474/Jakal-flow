@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { bridgeRequest, getBridgeJob, listBridgeJobs, startBridgeJob } from "../api";
+import {
+  defaultShareSettings,
+  emptyPlanDraft,
+  messagePayload,
+  needsExpandedProjectDetail,
+  shareSettingsFromDetail,
+} from "../controllerHelpers";
 import { useI18n } from "../i18n";
 import { translate } from "../locale";
 import {
@@ -11,6 +18,7 @@ import {
   buildProjectPayload,
   cloneValue,
   commandLabel,
+  detailApplySignature,
   firstSelectableStepId,
   mergeProjectDetailCodexStatus,
   programSettingsFromRuntime,
@@ -22,17 +30,6 @@ import {
   workspaceStatsFromProjects,
 } from "../utils";
 import { usePersistentState } from "./usePersistentState";
-
-function messagePayload(tone, text) {
-  return text ? { tone, text } : null;
-}
-
-function shareSettingsFromDetail(detail) {
-  return {
-    bind_host: detail?.share?.server?.config?.bind_host || "127.0.0.1",
-    public_base_url: detail?.share?.server?.config?.public_base_url || "",
-  };
-}
 
 export function useDesktopController() {
   const { language } = useI18n();
@@ -47,7 +44,7 @@ export function useDesktopController() {
   const [projectForm, setProjectForm] = useState(blankProjectForm(null));
   const [programSettings, setProgramSettings] = useState(programSettingsFromRuntime(null));
   const [projectDetail, setProjectDetail] = useState(null);
-  const [planDraft, setPlanDraft] = useState({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
+  const [planDraft, setPlanDraft] = useState(() => emptyPlanDraft());
   const [selectedStepId, setSelectedStepId] = usePersistentState("jakal-flow:selected-step", "");
   const [planDirty, setPlanDirty] = useState(false);
   const [pendingAction, setPendingAction] = useState("");
@@ -55,11 +52,9 @@ export function useDesktopController() {
   const [activeJobId, setActiveJobId] = useState("");
   const [activeJob, setActiveJob] = useState(null);
   const [message, setMessage] = useState(null);
-  const [shareSettings, setShareSettings] = useState({
-    bind_host: "127.0.0.1",
-    public_base_url: "",
-  });
+  const [shareSettings, setShareSettings] = useState(() => defaultShareSettings());
   const projectAutosaveTimerRef = useRef(null);
+  const lastAppliedDetailSignatureRef = useRef("");
 
   const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "run");
   const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
@@ -68,13 +63,14 @@ export function useDesktopController() {
   const [bottomHeight, setBottomHeight] = usePersistentState("jakal-flow:bottom-height", 250);
   const [projectFilter, setProjectFilter] = usePersistentState("jakal-flow:project-filter", "");
   const [workspaceFilter, setWorkspaceFilter] = usePersistentState("jakal-flow:workspace-filter", "");
+  const deferredProjectFilter = useDeferredValue(projectFilter);
   const defaultRuntime = useMemo(() => applyProgramSettings(baseRuntime, storedProgramSettings), [baseRuntime, storedProgramSettings]);
 
   const busy = Boolean(pendingAction || (activeJob && activeJob.status === "running"));
   const programSettingsDirty = useMemo(() => JSON.stringify(programSettings) !== JSON.stringify(programSettingsFromRuntime(storedProgramSettings)), [programSettings, storedProgramSettings]);
 
   const filteredProjects = useMemo(() => {
-    const query = projectFilter.trim().toLowerCase();
+    const query = deferredProjectFilter.trim().toLowerCase();
     if (!query) {
       return projects;
     }
@@ -84,7 +80,7 @@ export function useDesktopController() {
         .toLowerCase()
         .includes(query),
     );
-  }, [projectFilter, projects]);
+  }, [deferredProjectFilter, projects]);
 
   useEffect(() => {
     if (centerTab === "overview") {
@@ -105,16 +101,6 @@ export function useDesktopController() {
       }
     };
   }, []);
-
-  function needsExpandedProjectDetail() {
-    if (centerTab === "dashboard" || centerTab === "reports" || centerTab === "history") {
-      return true;
-    }
-    if (sidebarTab === "workspace" || sidebarTab === "plans") {
-      return true;
-    }
-    return !bottomCollapsed && bottomTab === "tokens";
-  }
 
   async function fetchProjectDetail(repoId, options = {}) {
     return bridgeRequest(
@@ -191,30 +177,43 @@ export function useDesktopController() {
   function applyProjectDetail(detail, options = {}) {
     const mergedDetail = mergeProjectDetailCodexStatus(detail, projectDetail?.codex_status, modelCatalog);
     const normalizedDetail = sanitizeProjectDetailForJobState(mergedDetail, options.runningJob ?? activeJob);
+    const applySignature = detailApplySignature(normalizedDetail, options.runningJob ?? activeJob);
+    if (
+      !options.force &&
+      applySignature &&
+      lastAppliedDetailSignatureRef.current === applySignature &&
+      normalizedDetail?.project?.repo_id === projectDetail?.project?.repo_id
+    ) {
+      setLoadingProjectId("");
+      return;
+    }
     const preserveDirtyPlan = shouldKeepUnsavedPlan(
       projectDetail?.project?.repo_id,
       normalizedDetail?.project?.repo_id,
       options.preserveDirtyPlan ?? planDirty,
     );
-    setProjectDetail(normalizedDetail);
-    setModelCatalog(normalizedDetail?.codex_status?.model_catalog || modelCatalog);
-    setShareSettings(shareSettingsFromDetail(normalizedDetail));
-    setLoadingProjectId("");
-    setProjectForm((current) => {
-      if (current.project_dir && preserveDirtyPlan) {
-        return current;
+    lastAppliedDetailSignatureRef.current = applySignature;
+    startTransition(() => {
+      setProjectDetail(normalizedDetail);
+      setModelCatalog(normalizedDetail?.codex_status?.model_catalog || modelCatalog);
+      setShareSettings(shareSettingsFromDetail(normalizedDetail));
+      setLoadingProjectId("");
+      setProjectForm((current) => {
+        if (current.project_dir && preserveDirtyPlan) {
+          return current;
+        }
+        return applyProgramSettingsToForm(projectFormFromDetail(normalizedDetail, defaultRuntime), storedProgramSettings);
+      });
+      if (!preserveDirtyPlan) {
+        setPlanDraft(cloneValue(normalizedDetail.plan));
+        if (options.preserveSelectedStep) {
+          setSelectedStepId((current) => current || firstSelectableStepId(normalizedDetail.plan));
+        } else {
+          setSelectedStepId(firstSelectableStepId(normalizedDetail.plan));
+        }
+        setPlanDirty(false);
       }
-      return applyProgramSettingsToForm(projectFormFromDetail(normalizedDetail, defaultRuntime), storedProgramSettings);
     });
-    if (!preserveDirtyPlan) {
-      setPlanDraft(cloneValue(normalizedDetail.plan));
-      if (options.preserveSelectedStep) {
-        setSelectedStepId((current) => current || firstSelectableStepId(normalizedDetail.plan));
-      } else {
-        setSelectedStepId(firstSelectableStepId(normalizedDetail.plan));
-      }
-      setPlanDirty(false);
-    }
   }
 
   useEffect(() => {
@@ -373,7 +372,7 @@ export function useDesktopController() {
     if (projectDetail?.detail_level === "full") {
       return undefined;
     }
-    if (!needsExpandedProjectDetail()) {
+    if (!needsExpandedProjectDetail({ centerTab, sidebarTab, bottomCollapsed, bottomTab })) {
       return undefined;
     }
 
@@ -467,6 +466,18 @@ export function useDesktopController() {
     setPlanDirty(true);
   }
 
+  function clearSelectedProjectState(nextRuntime = defaultRuntime) {
+    lastAppliedDetailSignatureRef.current = "";
+    setProjectDetail(null);
+    setSelectedProjectId("");
+    setSelectedStepId("");
+    setPlanDirty(false);
+    setLoadingProjectId("");
+    setProjectForm(blankProjectForm(nextRuntime));
+    setPlanDraft(emptyPlanDraft());
+    setShareSettings(defaultShareSettings());
+  }
+
   function updateSelectedStep(field, value) {
     if (!selectedStepId) {
       return;
@@ -509,14 +520,7 @@ export function useDesktopController() {
       projectAutosaveTimerRef.current = null;
     }
     setMessage(null);
-    setPlanDirty(false);
-    setLoadingProjectId("");
-    setSelectedStepId("");
-    setProjectDetail(null);
-    setSelectedProjectId("");
-    setProjectForm(blankProjectForm(defaultRuntime));
-    setPlanDraft({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
-    setShareSettings({ bind_host: "127.0.0.1", public_base_url: "" });
+    clearSelectedProjectState(defaultRuntime);
     setCenterTab("config");
     setSidebarTab("projects");
   }
@@ -552,6 +556,7 @@ export function useDesktopController() {
         buildProjectPayload(formToSave),
         workspaceRoot || null,
       );
+      lastAppliedDetailSignatureRef.current = "";
       setProjectDetail(detail);
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));
@@ -607,14 +612,7 @@ export function useDesktopController() {
       );
       setProjects(result.projects || []);
       setWorkspaceStats(result.workspace || null);
-      setProjectDetail(null);
-      setSelectedProjectId("");
-      setSelectedStepId("");
-      setPlanDirty(false);
-      setLoadingProjectId("");
-      setProjectForm(blankProjectForm(defaultRuntime));
-      setPlanDraft({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
-      setShareSettings({ bind_host: "127.0.0.1", public_base_url: "" });
+      clearSelectedProjectState(defaultRuntime);
       if ((result.projects || []).length) {
         setSelectedProjectId(result.projects[0].repo_id);
       }
@@ -640,14 +638,7 @@ export function useDesktopController() {
       setProjects(result.projects || []);
       setWorkspaceStats(result.workspace || null);
       if (repoId === selectedProjectId) {
-        setProjectDetail(null);
-        setSelectedProjectId("");
-        setSelectedStepId("");
-        setPlanDirty(false);
-        setLoadingProjectId("");
-        setProjectForm(blankProjectForm(defaultRuntime));
-        setPlanDraft({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
-        setShareSettings({ bind_host: "127.0.0.1", public_base_url: "" });
+        clearSelectedProjectState(defaultRuntime);
       }
       if ((result.projects || []).length && (!selectedProjectId || repoId === selectedProjectId)) {
         setSelectedProjectId(result.projects[0].repo_id);
@@ -667,14 +658,7 @@ export function useDesktopController() {
       const result = await bridgeRequest("delete-all-projects", {}, workspaceRoot || null);
       setProjects(result.projects || []);
       setWorkspaceStats(result.workspace || null);
-      setProjectDetail(null);
-      setSelectedProjectId("");
-      setSelectedStepId("");
-      setPlanDirty(false);
-      setLoadingProjectId("");
-      setProjectForm(blankProjectForm(defaultRuntime));
-      setPlanDraft({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
-      setShareSettings({ bind_host: "127.0.0.1", public_base_url: "" });
+      clearSelectedProjectState(defaultRuntime);
       setMessage(messagePayload("success", translate(language, "message.allProjectsDeleted")));
     });
   }
@@ -690,6 +674,7 @@ export function useDesktopController() {
         buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft),
         workspaceRoot || null,
       );
+      lastAppliedDetailSignatureRef.current = "";
       setProjectDetail(detail);
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));
@@ -715,6 +700,7 @@ export function useDesktopController() {
         buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings)),
         workspaceRoot || null,
       );
+      lastAppliedDetailSignatureRef.current = "";
       setProjectDetail(detail);
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));
@@ -853,6 +839,7 @@ export function useDesktopController() {
         },
         workspaceRoot || null,
       );
+      lastAppliedDetailSignatureRef.current = "";
       setProjectDetail(detail);
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));
@@ -887,6 +874,7 @@ export function useDesktopController() {
         },
         workspaceRoot || null,
       );
+      lastAppliedDetailSignatureRef.current = "";
       setProjectDetail(detail);
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));
@@ -908,6 +896,7 @@ export function useDesktopController() {
         },
         workspaceRoot || null,
       );
+      lastAppliedDetailSignatureRef.current = "";
       setProjectDetail(detail);
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));

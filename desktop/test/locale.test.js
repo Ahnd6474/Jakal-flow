@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AVAILABLE_LANGUAGE_OPTIONS, detectInitialLanguage, displayStatus, normalizeLanguage, translate } from "../src/locale.js";
+import { AVAILABLE_LANGUAGE_OPTIONS, detectInitialLanguage, displayStatus, ensureLanguageCatalog, normalizeLanguage, translate } from "../src/locale.js";
 
 test("normalizeLanguage keeps supported values, resolves aliases, and falls back to english", () => {
   assert.equal(normalizeLanguage("ko"), "ko");
@@ -21,8 +21,12 @@ test("detectInitialLanguage returns the nearest supported locale", () => {
   assert.equal(detectInitialLanguage("en-US"), "en");
 });
 
-test("translate interpolates parameters and falls back to english keys", () => {
+test("translate interpolates parameters and loads non-default locale catalogs on demand", async () => {
   assert.equal(translate("ko", "sidebar.targetBlock", { block: 3 }), "타깃 블록 3");
+  assert.equal(translate("fr", "action.run"), "Run");
+
+  await ensureLanguageCatalog("fr");
+
   assert.equal(translate("fr", "action.run"), "Courir");
 });
 
@@ -33,7 +37,9 @@ test("available language options include the extended locale list", () => {
   });
 });
 
-test("displayStatus still localizes existing translations", () => {
+test("displayStatus still localizes existing translations", async () => {
+  await ensureLanguageCatalog("fr");
+
   assert.equal(displayStatus("completed", "ko"), "완료");
   assert.equal(displayStatus("paused_for_review", "en"), "Paused for review");
   assert.equal(displayStatus("running:generate plan", "ko"), "실행 중: generate plan");

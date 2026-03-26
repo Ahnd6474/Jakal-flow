@@ -1,6 +1,3 @@
-import { GENERATED_STRINGS } from "./generated_locale_data.js";
-import { MANUAL_LOCALE_OVERRIDES } from "./manual_locale_overrides.js";
-
 export const DEFAULT_LANGUAGE = "en";
 export const SUPPORTED_LANGUAGES = [
   "ko",
@@ -896,17 +893,103 @@ KO_HIGH_QUALITY_OVERRIDES["run.stepProgress"] = "단계 진행도";
 KO_HIGH_QUALITY_OVERRIDES["run.debugging"] = "디버깅";
 KO_HIGH_QUALITY_OVERRIDES["run.workingOnStep"] = "{step} 작업 중";
 
-const ALL_STRINGS = Object.fromEntries(
-  Array.from(new Set([...Object.keys(STRINGS), ...Object.keys(GENERATED_STRINGS), ...Object.keys(MANUAL_LOCALE_OVERRIDES)])).map((language) => [
+const STATIC_LANGUAGE_PACKS = new Map(
+  ["en", "ko"].map((language) => [
     language,
     {
       ...(STRINGS[language] || {}),
-      ...(GENERATED_STRINGS[language] || {}),
-      ...(MANUAL_LOCALE_OVERRIDES[language] || {}),
       ...(language === "ko" ? KO_HIGH_QUALITY_OVERRIDES : {}),
     },
   ]),
 );
+
+let externalLocaleModulesPromise = null;
+const loadedDynamicLanguagePacks = new Map();
+const pendingDynamicLanguagePacks = new Map();
+
+function staticLanguagePack(language) {
+  const normalized = normalizeLanguage(language);
+  return STATIC_LANGUAGE_PACKS.get(normalized) || {};
+}
+
+function currentLanguagePack(language) {
+  const normalized = normalizeLanguage(language);
+  return loadedDynamicLanguagePacks.get(normalized) || staticLanguagePack(normalized);
+}
+
+async function loadExternalLocaleModules() {
+  if (!externalLocaleModulesPromise) {
+    externalLocaleModulesPromise = Promise.all([
+      import("./generated_locale_data.js"),
+      import("./manual_locale_overrides.js"),
+    ]).then(([generatedModule, overridesModule]) => ({
+      generated: generatedModule.GENERATED_STRINGS || {},
+      overrides: overridesModule.MANUAL_LOCALE_OVERRIDES || {},
+    }));
+  }
+  return externalLocaleModulesPromise;
+}
+
+function mergeDynamicLanguagePack(language, externalModules) {
+  const normalized = normalizeLanguage(language);
+  return {
+    ...(STRINGS[normalized] || {}),
+    ...(externalModules.generated?.[normalized] || {}),
+    ...(externalModules.overrides?.[normalized] || {}),
+    ...(normalized === "ko" ? KO_HIGH_QUALITY_OVERRIDES : {}),
+  };
+}
+
+export function hasLanguageCatalog(language) {
+  const normalized = normalizeLanguage(language);
+  return STATIC_LANGUAGE_PACKS.has(normalized) || loadedDynamicLanguagePacks.has(normalized);
+}
+
+export async function ensureLanguageCatalog(language) {
+  const normalized = normalizeLanguage(language);
+  if (hasLanguageCatalog(normalized)) {
+    return currentLanguagePack(normalized);
+  }
+  if (pendingDynamicLanguagePacks.has(normalized)) {
+    return pendingDynamicLanguagePacks.get(normalized);
+  }
+  const pending = loadExternalLocaleModules()
+    .then((externalModules) => {
+      const merged = mergeDynamicLanguagePack(normalized, externalModules);
+      loadedDynamicLanguagePacks.set(normalized, merged);
+      pendingDynamicLanguagePacks.delete(normalized);
+      return merged;
+    })
+    .catch((error) => {
+      pendingDynamicLanguagePacks.delete(normalized);
+      throw error;
+    });
+  pendingDynamicLanguagePacks.set(normalized, pending);
+  return pending;
+}
+
+export function readStoredLanguagePreference(storageKey = "jakal-flow:language") {
+  const storage = globalThis.localStorage;
+  if (!storage || typeof storage.getItem !== "function") {
+    return null;
+  }
+  try {
+    const raw = storage.getItem(storageKey);
+    if (raw === null) {
+      return null;
+    }
+    return normalizeLanguage(JSON.parse(raw));
+  } catch (_error) {
+    return null;
+  }
+}
+
+export function resolveInitialLanguage(sourceLanguage = null, storageKey = "jakal-flow:language") {
+  return (
+    readStoredLanguagePreference(storageKey)
+    || detectInitialLanguage(sourceLanguage)
+  );
+}
 
 function titleCase(text) {
   if (!text) {
@@ -953,7 +1036,7 @@ export function detectInitialLanguage(sourceLanguage = null) {
 
 export function translate(language, key, params = {}) {
   const normalized = normalizeLanguage(language);
-  const value = ALL_STRINGS[normalized]?.[key] ?? STRINGS.en[key];
+  const value = currentLanguagePack(normalized)?.[key] ?? STRINGS.en[key];
   if (value === undefined) {
     return key;
   }
@@ -977,7 +1060,7 @@ export function displayStatus(status, language) {
     });
   }
   const key = `status.${normalized}`;
-  const translated = ALL_STRINGS[normalizedLanguage]?.[key] ?? STRINGS.en[key];
+  const translated = currentLanguagePack(normalizedLanguage)?.[key] ?? STRINGS.en[key];
   if (translated) {
     return translated;
   }

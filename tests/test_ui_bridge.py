@@ -534,6 +534,70 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(loaded["checkpoints"]["items"], [])
             self.assertTrue(loaded["activity"])
 
+    def test_load_project_reuses_cached_core_payload_when_state_is_unchanged(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Cached Core Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            cache_file = Path(detail["project"]["project_root"]) / "state" / "PROJECT_DETAIL_CACHE_CORE.json"
+            if cache_file.exists():
+                cache_file.unlink()
+
+            first = run_command(
+                "load-project",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                    "refresh_codex_status": False,
+                    "detail_level": "core",
+                },
+            )
+
+            self.assertFalse(first["payload_cache_hit"])
+            self.assertTrue(cache_file.exists())
+
+            with mock.patch(
+                "jakal_flow.ui_bridge_payloads._build_project_detail_base_payload",
+                side_effect=AssertionError("The cached payload should be reused."),
+            ):
+                second = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": False,
+                        "detail_level": "core",
+                    },
+                )
+
+            self.assertTrue(second["payload_cache_hit"])
+            self.assertEqual(second["detail_level"], "core")
+            self.assertEqual(second["content_signature"], first["content_signature"])
+            self.assertEqual(second["detail_signature"], first["detail_signature"])
+            self.assertIn("content_signature", second)
+            self.assertIn("detail_signature", second)
+
     def test_share_bridge_commands_create_and_revoke_read_only_session(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

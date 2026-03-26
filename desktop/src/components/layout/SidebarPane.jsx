@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import { statusTone } from "../../utils";
@@ -60,8 +60,8 @@ function SidebarSectionTabs({ activeTab, onChange, tabs }) {
   );
 }
 
-function filterTree(node, normalizedQuery) {
-  const sortedChildren = [...(node.children || [])].sort((left, right) => {
+function sortTreeChildren(children = []) {
+  return [...children].sort((left, right) => {
     const leftFolder = left.kind === "dir" || left.kind === "directory" || Boolean((left.children || []).length);
     const rightFolder = right.kind === "dir" || right.kind === "directory" || Boolean((right.children || []).length);
     if (leftFolder !== rightFolder) {
@@ -69,14 +69,21 @@ function filterTree(node, normalizedQuery) {
     }
     return String(left.label || "").localeCompare(String(right.label || ""));
   });
+}
+
+function normalizeTree(node) {
+  return {
+    ...node,
+    children: sortTreeChildren(node.children || []).map((child) => normalizeTree(child)),
+  };
+}
+
+function filterPreparedTree(node, normalizedQuery) {
   if (!normalizedQuery) {
-    return {
-      ...node,
-      children: sortedChildren,
-    };
+    return node;
   }
-  const children = sortedChildren
-    .map((child) => filterTree(child, normalizedQuery))
+  const children = (node.children || [])
+    .map((child) => filterPreparedTree(child, normalizedQuery))
     .filter(Boolean);
   const selfMatch =
     node.label.toLowerCase().includes(normalizedQuery) || String(node.path || "").toLowerCase().includes(normalizedQuery);
@@ -147,10 +154,30 @@ export function SidebarPane({
 }) {
   const { language, t } = useI18n();
   const [contextMenu, setContextMenu] = useState(null);
+  const deferredWorkspaceFilter = useDeferredValue(workspaceFilter);
+  const workspaceFilterCacheRef = useRef(new Map());
+  const normalizedWorkspaceTree = useMemo(() => (workspaceTree || []).map((node) => normalizeTree(node)), [workspaceTree]);
+
+  useEffect(() => {
+    workspaceFilterCacheRef.current.clear();
+  }, [normalizedWorkspaceTree]);
+
   const filteredWorkspaceTree = useMemo(() => {
-    const normalizedQuery = workspaceFilter.trim().toLowerCase();
-    return (workspaceTree || []).map((node) => filterTree(node, normalizedQuery)).filter(Boolean);
-  }, [workspaceFilter, workspaceTree]);
+    const normalizedQuery = deferredWorkspaceFilter.trim().toLowerCase();
+    const cached = workspaceFilterCacheRef.current.get(normalizedQuery);
+    if (cached) {
+      return cached;
+    }
+    const nextTree = normalizedQuery
+      ? normalizedWorkspaceTree.map((node) => filterPreparedTree(node, normalizedQuery)).filter(Boolean)
+      : normalizedWorkspaceTree;
+    if (workspaceFilterCacheRef.current.size >= 12) {
+      const oldestQuery = workspaceFilterCacheRef.current.keys().next().value;
+      workspaceFilterCacheRef.current.delete(oldestQuery);
+    }
+    workspaceFilterCacheRef.current.set(normalizedQuery, nextTree);
+    return nextTree;
+  }, [deferredWorkspaceFilter, normalizedWorkspaceTree]);
 
   useEffect(() => {
     function handlePointerDown() {
@@ -277,7 +304,7 @@ export function SidebarPane({
               <input value={workspaceFilter} onChange={(event) => onWorkspaceFilterChange(event.target.value)} placeholder={t("sidebar.searchFiles")} />
             </label>
             <div className="sidebar-tree">
-              {filteredWorkspaceTree.length ? filteredWorkspaceTree.map((node) => <TreeNode key={node.path} node={node} filter={workspaceFilter} />) : <div className="empty-block">{t("sidebar.emptyWorkspace")}</div>}
+              {filteredWorkspaceTree.length ? filteredWorkspaceTree.map((node) => <TreeNode key={node.path} node={node} filter={deferredWorkspaceFilter} />) : <div className="empty-block">{t("sidebar.emptyWorkspace")}</div>}
             </div>
           </>
         ) : null}

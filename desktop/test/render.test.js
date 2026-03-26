@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -45,6 +44,58 @@ async function importBundledModule(key, contents) {
   const modulePath = path.join(tempDir, `${key}.mjs`);
   await writeFile(modulePath, result.outputFiles[0].text, "utf-8");
   return import(`${pathToFileURL(modulePath).href}?v=${Date.now()}`);
+}
+
+function renderHarnessSnippet(importPath, exportName) {
+  return `
+    import React from "react";
+    import { PassThrough } from "node:stream";
+    import { renderToPipeableStream } from "react-dom/server";
+    import { I18nProvider } from "./src/i18n.jsx";
+    import { ${exportName} } from "${importPath}";
+
+    export async function renderComponent(props) {
+      return await new Promise((resolve, reject) => {
+        const output = new PassThrough();
+        let html = "";
+        let settled = false;
+        let timeoutHandle = null;
+        const finish = (callback) => (value) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timeoutHandle);
+          callback(value);
+        };
+        output.on("data", (chunk) => {
+          html += chunk.toString();
+        });
+        output.on("end", finish(() => resolve(html)));
+        output.on("error", finish(reject));
+        const { pipe, abort } = renderToPipeableStream(
+          React.createElement(I18nProvider, { initialLanguage: "en" }, React.createElement(${exportName}, props)),
+          {
+            onAllReady() {
+              pipe(output);
+            },
+            onError(error) {
+              finish(reject)(error);
+            },
+          },
+        );
+        timeoutHandle = setTimeout(() => {
+          abort();
+          finish(reject)(new Error("Timed out waiting for server render."));
+        }, 5000);
+      });
+    }
+  `;
+}
+
+async function renderBundledComponent(key, importPath, exportName, props) {
+  const module = await importBundledModule(key, renderHarnessSnippet(importPath, exportName));
+  return module.renderComponent(props);
 }
 
 function noop() {}
@@ -133,23 +184,12 @@ function baseWorkspaceProps(overrides = {}) {
 }
 
 test("CenterWorkspace renders the serial flow view for serial plans", async () => {
-  const module = await importBundledModule(
+  const html = await renderBundledComponent(
     "center-workspace-render",
-    `
-      import React from "react";
-      import { renderToStaticMarkup } from "react-dom/server";
-      import { I18nProvider } from "./src/i18n.jsx";
-      import { CenterWorkspace } from "./src/components/layout/CenterWorkspace.jsx";
-
-      export function renderComponent(props) {
-        return renderToStaticMarkup(
-          React.createElement(I18nProvider, { initialLanguage: "en" }, React.createElement(CenterWorkspace, props))
-        );
-      }
-    `,
+    "./src/components/layout/CenterWorkspace.jsx",
+    "CenterWorkspace",
+    baseWorkspaceProps(),
   );
-
-  const html = module.renderComponent(baseWorkspaceProps());
 
   assert.match(html, /Execution Flow/);
   assert.match(html, /Flow Chart/);
@@ -159,23 +199,10 @@ test("CenterWorkspace renders the serial flow view for serial plans", async () =
 });
 
 test("CenterWorkspace renders the parallel execution tree for parallel plans", async () => {
-  const module = await importBundledModule(
+  const html = await renderBundledComponent(
     "parallel-workspace-render",
-    `
-      import React from "react";
-      import { renderToStaticMarkup } from "react-dom/server";
-      import { I18nProvider } from "./src/i18n.jsx";
-      import { CenterWorkspace } from "./src/components/layout/CenterWorkspace.jsx";
-
-      export function renderComponent(props) {
-        return renderToStaticMarkup(
-          React.createElement(I18nProvider, { initialLanguage: "en" }, React.createElement(CenterWorkspace, props))
-        );
-      }
-    `,
-  );
-
-  const html = module.renderComponent(
+    "./src/components/layout/CenterWorkspace.jsx",
+    "CenterWorkspace",
     baseWorkspaceProps({
       detail: {
         project: {
@@ -243,23 +270,11 @@ test("CenterWorkspace renders the parallel execution tree for parallel plans", a
 });
 
 test("IdeToolbar renders the active command and DAG-ready progress text", async () => {
-  const module = await importBundledModule(
+  const html = await renderBundledComponent(
     "ide-toolbar-render",
-    `
-      import React from "react";
-      import { renderToStaticMarkup } from "react-dom/server";
-      import { I18nProvider } from "./src/i18n.jsx";
-      import { IdeToolbar } from "./src/components/layout/IdeToolbar.jsx";
-
-      export function renderComponent(props) {
-        return renderToStaticMarkup(
-          React.createElement(I18nProvider, { initialLanguage: "en" }, React.createElement(IdeToolbar, props))
-        );
-      }
-    `,
-  );
-
-  const html = module.renderComponent({
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
     projectDetail: {
       project: {
         display_name: "Demo",
@@ -294,23 +309,11 @@ test("IdeToolbar renders the active command and DAG-ready progress text", async 
 });
 
 test("IdeToolbar prioritizes the debugging status over the generic active command", async () => {
-  const module = await importBundledModule(
+  const html = await renderBundledComponent(
     "ide-toolbar-debugging-render",
-    `
-      import React from "react";
-      import { renderToStaticMarkup } from "react-dom/server";
-      import { I18nProvider } from "./src/i18n.jsx";
-      import { IdeToolbar } from "./src/components/layout/IdeToolbar.jsx";
-
-      export function renderComponent(props) {
-        return renderToStaticMarkup(
-          React.createElement(I18nProvider, { initialLanguage: "en" }, React.createElement(IdeToolbar, props))
-        );
-      }
-    `,
-  );
-
-  const html = module.renderComponent({
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
     projectDetail: {
       project: {
         display_name: "Demo",
@@ -342,23 +345,11 @@ test("IdeToolbar prioritizes the debugging status over the generic active comman
 });
 
 test("RunProgressPanel renders current work, progress, and recent activity", async () => {
-  const module = await importBundledModule(
+  const html = await renderBundledComponent(
     "run-progress-panel-render",
-    `
-      import React from "react";
-      import { renderToStaticMarkup } from "react-dom/server";
-      import { I18nProvider } from "./src/i18n.jsx";
-      import { RunProgressPanel } from "./src/components/layout/RunProgressPanel.jsx";
-
-      export function renderComponent(props) {
-        return renderToStaticMarkup(
-          React.createElement(I18nProvider, { initialLanguage: "en" }, React.createElement(RunProgressPanel, props))
-        );
-      }
-    `,
-  );
-
-  const html = module.renderComponent({
+    "./src/components/layout/RunProgressPanel.jsx",
+    "RunProgressPanel",
+    {
     detail: {
       project: {
         current_status: "running:block:2",
@@ -405,23 +396,11 @@ test("RunProgressPanel renders current work, progress, and recent activity", asy
 });
 
 test("RunProgressPanel renders debugging state from the project status", async () => {
-  const module = await importBundledModule(
+  const html = await renderBundledComponent(
     "run-progress-panel-debugging-render",
-    `
-      import React from "react";
-      import { renderToStaticMarkup } from "react-dom/server";
-      import { I18nProvider } from "./src/i18n.jsx";
-      import { RunProgressPanel } from "./src/components/layout/RunProgressPanel.jsx";
-
-      export function renderComponent(props) {
-        return renderToStaticMarkup(
-          React.createElement(I18nProvider, { initialLanguage: "en" }, React.createElement(RunProgressPanel, props))
-        );
-      }
-    `,
-  );
-
-  const html = module.renderComponent({
+    "./src/components/layout/RunProgressPanel.jsx",
+    "RunProgressPanel",
+    {
     detail: {
       project: {
         current_status: "running:debugging",
@@ -462,4 +441,56 @@ test("RunProgressPanel renders debugging state from the project status", async (
   assert.match(html, /Debugging/);
   assert.match(html, /python -m pytest exited with 1/);
   assert.doesNotMatch(html, /Working on ST2 - Build/);
+});
+
+test("SidebarPane renders a filtered workspace tree without unrelated nodes", async () => {
+  const html = await renderBundledComponent(
+    "sidebar-pane-render",
+    "./src/components/layout/SidebarPane.jsx",
+    "SidebarPane",
+    {
+    activeTab: "workspace",
+    onChangeTab: noop,
+    projects: [],
+    selectedProjectId: "",
+    loadingProjectId: "",
+    projectFilter: "",
+    workspaceFilter: "bridge",
+    onProjectFilterChange: noop,
+    onWorkspaceFilterChange: noop,
+    onSelectProject: noop,
+    onNewProject: noop,
+    onDeleteProject: noop,
+    onDeleteAllProjects: noop,
+    workspaceTree: [
+      {
+        label: "Repository",
+        path: "/repo",
+        kind: "dir",
+        children: [
+          { label: "README.md", path: "/repo/README.md", kind: "file" },
+          {
+            label: "src",
+            path: "/repo/src",
+            kind: "dir",
+            children: [
+              { label: "ui_bridge.py", path: "/repo/src/ui_bridge.py", kind: "file" },
+              { label: "planning.py", path: "/repo/src/planning.py", kind: "file" },
+            ],
+          },
+        ],
+      },
+    ],
+    checkpoints: { items: [] },
+    github: {
+      connected: false,
+      origin_url: "",
+      branch: "main",
+      repo_url: "",
+    },
+  });
+
+  assert.match(html, /ui_bridge\.py/);
+  assert.match(html, /Repository/);
+  assert.doesNotMatch(html, /README\.md/);
 });
