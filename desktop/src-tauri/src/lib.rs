@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
+use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -172,6 +173,25 @@ fn parse_bridge_output(
     serde_json::from_str(&stdout).map_err(|error| format!("Failed to parse bridge JSON: {error}"))
 }
 
+fn spawn_output_reader<T>(stream: Option<T>) -> Option<std::thread::JoinHandle<Vec<u8>>>
+where
+    T: Read + Send + 'static,
+{
+    stream.map(|mut handle| {
+        std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let _ = handle.read_to_end(&mut buffer);
+            buffer
+        })
+    })
+}
+
+fn join_output_reader(handle: Option<std::thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+    handle
+        .and_then(|reader| reader.join().ok())
+        .unwrap_or_default()
+}
+
 fn run_bridge_command(
     command: &str,
     payload: Option<Value>,
@@ -202,6 +222,8 @@ fn run_bridge_command(
     let mut child = process
         .spawn()
         .map_err(|error| format!("Failed to start Python bridge: {error}"))?;
+    let mut stdout_reader = spawn_output_reader(child.stdout.take());
+    let mut stderr_reader = spawn_output_reader(child.stderr.take());
 
     if let Some(payload) = payload {
         if let Some(stdin) = child.stdin.as_mut() {
@@ -218,29 +240,27 @@ fn run_bridge_command(
 
     let timeout = bridge_timeout();
     let started_at = Instant::now();
-    let output = loop {
+    let status = loop {
         match child
             .try_wait()
             .map_err(|error| format!("Failed to poll Python bridge: {error}"))?
         {
-            Some(_status) => {
-                break child
-                    .wait_with_output()
-                    .map_err(|error| format!("Failed to wait for Python bridge: {error}"))?;
-            }
+            Some(status) => break status,
             None if started_at.elapsed() >= timeout => {
                 let _ = child.kill();
-                let timed_out_output = child.wait_with_output().map_err(|error| {
-                    format!("Failed to wait for timed out Python bridge: {error}")
-                })?;
+                let timed_out_status = child
+                    .wait()
+                    .map_err(|error| format!("Failed to wait for timed out Python bridge: {error}"))?;
+                let timed_out_stdout = join_output_reader(stdout_reader.take());
+                let timed_out_stderr = join_output_reader(stderr_reader.take());
                 let detail = bridge_failure_message(
-                    String::from_utf8_lossy(&timed_out_output.stdout)
+                    String::from_utf8_lossy(&timed_out_stdout)
                         .trim()
                         .to_string(),
-                    String::from_utf8_lossy(&timed_out_output.stderr)
+                    String::from_utf8_lossy(&timed_out_stderr)
                         .trim()
                         .to_string(),
-                    timed_out_output.status.code(),
+                    timed_out_status.code(),
                 );
                 return Err(format!(
                     "Python bridge timed out after {} seconds while running '{}'. {}",
@@ -252,11 +272,13 @@ fn run_bridge_command(
             None => std::thread::sleep(Duration::from_millis(50)),
         }
     };
+    let stdout = join_output_reader(stdout_reader.take());
+    let stderr = join_output_reader(stderr_reader.take());
     parse_bridge_output(
-        output.status.success(),
-        output.status.code(),
-        &output.stdout,
-        &output.stderr,
+        status.success(),
+        status.code(),
+        &stdout,
+        &stderr,
     )
 }
 
