@@ -355,7 +355,7 @@ test("RunProgressPanel renders current work, progress, and recent activity", asy
         current_status: "running:block:2",
       },
       activity: [
-        "2026-03-26T09:01:00Z | step-started [ST2] | Running ST2: Build the screen",
+        "2026-03-26T09:01:00Z | step-started [ST3] | Running ST3: Build the backend",
       ],
       plan: {
         execution_mode: "parallel",
@@ -363,14 +363,14 @@ test("RunProgressPanel renders current work, progress, and recent activity", asy
         steps: [
           { step_id: "ST1", title: "Plan", status: "completed" },
           { step_id: "ST2", title: "Build", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
-          { step_id: "ST3", title: "Backend", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+          { step_id: "ST3", title: "Backend", status: "running", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
         ],
       },
       stats: {
         total_steps: 3,
         completed_steps: 1,
         failed_steps: 0,
-        running_steps: 1,
+        running_steps: 2,
         remaining_steps: 2,
       },
     },
@@ -380,7 +380,7 @@ test("RunProgressPanel renders current work, progress, and recent activity", asy
       steps: [
         { step_id: "ST1", title: "Plan", status: "completed" },
         { step_id: "ST2", title: "Build", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
-        { step_id: "ST3", title: "Backend", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+        { step_id: "ST3", title: "Backend", status: "running", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
       ],
     },
     activeJob: {
@@ -390,9 +390,10 @@ test("RunProgressPanel renders current work, progress, and recent activity", asy
   });
 
   assert.match(html, /Live Run/);
-  assert.match(html, /Working on ST2 - Build/);
-  assert.match(html, /Completed 1\/3 steps, ready: ST2, ST3/);
-  assert.match(html, /Running ST2: Build the screen/);
+  assert.match(html, /Working on ST2 - Build, ST3 - Backend/);
+  assert.match(html, /Completed 1\/3 steps, running: ST2, ST3/);
+  assert.match(html, /2 node\(s\) running/);
+  assert.match(html, /Running ST3: Build the backend/);
 });
 
 test("RunProgressPanel renders debugging state from the project status", async () => {

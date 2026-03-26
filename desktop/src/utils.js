@@ -366,6 +366,24 @@ function readyExecutionNodeIds(plan = {}) {
     .map((step) => step.step_id);
 }
 
+function runningExecutionSteps(plan = {}) {
+  const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+  return steps.filter((step) => step?.status === "running");
+}
+
+function summarizeStepIds(steps = [], maxVisible = 4) {
+  const stepIds = steps
+    .map((step) => String(step?.step_id || "").trim())
+    .filter(Boolean);
+  if (!stepIds.length) {
+    return "";
+  }
+  if (stepIds.length <= maxVisible) {
+    return stepIds.join(", ");
+  }
+  return `${stepIds.slice(0, maxVisible).join(", ")} +${stepIds.length - maxVisible}`;
+}
+
 export function activityLineSummary(line = "") {
   const parts = String(line || "")
     .split("|")
@@ -392,7 +410,8 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
   const steps = Array.isArray(plan?.steps) ? plan.steps : [];
   const stats = detail?.stats || computePlanStats(plan);
   const command = activeJob?.status === "running" ? String(activeJob?.command || "").trim() : "";
-  const runningStep = steps.find((step) => step.status === "running") || null;
+  const runningStepList = runningExecutionSteps(plan);
+  const runningStep = runningStepList[0] || null;
   const nextStep = steps.find((step) => step.status !== "completed") || null;
   const readyIds = readyExecutionNodeIds(plan);
   const closeoutRunning = String(plan?.closeout_status || "").trim().toLowerCase() === "running";
@@ -405,7 +424,7 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     .slice(0, 3);
   const isActive =
     activeJob?.status === "running" ||
-    Boolean(runningStep) ||
+    runningStepList.length > 0 ||
     closeoutRunning ||
     status.startsWith("running:");
 
@@ -416,7 +435,7 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     phase = "closeout";
   } else if (debugging) {
     phase = "debugging";
-  } else if (command || runningStep || nextStep) {
+  } else if (command || runningStepList.length > 0 || nextStep) {
     phase = "step";
   }
 
@@ -432,7 +451,7 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     } else if (steps.length) {
       percent = Math.round((Math.max(0, Number(stats?.completed_steps || 0)) / steps.length) * 100);
       visualPercent = percent > 0 ? percent : 6;
-      if ((runningStep || command === "run-plan") && percent < 95) {
+      if ((runningStepList.length > 0 || command === "run-plan") && percent < 95) {
         visualPercent = Math.max(visualPercent, 10);
         visualPercent = Math.min(95, visualPercent);
       }
@@ -453,6 +472,7 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     failedSteps: Math.max(0, Number(stats?.failed_steps || 0)),
     runningSteps: Math.max(0, Number(stats?.running_steps || 0)),
     remainingSteps: Math.max(0, Number(stats?.remaining_steps || 0)),
+    runningStepList,
     runningStep,
     nextStep,
     readyIds,
@@ -1016,6 +1036,12 @@ export function executionProgressCaption(plan, language = "en") {
     String(plan?.execution_mode || "serial").trim().toLowerCase() === "parallel" &&
     steps.some((step) => (step?.depends_on || []).length || (step?.owned_paths || []).length);
   if (usesDag) {
+    const runningIds = summarizeStepIds(runningExecutionSteps(plan));
+    if (runningIds) {
+      return locale === "ko"
+        ? `${completed}/${total}단계 완료, 실행 중: ${runningIds}`
+        : `Completed ${completed}/${total} steps, running: ${runningIds}`;
+    }
     const completedIds = new Set(steps.filter((step) => step.status === "completed").map((step) => step.step_id));
     const readyIds = steps
       .filter(
@@ -1059,6 +1085,10 @@ export function toolbarProgressCaption(plan) {
     String(plan?.execution_mode || "serial").trim().toLowerCase() === "parallel" &&
     steps.some((step) => (step?.depends_on || []).length || (step?.owned_paths || []).length);
   if (usesDag) {
+    const runningIds = summarizeStepIds(runningExecutionSteps(plan));
+    if (runningIds) {
+      return `Completed ${completed}/${total} steps, running: ${runningIds}`;
+    }
     const completedIds = new Set(steps.filter((step) => step.status === "completed").map((step) => step.step_id));
     const readyIds = steps
       .filter(

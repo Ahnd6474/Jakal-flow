@@ -7,6 +7,19 @@ function stepLabel(step) {
   return [step?.step_id, step?.title].filter(Boolean).join(" - ");
 }
 
+function runningStepLabels(steps = [], maxVisible = 3) {
+  const labels = steps
+    .map((step) => stepLabel(step))
+    .filter(Boolean);
+  if (!labels.length) {
+    return "";
+  }
+  if (labels.length <= maxVisible) {
+    return labels.join(", ");
+  }
+  return `${labels.slice(0, maxVisible).join(", ")} +${labels.length - maxVisible}`;
+}
+
 export function RunProgressPanel({ detail, planDraft, activeJob }) {
   const { language, t } = useI18n();
   const progress = deriveExecutionProgress(detail, planDraft, activeJob);
@@ -34,6 +47,8 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
     currentWork = t("run.closeoutRunning");
   } else if (progress.phase === "debugging") {
     currentWork = t("run.debugging");
+  } else if ((progress.runningStepList || []).length > 1) {
+    currentWork = t("run.workingOnSteps", { steps: runningStepLabels(progress.runningStepList) });
   } else if (progress.runningStep) {
     currentWork = t("run.workingOnStep", { step: stepLabel(progress.runningStep) });
   } else if (progress.nextStep) {
@@ -42,8 +57,11 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
 
   const progressSummary = executionProgressCaption(progress.plan, language);
   const percentLabel = progress.indeterminate ? t("status.running") : t("run.progressPercent", { percent: progress.percent ?? 0 });
-  const runningStepElapsedSeconds = progress.runningStep?.started_at
-    ? Math.max(0, Math.round((nowTick - new Date(progress.runningStep.started_at).getTime()) / 1000))
+  const runningStartTimes = (progress.runningStepList || [])
+    .map((step) => Date.parse(String(step?.started_at || "")))
+    .filter((value) => Number.isFinite(value));
+  const runningStepElapsedSeconds = runningStartTimes.length
+    ? Math.max(0, Math.round((nowTick - Math.min(...runningStartTimes)) / 1000))
     : 0;
   const badgeLabel =
     progress.phase === "debugging"
@@ -79,7 +97,10 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
         {progress.totalSteps ? (
           <span>{t("run.completedStepsSummary", { completed: progress.completedSteps, total: progress.totalSteps })}</span>
         ) : null}
-        {progress.readyIds.length > 1 ? <span>{t("run.readyNodeSummary", { count: progress.readyIds.length })}</span> : null}
+        {progress.runningStepList?.length > 1 ? <span>{t("run.runningNodeSummary", { count: progress.runningStepList.length })}</span> : null}
+        {(!progress.runningStepList || progress.runningStepList.length <= 1) && progress.readyIds.length > 1 ? (
+          <span>{t("run.readyNodeSummary", { count: progress.readyIds.length })}</span>
+        ) : null}
         <span>{t("run.currentElapsed")}: {formatDurationCompact(runningStepElapsedSeconds, language)}</span>
         <span>{t("run.currentRemaining")}: {formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language)}</span>
         <span>{t("run.estimatedCost")}: {formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</span>

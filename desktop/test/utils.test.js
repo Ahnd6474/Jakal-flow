@@ -108,6 +108,8 @@ test("program settings helpers keep global runtime controls separate from projec
     codex_path: "codex.cmd",
     allow_push: false,
     require_checkpoint_approval: false,
+    workflow_mode: "standard",
+    ml_max_cycles: 3,
     execution_mode: "serial",
     parallel_workers: 2,
     developer_mode: false,
@@ -153,6 +155,8 @@ test("program settings helpers keep global runtime controls separate from projec
       codex_path: "codex.cmd",
       allow_push: false,
       require_checkpoint_approval: false,
+      workflow_mode: "standard",
+      ml_max_cycles: 3,
       execution_mode: "serial",
       parallel_workers: 2,
     },
@@ -188,6 +192,8 @@ test("program settings helpers keep global runtime controls separate from projec
         codex_path: "codex.cmd",
         allow_push: false,
         require_checkpoint_approval: false,
+        workflow_mode: "standard",
+        ml_max_cycles: 3,
         execution_mode: "serial",
         parallel_workers: 2,
       },
@@ -597,6 +603,7 @@ test("buildProjectPayload trims fields, blanks origin_url for existing repos, an
       test_cmd: "changed",
     },
     plan: {
+      workflow_mode: "standard",
       execution_mode: "serial",
       default_test_command: "pytest -q",
       steps: [{ step_id: "S1", status: "completed" }],
@@ -654,24 +661,24 @@ test("runtimeSummary reflects execution mode in preset and direct model summarie
       { model_preset: "balanced" },
       [{ preset_id: "balanced", summary: "Balanced preset" }],
     ),
-    "OpenAI/Codex | Balanced preset | serial",
+    "OpenAI/Codex | Standard Mode | Balanced preset | serial",
   );
-  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low" }, []), "OpenAI/Codex | gpt-5.4 | reasoning Low | serial");
+  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low" }, []), "OpenAI/Codex | Standard Mode | gpt-5.4 | reasoning Low | serial");
   assert.equal(
     runtimeSummary({ model: "gpt-5.4", effort: "medium", effort_selection_mode: "auto" }, []),
-    "OpenAI/Codex | gpt-5.4 | reasoning Auto | serial",
+    "OpenAI/Codex | Standard Mode | gpt-5.4 | reasoning Auto | serial",
   );
   assert.equal(
     runtimeSummary({ model: "gpt-5.4", effort: "low", use_fast_mode: true }, []),
-    "OpenAI/Codex | gpt-5.4 | reasoning Low | serial | /fast",
+    "OpenAI/Codex | Standard Mode | gpt-5.4 | reasoning Low | serial | /fast",
   );
-  assert.equal(runtimeSummary({ model: "gpt-5.4" }), "OpenAI/Codex | gpt-5.4 | reasoning High | serial");
+  assert.equal(runtimeSummary({ model: "gpt-5.4" }), "OpenAI/Codex | Standard Mode | gpt-5.4 | reasoning High | serial");
   assert.equal(
     runtimeSummary({ model: "gpt-5.4", effort: "high", execution_mode: "parallel", parallel_workers: 4 }, []),
-    "OpenAI/Codex | gpt-5.4 | reasoning High | parallel x4",
+    "OpenAI/Codex | Standard Mode | gpt-5.4 | reasoning High | parallel x4",
   );
   assert.equal(runtimeSummary({}, undefined), "No model selected");
-  assert.match(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), /^OpenAI\/Codex \| gpt-5\.4 .* serial$/);
+  assert.match(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), /^OpenAI\/Codex \| .* \| gpt-5\.4 .* serial$/);
 });
 
 test("runtimeSummary includes the selected local provider for OSS models", () => {
@@ -685,7 +692,7 @@ test("runtimeSummary includes the selected local provider for OSS models", () =>
       },
       [],
     ),
-    "Local/Ollama | qwen2.5-coder:0.5b | reasoning Medium | serial",
+    "Local/Ollama | Standard Mode | qwen2.5-coder:0.5b | reasoning Medium | serial",
   );
 });
 

@@ -750,9 +750,11 @@ STRINGS.en["run.planGeneration"] = "Generating execution plan";
 STRINGS.en["run.preparingStep"] = "Preparing {step}";
 STRINGS.en["run.progressPercent"] = "{percent}% complete";
 STRINGS.en["run.readyNodeSummary"] = "{count} ready node(s)";
+STRINGS.en["run.runningNodeSummary"] = "{count} node(s) running";
 STRINGS.en["run.stepProgress"] = "Step Progress";
 STRINGS.en["run.debugging"] = "Debugging";
 STRINGS.en["run.workingOnStep"] = "Working on {step}";
+STRINGS.en["run.workingOnSteps"] = "Working on {steps}";
 STRINGS.en["prompt.confirmDeleteAllProjects"] =
   "Remove all projects from jakal-flow? The managed docs, logs, and state will be deleted, but the original repository folders will stay in place.";
 STRINGS.en["sidebar.projectContextDelete"] = "Right-click to open project actions";
@@ -961,9 +963,11 @@ KO_HIGH_QUALITY_OVERRIDES["run.planGeneration"] = "계획 생성 중";
 KO_HIGH_QUALITY_OVERRIDES["run.preparingStep"] = "{step} 준비 중";
 KO_HIGH_QUALITY_OVERRIDES["run.progressPercent"] = "{percent}% 완료";
 KO_HIGH_QUALITY_OVERRIDES["run.readyNodeSummary"] = "실행 가능 노드 {count}개";
+KO_HIGH_QUALITY_OVERRIDES["run.runningNodeSummary"] = "실행 중인 노드 {count}개";
 KO_HIGH_QUALITY_OVERRIDES["run.stepProgress"] = "단계 진행도";
 KO_HIGH_QUALITY_OVERRIDES["run.debugging"] = "디버깅";
 KO_HIGH_QUALITY_OVERRIDES["run.workingOnStep"] = "{step} 작업 중";
+KO_HIGH_QUALITY_OVERRIDES["run.workingOnSteps"] = "{steps} 작업 중";
 
 const STATIC_LANGUAGE_PACKS = new Map(
   ["en", "ko"].map((language) => [
