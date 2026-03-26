@@ -328,6 +328,36 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(plan_state.steps[0].depends_on, ["ST2"])
         self.assertEqual(plan_state.steps[1].depends_on, [])
 
+    def test_save_execution_plan_state_keeps_running_checkpoint_status_in_sync(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_running_checkpoint_sync_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", execution_mode="parallel")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            saved = orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(step_id="custom-1", title="Active node", status="running"),
+                        ExecutionStep(step_id="custom-2", title="Queued node", status="pending"),
+                    ],
+                ),
+            )
+            checkpoint_state = read_json(context.paths.checkpoint_state_file, default={})
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(saved.steps[0].status, "running")
+        self.assertEqual(checkpoint_state["checkpoints"][0]["status"], "running")
+        self.assertEqual(checkpoint_state["checkpoints"][1]["status"], "pending")
+
     def test_run_saved_execution_step_uses_step_reasoning_effort(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_reasoning_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -532,6 +562,56 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(step.status, "completed")
         self.assertEqual(step.commit_hash, "retry-success-commit")
         self.assertEqual(step.notes, "step passed on retry")
+        self.assertEqual(context.metadata.current_status, "plan_completed")
+
+    def test_run_saved_execution_step_marks_project_running_before_attempts_begin(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_running_status_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        observed_statuses: list[str] = []
+
+        def fake_run_single_block(*args, **kwargs) -> None:
+            context = kwargs["context"]
+            observed_statuses.append(context.metadata.current_status)
+            append_jsonl(
+                context.paths.block_log_file,
+                {
+                    "block_index": 1,
+                    "status": "completed",
+                    "commit_hashes": ["running-status-commit"],
+                    "test_summary": "step passed",
+                },
+            )
+
+        try:
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch.object(
+                orchestrator,
+                "_run_single_block",
+                side_effect=fake_run_single_block,
+            ):
+                orchestrator.update_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    plan_state=ExecutionPlanState(
+                        plan_title="Running Status Demo",
+                        default_test_command="python -m pytest",
+                        steps=[ExecutionStep(step_id="custom-1", title="Start running", test_command="python -m pytest")],
+                    ),
+                )
+                context, _plan_state, step = orchestrator.run_saved_execution_step(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_id="ST1",
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(observed_statuses, ["running:st1"])
+        self.assertEqual(step.status, "completed")
         self.assertEqual(context.metadata.current_status, "plan_completed")
 
     def test_run_saved_execution_step_marks_failed_after_retry_limit(self) -> None:

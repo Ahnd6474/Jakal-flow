@@ -15,7 +15,7 @@ from .share import project_share_payload
 from .utils import compact_text, normalize_workflow_mode, read_json, read_jsonl_tail, read_last_jsonl, read_text, write_json
 
 
-DETAIL_CACHE_VERSION = 1
+DETAIL_CACHE_VERSION = 2
 
 
 def _path_signature(path: Path) -> str:
@@ -317,7 +317,7 @@ def checkpoint_payload(context: ProjectContext) -> dict[str, Any]:
     raw_items = raw.get("checkpoints", []) if isinstance(raw, dict) else []
     checkpoints = [item for item in raw_items if isinstance(item, dict)]
     pending = next((item for item in checkpoints if item.get("status") == "awaiting_review"), None)
-    if pending is None and context.loop_state.current_checkpoint_id:
+    if pending is None and context.loop_state.pending_checkpoint_approval and context.loop_state.current_checkpoint_id:
         pending = next(
             (item for item in checkpoints if item.get("checkpoint_id") == context.loop_state.current_checkpoint_id),
             None,

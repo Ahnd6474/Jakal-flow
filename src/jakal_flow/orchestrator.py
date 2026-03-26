@@ -493,6 +493,8 @@ class Orchestrator:
                 step.notes = ""
             elif step.status == "running":
                 step.status = "paused"
+        context.metadata.current_status = f"running:{target_step.step_id.lower()}"
+        context.metadata.last_run_at = now_utc_iso()
         plan_state.default_test_command = runtime.test_cmd
         plan_state = self.save_execution_plan_state(context, plan_state)
 
@@ -1973,6 +1975,11 @@ class Orchestrator:
     def _status_from_plan_state(self, plan_state: ExecutionPlanState) -> str:
         if not plan_state.steps:
             return "setup_ready"
+        running_steps = [step for step in plan_state.steps if step.status == "running"]
+        if running_steps:
+            if len(running_steps) == 1:
+                return f"running:{running_steps[0].step_id.lower()}"
+            return "running:parallel"
         if not self._all_steps_completed(plan_state.steps):
             return "plan_ready"
         if plan_state.closeout_status == "completed":
@@ -1990,7 +1997,7 @@ class Orchestrator:
             if step.status == "completed":
                 status = "approved"
             elif step.status == "running":
-                status = "awaiting_review"
+                status = "running"
             elif step.status in {"failed", "paused"}:
                 status = step.status
             checkpoints.append(
