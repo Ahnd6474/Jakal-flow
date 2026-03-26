@@ -2,16 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .codex_app_server import AUTO_MODEL_SLUG
+from .model_constants import AUTO_MODEL_SLUG, VALID_REASONING_EFFORTS
 from .models import RuntimeOptions
 
 MODEL_MODE_SLUG = "slug"
 MODEL_MODE_CODEX = "codex"
 VALID_MODEL_MODES = {MODEL_MODE_SLUG, MODEL_MODE_CODEX}
-VALID_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 DEFAULT_MODEL_SLUG = AUTO_MODEL_SLUG
 DEFAULT_CODEX_BASE_SLUG = "gpt-5.4"
 DEFAULT_CODEX_VARIANT_SLUG = "codex"
+LEGACY_MODEL_PRESET_IDS = {
+    "auto-low": "low",
+    "auto-medium": "medium",
+    "auto-high": "high",
+    "auto-xhigh": "xhigh",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +28,8 @@ class ModelPreset:
     description: str
 
     def summary(self) -> str:
+        if self.model == AUTO_MODEL_SLUG:
+            return f"{self.label} | reasoning {self.effort}"
         return f"{self.label} | {self.model} | reasoning {self.effort}"
 
 
@@ -35,29 +42,29 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
         description="Use Codex automatic model routing with the default reasoning balance.",
     ),
     ModelPreset(
-        preset_id="auto-low",
-        label="Auto / Low",
+        preset_id="low",
+        label="Low",
         model=AUTO_MODEL_SLUG,
         effort="low",
         description="Use automatic routing with lighter reasoning for faster edits and checks.",
     ),
     ModelPreset(
-        preset_id="auto-medium",
-        label="Auto / Medium",
+        preset_id="medium",
+        label="Medium",
         model=AUTO_MODEL_SLUG,
         effort="medium",
         description="Use automatic routing with balanced reasoning for everyday coding work.",
     ),
     ModelPreset(
-        preset_id="auto-high",
-        label="Auto / High",
+        preset_id="high",
+        label="High",
         model=AUTO_MODEL_SLUG,
         effort="high",
         description="Use automatic routing with stronger reasoning for larger or trickier changes.",
     ),
     ModelPreset(
-        preset_id="auto-xhigh",
-        label="Auto / XHigh",
+        preset_id="xhigh",
+        label="XHigh",
         model=AUTO_MODEL_SLUG,
         effort="xhigh",
         description="Use automatic routing with the deepest reasoning for the hardest investigations.",
@@ -87,13 +94,23 @@ def validate_reasoning_effort(value: str) -> str:
     return effort
 
 
+def normalize_model_preset_id(value: str, fallback: str = "") -> str:
+    requested = value.strip().lower()
+    normalized = LEGACY_MODEL_PRESET_IDS.get(requested, requested)
+    valid_ids = {preset.preset_id for preset in MODEL_PRESETS}
+    if normalized in valid_ids:
+        return normalized
+    return fallback
+
+
 def model_preset_by_id(preset_id: str, fallback: str = DEFAULT_MODEL_PRESET_ID) -> ModelPreset:
-    requested = preset_id.strip().lower()
+    requested = normalize_model_preset_id(preset_id, fallback="")
     for preset in MODEL_PRESETS:
         if preset.preset_id == requested:
             return preset
+    normalized_fallback = normalize_model_preset_id(fallback, fallback="")
     for preset in MODEL_PRESETS:
-        if preset.preset_id == fallback:
+        if preset.preset_id == normalized_fallback:
             return preset
     return MODEL_PRESETS[0]
 
@@ -101,7 +118,7 @@ def model_preset_by_id(preset_id: str, fallback: str = DEFAULT_MODEL_PRESET_ID) 
 def model_preset_from_runtime(runtime: RuntimeOptions) -> ModelPreset | None:
     if runtime.model_preset.strip():
         explicit = model_preset_by_id(runtime.model_preset, fallback="")
-        if explicit.preset_id == runtime.model_preset.strip().lower():
+        if explicit.preset_id == normalize_model_preset_id(runtime.model_preset, fallback=""):
             return explicit
     model = runtime.model.strip().lower()
     effort = normalize_reasoning_effort(runtime.effort)

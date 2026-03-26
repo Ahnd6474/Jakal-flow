@@ -11,6 +11,7 @@ import {
   commandLabel,
   firstSelectableStepId,
   projectFormFromDetail,
+  shouldKeepUnsavedPlan,
 } from "../utils";
 import { usePersistentState } from "./usePersistentState";
 
@@ -123,6 +124,28 @@ export function useDesktopController() {
     };
   }, []);
 
+  function applyProjectDetail(detail, options = {}) {
+    const preserveDirtyPlan = shouldKeepUnsavedPlan(
+      projectDetail?.project?.repo_id,
+      detail?.project?.repo_id,
+      options.preserveDirtyPlan ?? planDirty,
+    );
+    setProjectDetail(detail);
+    setModelCatalog(detail?.codex_status?.model_catalog || []);
+    setShareSettings(shareSettingsFromDetail(detail));
+    setProjectForm((current) => {
+      if (current.project_dir && preserveDirtyPlan) {
+        return current;
+      }
+      return projectFormFromDetail(detail, defaultRuntime);
+    });
+    if (!preserveDirtyPlan) {
+      setPlanDraft(cloneValue(detail.plan));
+      setSelectedStepId(firstSelectableStepId(detail.plan));
+      setPlanDirty(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -138,13 +161,7 @@ export function useDesktopController() {
         }
         setActiveJobId("");
         if (job.result?.project) {
-          setProjectDetail(job.result);
-          setModelCatalog(job.result?.codex_status?.model_catalog || []);
-          setShareSettings(shareSettingsFromDetail(job.result));
-          setProjectForm(projectFormFromDetail(job.result, defaultRuntime));
-          setPlanDraft(cloneValue(job.result.plan));
-          setSelectedStepId(firstSelectableStepId(job.result.plan));
-          setPlanDirty(false);
+          applyProjectDetail(job.result, { preserveDirtyPlan: false });
         }
         const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
         if (!cancelled) {
@@ -195,19 +212,7 @@ export function useDesktopController() {
         if (cancelled) {
           return;
         }
-        setProjectDetail(detail);
-        setModelCatalog(detail?.codex_status?.model_catalog || []);
-        setShareSettings(shareSettingsFromDetail(detail));
-        setProjectForm((current) => {
-          if (current.project_dir && planDirty) {
-            return current;
-          }
-          return projectFormFromDetail(detail, defaultRuntime);
-        });
-        if (!planDirty) {
-          setPlanDraft(cloneValue(detail.plan));
-          setSelectedStepId(firstSelectableStepId(detail.plan));
-        }
+        applyProjectDetail(detail);
       } catch (error) {
         if (!cancelled && !pendingAction) {
           setMessage(messagePayload("error", String(error)));
@@ -255,19 +260,7 @@ export function useDesktopController() {
 
       if (selectedProjectId) {
         const detail = await bridgeRequest("load-project", { repo_id: selectedProjectId }, workspaceRoot || null);
-        setProjectDetail(detail);
-        setModelCatalog(detail?.codex_status?.model_catalog || []);
-        setShareSettings(shareSettingsFromDetail(detail));
-        setProjectForm((current) => {
-          if (current.project_dir && planDirty) {
-            return current;
-          }
-          return projectFormFromDetail(detail, defaultRuntime);
-        });
-        if (!planDirty) {
-          setPlanDraft(cloneValue(detail.plan));
-          setSelectedStepId((current) => current || firstSelectableStepId(detail.plan));
-        }
+        applyProjectDetail(detail);
       } else if (listing.projects?.length) {
         setSelectedProjectId(listing.projects[0].repo_id);
       }
@@ -280,17 +273,10 @@ export function useDesktopController() {
 
   async function loadProject(repoId) {
     setPendingAction("load-project");
+    setSelectedProjectId(repoId);
     try {
       const detail = await bridgeRequest("load-project", { repo_id: repoId }, workspaceRoot || null);
-      setSelectedProjectId(repoId);
-      setProjectDetail(detail);
-      setModelCatalog(detail?.codex_status?.model_catalog || []);
-      setShareSettings(shareSettingsFromDetail(detail));
-      setProjectForm(projectFormFromDetail(detail, defaultRuntime));
-      if (!planDirty) {
-        setPlanDraft(cloneValue(detail.plan));
-        setSelectedStepId(firstSelectableStepId(detail.plan));
-      }
+      applyProjectDetail(detail);
       return detail;
     } catch (error) {
       setMessage(messagePayload("error", String(error)));

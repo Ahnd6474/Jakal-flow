@@ -17,6 +17,7 @@ from codex_auto.model_selection import (
     model_preset_by_id,
     model_preset_from_runtime,
     model_selection_from_runtime,
+    normalize_model_preset_id,
 )
 from codex_auto.models import ExecutionPlanState, ExecutionStep, RuntimeOptions
 from codex_auto.orchestrator import Orchestrator
@@ -275,6 +276,13 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         runtime = RuntimeOptions(model="custom-preview-model", model_preset="", effort="medium")
 
         self.assertIsNone(model_preset_from_runtime(runtime))
+
+    def test_model_preset_helpers_accept_legacy_auto_preset_ids(self) -> None:
+        self.assertEqual(normalize_model_preset_id("auto-high"), "high")
+        preset = model_preset_by_id("auto-medium")
+
+        self.assertEqual(preset.preset_id, "medium")
+        self.assertEqual(preset.effort, "medium")
 
     def test_source_prompt_templates_exist_and_keep_expected_placeholders(self) -> None:
         plan_template = load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)

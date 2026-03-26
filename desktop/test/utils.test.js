@@ -2,17 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  configReasoningOptions,
   basename,
   blankProjectForm,
   buildProjectPayload,
   canEditStep,
   cloneValue,
   commandLabel,
+  reasoningEffortLabel,
   deriveGithubMode,
   firstSelectableStepId,
   progressCaption,
   projectFormFromDetail,
   runtimeSummary,
+  selectedConfigReasoning,
+  shouldKeepUnsavedPlan,
   statusTone,
 } from "../src/utils.js";
 
@@ -108,6 +112,13 @@ test("projectFormFromDetail merges persisted runtime and derives GitHub mode", (
   });
 });
 
+test("shouldKeepUnsavedPlan only preserves local edits for the same project", () => {
+  assert.equal(shouldKeepUnsavedPlan("repo-a", "repo-a", true), true);
+  assert.equal(shouldKeepUnsavedPlan("repo-a", "repo-b", true), false);
+  assert.equal(shouldKeepUnsavedPlan("repo-a", "", true), false);
+  assert.equal(shouldKeepUnsavedPlan("repo-a", "repo-a", false), false);
+});
+
 test("buildProjectPayload trims fields, blanks origin_url for existing repos, and clones plan data", () => {
   const form = {
     project_dir: "  C:/work/demo  ",
@@ -183,6 +194,21 @@ test("runtimeSummary prefers preset summaries, then direct model settings, then 
   assert.equal(runtimeSummary({ model: "gpt-5.4" }), "gpt-5.4 | reasoning high");
   assert.equal(runtimeSummary({}, undefined), "No model selected");
   assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), "gpt-5.4 | 추론 높음");
+});
+
+test("config reasoning helpers keep auto separate from explicit efforts", () => {
+  const modelCatalog = [
+    {
+      model: "auto",
+      default_reasoning_effort: "medium",
+      supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+    },
+  ];
+
+  assert.deepEqual(configReasoningOptions(modelCatalog, "auto", "medium"), ["auto", "low", "medium", "high", "xhigh"]);
+  assert.equal(selectedConfigReasoning(modelCatalog, { model: "auto", model_preset: "auto", effort: "medium" }), "auto");
+  assert.equal(selectedConfigReasoning(modelCatalog, { model: "auto", model_preset: "medium", effort: "medium" }), "medium");
+  assert.equal(reasoningEffortLabel("auto"), "Auto");
 });
 
 test("progressCaption summarizes empty, partial, and completed plans", () => {

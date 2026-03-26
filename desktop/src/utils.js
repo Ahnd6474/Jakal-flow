@@ -10,11 +10,16 @@ export function cloneValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+export const AUTO_REASONING_OPTION = "auto";
 export const REASONING_OPTIONS = ["low", "medium", "high", "xhigh"];
+export const MODEL_REASONING_OPTIONS = [AUTO_REASONING_OPTION, ...REASONING_OPTIONS];
 
 export function reasoningEffortLabel(value, language = "en") {
   const normalized = String(value || "").trim().toLowerCase();
   const locale = normalizeLanguage(language);
+  if (normalized === AUTO_REASONING_OPTION) {
+    return translate(locale, "reasoning.auto");
+  }
   if (!normalized) {
     return translate(locale, "reasoning.high");
   }
@@ -61,6 +66,15 @@ export function projectFormFromDetail(detail, defaultRuntime) {
   };
 }
 
+export function shouldKeepUnsavedPlan(currentProjectId, nextProjectId, planDirty) {
+  if (!planDirty) {
+    return false;
+  }
+  const current = String(currentProjectId || "").trim();
+  const next = String(nextProjectId || "").trim();
+  return Boolean(current) && current === next;
+}
+
 export function buildProjectPayload(form, plan = null) {
   const payload = {
     project_dir: form.project_dir.trim(),
@@ -94,6 +108,30 @@ export function defaultReasoningOption(modelCatalog = [], model = "", fallback =
   const preferred = String(entry?.default_reasoning_effort || fallback || "medium").trim().toLowerCase();
   const options = supportedReasoningOptions(modelCatalog, model, preferred);
   return options.includes(preferred) ? preferred : options[0] || "medium";
+}
+
+export function configReasoningOptions(modelCatalog = [], model = "", fallback = "medium") {
+  const supported = supportedReasoningOptions(modelCatalog, model, fallback);
+  if (String(model || "").trim().toLowerCase() === "auto") {
+    return [AUTO_REASONING_OPTION, ...supported];
+  }
+  return supported;
+}
+
+export function selectedConfigReasoning(modelCatalog = [], runtime = {}) {
+  const model = String(runtime?.model || "").trim().toLowerCase() || "auto";
+  const options = configReasoningOptions(modelCatalog, model, runtime?.effort || "medium");
+  if (model === "auto") {
+    const preset = String(runtime?.model_preset || "").trim().toLowerCase();
+    if (options.includes(preset)) {
+      return preset;
+    }
+  }
+  const preferred = String(runtime?.effort || "").trim().toLowerCase() || defaultReasoningOption(modelCatalog, model, "medium");
+  if (options.includes(preferred)) {
+    return preferred;
+  }
+  return options[0] || "medium";
 }
 
 export function modelDisplayName(modelCatalog = [], model = "") {

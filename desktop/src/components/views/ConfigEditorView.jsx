@@ -1,5 +1,13 @@
 import { useI18n } from "../../i18n";
-import { defaultReasoningOption, findModelCatalogEntry, reasoningEffortLabel, runtimeSummary, supportedReasoningOptions } from "../../utils";
+import {
+  AUTO_REASONING_OPTION,
+  configReasoningOptions,
+  defaultReasoningOption,
+  findModelCatalogEntry,
+  reasoningEffortLabel,
+  runtimeSummary,
+  selectedConfigReasoning,
+} from "../../utils";
 
 function EffortButton({ effort, selected, onSelect, disabled, language, description }) {
   return (
@@ -14,27 +22,34 @@ function EffortButton({ effort, selected, onSelect, disabled, language, descript
 }
 
 function autoPresetId(effort) {
-  return effort === "medium" ? "auto" : `auto-${effort}`;
+  return effort === AUTO_REASONING_OPTION ? "auto" : effort;
 }
 
 function effortDescription(modelLabel, effort, language) {
   const reasoningLabel = reasoningEffortLabel(effort, language);
   if (language === "ko") {
+    if (effort === AUTO_REASONING_OPTION) {
+      return `${modelLabel}의 기본 추론 수준을 사용합니다.`;
+    }
     return `${modelLabel}에 ${reasoningLabel} 추론 수준을 적용합니다.`;
+  }
+  if (effort === AUTO_REASONING_OPTION) {
+    return `Use ${modelLabel}'s default reasoning level.`;
   }
   return `Use ${reasoningLabel} reasoning with ${modelLabel}.`;
 }
 
 function updateRuntimeModel(currentRuntime, modelCatalog, nextModel, nextEffort = null) {
   const model = String(nextModel || "").trim().toLowerCase() || "auto";
-  const supported = supportedReasoningOptions(modelCatalog, model, currentRuntime?.effort || "medium");
-  const preferred = nextEffort || currentRuntime?.effort || defaultReasoningOption(modelCatalog, model, "medium");
-  const effort = supported.includes(preferred) ? preferred : supported[0] || "medium";
+  const supported = configReasoningOptions(modelCatalog, model, currentRuntime?.effort || "medium");
+  const preferred = nextEffort || selectedConfigReasoning(modelCatalog, { ...currentRuntime, model });
+  const selection = supported.includes(preferred) ? preferred : supported[0] || "medium";
+  const effort = selection === AUTO_REASONING_OPTION ? defaultReasoningOption(modelCatalog, model, "medium") : selection;
   return {
     ...currentRuntime,
     model,
     effort,
-    model_preset: model === "auto" ? autoPresetId(effort) : "",
+    model_preset: model === "auto" ? autoPresetId(selection) : "",
     model_selection_mode: "slug",
     model_slug_input: model,
   };
@@ -53,8 +68,8 @@ export function ConfigEditorView({
   const { language, t } = useI18n();
   const selectedModel = runtime.model || "auto";
   const selectedCatalogEntry = findModelCatalogEntry(modelCatalog, selectedModel);
-  const supportedEfforts = supportedReasoningOptions(modelCatalog, selectedModel, runtime.effort || "medium");
-  const selectedEffort = supportedEfforts.includes(runtime.effort) ? runtime.effort : defaultReasoningOption(modelCatalog, selectedModel, "medium");
+  const supportedEfforts = configReasoningOptions(modelCatalog, selectedModel, runtime.effort || "medium");
+  const selectedEffort = selectedConfigReasoning(modelCatalog, runtime);
 
   const visibleModels = (modelCatalog || []).filter((item) => item && item.model);
   const allModels = visibleModels.length

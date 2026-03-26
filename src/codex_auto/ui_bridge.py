@@ -10,8 +10,15 @@ import sys
 import time
 from typing import Any
 
-from .codex_app_server import AUTO_MODEL_SLUG, fetch_codex_backend_snapshot
-from .model_selection import DEFAULT_MODEL_PRESET_ID, MODEL_PRESETS, model_preset_by_id, normalize_reasoning_effort
+from .codex_app_server import fetch_codex_backend_snapshot
+from .model_constants import AUTO_MODEL_SLUG
+from .model_selection import (
+    DEFAULT_MODEL_PRESET_ID,
+    MODEL_PRESETS,
+    model_preset_by_id,
+    normalize_model_preset_id,
+    normalize_reasoning_effort,
+)
 from .models import ExecutionPlanState, ProjectContext, RuntimeOptions
 from .orchestrator import Orchestrator
 from .share import (
@@ -257,7 +264,7 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
     )
     merged["test_cmd"] = str(merged.get("test_cmd", "python -m pytest")).strip() or "python -m pytest"
     merged["model"] = str(merged.get("model", "")).strip().lower()
-    merged["model_preset"] = str(merged.get("model_preset", "")).strip().lower()
+    merged["model_preset"] = normalize_model_preset_id(str(merged.get("model_preset", "")), fallback="")
     raw_effort = str(merged.get("effort", "")).strip()
     merged["effort"] = raw_effort.lower()
 
@@ -268,11 +275,12 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
     if not merged["effort"]:
         merged["effort"] = preset.effort
     merged["effort"] = normalize_reasoning_effort(merged["effort"], fallback=preset.effort)
-    if merged["model_preset"] not in {preset.preset_id for preset in MODEL_PRESETS}:
-        merged["model_preset"] = ""
     if merged["model"] == AUTO_MODEL_SLUG:
-        merged["model_preset"] = "auto" if merged["effort"] == "medium" else f"auto-{merged['effort']}"
-    elif merged["model_preset"].startswith("auto"):
+        if merged["model_preset"]:
+            merged["effort"] = model_preset_by_id(merged["model_preset"]).effort
+        else:
+            merged["model_preset"] = "auto" if merged["effort"] == "medium" else merged["effort"]
+    elif merged["model_preset"]:
         merged["model_preset"] = ""
     merged["model_selection_mode"] = str(merged.get("model_selection_mode", "slug")).strip() or "slug"
     merged["model_slug_input"] = str(merged.get("model_slug_input", merged["model"])).strip() or merged["model"]

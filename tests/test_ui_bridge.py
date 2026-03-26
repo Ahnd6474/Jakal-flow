@@ -111,6 +111,19 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.empty_cycle_limit, 1)
         self.assertEqual(runtime.checkpoint_interval_blocks, 1)
 
+    def test_runtime_from_payload_normalizes_legacy_auto_model_presets(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model": "auto",
+                "model_preset": "auto-high",
+                "effort": "medium",
+            }
+        )
+
+        self.assertEqual(runtime.model, "auto")
+        self.assertEqual(runtime.model_preset, "high")
+        self.assertEqual(runtime.effort, "high")
+
     def test_bootstrap_exposes_workspace_and_model_presets(self) -> None:
         with TemporaryTestDir() as temp_dir:
             with mock.patch("codex_auto.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):

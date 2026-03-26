@@ -133,6 +133,7 @@ const STRINGS = {
     "prompt.confirmCloseout": "Run final closeout now? This will do final cleanup, verification, smoke checks when possible, and handoff work.",
     "prompt.confirmRegeneratePlan": "Replace the current unstarted plan with a new Codex-generated plan?",
     "prompt.confirmResetPlan": "Reset the saved prompt and remove all execution steps for this project?",
+    "reasoning.auto": "Auto",
     "reasoning.high": "High",
     "reasoning.low": "Low",
     "reasoning.medium": "Medium",

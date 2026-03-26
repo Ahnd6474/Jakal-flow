@@ -10,13 +10,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .model_constants import AUTO_MODEL_SLUG, VALID_REASONING_EFFORTS
 from .utils import now_utc_iso
 
 
-AUTO_MODEL_SLUG = "auto"
 APP_SERVER_TIMEOUT_SECS = 8.0
 MODEL_PAGE_LIMIT = 100
-VALID_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 
 
 def resolve_codex_path(codex_path: str) -> str:
