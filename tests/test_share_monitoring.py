@@ -320,6 +320,47 @@ class ShareMonitoringTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_share_server_serves_translation_assets(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            server = ShareHTTPServer(("127.0.0.1", 0), ShareRequestHandler, workspace_root=workspace_root)
+            thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True)
+            thread.start()
+            try:
+                base_url = f"http://127.0.0.1:{server.server_address[1]}"
+                generated = urllib.request.urlopen(f"{base_url}/share/generated_share_translations.js")
+                generated_text = generated.read().decode("utf-8")
+                self.assertIn("JakalFlowGeneratedShareTranslations", generated_text)
+
+                manual = urllib.request.urlopen(f"{base_url}/share/manual_share_translations.js")
+                manual_text = manual.read().decode("utf-8")
+                self.assertIn("JakalFlowManualShareTranslations", manual_text)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_share_html_uses_view_relative_asset_paths(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "website" / "share.html").read_text(encoding="utf-8")
+
+        self.assertIn('href="share.css"', html)
+        self.assertIn('src="generated_share_translations.js"', html)
+        self.assertIn('src="manual_share_translations.js"', html)
+        self.assertIn('src="share.js"', html)
+        self.assertNotIn('href="/share/share.css"', html)
+        self.assertNotIn('src="/share/share.js"', html)
+
+    def test_share_script_uses_view_relative_api_paths(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "website" / "share.js").read_text(encoding="utf-8")
+
+        self.assertIn('pathname.endsWith("/share/view")', script)
+        self.assertIn('shareEndpoint("api/status")', script)
+        self.assertIn('shareEndpoint("api/events")', script)
+        self.assertIn('builtInEnglishShareTranslations', script)
+        self.assertIn('language === "en" ? builtInEnglishShareTranslations : {}', script)
+        self.assertNotIn('new URL("/share/api/status", window.location.origin)', script)
+        self.assertNotIn('new URL("/share/api/events", window.location.origin)', script)
+
     def test_share_events_api_streams_live_status_payload(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"
