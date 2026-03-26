@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyProgramSettings,
+  applyProgramSettingsToForm,
   autoRoutingPresetLabel,
   configReasoningOptions,
   basename,
@@ -15,6 +17,7 @@ import {
   firstSelectableStepId,
   mergeProjectDetailCodexStatus,
   progressCaption,
+  programSettingsFromRuntime,
   projectFormFromDetail,
   runtimeSummary,
   selectedConfigReasoning,
@@ -50,6 +53,70 @@ test("deriveGithubMode distinguishes manual and existing projects", () => {
   assert.equal(deriveGithubMode("https://github.com/openai/codex-auto"), "manual");
   assert.equal(deriveGithubMode(""), "existing");
   assert.equal(deriveGithubMode(null), "existing");
+});
+
+test("program settings helpers keep global runtime controls separate from project-specific values", () => {
+  const settings = programSettingsFromRuntime({
+    approval_mode: "untrusted",
+    sandbox_mode: "workspace-write",
+    allow_push: false,
+  });
+
+  assert.deepEqual(settings, {
+    approval_mode: "untrusted",
+    sandbox_mode: "workspace-write",
+    checkpoint_interval_blocks: 1,
+    codex_path: "codex.cmd",
+    allow_push: false,
+    require_checkpoint_approval: false,
+  });
+
+  assert.deepEqual(
+    applyProgramSettings(
+      {
+        model: "gpt-5.4",
+        test_cmd: "pytest -q",
+      },
+      settings,
+    ),
+    {
+      model: "gpt-5.4",
+      test_cmd: "pytest -q",
+      approval_mode: "untrusted",
+      sandbox_mode: "workspace-write",
+      checkpoint_interval_blocks: 1,
+      codex_path: "codex.cmd",
+      allow_push: false,
+      require_checkpoint_approval: false,
+    },
+  );
+
+  assert.deepEqual(
+    applyProgramSettingsToForm(
+      {
+        project_dir: "demo",
+        runtime: {
+          model: "gpt-5.4",
+          test_cmd: "pytest -q",
+          approval_mode: "never",
+        },
+      },
+      settings,
+    ),
+    {
+      project_dir: "demo",
+      runtime: {
+        model: "gpt-5.4",
+        test_cmd: "pytest -q",
+        approval_mode: "untrusted",
+        sandbox_mode: "workspace-write",
+        checkpoint_interval_blocks: 1,
+        codex_path: "codex.cmd",
+        allow_push: false,
+        require_checkpoint_approval: false,
+      },
+    },
+  );
 });
 
 test("blankProjectForm seeds runtime defaults without mutating the source runtime", () => {
@@ -223,6 +290,7 @@ test("runtimeSummary prefers preset summaries, then direct model settings, then 
     "Balanced preset",
   );
   assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low" }, []), "gpt-5.4 | reasoning low");
+  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low", use_fast_mode: true }, []), "gpt-5.4 | reasoning low | /fast");
   assert.equal(runtimeSummary({ model: "gpt-5.4" }), "gpt-5.4 | reasoning high");
   assert.equal(runtimeSummary({}, undefined), "No model selected");
   assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), "gpt-5.4 | 추론 높음");

@@ -4,6 +4,8 @@ import { bridgeRequest, getBridgeJob, startBridgeJob } from "../api";
 import { useI18n } from "../i18n";
 import { translate } from "../locale";
 import {
+  applyProgramSettings,
+  applyProgramSettingsToForm,
   basename,
   blankProjectForm,
   buildProjectPayload,
@@ -11,6 +13,7 @@ import {
   commandLabel,
   firstSelectableStepId,
   mergeProjectDetailCodexStatus,
+  programSettingsFromRuntime,
   projectFormFromDetail,
   shouldKeepUnsavedPlan,
   shouldReplaceVisibleProject,
@@ -31,13 +34,15 @@ function shareSettingsFromDetail(detail) {
 export function useDesktopController() {
   const { language } = useI18n();
   const [workspaceRoot, setWorkspaceRoot] = useState("");
-  const [defaultRuntime, setDefaultRuntime] = useState(null);
+  const [baseRuntime, setBaseRuntime] = useState(null);
   const [modelPresets, setModelPresets] = useState([]);
   const [modelCatalog, setModelCatalog] = useState([]);
   const [projects, setProjects] = useState([]);
   const [workspaceStats, setWorkspaceStats] = useState(null);
   const [selectedProjectId, setSelectedProjectId] = usePersistentState("codex-auto:selected-project", "");
+  const [storedProgramSettings, setStoredProgramSettings] = usePersistentState("codex-auto:program-settings", null);
   const [projectForm, setProjectForm] = useState(blankProjectForm(null));
+  const [programSettings, setProgramSettings] = useState(programSettingsFromRuntime(null));
   const [projectDetail, setProjectDetail] = useState(null);
   const [planDraft, setPlanDraft] = useState({ steps: [], project_prompt: "", closeout_status: "not_started" });
   const [selectedStepId, setSelectedStepId] = usePersistentState("codex-auto:selected-step", "");
@@ -59,12 +64,10 @@ export function useDesktopController() {
   const [bottomHeight, setBottomHeight] = usePersistentState("codex-auto:bottom-height", 250);
   const [projectFilter, setProjectFilter] = usePersistentState("codex-auto:project-filter", "");
   const [workspaceFilter, setWorkspaceFilter] = usePersistentState("codex-auto:workspace-filter", "");
+  const defaultRuntime = useMemo(() => applyProgramSettings(baseRuntime, storedProgramSettings), [baseRuntime, storedProgramSettings]);
 
   const busy = Boolean(pendingAction || (activeJob && activeJob.status === "running"));
-  const selectedProjectSummary = useMemo(
-    () => projects.find((item) => item.repo_id === selectedProjectId)?.summary || "",
-    [projects, selectedProjectId],
-  );
+  const programSettingsDirty = useMemo(() => JSON.stringify(programSettings) !== JSON.stringify(programSettingsFromRuntime(storedProgramSettings)), [programSettings, storedProgramSettings]);
 
   const filteredProjects = useMemo(() => {
     const query = projectFilter.trim().toLowerCase();
@@ -123,10 +126,13 @@ export function useDesktopController() {
           return;
         }
         setWorkspaceRoot(bootstrap.workspace_root);
-        setDefaultRuntime(bootstrap.default_runtime);
+        setBaseRuntime(bootstrap.default_runtime);
         setModelPresets(bootstrap.model_presets || []);
         setModelCatalog(bootstrap.model_catalog || []);
-        setProjectForm(blankProjectForm(bootstrap.default_runtime));
+        const nextProgramSettings = programSettingsFromRuntime(storedProgramSettings || bootstrap.default_runtime);
+        setStoredProgramSettings(nextProgramSettings);
+        setProgramSettings(nextProgramSettings);
+        setProjectForm(blankProjectForm(applyProgramSettings(bootstrap.default_runtime, nextProgramSettings)));
         const listing = await bridgeRequest("list-projects", null, bootstrap.workspace_root);
         if (cancelled) {
           return;
@@ -164,7 +170,7 @@ export function useDesktopController() {
       if (current.project_dir && preserveDirtyPlan) {
         return current;
       }
-      return projectFormFromDetail(normalizedDetail, defaultRuntime);
+      return applyProgramSettingsToForm(projectFormFromDetail(normalizedDetail, defaultRuntime), storedProgramSettings);
     });
     if (!preserveDirtyPlan) {
       setPlanDraft(cloneValue(normalizedDetail.plan));
@@ -447,14 +453,26 @@ export function useDesktopController() {
     setSidebarTab("projects");
   }
 
+  function saveProgramSettings() {
+    const nextSettings = programSettingsFromRuntime(programSettings);
+    setStoredProgramSettings(nextSettings);
+    setProgramSettings(nextSettings);
+    setProjectForm((current) => applyProgramSettingsToForm(current, nextSettings));
+    setMessage(messagePayload("success", translate(language, "message.programSettingsSaved")));
+  }
+
   async function saveProject() {
     await withPending("save-project-setup", async () => {
-      const detail = await bridgeRequest("save-project-setup", buildProjectPayload(projectForm), workspaceRoot || null);
+      const detail = await bridgeRequest(
+        "save-project-setup",
+        buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings)),
+        workspaceRoot || null,
+      );
       setProjectDetail(detail);
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));
       setSelectedProjectId(detail.project.repo_id);
-      setProjectForm(projectFormFromDetail(detail, defaultRuntime));
+      setProjectForm(applyProgramSettingsToForm(projectFormFromDetail(detail, defaultRuntime), storedProgramSettings));
       setPlanDraft(cloneValue(detail.plan));
       setSelectedStepId(firstSelectableStepId(detail.plan));
       setPlanDirty(false);
@@ -469,7 +487,11 @@ export function useDesktopController() {
       return;
     }
     await withPending("save-plan", async () => {
-      const detail = await bridgeRequest("save-plan", buildProjectPayload(projectForm, planDraft), workspaceRoot || null);
+      const detail = await bridgeRequest(
+        "save-plan",
+        buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft),
+        workspaceRoot || null,
+      );
       setProjectDetail(detail);
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));
@@ -490,7 +512,11 @@ export function useDesktopController() {
       return;
     }
     await withPending("reset-plan", async () => {
-      const detail = await bridgeRequest("reset-plan", buildProjectPayload(projectForm), workspaceRoot || null);
+      const detail = await bridgeRequest(
+        "reset-plan",
+        buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings)),
+        workspaceRoot || null,
+      );
       setProjectDetail(detail);
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));
@@ -541,7 +567,7 @@ export function useDesktopController() {
       return;
     }
     await startJob("generate-plan", {
-      ...buildProjectPayload(projectForm),
+      ...buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings)),
       prompt,
       max_steps: Math.max(1, Number.parseInt(String(projectForm.runtime?.max_blocks || 5), 10) || 1),
     });
@@ -552,7 +578,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.createStepBeforeRun")));
       return;
     }
-    await startJob("run-plan", buildProjectPayload(projectForm, planDraft));
+    await startJob("run-plan", buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
   }
 
   async function runCloseout() {
@@ -567,7 +593,7 @@ export function useDesktopController() {
     if (!window.confirm(translate(language, "prompt.confirmCloseout"))) {
       return;
     }
-    await startJob("run-closeout", buildProjectPayload(projectForm, planDraft));
+    await startJob("run-closeout", buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
   }
 
   async function requestStop() {
@@ -790,6 +816,8 @@ export function useDesktopController() {
     busy,
     workspaceRoot,
     defaultRuntime,
+    programSettings,
+    programSettingsDirty,
     modelPresets,
     modelCatalog,
     projects,
@@ -806,7 +834,6 @@ export function useDesktopController() {
     activeJobId,
     message,
     shareSettings,
-    selectedProjectSummary,
     centerTab,
     bottomTab,
     sidebarTab,
@@ -819,6 +846,7 @@ export function useDesktopController() {
     setProjectForm,
     setPlanDraft,
     setSelectedStepId,
+    setProgramSettings,
     setCenterTab,
     setBottomTab,
     setSidebarTab,
@@ -837,6 +865,7 @@ export function useDesktopController() {
     savePlan,
     resetPlan,
     startNewProject,
+    saveProgramSettings,
     generatePlan,
     runPlan,
     runCloseout,

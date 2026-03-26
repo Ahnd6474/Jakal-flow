@@ -124,6 +124,17 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.model_preset, "high")
         self.assertEqual(runtime.effort, "high")
 
+    def test_runtime_from_payload_coerces_fast_mode_flag(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model": "gpt-5.4",
+                "use_fast_mode": "true",
+            }
+        )
+
+        self.assertEqual(runtime.model, "gpt-5.4")
+        self.assertTrue(runtime.use_fast_mode)
+
     def test_bootstrap_exposes_workspace_and_model_presets(self) -> None:
         with TemporaryTestDir() as temp_dir:
             with mock.patch("codex_auto.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):

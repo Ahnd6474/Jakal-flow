@@ -265,6 +265,7 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
     merged["test_cmd"] = str(merged.get("test_cmd", "python -m pytest")).strip() or "python -m pytest"
     merged["model"] = str(merged.get("model", "")).strip().lower()
     merged["model_preset"] = normalize_model_preset_id(str(merged.get("model_preset", "")), fallback="")
+    merged["use_fast_mode"] = coerce_bool(merged.get("use_fast_mode", False), False)
     raw_effort = str(merged.get("effort", "")).strip()
     merged["effort"] = raw_effort.lower()
 

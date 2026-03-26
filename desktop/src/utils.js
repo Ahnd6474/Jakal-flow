@@ -13,6 +13,23 @@ export function cloneValue(value) {
 export const AUTO_REASONING_OPTION = "auto";
 export const REASONING_OPTIONS = ["low", "medium", "high", "xhigh"];
 export const MODEL_REASONING_OPTIONS = [AUTO_REASONING_OPTION, ...REASONING_OPTIONS];
+export const PROGRAM_RUNTIME_KEYS = [
+  "approval_mode",
+  "sandbox_mode",
+  "checkpoint_interval_blocks",
+  "codex_path",
+  "allow_push",
+  "require_checkpoint_approval",
+];
+
+const DEFAULT_PROGRAM_RUNTIME = {
+  approval_mode: "never",
+  sandbox_mode: "danger-full-access",
+  checkpoint_interval_blocks: 1,
+  codex_path: "codex.cmd",
+  allow_push: true,
+  require_checkpoint_approval: false,
+};
 
 export function reasoningEffortLabel(value, language = "en") {
   const normalized = String(value || "").trim().toLowerCase();
@@ -54,6 +71,33 @@ export function basename(path) {
 
 export function deriveGithubMode(originUrl) {
   return originUrl ? "manual" : "existing";
+}
+
+export function programSettingsFromRuntime(runtime) {
+  const source = cloneValue(runtime) || {};
+  return PROGRAM_RUNTIME_KEYS.reduce(
+    (settings, key) => {
+      if (source[key] !== undefined) {
+        settings[key] = source[key];
+      }
+      return settings;
+    },
+    { ...DEFAULT_PROGRAM_RUNTIME },
+  );
+}
+
+export function applyProgramSettings(runtime, programSettings) {
+  return {
+    ...(cloneValue(runtime) || {}),
+    ...programSettingsFromRuntime(programSettings),
+  };
+}
+
+export function applyProgramSettingsToForm(form, programSettings) {
+  return {
+    ...(cloneValue(form) || {}),
+    runtime: applyProgramSettings(form?.runtime, programSettings),
+  };
 }
 
 export function blankProjectForm(defaultRuntime) {
@@ -218,17 +262,19 @@ export function firstSelectableStepId(plan) {
 export function runtimeSummary(runtime, modelPresets = [], language = "en", modelCatalog = []) {
   const preset = modelPresets.find((item) => item.preset_id === runtime?.model_preset);
   if (preset) {
-    return preset.summary;
+    return runtime?.use_fast_mode ? `${preset.summary} | /fast` : preset.summary;
   }
   if (runtime?.model) {
     const label = modelDisplayName(modelCatalog, runtime.model);
     if (normalizeLanguage(language) === "ko") {
-      return translate("ko", "runtime.modelSummary", {
+      const summary = translate("ko", "runtime.modelSummary", {
         model: label,
         effort: reasoningEffortLabel(runtime.effort || "high", "ko"),
       });
+      return runtime?.use_fast_mode ? `${summary} | /fast` : summary;
     }
-    return `${label} | reasoning ${runtime.effort || "high"}`;
+    const summary = `${label} | reasoning ${runtime.effort || "high"}`;
+    return runtime?.use_fast_mode ? `${summary} | /fast` : summary;
   }
   return translate(language, "runtime.noModelSelected");
 }

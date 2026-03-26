@@ -23,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
             help="Root directory for isolated managed projects",
         )
         target.add_argument("--model", default="auto", help="Model slug passed to Codex CLI, or auto to use Codex defaults")
+        target.add_argument("--fast", action="store_true", help="Prefix Codex prompts with /fast before execution")
         target.add_argument("--effort", default="medium", help="Reasoning effort override: low, medium, high, xhigh")
         target.add_argument("--extra-prompt", default="", help="Additional user instructions appended to Codex prompts")
         target.add_argument(
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
 def runtime_from_args(args: argparse.Namespace) -> RuntimeOptions:
     return RuntimeOptions(
         model=args.model,
+        use_fast_mode=args.fast,
         effort=args.effort,
         extra_prompt=args.extra_prompt,
         init_plan_prompt=args.plan_prompt,

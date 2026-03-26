@@ -32,8 +32,8 @@ export default function App() {
       if (!(event.ctrlKey || event.metaKey)) {
         return;
       }
-      if (event.key >= "1" && event.key <= "5") {
-        const tabs = ["run", "dashboard", "reports", "history", "config"];
+      if (event.key >= "1" && event.key <= "6") {
+        const tabs = ["run", "dashboard", "reports", "history", "config", "app-settings"];
         setCenterTab(tabs[Number.parseInt(event.key, 10) - 1]);
         event.preventDefault();
       }
@@ -56,7 +56,9 @@ export default function App() {
         planDraft={controller.planDraft}
         busy={controller.busy}
         activeJob={controller.activeJob}
+        activeCenterTab={controller.centerTab}
         onRefresh={controller.forceRefresh}
+        onOpenSettings={() => controller.setCenterTab("app-settings")}
         onGeneratePlan={controller.generatePlan}
         onRunPlan={controller.runPlan}
         onRunCloseout={controller.runCloseout}
@@ -81,7 +83,6 @@ export default function App() {
             projects={controller.filteredProjects}
             selectedProjectId={controller.selectedProjectId}
             loadingProjectId={controller.loadingProjectId}
-            selectedProjectSummary={controller.selectedProjectSummary}
             projectFilter={controller.projectFilter}
             workspaceFilter={controller.workspaceFilter}
             onProjectFilterChange={controller.setProjectFilter}
@@ -100,6 +101,8 @@ export default function App() {
             onChangeTab={controller.setCenterTab}
             detail={detail}
             form={controller.projectForm}
+            programSettings={controller.programSettings}
+            programSettingsDirty={controller.programSettingsDirty}
             planDraft={controller.planDraft}
             shareSettings={controller.shareSettings}
             selectedStepId={controller.selectedStepId}
@@ -107,8 +110,10 @@ export default function App() {
             modelCatalog={controller.modelCatalog}
             busy={controller.busy}
             onChangeForm={controller.setProjectForm}
+            onChangeProgramSettings={controller.setProgramSettings}
             onChooseDirectory={controller.chooseDirectory}
             onSaveProject={controller.saveProject}
+            onSaveProgramSettings={controller.saveProgramSettings}
             onPromptChange={(value) =>
               controller.syncPlan({
                 ...(controller.planDraft || {}),

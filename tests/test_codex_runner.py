@@ -139,6 +139,38 @@ class CodexRunnerTests(unittest.TestCase):
             self.assertEqual(len(observed_commands), 1)
             self.assertNotIn("-m", observed_commands[0])
 
+    def test_run_pass_prefixes_fast_command_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            temp_root = Path(raw_temp)
+            repo_dir = temp_root / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            manager = WorkspaceManager(temp_root / "workspace")
+            context = manager.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=RuntimeOptions(model="gpt-5.4", effort="medium", use_fast_mode=True),
+            )
+            runner = CodexRunner("codex.cmd")
+            observed_inputs: list[bytes] = []
+
+            def fake_run(command, input, capture_output, check):
+                observed_inputs.append(input)
+                output_file = Path(command[command.index("-o") + 1])
+                output_file.write_text("Fast response", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+            with mock.patch("codex_auto.codex_runner.subprocess.run", side_effect=fake_run):
+                runner.run_pass(
+                    context=context,
+                    prompt="Apply the requested fix",
+                    pass_type="demo pass",
+                    block_index=1,
+                    search_enabled=False,
+                )
+
+            self.assertEqual(len(observed_inputs), 1)
+            self.assertEqual(observed_inputs[0].decode("utf-8"), "/fast\n\nApply the requested fix")
+
 
 if __name__ == "__main__":
     unittest.main()

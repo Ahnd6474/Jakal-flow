@@ -32,7 +32,8 @@ class CodexRunner:
         output_file = block_dir / f"{pass_slug}.last_message.txt"
         event_file = block_dir / f"{pass_slug}.events.jsonl"
         diagnostics_file = block_dir / f"{pass_slug}.diagnostics.json"
-        write_text(prompt_file, prompt)
+        formatted_prompt = self._format_prompt(context, prompt)
+        write_text(prompt_file, formatted_prompt)
 
         command = [self.codex_path, "-a", context.runtime.approval_mode]
         if search_enabled:
@@ -75,7 +76,7 @@ class CodexRunner:
                 pass
             completed = subprocess.run(
                 command,
-                input=prompt.encode("utf-8"),
+                input=formatted_prompt.encode("utf-8"),
                 capture_output=True,
                 check=False,
             )
@@ -140,6 +141,14 @@ class CodexRunner:
             attempt_count=len(attempt_records),
             diagnostics=diagnostics,
         )
+
+    def _format_prompt(self, context: ProjectContext, prompt: str) -> str:
+        if not getattr(context.runtime, "use_fast_mode", False):
+            return prompt
+        stripped = prompt.lstrip()
+        if stripped.startswith("/fast"):
+            return prompt
+        return f"/fast\n\n{prompt}"
 
     def _extract_usage(self, stdout: str) -> dict[str, int]:
         usage = {

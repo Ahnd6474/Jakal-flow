@@ -7,7 +7,9 @@ export function IdeToolbar({
   planDraft,
   busy,
   activeJob,
+  activeCenterTab,
   onRefresh,
+  onOpenSettings,
   onGeneratePlan,
   onRunPlan,
   onRunCloseout,
@@ -17,7 +19,7 @@ export function IdeToolbar({
   const status = activeJob?.status === "running" ? "running" : projectDetail?.project?.current_status || "idle";
   const checkpointPending = Boolean(projectDetail?.checkpoints?.pending);
   const projectName = projectDetail?.project?.display_name || projectDetail?.project?.slug || null;
-  const { language, languageOptions, setLanguage, t } = useI18n();
+  const { language, t } = useI18n();
   const statusLabel = activeJob?.status === "running" ? commandLabel(activeJob.command, language) : displayStatus(status, language);
 
   return (
@@ -44,16 +46,13 @@ export function IdeToolbar({
       </div>
 
       <div className="ide-toolbar__group">
-        <label className="toolbar-select">
-          <span>{t("common.language")}</span>
-          <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-            {languageOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <button
+          className={`toolbar-button ${activeCenterTab === "app-settings" ? "toolbar-button--accent" : ""}`}
+          onClick={onOpenSettings}
+          type="button"
+        >
+          {t("toolbar.programSettings")}
+        </button>
         <button className="toolbar-button" onClick={onGeneratePlan} type="button" disabled={busy}>
           {t("action.generatePlan")}
         </button>

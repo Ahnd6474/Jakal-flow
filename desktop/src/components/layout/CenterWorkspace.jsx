@@ -3,6 +3,7 @@ import { RunControlView } from "../views/RunControlView";
 import { ReportsView } from "../views/ReportsView";
 import { HistoryView } from "../views/HistoryView";
 import { ConfigEditorView } from "../views/ConfigEditorView";
+import { AppSettingsView } from "../views/AppSettingsView";
 import { useI18n } from "../../i18n";
 
 function WorkspaceTab({ value, activeTab, onChange, label }) {
@@ -18,6 +19,8 @@ export function CenterWorkspace({
   onChangeTab,
   detail,
   form,
+  programSettings,
+  programSettingsDirty,
   planDraft,
   shareSettings,
   selectedStepId,
@@ -25,8 +28,10 @@ export function CenterWorkspace({
   modelCatalog,
   busy,
   onChangeForm,
+  onChangeProgramSettings,
   onChooseDirectory,
   onSaveProject,
+  onSaveProgramSettings,
   onPromptChange,
   onGeneratePlan,
   onSavePlan,
@@ -56,6 +61,7 @@ export function CenterWorkspace({
         <WorkspaceTab value="reports" activeTab={activeTab} onChange={onChangeTab} label={t("tab.reports")} />
         <WorkspaceTab value="history" activeTab={activeTab} onChange={onChangeTab} label={t("tab.history")} />
         <WorkspaceTab value="config" activeTab={activeTab} onChange={onChangeTab} label={t("tab.config")} />
+        <WorkspaceTab value="app-settings" activeTab={activeTab} onChange={onChangeTab} label={t("tab.programSettings")} />
       </div>
 
       {activeTab === "run" ? (
@@ -96,6 +102,15 @@ export function CenterWorkspace({
           onChangeForm={onChangeForm}
           onChooseDirectory={onChooseDirectory}
           onSaveProject={onSaveProject}
+        />
+      ) : null}
+      {activeTab === "app-settings" ? (
+        <AppSettingsView
+          settings={programSettings}
+          dirty={programSettingsDirty}
+          busy={busy}
+          onChangeSettings={onChangeProgramSettings}
+          onSaveSettings={onSaveProgramSettings}
         />
       ) : null}
     </section>

@@ -152,6 +152,24 @@ export function ConfigEditorView({
               disabled={busy}
             />
           </label>
+          <label className="choice-radio">
+            <input
+              type="checkbox"
+              checked={Boolean(runtime.use_fast_mode)}
+              onChange={(event) =>
+                onChangeForm((current) => ({
+                  ...current,
+                  runtime: {
+                    ...current.runtime,
+                    use_fast_mode: event.target.checked,
+                  },
+                }))
+              }
+              disabled={busy}
+            />
+            <span>{t("option.useFastMode")}</span>
+          </label>
+          <p>{t("config.fastModeDescription")}</p>
 
           <div className="subsection">
             <div className="subsection__header">
@@ -186,80 +204,7 @@ export function ConfigEditorView({
                 disabled={busy}
               />
             </label>
-            <div className="choice-grid">
-              <label className="field">
-                <span>{t("field.approvalMode")}</span>
-                <select
-                  value={runtime.approval_mode || "never"}
-                  onChange={(event) => onChangeForm((current) => ({ ...current, runtime: { ...current.runtime, approval_mode: event.target.value } }))}
-                  disabled={busy}
-                >
-                  <option value="never">never</option>
-                  <option value="on-failure">on-failure</option>
-                  <option value="untrusted">untrusted</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>{t("field.sandboxMode")}</span>
-                <select
-                  value={runtime.sandbox_mode || "danger-full-access"}
-                  onChange={(event) => onChangeForm((current) => ({ ...current, runtime: { ...current.runtime, sandbox_mode: event.target.value } }))}
-                  disabled={busy}
-                >
-                  <option value="danger-full-access">danger-full-access</option>
-                  <option value="workspace-write">workspace-write</option>
-                  <option value="read-only">read-only</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>{t("field.checkpointInterval")}</span>
-                <input
-                  type="number"
-                  min="1"
-                  value={runtime.checkpoint_interval_blocks || 1}
-                  onChange={(event) =>
-                    onChangeForm((current) => ({
-                      ...current,
-                      runtime: { ...current.runtime, checkpoint_interval_blocks: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1) },
-                    }))
-                  }
-                  disabled={busy}
-                />
-              </label>
-              <label className="field">
-                <span>{t("field.codexPath")}</span>
-                <input
-                  value={runtime.codex_path || "codex.cmd"}
-                  onChange={(event) => onChangeForm((current) => ({ ...current, runtime: { ...current.runtime, codex_path: event.target.value } }))}
-                  disabled={busy}
-                />
-              </label>
-            </div>
-            <div className="choice-list">
-              <label className="choice-radio">
-                <input
-                  type="checkbox"
-                  checked={Boolean(runtime.allow_push)}
-                  onChange={(event) => onChangeForm((current) => ({ ...current, runtime: { ...current.runtime, allow_push: event.target.checked } }))}
-                  disabled={busy}
-                />
-                <span>{t("option.allowPushAfterSafeRuns")}</span>
-              </label>
-              <label className="choice-radio">
-                <input
-                  type="checkbox"
-                  checked={Boolean(runtime.require_checkpoint_approval)}
-                  onChange={(event) =>
-                    onChangeForm((current) => ({
-                      ...current,
-                      runtime: { ...current.runtime, require_checkpoint_approval: event.target.checked },
-                    }))
-                  }
-                  disabled={busy}
-                />
-                <span>{t("option.requireCheckpointApproval")}</span>
-              </label>
-            </div>
+            <p>{t("config.programSettingsMoved")}</p>
           </div>
         </div>
 

@@ -94,7 +94,6 @@ export function SidebarPane({
   projects,
   selectedProjectId,
   loadingProjectId,
-  selectedProjectSummary,
   projectFilter,
   workspaceFilter,
   onProjectFilterChange,
@@ -155,10 +154,6 @@ export function SidebarPane({
               ) : (
                 <div className="empty-block">{t("sidebar.emptyProjects")}</div>
               )}
-            </div>
-            <div className="sidebar-summary">
-              <span>{t("sidebar.selectedSummary")}</span>
-              <pre>{selectedProjectSummary || t("sidebar.noProjectSummary")}</pre>
             </div>
             <div className="sidebar-item">
               <div className="sidebar-item__title">
