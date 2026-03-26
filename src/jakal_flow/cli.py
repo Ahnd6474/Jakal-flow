@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 
+from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER
 from .models import RuntimeOptions
 from .orchestrator import Orchestrator
 
@@ -21,6 +22,18 @@ def build_parser() -> argparse.ArgumentParser:
             "--workspace-root",
             default=".jakal-flow-workspace",
             help="Root directory for isolated managed projects",
+        )
+        target.add_argument(
+            "--model-provider",
+            default=DEFAULT_MODEL_PROVIDER,
+            choices=[DEFAULT_MODEL_PROVIDER, "oss"],
+            help="Codex model provider: OpenAI/Codex cloud or local OSS mode",
+        )
+        target.add_argument(
+            "--local-model-provider",
+            default=DEFAULT_LOCAL_MODEL_PROVIDER,
+            choices=[DEFAULT_LOCAL_MODEL_PROVIDER, "lmstudio"],
+            help="Local provider to use when --model-provider oss is selected",
         )
         target.add_argument("--model", default="auto", help="Model slug passed to Codex CLI, or auto to use Codex defaults")
         target.add_argument("--fast", action="store_true", help="Prefix Codex prompts with /fast before execution")
@@ -68,6 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def runtime_from_args(args: argparse.Namespace) -> RuntimeOptions:
     return RuntimeOptions(
+        model_provider=args.model_provider,
+        local_model_provider=args.local_model_provider if args.model_provider == "oss" else "",
         model=args.model,
         use_fast_mode=args.fast,
         generate_word_report=args.word_report,

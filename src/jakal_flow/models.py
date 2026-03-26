@@ -40,6 +40,8 @@ def _string_list(value: Any) -> list[str]:
 
 @dataclass(slots=True)
 class RuntimeOptions:
+    model_provider: str = "openai"
+    local_model_provider: str = ""
     model: str = "auto"
     model_preset: str = "auto"
     model_selection_mode: str = "slug"

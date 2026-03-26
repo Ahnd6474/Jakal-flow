@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .model_constants import AUTO_MODEL_SLUG, VALID_REASONING_EFFORTS
+from .model_providers import discover_local_model_catalog
 from .utils import now_utc_iso
 
 
@@ -181,7 +182,7 @@ def fetch_codex_backend_snapshot(codex_path: str = "codex.cmd") -> CodexBackendS
         with _CodexAppServerSession(codex_path) as session:
             account_result = session.request("account/read", {"refreshToken": False})
             rate_limit_result = session.request("account/rateLimits/read", {})
-            model_catalog = _read_model_catalog(session)
+            model_catalog = _merge_model_catalogs(_read_model_catalog(session), discover_local_model_catalog())
         return CodexBackendSnapshot(
             checked_at=checked_at,
             available=True,
@@ -190,10 +191,11 @@ def fetch_codex_backend_snapshot(codex_path: str = "codex.cmd") -> CodexBackendS
             rate_limits=_format_rate_limits(rate_limit_result),
         )
     except Exception as exc:
+        local_models = discover_local_model_catalog()
         return CodexBackendSnapshot(
             checked_at=checked_at,
-            available=False,
-            model_catalog=[_auto_model_entry()],
+            available=bool(local_models),
+            model_catalog=_merge_model_catalogs([_auto_model_entry()], local_models),
             account={
                 "authenticated": False,
                 "requires_openai_auth": True,
@@ -243,6 +245,8 @@ def _auto_model_entry() -> dict[str, Any]:
         "supports_personality": True,
         "upgrade": None,
         "availability_nux": None,
+        "provider": "openai",
+        "local_provider": None,
     }
 
 
@@ -273,7 +277,29 @@ def _format_model_entry(item: dict[str, Any]) -> dict[str, Any]:
         "supports_personality": bool(item.get("supportsPersonality", False)),
         "upgrade": str(item.get("upgrade", "")).strip() or None,
         "availability_nux": availability if isinstance(availability, dict) else None,
+        "provider": "openai",
+        "local_provider": None,
     }
+
+
+def _merge_model_catalogs(*catalogs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for catalog in catalogs:
+        for item in catalog:
+            if not isinstance(item, dict):
+                continue
+            provider = str(item.get("provider", "openai")).strip().lower() or "openai"
+            local_provider = str(item.get("local_provider", "")).strip().lower()
+            model = str(item.get("model", "")).strip().lower()
+            if not model:
+                continue
+            key = (provider, local_provider, model)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged
 
 
 def _format_account_snapshot(result: dict[str, Any]) -> dict[str, Any]:

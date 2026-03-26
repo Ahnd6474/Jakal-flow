@@ -2,3 +2,7 @@ from __future__ import annotations
 
 AUTO_MODEL_SLUG = "auto"
 VALID_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
+DEFAULT_MODEL_PROVIDER = "openai"
+VALID_MODEL_PROVIDERS = {DEFAULT_MODEL_PROVIDER, "oss"}
+DEFAULT_LOCAL_MODEL_PROVIDER = "ollama"
+VALID_LOCAL_MODEL_PROVIDERS = {DEFAULT_LOCAL_MODEL_PROVIDER, "lmstudio"}

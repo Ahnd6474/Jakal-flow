@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from .codex_app_server import fetch_codex_backend_snapshot
+from .model_constants import AUTO_MODEL_SLUG, DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER
 from .model_constants import AUTO_MODEL_SLUG
 from .model_selection import (
     DEFAULT_MODEL_PRESET_ID,
@@ -19,6 +20,7 @@ from .model_selection import (
     normalize_model_preset_id,
     normalize_reasoning_effort,
 )
+from .model_providers import normalize_local_model_provider, normalize_model_provider
 from .models import ExecutionPlanState, ProjectContext, RuntimeOptions
 from .orchestrator import Orchestrator
 from .public_tunnel import public_tunnel_status_payload, start_cloudflare_quick_tunnel, stop_public_tunnel_process
@@ -278,6 +280,19 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
     if merged["execution_mode"] not in {"serial", "parallel"}:
         merged["execution_mode"] = "serial"
     merged["test_cmd"] = str(merged.get("test_cmd", "python -m pytest")).strip() or "python -m pytest"
+    merged["model_provider"] = normalize_model_provider(
+        str(merged.get("model_provider", DEFAULT_MODEL_PROVIDER)),
+        fallback=DEFAULT_MODEL_PROVIDER,
+    )
+    merged["local_model_provider"] = normalize_local_model_provider(
+        str(merged.get("local_model_provider", "")),
+        fallback="",
+    )
+    if merged["model_provider"] == "oss":
+        if not merged["local_model_provider"]:
+            merged["local_model_provider"] = DEFAULT_LOCAL_MODEL_PROVIDER
+    else:
+        merged["local_model_provider"] = ""
     merged["model"] = str(merged.get("model", "")).strip().lower()
     merged["model_preset"] = normalize_model_preset_id(str(merged.get("model_preset", "")), fallback="")
     merged["effort_selection_mode"] = str(merged.get("effort_selection_mode", "")).strip().lower()
@@ -295,7 +310,7 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
     if not merged["effort"]:
         merged["effort"] = preset.effort
     merged["effort"] = normalize_reasoning_effort(merged["effort"], fallback=preset.effort)
-    if merged["model"] == AUTO_MODEL_SLUG:
+    if merged["model_provider"] != "oss" and merged["model"] == AUTO_MODEL_SLUG:
         if merged["model_preset"]:
             merged["effort"] = model_preset_by_id(merged["model_preset"]).effort
         else:

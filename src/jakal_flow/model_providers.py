@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from typing import Any
+
+from .model_constants import (
+    DEFAULT_LOCAL_MODEL_PROVIDER,
+    DEFAULT_MODEL_PROVIDER,
+    VALID_LOCAL_MODEL_PROVIDERS,
+    VALID_MODEL_PROVIDERS,
+)
+
+
+def normalize_model_provider(value: str, fallback: str = DEFAULT_MODEL_PROVIDER) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in VALID_MODEL_PROVIDERS:
+        return normalized
+    return fallback
+
+
+def normalize_local_model_provider(value: str, fallback: str = "") -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in VALID_LOCAL_MODEL_PROVIDERS:
+        return normalized
+    return fallback
+
+
+def discover_local_model_catalog(third_party_root: Path | None = None) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for provider, model_name, source, installed in _iter_local_models(third_party_root=third_party_root):
+        key = (provider, model_name.lower())
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        entries.append(
+            {
+                "id": f"{provider}:{model_name}",
+                "model": model_name,
+                "display_name": f"{model_name} ({_local_provider_label(provider)})",
+                "description": _local_model_description(provider, source, installed),
+                "hidden": False,
+                "is_default": False,
+                "default_reasoning_effort": "medium",
+                "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"],
+                "input_modalities": ["text"],
+                "supports_personality": False,
+                "upgrade": None,
+                "availability_nux": None,
+                "provider": "oss",
+                "local_provider": provider,
+                "source": source,
+                "installed": installed,
+            }
+        )
+    return sorted(entries, key=lambda item: (item["local_provider"], item["model"].lower()))
+
+
+def _iter_local_models(third_party_root: Path | None = None) -> list[tuple[str, str, str, bool]]:
+    discovered: list[tuple[str, str, str, bool]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for model_name in _ollama_cli_models():
+        key = (DEFAULT_LOCAL_MODEL_PROVIDER, model_name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        discovered.append((DEFAULT_LOCAL_MODEL_PROVIDER, model_name, "ollama-cli", True))
+
+    for model_name in _vendored_ollama_models(third_party_root=third_party_root):
+        key = (DEFAULT_LOCAL_MODEL_PROVIDER, model_name.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        discovered.append((DEFAULT_LOCAL_MODEL_PROVIDER, model_name, "vendored-third-party", False))
+
+    return discovered
+
+
+def _ollama_cli_models() -> list[str]:
+    try:
+        completed = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=4,
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return []
+    if completed.returncode != 0:
+        return []
+    models: list[str] = []
+    for index, line in enumerate(completed.stdout.splitlines()):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if index == 0 and stripped.lower().startswith("name"):
+            continue
+        model_name = stripped.split()[0].strip()
+        if model_name:
+            models.append(model_name)
+    return models
+
+
+def _vendored_ollama_models(third_party_root: Path | None = None) -> list[str]:
+    root = (third_party_root or _default_third_party_root()) / "ollama"
+    if not root.exists():
+        return []
+    models: list[str] = []
+    for provider_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+        manifest_root = provider_dir / "manifests" / "registry.ollama.ai" / "library"
+        if manifest_root.exists():
+            for family_dir in sorted(path for path in manifest_root.iterdir() if path.is_dir()):
+                for tag_path in sorted(path for path in family_dir.iterdir() if path.is_file()):
+                    model_name = f"{family_dir.name}:{tag_path.name}"
+                    if model_name not in models:
+                        models.append(model_name)
+            continue
+        fallback_name = provider_dir.name.replace("--", ":")
+        if fallback_name not in models:
+            models.append(fallback_name)
+    return models
+
+
+def _default_third_party_root() -> Path:
+    return Path(__file__).resolve().parents[2] / "third_party"
+
+
+def _local_provider_label(value: str) -> str:
+    normalized = normalize_local_model_provider(value, fallback=value)
+    if normalized == "lmstudio":
+        return "LM Studio"
+    if normalized == "ollama":
+        return "Ollama"
+    return normalized or "Local"
+
+
+def _local_model_description(provider: str, source: str, installed: bool) -> str:
+    provider_label = _local_provider_label(provider)
+    status_text = "detected on this machine" if installed else "available from the repository bundle"
+    if source == "ollama-cli":
+        return f"Run this local {provider_label} model through Codex CLI OSS mode; the model is {status_text}."
+    return f"Run this local {provider_label} model through Codex CLI OSS mode; the model is {status_text}."
