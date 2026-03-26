@@ -107,6 +107,9 @@ class GitOps:
         self.run(["commit", "-m", message], cwd=repo_dir)
         return self.current_revision(repo_dir)
 
+    def add_all(self, repo_dir: Path) -> None:
+        self.run(["add", "-A"], cwd=repo_dir)
+
     def create_initial_commit(self, repo_dir: Path, message: str) -> str:
         self.run(["add", "-A"], cwd=repo_dir)
         self.run(["commit", "--allow-empty", "-m", message], cwd=repo_dir)
@@ -142,6 +145,10 @@ class GitOps:
 
     def continue_cherry_pick(self, repo_dir: Path) -> None:
         self.run(["cherry-pick", "--continue"], cwd=repo_dir)
+
+    def cherry_pick_in_progress(self, repo_dir: Path) -> bool:
+        result = self.run(["rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"], cwd=repo_dir, check=False)
+        return result.returncode == 0
 
     def conflicted_files(self, repo_dir: Path) -> list[str]:
         result = self.run(["diff", "--name-only", "--diff-filter=U"], cwd=repo_dir, check=False)

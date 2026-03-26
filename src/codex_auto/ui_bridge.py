@@ -1,1 +1,7 @@
-from jakal_flow.ui_bridge import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys
+from importlib import import_module
+
+sys.modules[__name__] = import_module("jakal_flow.ui_bridge")
+

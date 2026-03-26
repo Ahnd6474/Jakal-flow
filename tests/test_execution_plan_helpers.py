@@ -246,7 +246,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual([[step.step_id for step in batch] for batch in batches], [["ST2", "ST3"]])
 
-    def test_pending_execution_batches_splits_conflicting_owned_paths(self) -> None:
+    def test_pending_execution_batches_keeps_parent_child_owned_paths_together(self) -> None:
         orchestrator = Orchestrator(Path.cwd() / ".tmp_pending_batches_workspace")
         plan_state = ExecutionPlanState(
             execution_mode="parallel",
@@ -254,6 +254,22 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 ExecutionStep(step_id="ST1", title="Root", status="completed"),
                 ExecutionStep(step_id="ST2", title="A", depends_on=["ST1"], owned_paths=["src/shared"]),
                 ExecutionStep(step_id="ST3", title="B", depends_on=["ST1"], owned_paths=["src/shared/utils"]),
+                ExecutionStep(step_id="ST4", title="C", depends_on=["ST1"], owned_paths=["tests"]),
+            ],
+        )
+
+        batches = orchestrator.pending_execution_batches(plan_state)
+
+        self.assertEqual([[step.step_id for step in batch] for batch in batches], [["ST2", "ST3", "ST4"]])
+
+    def test_pending_execution_batches_splits_exact_owned_path_conflicts(self) -> None:
+        orchestrator = Orchestrator(Path.cwd() / ".tmp_pending_batches_workspace")
+        plan_state = ExecutionPlanState(
+            execution_mode="parallel",
+            steps=[
+                ExecutionStep(step_id="ST1", title="Root", status="completed"),
+                ExecutionStep(step_id="ST2", title="A", depends_on=["ST1"], owned_paths=["src/shared/utils.py"]),
+                ExecutionStep(step_id="ST3", title="B", depends_on=["ST1"], owned_paths=["src/shared/utils.py"]),
                 ExecutionStep(step_id="ST4", title="C", depends_on=["ST1"], owned_paths=["tests"]),
             ],
         )
@@ -980,6 +996,196 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("integration assertion failed", debug_prompt_text)
         self.assertIn("parallel batch traceback", debug_prompt_text)
         self.assertIn("Do not modify tests unless", debug_prompt_text)
+
+    def test_parallel_batch_merge_conflict_invokes_debugger_and_continues(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_merge_debugger_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            test_cmd="python -m pytest",
+            execution_mode="parallel",
+            parallel_workers=2,
+        )
+        debug_prompt_text = ""
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            context.metadata.current_safe_revision = "safe-revision"
+            context.loop_state.current_safe_revision = "safe-revision"
+            orchestrator.workspace.save_project(context)
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Parallel Merge Recovery Demo",
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(
+                            step_id="node-a",
+                            title="Desktop slice",
+                            codex_description="Implement the desktop slice.",
+                            test_command="python -m pytest",
+                            success_criteria="The desktop slice passes verification.",
+                            depends_on=[],
+                            owned_paths=["desktop/src"],
+                        ),
+                        ExecutionStep(
+                            step_id="node-b",
+                            title="Backend slice",
+                            codex_description="Implement the backend slice.",
+                            test_command="python -m pytest",
+                            success_criteria="The backend slice passes verification.",
+                            depends_on=[],
+                            owned_paths=["src/jakal_flow"],
+                        ),
+                    ],
+                ),
+            )
+
+            recovered_stdout = workspace_root / "parallel-batch-merge.stdout.log"
+            recovered_stderr = workspace_root / "parallel-batch-merge.stderr.log"
+            recovered_stdout.write_text("merge conflict resolved\n", encoding="utf-8")
+            recovered_stderr.write_text("", encoding="utf-8")
+            passing_stdout = workspace_root / "parallel-batch-pass.stdout.log"
+            passing_stderr = workspace_root / "parallel-batch-pass.stderr.log"
+            passing_stdout.write_text("batch green\n", encoding="utf-8")
+            passing_stderr.write_text("", encoding="utf-8")
+            recovered_test = TestRunResult(
+                command="python -m pytest",
+                returncode=0,
+                stdout_file=recovered_stdout,
+                stderr_file=recovered_stderr,
+                summary="python -m pytest exited with 0",
+            )
+            passing_test = TestRunResult(
+                command="python -m pytest",
+                returncode=0,
+                stdout_file=passing_stdout,
+                stderr_file=passing_stderr,
+                summary="python -m pytest exited with 0",
+            )
+            worker_results = [
+                {
+                    "step_id": "ST1",
+                    "status": "completed",
+                    "notes": "worker 1 ok",
+                    "commit_hash": "worker-1-commit",
+                    "changed_files": ["desktop/src/app.jsx"],
+                    "pass_log": {"pass_type": "block-search-pass"},
+                    "block_log": {"status": "completed"},
+                    "test_summary": "worker 1 ok",
+                },
+                {
+                    "step_id": "ST2",
+                    "status": "completed",
+                    "notes": "worker 2 ok",
+                    "commit_hash": "worker-2-commit",
+                    "changed_files": ["src/jakal_flow/orchestrator.py"],
+                    "pass_log": {"pass_type": "block-search-pass"},
+                    "block_log": {"status": "completed"},
+                    "test_summary": "worker 2 ok",
+                },
+            ]
+
+            with mock.patch.object(orchestrator, "_run_parallel_step_worker", side_effect=worker_results), mock.patch.object(
+                orchestrator,
+                "_run_test_command",
+                side_effect=[recovered_test, passing_test],
+            ), mock.patch.object(
+                orchestrator.git,
+                "try_cherry_pick",
+                side_effect=[
+                    CommandResult(command=["git", "cherry-pick"], returncode=0, stdout="", stderr=""),
+                    CommandResult(
+                        command=["git", "cherry-pick"],
+                        returncode=1,
+                        stdout="Auto-merging src/jakal_flow/orchestrator.py\n",
+                        stderr="CONFLICT (content): Merge conflict in src/jakal_flow/orchestrator.py\n",
+                    ),
+                ],
+            ), mock.patch.object(
+                orchestrator.git,
+                "conflicted_files",
+                return_value=["src/jakal_flow/orchestrator.py"],
+            ), mock.patch.object(
+                orchestrator.git,
+                "cherry_pick_in_progress",
+                return_value=True,
+            ), mock.patch.object(orchestrator.git, "add_all") as mocked_add_all, mock.patch.object(
+                orchestrator.git,
+                "continue_cherry_pick",
+            ) as mocked_continue, mock.patch.object(
+                orchestrator.git,
+                "commit_all",
+                return_value="unexpected-debug-commit",
+            ) as mocked_commit, mock.patch.object(
+                orchestrator.git,
+                "current_revision",
+                side_effect=["merge-commit-1", "merge-recovery-commit"],
+            ), mock.patch.object(
+                orchestrator.git,
+                "changed_files",
+                return_value=["desktop/src/app.jsx", "src/jakal_flow/orchestrator.py"],
+            ), mock.patch.object(
+                orchestrator.git,
+                "remote_url",
+                return_value=None,
+            ), mock.patch.object(
+                orchestrator.git,
+                "abort_cherry_pick",
+            ) as mocked_abort, mock.patch.object(
+                orchestrator.git,
+                "hard_reset",
+            ) as mocked_reset, mock.patch.object(
+                orchestrator,
+                "setup_local_project",
+                return_value=context,
+            ), mock.patch("jakal_flow.orchestrator.CodexRunner.run_pass") as mocked_run_pass, mock.patch(
+                "jakal_flow.orchestrator.ensure_virtualenv",
+                return_value=repo_dir / ".venv",
+            ):
+                mocked_run_pass.return_value = CodexRunResult(
+                    pass_type="parallel-batch-debug",
+                    prompt_file=workspace_root / "parallel-merge-debug.prompt.md",
+                    output_file=workspace_root / "parallel-merge-debug.last_message.txt",
+                    event_file=workspace_root / "parallel-merge-debug.events.jsonl",
+                    returncode=0,
+                    search_enabled=False,
+                    changed_files=[],
+                    usage={"input_tokens": 15},
+                    last_message="parallel merge debugger pass",
+                )
+                context, plan_state, steps = orchestrator.run_parallel_execution_batch(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_ids=["ST1", "ST2"],
+                )
+                debug_prompt_text = mocked_run_pass.call_args.kwargs["prompt"]
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual([step.status for step in steps], ["completed", "completed"])
+        self.assertEqual([step.commit_hash for step in steps], ["merge-commit-1", "merge-recovery-commit"])
+        self.assertEqual([step.status for step in plan_state.steps], ["completed", "completed"])
+        self.assertEqual(context.metadata.current_status, "plan_completed")
+        self.assertEqual(context.metadata.current_safe_revision, "merge-recovery-commit")
+        mocked_add_all.assert_called_once_with(context.paths.repo_dir)
+        mocked_continue.assert_called_once_with(context.paths.repo_dir)
+        mocked_commit.assert_not_called()
+        mocked_abort.assert_not_called()
+        mocked_reset.assert_not_called()
+        self.assertIn("git cherry-pick worker-2-commit conflicted", debug_prompt_text)
+        self.assertIn("CONFLICT (content): Merge conflict in src/jakal_flow/orchestrator.py", debug_prompt_text)
+        self.assertIn("resolve the final merged code intentionally", debug_prompt_text)
 
     def test_execution_plan_svg_includes_step_statuses(self) -> None:
         svg = execution_plan_svg(

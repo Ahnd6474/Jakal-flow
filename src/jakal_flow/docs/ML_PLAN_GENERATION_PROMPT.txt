@@ -23,11 +23,14 @@ Hard ML rules:
 Planning goals:
 - First establish or verify the evaluation protocol and leakage guardrails if they are not already explicit.
 - Then schedule multiple executor-friendly experiments that can run in parallel when safe.
+- Maximize safe experiment frontier width. Prefer one narrow guardrail prerequisite followed by 2 or more parallel-ready experiment nodes when the repository can support that.
 - ML experiments must record feature choices and detailed model choices.
 - DL experiments must record architecture details and approximate size/parameter budget.
 - Keep each node locally judgeable and scoped to one clear experiment or one prerequisite guardrail.
 - Use dependency edges only when an experiment truly depends on another node.
-- Use disjoint `owned_paths` for nodes that may run in parallel.
+- Use non-empty, narrow `owned_paths` for nodes that may run in parallel.
+- Prefer experiment-specific config files, output directories, run manifests, or leaf source directories over broad shared roots so more experiments can run concurrently.
+- Keep exact-path ownership exclusive across the same ready wave.
 - If a task needs broad repo-wide refactors or shared-file churn, isolate it instead of pretending it is parallel-safe.
 - Do not include the final aggregation/closeout sweep inside the normal task list. The app runs a separate closeout block after the planned tasks finish.
 
@@ -76,6 +79,7 @@ Field requirements:
 - `resource_budget` should be concrete enough to limit runaway experimentation.
 - `primary_metric` and `metric_direction` must be explicit whenever a quantitative target exists.
 - `codex_description` should tell the executor to use the repo's existing ML tooling first.
+- When parallel execution is plausible, avoid broad shared ownership like the entire training package or the whole configs directory unless that node truly must run alone.
 - Do not include markdown fences or commentary outside the JSON.
 
 Repository summary:

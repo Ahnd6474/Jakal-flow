@@ -165,31 +165,86 @@ def start_share_server_process(
     env["PYTHONPATH"] = build_pythonpath(root)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
-    command = [
-        sys.executable,
-        "-m",
-        "jakal_flow.share_server",
-        "--workspace-root",
-        str(workspace_root),
-        "--host",
-        updated_config.bind_host,
-        "--port",
-        str(updated_config.preferred_port),
-    ]
-    spawn_background_process(
-        command,
-        cwd=root,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    if not wait_for_condition(
-        lambda: bool(share_server_status_payload(workspace_root).get("running")),
-        timeout_seconds=SHARE_SERVER_START_TIMEOUT_SECS,
-        interval_seconds=0.1,
-    ):
-        raise RuntimeError("Share server did not start in time.")
-    return share_server_status_payload(workspace_root)
+    def launch_server(candidate_port: int) -> dict[str, Any] | None:
+        command = [
+            sys.executable,
+            "-m",
+            "jakal_flow.share_server",
+            "--workspace-root",
+            str(workspace_root),
+            "--host",
+            updated_config.bind_host,
+            "--port",
+            str(candidate_port),
+        ]
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = (
+                getattr(subprocess, "DETACHED_PROCESS", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                creationflags = 0
+        subprocess.Popen(
+            command,
+            cwd=root,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+            close_fds=True,
+        )
+        if wait_for_condition(
+            lambda: load_share_server_state(workspace_root) is not None,
+            timeout_seconds=SHARE_SERVER_START_TIMEOUT_SECS,
+            interval_seconds=0.1,
+        ):
+            state = load_share_server_state(workspace_root)
+            if state is None:
+                return None
+            status = share_server_status_payload(workspace_root)
+            if status.get("running"):
+                return status
+            tunnel = public_tunnel_status_payload(workspace_root)
+            config_payload = load_share_server_config(workspace_root).to_dict()
+            return {
+                "running": True,
+                "host": state.host,
+                "port": state.port,
+                "pid": state.pid,
+                "started_at": state.started_at,
+                "base_url": state.base_url,
+                "viewer_path": state.viewer_path,
+                "config": config_payload,
+                "share_base_url": config_payload.get("public_base_url") or tunnel.get("public_url") or state.base_url,
+                "share_base_url_source": (
+                    "config"
+                    if config_payload.get("public_base_url")
+                    else ("quick_tunnel" if tunnel.get("public_url") else "local")
+                ),
+                "public_tunnel": tunnel,
+            }
+        return None
+
+    started = launch_server(int(updated_config.preferred_port))
+    if started is not None:
+        return started
+    if int(updated_config.preferred_port) > 0:
+        started = launch_server(0)
+        if started is not None:
+            append_jsonl(
+                workspace_root / "share_server_fallbacks.jsonl",
+                {
+                    "timestamp": now_utc_iso(),
+                    "event_type": "share-server-port-fallback",
+                    "requested_port": int(updated_config.preferred_port),
+                    "fallback_port": started.get("port"),
+                },
+            )
+            return started
+    raise RuntimeError("Share server did not start in time.")
 
 
 def stop_share_server_process(workspace_root: Path) -> dict[str, Any]:
@@ -690,13 +745,12 @@ def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | No
             else None
         )
         public_base_url = str(payload.get("public_base_url", "")).strip() if "public_base_url" in payload else None
-        start_share_server_process(
+        share_status = start_share_server_process(
             workspace_root,
             host=bind_host,
             port=preferred_port,
             public_base_url=public_base_url,
         )
-        share_status = share_server_status_payload(workspace_root)
         effective_bind_host = str(share_status.get("config", {}).get("bind_host", bind_host or "")).strip() or bind_host or ""
         should_start_quick_tunnel = (
             effective_bind_host == "0.0.0.0"

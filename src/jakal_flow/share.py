@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import quote
 
 from .models import ExecutionPlanState, ProjectContext
+from .status_views import effective_project_status
 from .utils import compact_text, decode_process_output, now_utc_iso, read_json, read_jsonl_tail, read_last_jsonl, write_json
 from .workspace import WorkspaceManager
 
@@ -262,11 +263,6 @@ def share_server_status_payload(workspace_root: Path) -> dict[str, Any]:
         ),
         "public_tunnel": tunnel,
     }
-    if not running:
-        try:
-            share_server_status_file(workspace_root).unlink(missing_ok=True)
-        except OSError:
-            pass
     return payload
 
 
@@ -449,8 +445,8 @@ def last_updated_timestamp(context: ProjectContext, plan_state: ExecutionPlanSta
     return max(parsed).replace(microsecond=0).isoformat()
 
 
-def current_phase(context: ProjectContext) -> str | None:
-    status = str(context.metadata.current_status or "").strip()
+def current_phase(context: ProjectContext, plan_state: ExecutionPlanState) -> str | None:
+    status = effective_project_status(context.metadata.current_status, plan_state, context.loop_state)
     if not status:
         return None
     if status.startswith("running:block:"):
@@ -466,13 +462,14 @@ def current_phase(context: ProjectContext) -> str | None:
 
 
 def public_monitor_status(context: ProjectContext, plan_state: ExecutionPlanState, log_limit: int = 8) -> dict[str, Any]:
+    status = effective_project_status(context.metadata.current_status, plan_state, context.loop_state)
     return {
         "project": {
             "display_name": mask_public_text(context.metadata.display_name or context.metadata.slug, max_chars=80),
             "slug": context.metadata.slug,
         },
-        "overall_run_status": context.metadata.current_status,
-        "current_phase": current_phase(context),
+        "overall_run_status": status,
+        "current_phase": current_phase(context, plan_state),
         "current_block_index": max(0, int(context.loop_state.block_index or 0)),
         "current_task": {
             "title": mask_public_text(context.loop_state.current_task or "", max_chars=120),
@@ -499,16 +496,19 @@ def public_session_summary(
     session: ShareSession,
     include_token: bool = False,
 ) -> dict[str, Any]:
+    state = load_share_server_state(workspace_root)
     server = share_server_status_payload(workspace_root)
+    viewer_path = str(server.get("viewer_path") or (state.viewer_path if state is not None else DEFAULT_VIEWER_PATH))
     local_url = None
-    if server.get("running") and server.get("base_url"):
-        local_base = str(server["base_url"])
-        if str(server.get("host") or "").strip() == "0.0.0.0":
+    local_base = str(server.get("base_url") or (state.base_url if state is not None else "")).strip()
+    local_host = str(server.get("host") or (state.host if state is not None else "")).strip()
+    if local_base:
+        if local_host == "0.0.0.0":
             local_base = local_base.replace("http://0.0.0.0:", "http://127.0.0.1:", 1)
-        local_url = viewer_link(local_base, session, str(server.get("viewer_path") or DEFAULT_VIEWER_PATH))
+        local_url = viewer_link(local_base, session, viewer_path)
     public_url = None
     if server.get("share_base_url"):
-        public_url = viewer_link(str(server["share_base_url"]), session, str(server.get("viewer_path") or DEFAULT_VIEWER_PATH))
+        public_url = viewer_link(str(server["share_base_url"]), session, viewer_path)
     payload = {
         "session_id": session.session_id,
         "created_at": session.created_at,

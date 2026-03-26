@@ -12,10 +12,11 @@ from .models import ExecutionPlanState, ProjectContext
 from .orchestrator import Orchestrator
 from .runtime_insights import build_runtime_insights
 from .share import project_share_payload
+from .status_views import effective_project_status
 from .utils import compact_text, normalize_workflow_mode, read_json, read_jsonl_tail, read_last_jsonl, read_text, write_json
 
 
-DETAIL_CACHE_VERSION = 2
+DETAIL_CACHE_VERSION = 3
 
 
 def _path_signature(path: Path) -> str:
@@ -148,7 +149,13 @@ def progress_caption(plan_state: ExecutionPlanState) -> str:
     return f"Completed {completed}/{total} steps, next: {next_step}"
 
 
-def project_summary(orchestrator: Orchestrator, project: ProjectContext, plan_state: ExecutionPlanState | None = None) -> str:
+def project_summary(
+    orchestrator: Orchestrator,
+    project: ProjectContext,
+    plan_state: ExecutionPlanState | None = None,
+    *,
+    current_status: str | None = None,
+) -> str:
     plan = plan_state or orchestrator.load_execution_plan_state(project)
     remaining = [step.step_id for step in plan.steps if step.status != "completed"]
     recent_blocks = read_jsonl_tail(project.paths.block_log_file, 5)
@@ -165,7 +172,7 @@ def project_summary(orchestrator: Orchestrator, project: ProjectContext, plan_st
         f"Directory: {project.metadata.repo_path}",
         f"GitHub: {project.metadata.origin_url or 'Not connected'}",
         f"Branch: {project.metadata.branch}",
-        f"Status: {project.metadata.current_status}",
+        f"Status: {current_status or project.metadata.current_status}",
         f"Workflow: {normalize_workflow_mode(getattr(plan, 'workflow_mode', '') or getattr(project.runtime, 'workflow_mode', 'standard'))}",
         f"Model: {project.runtime.model}  ({project.runtime.effort}) [{provider_summary}]",
         f"Verification: {plan.default_test_command or project.runtime.test_cmd}",
@@ -194,12 +201,11 @@ def project_stats(plan_state: ExecutionPlanState) -> dict[str, Any]:
     }
 
 
-def workspace_snapshot(projects: list[ProjectContext]) -> dict[str, Any]:
+def workspace_snapshot(statuses: list[str]) -> dict[str, Any]:
     running = 0
     ready = 0
     failed = 0
-    for project in projects:
-        status = project.metadata.current_status
+    for status in statuses:
         if status.startswith("running:"):
             running += 1
         elif status in {"setup_ready", "plan_ready", "plan_completed", "closed_out", "ready"}:
@@ -207,7 +213,7 @@ def workspace_snapshot(projects: list[ProjectContext]) -> dict[str, Any]:
         elif status.endswith("failed") or status in {"failed", "closeout_failed"}:
             failed += 1
     return {
-        "project_count": len(projects),
+        "project_count": len(statuses),
         "ready_like": ready,
         "running": running,
         "failed": failed,
@@ -459,6 +465,7 @@ def build_activity_lines(context: ProjectContext, plan_state: ExecutionPlanState
 
 def project_list_item_payload(orchestrator: Orchestrator, project: ProjectContext) -> dict[str, Any]:
     plan_state = orchestrator.load_execution_plan_state(project)
+    current_status = effective_project_status(project.metadata.current_status, plan_state, project.loop_state)
     detail = project.metadata.origin_url or f"Branch {project.metadata.branch}"
     return {
         "repo_id": project.metadata.repo_id,
@@ -467,11 +474,11 @@ def project_list_item_payload(orchestrator: Orchestrator, project: ProjectContex
         "repo_path": str(project.metadata.repo_path),
         "origin_url": project.metadata.origin_url,
         "branch": project.metadata.branch,
-        "status": project.metadata.current_status,
+        "status": current_status,
         "detail": detail,
         "created_at": project.metadata.created_at,
         "last_run_at": project.metadata.last_run_at,
-        "summary": project_summary(orchestrator, project, plan_state),
+        "summary": project_summary(orchestrator, project, plan_state, current_status=current_status),
         "progress": progress_caption(plan_state),
         "stats": project_stats(plan_state),
         "closeout_status": plan_state.closeout_status,
@@ -485,6 +492,7 @@ def _build_project_detail_base_payload(
     load_run_control: Callable[[ProjectContext], dict[str, Any]],
 ) -> dict[str, Any]:
     plan_state = orchestrator.load_execution_plan_state(project)
+    current_status = effective_project_status(project.metadata.current_status, plan_state, project.loop_state)
     control = load_run_control(project)
     recent_usage_payload = recent_usage(project)
     runtime_insights = build_runtime_insights(project, plan_state, recent_usage_payload)
@@ -526,8 +534,12 @@ def _build_project_detail_base_payload(
         {},
         detail_level=normalized_detail_level,
     )
+    if isinstance(bottom_panels.get("git_status"), dict):
+        bottom_panels["git_status"]["current_status"] = current_status
+    project_payload = project.metadata.to_dict()
+    project_payload["current_status"] = current_status
     snapshot = {
-        "project": project.metadata.to_dict(),
+        "project": deepcopy(project_payload),
         "runtime": project.runtime.to_dict(),
         "loop_state": project.loop_state.to_dict(),
         "plan": plan_state.to_dict(),
@@ -542,11 +554,11 @@ def _build_project_detail_base_payload(
     }
     return {
         "detail_level": normalized_detail_level,
-        "project": project.metadata.to_dict(),
+        "project": project_payload,
         "runtime": project.runtime.to_dict(),
         "loop_state": project.loop_state.to_dict(),
         "plan": plan_state.to_dict(),
-        "summary": project_summary(orchestrator, project, plan_state),
+        "summary": project_summary(orchestrator, project, plan_state, current_status=current_status),
         "progress": progress_caption(plan_state),
         "stats": project_stats(plan_state),
         "codex_status": {},
@@ -666,7 +678,8 @@ def project_detail_payload(
 
 def list_projects_payload(orchestrator: Orchestrator) -> dict[str, Any]:
     projects = sorted(orchestrator.list_projects(), key=lambda item: item.metadata.created_at, reverse=True)
+    project_payloads = [project_list_item_payload(orchestrator, project) for project in projects]
     return {
-        "projects": [project_list_item_payload(orchestrator, project) for project in projects],
-        "workspace": workspace_snapshot(projects),
+        "projects": project_payloads,
+        "workspace": workspace_snapshot([str(item.get("status", "")).strip() for item in project_payloads]),
     }

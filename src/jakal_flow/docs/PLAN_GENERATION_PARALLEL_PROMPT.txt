@@ -28,8 +28,11 @@ Requested execution mode:
 The app is currently in parallel mode. Plan a DAG execution tree instead of a simple list.
 Use `step_id` and `depends_on` to define the graph.
 Only let steps become parallel-ready when their dependencies are complete.
-For any steps that may run in parallel, provide non-empty `owned_paths` that are disjoint from each other.
-Do not put risky, tightly coupled, or same-file refactors in the same parallel-ready wave.
+Maximize safe frontier width. Prefer plans that create at least one credible parallel-ready wave with 2 or more steps after any required prerequisite setup.
+For any steps that may run in parallel, provide non-empty `owned_paths` and make them as narrow as possible.
+Prefer exact files or leaf directories over broad package roots so the scheduler can batch more work safely.
+Keep exact-path ownership exclusive across the same ready wave.
+Do not put risky, tightly coupled, shared-contract, or same-file refactors in the same parallel-ready wave.
 If a step needs broad repo-wide edits or merge-sensitive refactors, keep it isolated rather than pretending it is parallel-safe.
 Do not include the final closeout sweep inside the normal task list. The app runs a separate closeout block after all planned tasks finish.
 
@@ -63,7 +66,7 @@ Field requirements:
 - "codex_description": the actual instruction for Codex, no more than one paragraph, specific enough to execute.
 - "reasoning_effort": choose only `low`, `medium`, `high`, or `xhigh`. Use `low` for narrow mechanical edits, `medium` for normal implementation, `high` for multi-file or tricky work, and `xhigh` only for the hardest investigations or refactors.
 - "depends_on": in parallel mode, use this to encode the DAG.
-- "owned_paths": in parallel mode, list the main repo-relative files or directories each step owns so independently ready steps can be batched safely. Use an empty array only when the step should run alone.
+- "owned_paths": in parallel mode, list the main repo-relative files or directories each step owns so independently ready steps can be batched safely. Prefer narrow exact files or leaf directories. Use an empty array only when the step should run alone.
 - "success_criteria": a concrete, locally judgeable done condition, describing what must be true when the block is complete.
 
 Do not include markdown fences or commentary outside the JSON.

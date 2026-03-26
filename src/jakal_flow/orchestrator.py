@@ -48,6 +48,7 @@ from .planning import (
     load_source_prompt_template,
 )
 from .reporting import Reporter
+from .status_views import status_from_plan_state
 from .utils import compact_text, ensure_dir, normalize_workflow_mode, now_utc_iso, read_json, read_last_jsonl, read_text, write_json, write_text
 from .verification import VerificationRunner
 from .workspace import WorkspaceManager
@@ -445,16 +446,22 @@ class Orchestrator:
             batches.append(current_batch)
         return batches or [[step] for step in ready_steps]
 
-    def _owned_paths_conflict(self, left: str, right: str) -> bool:
+    def _owned_paths_overlap_level(self, left: str, right: str) -> str:
         normalized_left = self._normalize_owned_path(left).lower()
         normalized_right = self._normalize_owned_path(right).lower()
         if not normalized_left or not normalized_right:
-            return False
-        return (
-            normalized_left == normalized_right
-            or normalized_left.startswith(f"{normalized_right}/")
+            return "none"
+        if normalized_left == normalized_right:
+            return "hard"
+        if (
+            normalized_left.startswith(f"{normalized_right}/")
             or normalized_right.startswith(f"{normalized_left}/")
-        )
+        ):
+            return "soft"
+        return "none"
+
+    def _owned_paths_conflict(self, left: str, right: str) -> bool:
+        return self._owned_paths_overlap_level(left, right) == "hard"
 
     def run_saved_execution_step(
         self,
@@ -720,6 +727,20 @@ class Orchestrator:
                     step.notes = batch_summary if step.step_id == failed_worker.get("step_id") else "Parallel batch aborted because another worker failed."
                 context.metadata.current_status = "failed"
             else:
+                verification_block_index = max(1, context.loop_state.block_index + len(ordered_targets))
+                batch_debug_step = self._build_parallel_batch_debug_step(
+                    ordered_targets,
+                    plan_state.default_test_command or runtime.test_cmd,
+                )
+                batch_candidate = CandidateTask(
+                    candidate_id="parallel-batch-debug",
+                    title=batch_debug_step.title,
+                    rationale=self._execution_step_rationale(batch_debug_step, batch_debug_step.test_command),
+                    plan_refs=[step.step_id for step in ordered_targets],
+                    score=1.0,
+                )
+                batch_memory_context = MemoryStore(context.paths).render_context(read_text(context.paths.mid_term_plan_file))
+                batch_runner = CodexRunner(context.runtime.codex_path)
                 try:
                     for result in worker_results:
                         worker_commit = str(result.get("commit_hash") or "").strip()
@@ -732,6 +753,45 @@ class Orchestrator:
                             continue
                         conflicted_files = self.git.conflicted_files(context.paths.repo_dir)
                         failure_extra = {"conflict": self._parallel_conflict_details(conflicted_files)}
+                        if conflicted_files and self.git.cherry_pick_in_progress(context.paths.repo_dir):
+                            merge_test_result = self._parallel_merge_conflict_test_result(
+                                context=context,
+                                worker_commit=worker_commit,
+                                merge_result=merge_result,
+                                conflicted_files=conflicted_files,
+                            )
+                            debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
+                                context=context,
+                                runner=batch_runner,
+                                reporter=reporter,
+                                block_index=verification_block_index,
+                                candidate=batch_candidate,
+                                execution_step=batch_debug_step,
+                                memory_context=batch_memory_context,
+                                failing_pass_name="parallel-batch-merge",
+                                failing_test_result=merge_test_result,
+                                post_success_strategy="continue_cherry_pick",
+                            )
+                            if (
+                                debug_run_result.returncode == 0
+                                and debug_test_result is not None
+                                and debug_test_result.returncode == 0
+                                and debug_commit_hash
+                            ):
+                                self._log_pass_result(
+                                    context=context,
+                                    reporter=reporter,
+                                    block_index=verification_block_index,
+                                    candidate=batch_candidate,
+                                    pass_name=debug_pass_name,
+                                    run_result=debug_run_result,
+                                    test_result=debug_test_result,
+                                    commit_hash=debug_commit_hash,
+                                    rollback_status="not_needed",
+                                    search_enabled=False,
+                                )
+                                merged_commit_hashes.append(debug_commit_hash)
+                                continue
                         raise RuntimeError(
                             f"Parallel merge conflict while cherry-picking {worker_commit}: {', '.join(conflicted_files) or merge_result.stderr.strip() or 'unknown conflict'}"
                         )
@@ -746,7 +806,6 @@ class Orchestrator:
                         step.notes = batch_summary
                     context.metadata.current_status = "failed"
                 else:
-                    verification_block_index = max(1, context.loop_state.block_index + len(ordered_targets))
                     if any(commit_hash.strip() for commit_hash in merged_commit_hashes):
                         close_block_index = max(1, context.loop_state.block_index + len(ordered_targets))
                         group_test_result = self._run_test_command(context, close_block_index, "parallel-batch-pass")
@@ -755,19 +814,6 @@ class Orchestrator:
                         group_test_result = self._run_test_command(context, verification_block_index, "parallel-batch-pass")
                         reporter.save_test_result(verification_block_index, "parallel-batch-pass", group_test_result)
                     if group_test_result and group_test_result.returncode != 0:
-                        batch_debug_step = self._build_parallel_batch_debug_step(
-                            ordered_targets,
-                            plan_state.default_test_command or runtime.test_cmd,
-                        )
-                        batch_candidate = CandidateTask(
-                            candidate_id="parallel-batch-debug",
-                            title=batch_debug_step.title,
-                            rationale=self._execution_step_rationale(batch_debug_step, batch_debug_step.test_command),
-                            plan_refs=[step.step_id for step in ordered_targets],
-                            score=1.0,
-                        )
-                        batch_memory_context = MemoryStore(context.paths).render_context(read_text(context.paths.mid_term_plan_file))
-                        batch_runner = CodexRunner(context.runtime.codex_path)
                         debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
                             context=context,
                             runner=batch_runner,
@@ -1975,22 +2021,7 @@ class Orchestrator:
         return "serial"
 
     def _status_from_plan_state(self, plan_state: ExecutionPlanState) -> str:
-        if not plan_state.steps:
-            return "setup_ready"
-        running_steps = [step for step in plan_state.steps if step.status == "running"]
-        if running_steps:
-            if len(running_steps) == 1:
-                return f"running:{running_steps[0].step_id.lower()}"
-            return "running:parallel"
-        if not self._all_steps_completed(plan_state.steps):
-            return "plan_ready"
-        if plan_state.closeout_status == "completed":
-            return "closed_out"
-        if plan_state.closeout_status == "running":
-            return "running:closeout"
-        if plan_state.closeout_status == "failed":
-            return "closeout_failed"
-        return "plan_completed"
+        return status_from_plan_state(plan_state)
 
     def _checkpoints_from_execution_steps(self, steps: list[ExecutionStep]) -> list[Checkpoint]:
         checkpoints: list[Checkpoint] = []
@@ -2250,6 +2281,7 @@ class Orchestrator:
         memory_context: str,
         failing_pass_name: str,
         failing_test_result: TestRunResult,
+        post_success_strategy: str = "commit_if_changes",
     ):
         debug_pass_name = self._debug_pass_name(failing_pass_name)
         debugger_prompt_template = load_debugger_prompt_template(context.runtime.execution_mode)
@@ -2286,11 +2318,20 @@ class Orchestrator:
             test_result.summary = f"{test_result.summary} after debugger recovery"
             reporter.save_test_result(block_index, debug_pass_name, test_result)
             commit_hash: str | None = None
-            if test_result.returncode == 0 and self.git.has_changes(context.paths.repo_dir):
-                commit_hash = self.git.commit_all(
-                    context.paths.repo_dir,
-                    self._commit_message(block_index, debug_pass_name, candidate.title),
-                )
+            if test_result.returncode == 0:
+                if post_success_strategy == "commit_if_changes":
+                    if self.git.has_changes(context.paths.repo_dir):
+                        commit_hash = self.git.commit_all(
+                            context.paths.repo_dir,
+                            self._commit_message(block_index, debug_pass_name, candidate.title),
+                        )
+                elif post_success_strategy == "continue_cherry_pick":
+                    if self.git.cherry_pick_in_progress(context.paths.repo_dir):
+                        self.git.add_all(context.paths.repo_dir)
+                        self.git.continue_cherry_pick(context.paths.repo_dir)
+                    commit_hash = self.git.current_revision(context.paths.repo_dir)
+                else:
+                    raise ValueError(f"Unsupported debugger success strategy: {post_success_strategy}")
             return debug_pass_name, run_result, test_result, commit_hash
         finally:
             context.metadata.last_run_at = now_utc_iso()
@@ -2532,14 +2573,42 @@ class Orchestrator:
     def _parallel_conflict_details(self, conflicted_files: list[str]) -> dict[str, object]:
         files = sorted({str(item).strip() for item in conflicted_files if str(item).strip()})
         return {
-            "policy": "abort_and_report",
-            "recommended_action": "manual_review",
+            "policy": "attempt_debugger_recovery_then_report",
+            "recommended_action": "automatic_merge_debugger",
             "files": files,
             "procedure": (
-                "Keep the base branch safe revision, inspect each conflicted file manually, choose the final code intentionally, "
-                "then rerun the batch after the overlap is resolved."
+                "Try the parallel merge debugger first. If recovery still fails, keep the base branch safe revision, "
+                "inspect each conflicted file intentionally, then rerun the batch after the overlap is resolved."
             ),
         }
+
+    def _parallel_merge_conflict_test_result(
+        self,
+        *,
+        context: ProjectContext,
+        worker_commit: str,
+        merge_result,
+        conflicted_files: list[str],
+    ) -> TestRunResult:
+        merge_stdout = context.paths.logs_dir / "parallel-batch-merge.stdout.log"
+        merge_stderr = context.paths.logs_dir / "parallel-batch-merge.stderr.log"
+        summary = (
+            f"git cherry-pick {worker_commit} conflicted on "
+            f"{', '.join(conflicted_files) or 'unknown files'}"
+        )
+        write_text(merge_stdout, str(getattr(merge_result, "stdout", "") or ""))
+        write_text(
+            merge_stderr,
+            str(getattr(merge_result, "stderr", "") or "").strip()
+            or summary,
+        )
+        return TestRunResult(
+            command=f"git cherry-pick {worker_commit}",
+            returncode=getattr(merge_result, "returncode", 1) or 1,
+            stdout_file=merge_stdout,
+            stderr_file=merge_stderr,
+            summary=summary,
+        )
 
     def _report_failure(
         self,
