@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from types import SimpleNamespace
 import unittest
 from pathlib import Path
@@ -41,6 +42,12 @@ from jakal_flow.utils import append_jsonl, read_jsonl_tail, read_last_jsonl
 
 
 class ExecutionPlanHelperTests(unittest.TestCase):
+    def test_legacy_codex_auto_namespace_aliases_new_package(self) -> None:
+        legacy_planning = importlib.import_module("codex_auto.planning")
+        renamed_planning = importlib.import_module("jakal_flow.planning")
+
+        self.assertEqual(legacy_planning.REFERENCE_GUIDE_DISPLAY_PATH, renamed_planning.REFERENCE_GUIDE_DISPLAY_PATH)
+
     def test_parse_execution_plan_response_reads_json_tasks(self) -> None:
         response = """
         {
@@ -330,7 +337,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             repo_inputs = scan_repository_inputs(repo_dir)
             self.assertIn("notes.md", repo_inputs["docs"])
             reference_notes = load_reference_guide_text()
-            self.assertIn("JavaScript", reference_notes)
+            self.assertIn("React + Tauri", reference_notes)
 
             context = SimpleNamespace(
                 paths=SimpleNamespace(repo_dir=repo_dir, plan_file=temp_root / "managed-docs" / "PLAN.md"),
@@ -346,10 +353,10 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertIn("Use the following priority order while planning:", plan_prompt)
         self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", plan_prompt)
-        self.assertIn("JavaScript", plan_prompt)
+        self.assertIn("React + Tauri", plan_prompt)
         self.assertIn("1. Follow AGENTS.md and explicit repository constraints first.", bootstrap_prompt)
         self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", bootstrap_prompt)
-        self.assertIn("JavaScript", bootstrap_prompt)
+        self.assertIn("React + Tauri", bootstrap_prompt)
 
     def test_ensure_gitignore_adds_missing_entries_once(self) -> None:
         project_dir = Path(__file__).resolve().parents[1] / ".tmp_gitignore_test"
