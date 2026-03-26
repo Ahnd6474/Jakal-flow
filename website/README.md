@@ -1,4 +1,4 @@
-Static website assets for `codex-auto`.
+Static website assets for `jakal-flow`.
 
 - Entry: `website/index.html`
 - Styles: `website/site.css`

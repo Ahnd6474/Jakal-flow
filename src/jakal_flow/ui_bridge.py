@@ -39,15 +39,19 @@ from .share import (
 from .utils import append_jsonl, compact_text, now_utc_iso, parse_json_text, read_json, read_jsonl_tail, read_last_jsonl, read_text, write_json
 
 
-DEFAULT_GUI_WORKSPACE_DIRNAME = ".codex-auto-workspace"
+DEFAULT_GUI_WORKSPACE_DIRNAME = ".jakal-flow-workspace"
+LEGACY_GUI_WORKSPACE_DIRNAME = ".codex-auto-workspace"
 SHARE_SERVER_START_TIMEOUT_SECS = 3.0
 
 
 def default_workspace_root() -> Path:
-    explicit = os.environ.get("CODEX_AUTO_GUI_WORKSPACE")
+    explicit = os.environ.get("JAKAL_FLOW_GUI_WORKSPACE") or os.environ.get("CODEX_AUTO_GUI_WORKSPACE")
     if explicit:
         return Path(explicit).expanduser().resolve()
-    legacy = (Path.cwd() / DEFAULT_GUI_WORKSPACE_DIRNAME).resolve()
+    preferred = (Path.cwd() / DEFAULT_GUI_WORKSPACE_DIRNAME).resolve()
+    if preferred.exists():
+        return preferred
+    legacy = (Path.cwd() / LEGACY_GUI_WORKSPACE_DIRNAME).resolve()
     if legacy.exists():
         return legacy
     return (Path.home() / DEFAULT_GUI_WORKSPACE_DIRNAME).resolve()
@@ -136,7 +140,7 @@ def start_share_server_process(
     command = [
         sys.executable,
         "-m",
-        "codex_auto.share_server",
+        "jakal_flow.share_server",
         "--workspace-root",
         str(workspace_root),
         "--host",
@@ -1097,7 +1101,7 @@ def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | No
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="JSON bridge for the codex-auto React/Tauri desktop shell")
+    parser = argparse.ArgumentParser(description="JSON bridge for the jakal-flow React/Tauri desktop shell")
     parser.add_argument("command", help="Bridge command to execute")
     parser.add_argument(
         "--workspace-root",

@@ -9,9 +9,9 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from codex_auto.codex_runner import CodexRunner
-from codex_auto.models import RuntimeOptions
-from codex_auto.workspace import WorkspaceManager
+from jakal_flow.codex_runner import CodexRunner
+from jakal_flow.models import RuntimeOptions
+from jakal_flow.workspace import WorkspaceManager
 
 
 class CodexRunnerTests(unittest.TestCase):
@@ -50,8 +50,8 @@ class CodexRunnerTests(unittest.TestCase):
                     stderr=b"",
                 )
 
-            with mock.patch("codex_auto.codex_runner.subprocess.run", side_effect=fake_run), mock.patch(
-                "codex_auto.codex_runner.time.sleep"
+            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run), mock.patch(
+                "jakal_flow.codex_runner.time.sleep"
             ):
                 result = runner.run_pass(
                     context=context,
@@ -90,8 +90,8 @@ class CodexRunnerTests(unittest.TestCase):
                     stderr=b"authentication failed",
                 )
 
-            with mock.patch("codex_auto.codex_runner.subprocess.run", side_effect=fake_run), mock.patch(
-                "codex_auto.codex_runner.time.sleep"
+            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run), mock.patch(
+                "jakal_flow.codex_runner.time.sleep"
             ) as mocked_sleep:
                 result = runner.run_pass(
                     context=context,
@@ -127,7 +127,7 @@ class CodexRunnerTests(unittest.TestCase):
                 output_file.write_text("Auto response", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
-            with mock.patch("codex_auto.codex_runner.subprocess.run", side_effect=fake_run):
+            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run):
                 runner.run_pass(
                     context=context,
                     prompt="Use the default model routing",
@@ -159,7 +159,7 @@ class CodexRunnerTests(unittest.TestCase):
                 output_file.write_text("Fast response", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
-            with mock.patch("codex_auto.codex_runner.subprocess.run", side_effect=fake_run):
+            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run):
                 runner.run_pass(
                     context=context,
                     prompt="Apply the requested fix",

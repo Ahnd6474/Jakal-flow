@@ -39,13 +39,13 @@ export function useDesktopController() {
   const [modelCatalog, setModelCatalog] = useState([]);
   const [projects, setProjects] = useState([]);
   const [workspaceStats, setWorkspaceStats] = useState(null);
-  const [selectedProjectId, setSelectedProjectId] = usePersistentState("codex-auto:selected-project", "");
-  const [storedProgramSettings, setStoredProgramSettings] = usePersistentState("codex-auto:program-settings", null);
+  const [selectedProjectId, setSelectedProjectId] = usePersistentState("jakal-flow:selected-project", "");
+  const [storedProgramSettings, setStoredProgramSettings] = usePersistentState("jakal-flow:program-settings", null);
   const [projectForm, setProjectForm] = useState(blankProjectForm(null));
   const [programSettings, setProgramSettings] = useState(programSettingsFromRuntime(null));
   const [projectDetail, setProjectDetail] = useState(null);
   const [planDraft, setPlanDraft] = useState({ steps: [], project_prompt: "", closeout_status: "not_started" });
-  const [selectedStepId, setSelectedStepId] = usePersistentState("codex-auto:selected-step", "");
+  const [selectedStepId, setSelectedStepId] = usePersistentState("jakal-flow:selected-step", "");
   const [planDirty, setPlanDirty] = useState(false);
   const [pendingAction, setPendingAction] = useState("");
   const [loadingProjectId, setLoadingProjectId] = useState("");
@@ -57,10 +57,13 @@ export function useDesktopController() {
     public_base_url: "",
   });
 
-  const [centerTab, setCenterTab] = usePersistentState("codex-auto:center-tab", "run");
-  const [sidebarTab, setSidebarTab] = usePersistentState("codex-auto:sidebar-tab", "projects");
-  const [projectFilter, setProjectFilter] = usePersistentState("codex-auto:project-filter", "");
-  const [workspaceFilter, setWorkspaceFilter] = usePersistentState("codex-auto:workspace-filter", "");
+  const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "run");
+  const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
+  const [sidebarTab, setSidebarTab] = usePersistentState("jakal-flow:sidebar-tab", "projects");
+  const [bottomCollapsed, setBottomCollapsed] = usePersistentState("jakal-flow:bottom-collapsed", false);
+  const [bottomHeight, setBottomHeight] = usePersistentState("jakal-flow:bottom-height", 250);
+  const [projectFilter, setProjectFilter] = usePersistentState("jakal-flow:project-filter", "");
+  const [workspaceFilter, setWorkspaceFilter] = usePersistentState("jakal-flow:workspace-filter", "");
   const defaultRuntime = useMemo(() => applyProgramSettings(baseRuntime, storedProgramSettings), [baseRuntime, storedProgramSettings]);
 
   const busy = Boolean(pendingAction || (activeJob && activeJob.status === "running"));
@@ -78,12 +81,6 @@ export function useDesktopController() {
         .includes(query),
     );
   }, [projectFilter, projects]);
-
-  useEffect(() => {
-    if (!programSettings?.developer_mode && (centerTab === "reports" || centerTab === "history")) {
-      setCenterTab("dashboard");
-    }
-  }, [centerTab, programSettings?.developer_mode, setCenterTab]);
 
   useEffect(() => {
     if (centerTab === "overview") {
@@ -104,7 +101,7 @@ export function useDesktopController() {
     if (sidebarTab === "workspace" || sidebarTab === "plans") {
       return true;
     }
-    return false;
+    return !bottomCollapsed && bottomTab === "tokens";
   }
 
   async function fetchProjectDetail(repoId, options = {}) {
@@ -283,7 +280,7 @@ export function useDesktopController() {
     async function loadExpandedProjectDetail() {
       try {
         const detail = await fetchProjectDetail(selectedProjectId, {
-          refreshCodexStatus: centerTab === "dashboard",
+          refreshCodexStatus: centerTab === "dashboard" || (!bottomCollapsed && bottomTab === "tokens"),
           detailLevel: "full",
         });
         if (cancelled) {
@@ -316,6 +313,8 @@ export function useDesktopController() {
     };
   }, [
     activeJobId,
+    bottomCollapsed,
+    bottomTab,
     centerTab,
     loadingProjectId,
     pendingAction,
@@ -626,6 +625,7 @@ export function useDesktopController() {
       setActiveJobId(job.id);
       setActiveJob(job);
       setCenterTab("run");
+      setBottomTab("json");
       setMessage(
         messagePayload(
           "info",
@@ -925,7 +925,10 @@ export function useDesktopController() {
     message,
     shareSettings,
     centerTab,
+    bottomTab,
     sidebarTab,
+    bottomCollapsed,
+    bottomHeight,
     projectFilter,
     workspaceFilter,
     planDirty,
@@ -935,7 +938,10 @@ export function useDesktopController() {
     setSelectedStepId,
     setProgramSettings,
     setCenterTab,
+    setBottomTab,
     setSidebarTab,
+    setBottomCollapsed,
+    setBottomHeight,
     setProjectFilter,
     setWorkspaceFilter,
     setShareSettings,

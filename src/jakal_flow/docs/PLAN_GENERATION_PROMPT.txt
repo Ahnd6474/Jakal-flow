@@ -18,7 +18,7 @@ Treat only directly necessary supporting work as in scope; do not add speculativ
 Use the following priority order while planning:
 1. Follow AGENTS.md and explicit repository constraints first.
 2. Use the user request as the primary product goal within those constraints.
-3. Use src/codex_auto/docs/REFERENCE_GUIDE.md for unstated implementation preferences and tie-breakers.
+3. Use src/jakal_flow/docs/REFERENCE_GUIDE.md for unstated implementation preferences and tie-breakers.
 4. Use README.md and other repository docs to align with the existing structure.
 5. Fall back to generic defaults only if the repository sources above do not decide the issue.
 
@@ -58,7 +58,7 @@ README:
 AGENTS:
 {agents}
 
-Reference notes (src/codex_auto/docs/REFERENCE_GUIDE.md):
+Reference notes (src/jakal_flow/docs/REFERENCE_GUIDE.md):
 {reference_notes}
 
 Docs:

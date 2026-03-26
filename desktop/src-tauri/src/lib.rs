@@ -51,7 +51,11 @@ fn parse_bridge_timeout(env_override: Option<String>) -> Duration {
 }
 
 fn bridge_timeout() -> Duration {
-    parse_bridge_timeout(env::var("CODEX_AUTO_BRIDGE_TIMEOUT_SECS").ok())
+    parse_bridge_timeout(
+        env::var("JAKAL_FLOW_BRIDGE_TIMEOUT_SECS")
+            .ok()
+            .or_else(|| env::var("CODEX_AUTO_BRIDGE_TIMEOUT_SECS").ok()),
+    )
 }
 
 fn normalize_bridge_command(command: &str) -> Result<String, String> {
@@ -123,7 +127,12 @@ fn resolve_python_executable(root: &Path, env_override: Option<String>) -> Strin
 }
 
 fn python_executable(root: &Path) -> String {
-    resolve_python_executable(root, env::var("CODEX_AUTO_PYTHON").ok())
+    resolve_python_executable(
+        root,
+        env::var("JAKAL_FLOW_PYTHON")
+            .ok()
+            .or_else(|| env::var("CODEX_AUTO_PYTHON").ok()),
+    )
 }
 
 fn build_pythonpath(root: &Path, existing: Option<OsString>) -> Result<String, String> {
@@ -205,7 +214,7 @@ fn run_bridge_command(
     let mut process = Command::new(python);
     process
         .arg("-m")
-        .arg("codex_auto.ui_bridge")
+        .arg("jakal_flow.ui_bridge")
         .arg(&command)
         .current_dir(&root)
         .env("PYTHONPATH", pythonpath)
@@ -420,7 +429,7 @@ pub fn run() {
             list_bridge_jobs
         ])
         .run(tauri::generate_context!())
-        .expect("error while running codex-auto desktop");
+        .expect("error while running jakal-flow desktop");
 }
 
 #[cfg(test)]
@@ -440,7 +449,7 @@ mod tests {
     impl TestDir {
         fn new() -> Self {
             let path = env::temp_dir().join(format!(
-                "codex-auto-desktop-tests-{}-{}",
+                "jakal-flow-desktop-tests-{}-{}",
                 std::process::id(),
                 TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed)
             ));

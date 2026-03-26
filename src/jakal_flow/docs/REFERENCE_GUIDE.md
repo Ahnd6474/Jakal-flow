@@ -41,7 +41,7 @@ This guide defines baseline implementation principles. It is not an expansion-id
 - Avoid over-abstraction, but do not force unrelated responsibilities into one file.
 - Keep role boundaries clear even in small projects.
 - Prefer structures that are less likely to break when features are added later.
-- In this repository, keep UI concerns under `desktop/` and orchestration or automation logic under `src/codex_auto/`.
+- In this repository, keep UI concerns under `desktop/` and orchestration or automation logic under `src/jakal_flow/`.
 
 ## 6. State Management
 

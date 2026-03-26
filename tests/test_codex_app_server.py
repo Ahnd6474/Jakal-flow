@@ -7,7 +7,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from codex_auto.codex_app_server import fetch_codex_backend_snapshot
+from jakal_flow.codex_app_server import fetch_codex_backend_snapshot
 
 
 class _FakeSession:
@@ -70,7 +70,7 @@ class _FakeSession:
 
 class CodexAppServerTests(unittest.TestCase):
     def test_fetch_codex_backend_snapshot_formats_models_and_rate_limits(self) -> None:
-        with mock.patch("codex_auto.codex_app_server._CodexAppServerSession", _FakeSession):
+        with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", _FakeSession):
             snapshot = fetch_codex_backend_snapshot("codex.cmd")
 
         self.assertTrue(snapshot.available)
@@ -82,7 +82,7 @@ class CodexAppServerTests(unittest.TestCase):
         self.assertEqual(snapshot.model_catalog[1]["supported_reasoning_efforts"], ["low", "high"])
 
     def test_fetch_codex_backend_snapshot_returns_fallback_when_app_server_fails(self) -> None:
-        with mock.patch("codex_auto.codex_app_server._CodexAppServerSession", side_effect=RuntimeError("boom")):
+        with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", side_effect=RuntimeError("boom")):
             snapshot = fetch_codex_backend_snapshot("codex.cmd")
 
         self.assertFalse(snapshot.available)

@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
             target.add_argument("--branch", default="main", help="Target branch")
         target.add_argument(
             "--workspace-root",
-            default=".codex-auto-workspace",
+            default=".jakal-flow-workspace",
             help="Root directory for isolated managed projects",
         )
         target.add_argument("--model", default="auto", help="Model slug passed to Codex CLI, or auto to use Codex defaults")

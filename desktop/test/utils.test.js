@@ -51,7 +51,7 @@ test("basename handles Windows, POSIX, and empty paths", () => {
 });
 
 test("deriveGithubMode distinguishes manual and existing projects", () => {
-  assert.equal(deriveGithubMode("https://github.com/openai/codex-auto"), "manual");
+  assert.equal(deriveGithubMode("https://github.com/openai/jakal-flow"), "manual");
   assert.equal(deriveGithubMode(""), "existing");
   assert.equal(deriveGithubMode(null), "existing");
 });

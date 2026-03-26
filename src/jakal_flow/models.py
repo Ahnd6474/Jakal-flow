@@ -36,8 +36,8 @@ class RuntimeOptions:
     max_blocks: int = 1
     allow_push: bool = False
     codex_path: str = "codex.cmd"
-    git_user_name: str = "codex-auto-bot"
-    git_user_email: str = "codex-auto@example.invalid"
+    git_user_name: str = "jakal-flow-bot"
+    git_user_email: str = "jakal-flow@example.invalid"
     no_progress_limit: int = 3
     regression_limit: int = 3
     empty_cycle_limit: int = 3

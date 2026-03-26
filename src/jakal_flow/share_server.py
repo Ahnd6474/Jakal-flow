@@ -32,7 +32,7 @@ WEBSITE_ROOT = Path(__file__).resolve().parents[2] / "website"
 
 
 class ShareRequestHandler(BaseHTTPRequestHandler):
-    server_version = "codex-auto-share/0.1"
+    server_version = "jakal-flow-share/0.1"
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -157,7 +157,7 @@ class ShareHTTPServer(ThreadingHTTPServer):
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Read-only share server for codex-auto project monitoring")
+    parser = argparse.ArgumentParser(description="Read-only share server for jakal-flow project monitoring")
     parser.add_argument("--workspace-root", required=True)
     parser.add_argument("--host", default=DEFAULT_SHARE_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_SHARE_PORT)

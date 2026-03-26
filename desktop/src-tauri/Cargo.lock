@@ -313,7 +313,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-auto-desktop"
+name = "jakal-flow-desktop"
 version = "0.1.0"
 dependencies = [
  "serde",
