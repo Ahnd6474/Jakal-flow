@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .model_selection import normalize_reasoning_effort
 from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, ProjectContext
-from .utils import compact_text, now_utc_iso, parse_json_text, read_text, similarity_score, tokenize, write_text
+from .utils import compact_text, normalize_workflow_mode, now_utc_iso, parse_json_text, read_text, similarity_score, tokenize, write_text
 
 
 @dataclass(slots=True)
@@ -27,6 +27,9 @@ DEBUGGER_SERIAL_PROMPT_FILENAME = "DEBUGGER_SERIAL_PROMPT.txt"
 DEBUGGER_PARALLEL_PROMPT_FILENAME = "DEBUGGER_PARALLEL_PROMPT.txt"
 DEBUGGER_PROMPT_FILENAME = DEBUGGER_SERIAL_PROMPT_FILENAME
 FINALIZATION_PROMPT_FILENAME = "FINALIZATION_PROMPT.txt"
+ML_PLAN_GENERATION_PROMPT_FILENAME = "ML_PLAN_GENERATION_PROMPT.txt"
+ML_STEP_EXECUTION_PROMPT_FILENAME = "ML_STEP_EXECUTION_PROMPT.txt"
+ML_FINALIZATION_PROMPT_FILENAME = "ML_FINALIZATION_PROMPT.txt"
 SCOPE_GUARD_TEMPLATE_FILENAME = "SCOPE_GUARD_TEMPLATE.md"
 REFERENCE_GUIDE_FILENAME = "REFERENCE_GUIDE.md"
 REFERENCE_GUIDE_DISPLAY_PATH = f"src/jakal_flow/docs/{REFERENCE_GUIDE_FILENAME}"
@@ -48,24 +51,28 @@ def _normalize_execution_mode(value: str | None) -> str:
     return "parallel" if str(value or "").strip().lower() == "parallel" else "serial"
 
 
-def plan_generation_prompt_filename(execution_mode: str | None) -> str:
+def plan_generation_prompt_filename(execution_mode: str | None, workflow_mode: str | None = None) -> str:
+    if normalize_workflow_mode(workflow_mode) == "ml":
+        return ML_PLAN_GENERATION_PROMPT_FILENAME
     if _normalize_execution_mode(execution_mode) == "parallel":
         return PLAN_GENERATION_PARALLEL_PROMPT_FILENAME
     return PLAN_GENERATION_SERIAL_PROMPT_FILENAME
 
 
-def step_execution_prompt_filename(execution_mode: str | None) -> str:
+def step_execution_prompt_filename(execution_mode: str | None, workflow_mode: str | None = None) -> str:
+    if normalize_workflow_mode(workflow_mode) == "ml":
+        return ML_STEP_EXECUTION_PROMPT_FILENAME
     if _normalize_execution_mode(execution_mode) == "parallel":
         return STEP_EXECUTION_PARALLEL_PROMPT_FILENAME
     return STEP_EXECUTION_SERIAL_PROMPT_FILENAME
 
 
-def load_plan_generation_prompt_template(execution_mode: str | None) -> str:
-    return load_source_prompt_template(plan_generation_prompt_filename(execution_mode))
+def load_plan_generation_prompt_template(execution_mode: str | None, workflow_mode: str | None = None) -> str:
+    return load_source_prompt_template(plan_generation_prompt_filename(execution_mode, workflow_mode))
 
 
-def load_step_execution_prompt_template(execution_mode: str | None) -> str:
-    return load_source_prompt_template(step_execution_prompt_filename(execution_mode))
+def load_step_execution_prompt_template(execution_mode: str | None, workflow_mode: str | None = None) -> str:
+    return load_source_prompt_template(step_execution_prompt_filename(execution_mode, workflow_mode))
 
 
 def debugger_prompt_filename(execution_mode: str | None) -> str:
@@ -76,6 +83,16 @@ def debugger_prompt_filename(execution_mode: str | None) -> str:
 
 def load_debugger_prompt_template(execution_mode: str | None) -> str:
     return load_source_prompt_template(debugger_prompt_filename(execution_mode))
+
+
+def finalization_prompt_filename(workflow_mode: str | None = None) -> str:
+    if normalize_workflow_mode(workflow_mode) == "ml":
+        return ML_FINALIZATION_PROMPT_FILENAME
+    return FINALIZATION_PROMPT_FILENAME
+
+
+def load_finalization_prompt_template(workflow_mode: str | None = None) -> str:
+    return load_source_prompt_template(finalization_prompt_filename(workflow_mode))
 
 
 def load_reference_guide_text() -> str:
@@ -401,11 +418,13 @@ def prompt_to_execution_plan_prompt(
     execution_mode: str = "serial",
     template_text: str | None = None,
 ) -> str:
-    template = template_text or load_plan_generation_prompt_template(execution_mode)
+    workflow_mode = normalize_workflow_mode(getattr(context.runtime, "workflow_mode", "standard"))
+    template = template_text or load_plan_generation_prompt_template(execution_mode, workflow_mode)
     try:
         return template.format(
             repo_dir=context.paths.repo_dir,
             max_steps=max(3, max_steps),
+            workflow_mode=workflow_mode,
             execution_mode=execution_mode.strip().lower() or "serial",
             readme=repo_inputs["readme"],
             agents=repo_inputs["agents"],
@@ -475,6 +494,9 @@ def parse_execution_plan_response(
             owned_paths = [str(value).strip() for value in raw_owned_paths if str(value).strip()]
         else:
             owned_paths = [part.strip() for part in str(raw_owned_paths).replace("\n", ",").split(",") if part.strip()]
+        metadata = item.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
         steps.append(
             ExecutionStep(
                 step_id=str(item.get("step_id", item.get("node_id", ""))).strip() or f"ST{len(steps) + 1}",
@@ -488,6 +510,7 @@ def parse_execution_plan_response(
                 depends_on=depends_on,
                 owned_paths=owned_paths,
                 status="pending",
+                metadata=metadata,
             )
         )
     return plan_title, summary, steps
@@ -572,7 +595,8 @@ def implementation_prompt(
     mid_term = read_text(context.paths.mid_term_plan_file)
     scope_guard = read_text(context.paths.scope_guard_file)
     research_notes = read_text(context.paths.research_notes_file)
-    template = template_text or load_step_execution_prompt_template(getattr(context.runtime, "execution_mode", "serial"))
+    workflow_mode = normalize_workflow_mode(getattr(context.runtime, "workflow_mode", "standard"))
+    template = template_text or load_step_execution_prompt_template(getattr(context.runtime, "execution_mode", "serial"), workflow_mode)
     task_title = execution_step.title if execution_step else candidate.title
     display_description = execution_step.display_description.strip() if execution_step else ""
     codex_description = execution_step.codex_description.strip() if execution_step else ""
@@ -590,10 +614,12 @@ def implementation_prompt(
     )
     depends_on = ", ".join(execution_step.depends_on) if execution_step and execution_step.depends_on else "none"
     owned_paths = "\n".join(f"- {path}" for path in execution_step.owned_paths) if execution_step and execution_step.owned_paths else "- none declared"
+    step_metadata = execution_step.metadata if execution_step and execution_step.metadata else {}
     try:
         return template.format(
             repo_dir=context.paths.repo_dir,
             docs_dir=context.paths.docs_dir,
+            workflow_mode=workflow_mode,
             pass_name=pass_name,
             test_command=test_command,
             task_title=task_title,
@@ -602,6 +628,7 @@ def implementation_prompt(
             success_criteria=success_criteria,
             depends_on=depends_on,
             owned_paths=owned_paths,
+            step_metadata=json.dumps(step_metadata, indent=2, sort_keys=True) if step_metadata else "{}",
             candidate_rationale=candidate.rationale,
             memory_context=memory_context,
             plan_snapshot=compact_text(plan_text, 4000),
@@ -609,6 +636,8 @@ def implementation_prompt(
             scope_guard=compact_text(scope_guard, 2500),
             research_notes=compact_text(research_notes, 2500),
             research_notes_file=context.paths.research_notes_file,
+            ml_step_report_file=context.paths.ml_step_report_file,
+            ml_experiment_report_file=context.paths.ml_experiment_report_file,
             extra_prompt=context.runtime.extra_prompt.strip() or "None.",
         )
     except KeyError as exc:
@@ -631,6 +660,7 @@ def debugger_prompt(
     scope_guard = read_text(context.paths.scope_guard_file)
     research_notes = read_text(context.paths.research_notes_file)
     template = template_text or load_debugger_prompt_template(getattr(context.runtime, "execution_mode", "serial"))
+    workflow_mode = normalize_workflow_mode(getattr(context.runtime, "workflow_mode", "standard"))
     task_title = execution_step.title if execution_step else candidate.title
     display_description = execution_step.display_description.strip() if execution_step else ""
     codex_description = execution_step.codex_description.strip() if execution_step else ""
@@ -648,10 +678,12 @@ def debugger_prompt(
     )
     depends_on = ", ".join(execution_step.depends_on) if execution_step and execution_step.depends_on else "none"
     owned_paths = "\n".join(f"- {path}" for path in execution_step.owned_paths) if execution_step and execution_step.owned_paths else "- none declared"
+    step_metadata = execution_step.metadata if execution_step and execution_step.metadata else {}
     try:
         return template.format(
             repo_dir=context.paths.repo_dir,
             docs_dir=context.paths.docs_dir,
+            workflow_mode=workflow_mode,
             failing_pass_name=failing_pass_name,
             test_command=test_command,
             task_title=task_title,
@@ -660,6 +692,7 @@ def debugger_prompt(
             success_criteria=success_criteria,
             depends_on=depends_on,
             owned_paths=owned_paths,
+            step_metadata=json.dumps(step_metadata, indent=2, sort_keys=True) if step_metadata else "{}",
             candidate_rationale=candidate.rationale,
             memory_context=memory_context,
             plan_snapshot=compact_text(plan_text, 4000),
@@ -667,6 +700,7 @@ def debugger_prompt(
             scope_guard=compact_text(scope_guard, 2500),
             research_notes=compact_text(research_notes, 2500),
             research_notes_file=context.paths.research_notes_file,
+            ml_step_report_file=context.paths.ml_step_report_file,
             failing_test_summary=compact_text(failing_test_summary, 1200) or "No verification summary was captured.",
             failing_test_stdout=compact_text(failing_test_stdout, 4000) or "No stdout captured.",
             failing_test_stderr=compact_text(failing_test_stderr, 4000) or "No stderr captured.",
@@ -682,7 +716,8 @@ def finalization_prompt(
     repo_inputs: dict[str, str],
     template_text: str | None = None,
 ) -> str:
-    template = template_text or load_source_prompt_template(FINALIZATION_PROMPT_FILENAME)
+    workflow_mode = normalize_workflow_mode(getattr(context.runtime, "workflow_mode", "standard"))
+    template = template_text or load_finalization_prompt_template(workflow_mode)
     completed_steps = "\n".join(
         [
             f"- {step.step_id}: {step.title} :: {step.success_criteria or 'Completed'}"
@@ -694,6 +729,7 @@ def finalization_prompt(
         return template.format(
             repo_dir=context.paths.repo_dir,
             docs_dir=context.paths.docs_dir,
+            workflow_mode=workflow_mode,
             plan_title=plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug,
             project_prompt=plan_state.project_prompt.strip() or "No prompt recorded.",
             plan_summary=plan_state.summary.strip() or "No execution summary recorded.",
@@ -703,6 +739,10 @@ def finalization_prompt(
             agents=repo_inputs["agents"],
             docs=repo_inputs["docs"],
             closeout_report_file=context.paths.closeout_report_file,
+            ml_mode_state_file=context.paths.ml_mode_state_file,
+            ml_experiment_reports_dir=context.paths.ml_experiment_reports_dir,
+            ml_experiment_report_file=context.paths.ml_experiment_report_file,
+            ml_experiment_results_svg_file=context.paths.ml_experiment_results_svg_file,
             extra_prompt=context.runtime.extra_prompt.strip() or "None.",
         )
     except KeyError as exc:
@@ -795,6 +835,7 @@ def execution_plan_markdown(
     plan_title: str,
     project_prompt: str,
     summary: str,
+    workflow_mode: str,
     execution_mode: str,
     steps: list[ExecutionStep],
 ) -> str:
@@ -815,6 +856,9 @@ def execution_plan_markdown(
         "",
         "## Execution Summary",
         summary.strip() or "Codex-generated execution plan for the current repository state.",
+        "",
+        "## Workflow Mode",
+        normalize_workflow_mode(workflow_mode),
         "",
         "## Execution Mode",
         execution_mode.strip().lower() or "serial",
@@ -837,6 +881,8 @@ def execution_plan_markdown(
                 f"  - Success criteria: {step.success_criteria or 'Verification command completes successfully.'}",
             ]
         )
+        if step.metadata:
+            lines.append(f"  - Metadata: {json.dumps(step.metadata, ensure_ascii=False, sort_keys=True)}")
     lines.extend(
         [
             "",

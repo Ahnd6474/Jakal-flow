@@ -57,11 +57,16 @@ class WorkspaceManager:
             block_log_file=logs_dir / "blocks.jsonl",
             checkpoint_state_file=state_dir / "CHECKPOINTS.json",
             execution_plan_file=state_dir / "EXECUTION_PLAN.json",
+            ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
+            ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
+            ml_experiment_reports_dir=state_dir / "ml_experiments",
             ui_control_file=state_dir / "UI_RUN_CONTROL.json",
             ui_event_log_file=logs_dir / "ui_events.jsonl",
             execution_flow_svg_file=docs_dir / "EXECUTION_FLOW.svg",
             closeout_report_file=docs_dir / "CLOSEOUT_REPORT.md",
             closeout_report_docx_file=reports_dir / "CLOSEOUT_REPORT.docx",
+            ml_experiment_report_file=docs_dir / "ML_EXPERIMENT_REPORT.md",
+            ml_experiment_results_svg_file=docs_dir / "ML_EXPERIMENT_RESULTS.svg",
         )
 
     def initialize_project(
@@ -81,6 +86,7 @@ class WorkspaceManager:
             paths.logs_dir,
             paths.reports_dir,
             paths.state_dir,
+            paths.ml_experiment_reports_dir,
         ]:
             ensure_dir(directory)
 
@@ -136,6 +142,7 @@ class WorkspaceManager:
             paths.logs_dir,
             paths.reports_dir,
             paths.state_dir,
+            paths.ml_experiment_reports_dir,
         ]:
             ensure_dir(directory)
         ensure_dir(resolved_dir)

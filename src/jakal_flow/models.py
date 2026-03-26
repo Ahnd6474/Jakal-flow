@@ -38,6 +38,15 @@ def _string_list(value: Any) -> list[str]:
     return normalized
 
 
+def _float_or_none(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass(slots=True)
 class RuntimeOptions:
     model_provider: str = "openai"
@@ -60,6 +69,8 @@ class RuntimeOptions:
     codex_base_slug: str = ""
     codex_variant_slug: str = ""
     effort: str = "medium"
+    workflow_mode: str = "standard"
+    ml_max_cycles: int = 3
     execution_mode: str = "serial"
     parallel_workers: int = 2
     extra_prompt: str = ""
@@ -159,11 +170,16 @@ class ProjectPaths:
     block_log_file: Path
     checkpoint_state_file: Path
     execution_plan_file: Path
+    ml_mode_state_file: Path
+    ml_step_report_file: Path
+    ml_experiment_reports_dir: Path
     ui_control_file: Path
     ui_event_log_file: Path
     execution_flow_svg_file: Path
     closeout_report_file: Path
     closeout_report_docx_file: Path
+    ml_experiment_report_file: Path
+    ml_experiment_results_svg_file: Path
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)
@@ -281,6 +297,7 @@ class ExecutionStep:
     completed_at: str | None = None
     commit_hash: str | None = None
     notes: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)
@@ -306,6 +323,7 @@ class ExecutionStep:
             completed_at=data.get("completed_at"),
             commit_hash=data.get("commit_hash"),
             notes=str(data.get("notes", "")).strip(),
+            metadata=data.get("metadata", {}) if isinstance(data.get("metadata", {}), dict) else {},
         )
 
 
@@ -314,6 +332,7 @@ class ExecutionPlanState:
     plan_title: str = ""
     project_prompt: str = ""
     summary: str = ""
+    workflow_mode: str = "standard"
     execution_mode: str = "serial"
     default_test_command: str = "python -m pytest"
     last_updated_at: str | None = None
@@ -339,6 +358,7 @@ class ExecutionPlanState:
             plan_title=str(data.get("plan_title", data.get("title", ""))).strip(),
             project_prompt=str(data.get("project_prompt", "")).strip(),
             summary=str(data.get("summary", "")).strip(),
+            workflow_mode=str(data.get("workflow_mode", "standard")).strip().lower() or "standard",
             execution_mode=str(data.get("execution_mode", "serial")).strip().lower() or "serial",
             default_test_command=str(data.get("default_test_command", "python -m pytest")).strip() or "python -m pytest",
             last_updated_at=data.get("last_updated_at"),
@@ -348,4 +368,112 @@ class ExecutionPlanState:
             closeout_commit_hash=data.get("closeout_commit_hash"),
             closeout_notes=str(data.get("closeout_notes", "")).strip(),
             steps=steps,
+        )
+
+
+@dataclass(slots=True)
+class MLExperimentRecord:
+    experiment_id: str
+    cycle_index: int = 1
+    step_id: str = ""
+    status: str = "planned"
+    title: str = ""
+    experiment_kind: str = ""
+    dataset_policy: str = ""
+    leakage_guard: str = ""
+    feature_spec: str = ""
+    model_spec: str = ""
+    architecture_spec: str = ""
+    parameter_budget: str = ""
+    resource_budget: str = ""
+    train_command: str = ""
+    eval_command: str = ""
+    primary_metric: str = ""
+    metric_direction: str = "maximize"
+    metric_value: float | None = None
+    validation_summary: str = ""
+    artifact_paths: list[str] = field(default_factory=list)
+    notes: str = ""
+    report_path: str = ""
+    updated_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _normalize(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MLExperimentRecord":
+        return cls(
+            experiment_id=str(data.get("experiment_id", data.get("step_id", ""))).strip() or "EXP-UNKNOWN",
+            cycle_index=max(1, int(data.get("cycle_index", 1) or 1)),
+            step_id=str(data.get("step_id", "")).strip(),
+            status=str(data.get("status", "planned")).strip() or "planned",
+            title=str(data.get("title", "")).strip(),
+            experiment_kind=str(data.get("experiment_kind", "")).strip(),
+            dataset_policy=str(data.get("dataset_policy", "")).strip(),
+            leakage_guard=str(data.get("leakage_guard", "")).strip(),
+            feature_spec=str(data.get("feature_spec", "")).strip(),
+            model_spec=str(data.get("model_spec", "")).strip(),
+            architecture_spec=str(data.get("architecture_spec", "")).strip(),
+            parameter_budget=str(data.get("parameter_budget", "")).strip(),
+            resource_budget=str(data.get("resource_budget", "")).strip(),
+            train_command=str(data.get("train_command", "")).strip(),
+            eval_command=str(data.get("eval_command", "")).strip(),
+            primary_metric=str(data.get("primary_metric", "")).strip(),
+            metric_direction=str(data.get("metric_direction", "maximize")).strip() or "maximize",
+            metric_value=_float_or_none(data.get("metric_value")),
+            validation_summary=str(data.get("validation_summary", "")).strip(),
+            artifact_paths=_string_list(data.get("artifact_paths", [])),
+            notes=str(data.get("notes", "")).strip(),
+            report_path=str(data.get("report_path", "")).strip(),
+            updated_at=data.get("updated_at"),
+        )
+
+
+@dataclass(slots=True)
+class MLModeState:
+    workflow_mode: str = "standard"
+    cycle_index: int = 0
+    max_cycles: int = 1
+    objective: str = ""
+    target_metric: str = ""
+    target_value: float | None = None
+    metric_direction: str = "maximize"
+    stop_requested: bool = False
+    stop_reason: str = ""
+    replan_required: bool = False
+    next_cycle_prompt: str = ""
+    best_experiment_id: str = ""
+    best_metric_name: str = ""
+    best_metric_value: float | None = None
+    updated_at: str | None = None
+    experiments: list[MLExperimentRecord] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _normalize(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MLModeState":
+        raw_experiments = data.get("experiments", [])
+        experiments: list[MLExperimentRecord] = []
+        if isinstance(raw_experiments, list):
+            for item in raw_experiments:
+                if isinstance(item, dict):
+                    experiments.append(MLExperimentRecord.from_dict(item))
+        return cls(
+            workflow_mode=str(data.get("workflow_mode", "standard")).strip().lower() or "standard",
+            cycle_index=max(0, int(data.get("cycle_index", 0) or 0)),
+            max_cycles=max(1, int(data.get("max_cycles", 1) or 1)),
+            objective=str(data.get("objective", "")).strip(),
+            target_metric=str(data.get("target_metric", "")).strip(),
+            target_value=_float_or_none(data.get("target_value")),
+            metric_direction=str(data.get("metric_direction", "maximize")).strip() or "maximize",
+            stop_requested=bool(data.get("stop_requested", False)),
+            stop_reason=str(data.get("stop_reason", "")).strip(),
+            replan_required=bool(data.get("replan_required", False)),
+            next_cycle_prompt=str(data.get("next_cycle_prompt", "")).strip(),
+            best_experiment_id=str(data.get("best_experiment_id", "")).strip(),
+            best_metric_name=str(data.get("best_metric_name", "")).strip(),
+            best_metric_value=_float_or_none(data.get("best_metric_value")),
+            updated_at=data.get("updated_at"),
+            experiments=experiments,
         )

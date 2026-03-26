@@ -206,6 +206,13 @@ def compact_text(value: str, max_chars: int = 3_000) -> str:
     return f"{stripped[: max_chars - 3].rstrip()}..."
 
 
+def normalize_workflow_mode(value: Any, fallback: str = "standard") -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "ml":
+        return "ml"
+    return fallback if str(fallback).strip().lower() == "ml" else "standard"
+
+
 def tokenize(value: str) -> set[str]:
     return {token for token in re.findall(r"[a-zA-Z0-9_]+", value.lower()) if len(token) > 2}
 
