@@ -56,7 +56,6 @@ export function AppSettingsView({
           <div className="subsection">
             <div className="subsection__header">
               <strong>{t("settings.application")}</strong>
-              <span>{t("settings.applicationDescription")}</span>
             </div>
             <label className="field">
               <span>{t("common.language")}</span>
@@ -91,7 +90,6 @@ export function AppSettingsView({
           <div className="subsection">
             <div className="subsection__header">
               <strong>{t("settings.dashboardPreferences")}</strong>
-              <span>{t("settings.dashboardPreferencesDescription")}</span>
             </div>
             <div className="choice-list">
               {dashboardOptions.map(([key, label]) => (
@@ -121,7 +119,6 @@ export function AppSettingsView({
           <div className="subsection">
             <div className="subsection__header">
               <strong>{t("settings.executionDefaults")}</strong>
-              <span>{t("settings.executionDefaultsDescription")}</span>
             </div>
             <div className="choice-grid">
               <label className="field">
@@ -333,37 +330,10 @@ export function AppSettingsView({
             <p>{t("run.shareDescription")}</p>
             <p>{t("run.sharePoll")}</p>
             <div className="share-panel">
-              <label className="field">
+              <div className="sidebar-item">
                 <span>{t("run.shareBindHost")}</span>
-                <select
-                  value={shareSettings?.bind_host || "127.0.0.1"}
-                  onChange={(event) =>
-                    onChangeShareSettings((current) => ({
-                      ...(current || {}),
-                      bind_host: event.target.value,
-                    }))
-                  }
-                  disabled={busy}
-                >
-                  <option value="127.0.0.1">{t("run.shareBindLocal")}</option>
-                  <option value="0.0.0.0">{t("run.shareBindNetwork")}</option>
-                </select>
-              </label>
-              <label className="field field--wide">
-                <span>{t("run.sharePublicBaseUrl")}</span>
-                <input
-                  value={shareSettings?.public_base_url || ""}
-                  onChange={(event) =>
-                    onChangeShareSettings((current) => ({
-                      ...(current || {}),
-                      public_base_url: event.target.value,
-                    }))
-                  }
-                  placeholder="https://your-public-share.example"
-                  disabled={busy}
-                />
-              </label>
-              <p className="muted">{t("run.shareExternalHint")}</p>
+                <strong>0.0.0.0</strong>
+              </div>
             </div>
             {activeShare?.share_url ? (
               <div className="share-panel">
@@ -373,14 +343,7 @@ export function AppSettingsView({
                 </label>
                 <div className="share-meta">
                   <span>{t("run.shareExpires", { expiresAt: activeShare.expires_at || t("common.unavailable") })}</span>
-                  <span>{t("run.shareServerAddress", { address: shareServer?.base_url || t("common.unavailable") })}</span>
                 </div>
-                {activeShare?.local_url && activeShare.local_url !== activeShare.share_url ? (
-                  <label className="field field--wide">
-                    <span>{t("run.shareLocalLink")}</span>
-                    <input value={activeShare.local_url} readOnly />
-                  </label>
-                ) : null}
                 <div className="action-row">
                   <button className="toolbar-button toolbar-button--accent" onClick={onCopyShareLink} type="button" disabled={busy}>
                     {t("action.copyLink")}

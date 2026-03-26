@@ -1,11 +1,12 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm as dialogConfirm, open } from "@tauri-apps/plugin-dialog";
 import { bridgeRequest, getBridgeJob, listBridgeJobs, startBridgeJob } from "../api";
 import {
   defaultShareSettings,
   emptyPlanDraft,
   messagePayload,
   needsExpandedProjectDetail,
+  resolveConfirmation,
   shareSettingsFromDetail,
 } from "../controllerHelpers";
 import { useI18n } from "../i18n";
@@ -103,6 +104,11 @@ export function useDesktopController() {
       }
     };
   }, []);
+
+  async function confirmAction(messageKey) {
+    const fallbackConfirm = typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm.bind(window) : null;
+    return resolveConfirmation(dialogConfirm, fallbackConfirm, translate(language, messageKey));
+  }
 
   async function fetchProjectDetail(repoId, options = {}) {
     return bridgeRequest(
@@ -678,7 +684,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.openProjectFirst")));
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmDeleteProject"))) {
+    if (!(await confirmAction("prompt.confirmDeleteProject"))) {
       return;
     }
     await withPending("delete-project", async () => {
@@ -703,7 +709,7 @@ export function useDesktopController() {
     if (!repoId) {
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmDeleteProject"))) {
+    if (!(await confirmAction("prompt.confirmDeleteProject"))) {
       return;
     }
     await withPending("delete-project", async () => {
@@ -730,7 +736,7 @@ export function useDesktopController() {
     if (!projects.length) {
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmDeleteAllProjects"))) {
+    if (!(await confirmAction("prompt.confirmDeleteAllProjects"))) {
       return;
     }
     await withPending("delete-all-projects", async () => {
@@ -770,7 +776,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.openOrCreateProjectFirst")));
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmResetPlan"))) {
+    if (!(await confirmAction("prompt.confirmResetPlan"))) {
       return;
     }
     await withPending("reset-plan", async () => {
@@ -826,7 +832,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.editRemainingSteps")));
       return;
     }
-    if ((planDraft?.steps || []).length && !window.confirm(translate(language, "prompt.confirmRegeneratePlan"))) {
+    if ((planDraft?.steps || []).length && !(await confirmAction("prompt.confirmRegeneratePlan"))) {
       return;
     }
     await startJob("generate-plan", {
@@ -853,7 +859,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.closeoutAfterAllSteps")));
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmCloseout"))) {
+    if (!(await confirmAction("prompt.confirmCloseout"))) {
       return;
     }
     await startJob("run-closeout", buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
@@ -913,8 +919,7 @@ export function useDesktopController() {
         {
           project_dir: projectForm.project_dir.trim(),
           created_by: "tauri-react-ui",
-          bind_host: shareSettings.bind_host,
-          public_base_url: shareSettings.public_base_url,
+          bind_host: "0.0.0.0",
         },
         workspaceRoot || null,
       );
