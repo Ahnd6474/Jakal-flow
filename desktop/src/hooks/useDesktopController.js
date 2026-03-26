@@ -1022,6 +1022,7 @@ export function useDesktopController() {
       parallel_group: "",
       depends_on: [],
       owned_paths: [],
+      metadata: {},
       status: "pending",
       notes: "",
     };
