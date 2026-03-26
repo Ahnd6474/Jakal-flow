@@ -64,7 +64,6 @@ export default function App() {
         onOpenSettings={() => controller.setCenterTab("app-settings")}
         onGeneratePlan={controller.generatePlan}
         onRunPlan={controller.runPlan}
-        onRunCloseout={controller.runCloseout}
         onApproveCheckpoint={controller.approveCheckpoint}
       />
 
@@ -132,7 +131,6 @@ export default function App() {
             onSavePlan={controller.savePlan}
             onResetPlan={controller.resetPlan}
             onRunPlan={controller.runPlan}
-            onRunCloseout={controller.runCloseout}
             onRequestStop={controller.requestStop}
             onSelectStep={controller.setSelectedStepId}
             onUpdateStepField={controller.updateSelectedStep}

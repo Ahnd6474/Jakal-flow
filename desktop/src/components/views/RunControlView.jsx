@@ -1,6 +1,6 @@
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { canEditStep, formatDurationCompact, formatUsd, REASONING_OPTIONS, reasoningEffortLabel, statusTone } from "../../utils";
+import { canEditStep, formatDurationCompact, formatUsd, isSystemStep, planStepsWithCloseout, REASONING_OPTIONS, reasoningEffortLabel, statusTone } from "../../utils";
 
 function FlowNode({ step, selected, onSelect, language, t }) {
   const tone = statusTone(step.status);
@@ -27,7 +27,6 @@ export function RunControlView({
   onSavePlan,
   onResetPlan,
   onRunPlan,
-  onRunCloseout,
   onRequestStop,
   onSelectStep,
   onUpdateStepField,
@@ -36,7 +35,12 @@ export function RunControlView({
   onDeleteStep,
   onMoveStep,
 }) {
-  const steps = planDraft?.steps || [];
+  const { language, t } = useI18n();
+  const steps = planStepsWithCloseout(planDraft, {
+    title: t("run.closeout"),
+    description: t("reports.closeoutReport"),
+    successCriteria: t("reports.closeoutReport"),
+  });
   const selectedStep = steps.find((step) => step.step_id === selectedStepId) || null;
   const runtimeInsights = detail?.runtime_insights || {};
   const executionEstimate = runtimeInsights?.execution || {};
@@ -46,7 +50,7 @@ export function RunControlView({
   const completedCount = steps.filter((step) => step.status === "completed").length;
   const executionMode = String(planDraft?.execution_mode || detail?.runtime?.execution_mode || "serial").trim().toLowerCase() === "parallel" ? "parallel" : "serial";
   const flowColumns = 3;
-  const { language, t } = useI18n();
+  const selectedSystemStep = isSystemStep(selectedStep);
 
   return (
     <section className="workspace-view">
@@ -104,9 +108,6 @@ export function RunControlView({
             <button className="toolbar-button toolbar-button--accent" onClick={onRunPlan} type="button" disabled={busy}>
               {t("action.run")}
             </button>
-            <button className="toolbar-button" onClick={onRunCloseout} type="button" disabled={busy}>
-              {t("action.closeout")}
-            </button>
             <button className="toolbar-button toolbar-button--ghost" onClick={onRequestStop} type="button" disabled={!busy}>
               {t("action.stop")}
             </button>
@@ -147,69 +148,92 @@ export function RunControlView({
             <span className={`status-badge status-badge--${statusTone(selectedStep?.status)}`}>{selectedStep ? displayStatus(selectedStep.status, language) : t("common.none")}</span>
           </div>
           {selectedStep ? (
-            <div className="step-editor-grid">
-              <div className="field field--wide">
-                <span>{t("run.stepEstimate")}</span>
-                <strong>
-                  {formatDurationCompact(selectedStepEstimate?.estimated_duration_seconds ?? 0, language)}
-                  {" | "}
-                  {t("run.currentRemaining")}: {formatDurationCompact(selectedStepEstimate?.remaining_seconds ?? 0, language)}
-                </strong>
+            selectedSystemStep ? (
+              <div className="step-editor-grid">
+                <div className="field field--wide">
+                  <span>{t("field.title")}</span>
+                  <strong>{selectedStep.title || t("run.closeout")}</strong>
+                </div>
+                <div className="field field--wide">
+                  <span>{t("field.description")}</span>
+                  <p>{selectedStep.display_description || t("run.noSummary")}</p>
+                </div>
+                <div className="field field--wide">
+                  <span>{t("field.successCriteria")}</span>
+                  <p>{selectedStep.success_criteria || t("run.noSummary")}</p>
+                </div>
+                {selectedStep.notes ? (
+                  <div className="field field--wide">
+                    <span>{t("common.status")}</span>
+                    <p>{selectedStep.notes}</p>
+                  </div>
+                ) : null}
               </div>
-              <label className="field field--wide">
-                <span>{t("field.title")}</span>
-                <input value={selectedStep.title || ""} onChange={(event) => onUpdateStepField("title", event.target.value)} disabled={!editableStep} />
-              </label>
-              <label className="field">
-                <span>{t("field.gptReasoning")}</span>
-                <select
-                  value={selectedStep.reasoning_effort || detail?.runtime?.effort || "high"}
-                  onChange={(event) => onUpdateStepField("reasoning_effort", event.target.value)}
-                  disabled={!editableStep}
-                >
-                  {REASONING_OPTIONS.map((effort) => (
-                    <option key={effort} value={effort}>
-                      {reasoningEffortLabel(effort, language)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {executionMode === "parallel" ? (
-                <label className="field">
-                  <span>{t("field.parallelGroup")}</span>
-                  <input value={selectedStep.parallel_group || ""} onChange={(event) => onUpdateStepField("parallel_group", event.target.value)} disabled={!editableStep} />
+            ) : (
+              <div className="step-editor-grid">
+                <div className="field field--wide">
+                  <span>{t("run.stepEstimate")}</span>
+                  <strong>
+                    {formatDurationCompact(selectedStepEstimate?.estimated_duration_seconds ?? 0, language)}
+                    {" | "}
+                    {t("run.currentRemaining")}: {formatDurationCompact(selectedStepEstimate?.remaining_seconds ?? 0, language)}
+                  </strong>
+                </div>
+                <label className="field field--wide">
+                  <span>{t("field.title")}</span>
+                  <input value={selectedStep.title || ""} onChange={(event) => onUpdateStepField("title", event.target.value)} disabled={!editableStep} />
                 </label>
-              ) : null}
-              <label className="field field--wide">
-                <span>{t("field.description")}</span>
-                <textarea value={selectedStep.display_description || ""} onChange={(event) => onUpdateStepField("display_description", event.target.value)} disabled={!editableStep} />
-              </label>
-              <label className="field field--wide">
-                <span>{t("field.codexInstruction")}</span>
-                <textarea value={selectedStep.codex_description || ""} onChange={(event) => onUpdateStepField("codex_description", event.target.value)} disabled={!editableStep} />
-              </label>
-              <label className="field field--wide">
-                <span>{t("field.successCriteria")}</span>
-                <textarea value={selectedStep.success_criteria || ""} onChange={(event) => onUpdateStepField("success_criteria", event.target.value)} disabled={!editableStep} />
-              </label>
-              <div className="action-row field--wide">
-                <button className="toolbar-button toolbar-button--accent" onClick={onSaveStepLocal} type="button" disabled={busy}>
-                  {t("action.saveLocal")}
-                </button>
-                <button className="toolbar-button" onClick={onAddStep} type="button" disabled={busy}>
-                  {t("action.add")}
-                </button>
-                <button className="toolbar-button toolbar-button--ghost" onClick={onDeleteStep} type="button" disabled={!editableStep}>
-                  {t("action.delete")}
-                </button>
-                <button className="toolbar-button toolbar-button--ghost" onClick={() => onMoveStep(-1)} type="button" disabled={!editableStep}>
-                  {t("action.up")}
-                </button>
-                <button className="toolbar-button toolbar-button--ghost" onClick={() => onMoveStep(1)} type="button" disabled={!editableStep}>
-                  {t("action.down")}
-                </button>
+                <label className="field">
+                  <span>{t("field.gptReasoning")}</span>
+                  <select
+                    value={selectedStep.reasoning_effort || detail?.runtime?.effort || "high"}
+                    onChange={(event) => onUpdateStepField("reasoning_effort", event.target.value)}
+                    disabled={!editableStep}
+                  >
+                    {REASONING_OPTIONS.map((effort) => (
+                      <option key={effort} value={effort}>
+                        {reasoningEffortLabel(effort, language)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {executionMode === "parallel" ? (
+                  <label className="field">
+                    <span>{t("field.parallelGroup")}</span>
+                    <input value={selectedStep.parallel_group || ""} onChange={(event) => onUpdateStepField("parallel_group", event.target.value)} disabled={!editableStep} />
+                  </label>
+                ) : null}
+                <label className="field field--wide">
+                  <span>{t("field.description")}</span>
+                  <textarea value={selectedStep.display_description || ""} onChange={(event) => onUpdateStepField("display_description", event.target.value)} disabled={!editableStep} />
+                </label>
+                <label className="field field--wide">
+                  <span>{t("field.codexInstruction")}</span>
+                  <textarea value={selectedStep.codex_description || ""} onChange={(event) => onUpdateStepField("codex_description", event.target.value)} disabled={!editableStep} />
+                </label>
+                <label className="field field--wide">
+                  <span>{t("field.successCriteria")}</span>
+                  <textarea value={selectedStep.success_criteria || ""} onChange={(event) => onUpdateStepField("success_criteria", event.target.value)} disabled={!editableStep} />
+                </label>
+                <div className="action-row field--wide">
+                  <button className="toolbar-button toolbar-button--accent" onClick={onSaveStepLocal} type="button" disabled={busy}>
+                    {t("action.saveLocal")}
+                  </button>
+                  <button className="toolbar-button" onClick={onAddStep} type="button" disabled={busy}>
+                    {t("action.add")}
+                  </button>
+                  <button className="toolbar-button toolbar-button--ghost" onClick={onDeleteStep} type="button" disabled={!editableStep}>
+                    {t("action.delete")}
+                  </button>
+                  <button className="toolbar-button toolbar-button--ghost" onClick={() => onMoveStep(-1)} type="button" disabled={!editableStep}>
+                    {t("action.up")}
+                  </button>
+                  <button className="toolbar-button toolbar-button--ghost" onClick={() => onMoveStep(1)} type="button" disabled={!editableStep}>
+                    {t("action.down")}
+                  </button>
+                </div>
               </div>
-            </div>
+            )
           ) : (
             <div className="empty-block">{t("run.selectStep")}</div>
           )}

@@ -1,5 +1,8 @@
-You are planning one ML experimentation cycle for the managed repository at {repo_dir}.
+You are Planner Agent B for one ML experimentation cycle in the managed repository at {repo_dir}.
 Follow any AGENTS.md rules in the repository.
+
+Planner Agent A has already produced an intermediate decomposition artifact.
+Your job is to convert that artifact into the final ML execution cycle.
 
 Workflow mode:
 {workflow_mode}
@@ -95,6 +98,9 @@ Reference notes (src/jakal_flow/docs/REFERENCE_GUIDE.md):
 
 Docs:
 {docs}
+
+Planner Agent A decomposition artifact:
+{planner_outline}
 
 User request:
 {user_prompt}

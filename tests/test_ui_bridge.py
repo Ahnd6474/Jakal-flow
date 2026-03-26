@@ -692,6 +692,81 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(loaded["checkpoints"]["items"][0]["status"], "running")
             self.assertIsNone(loaded["checkpoints"]["pending"])
 
+    def test_run_plan_automatically_runs_closeout_after_last_completed_step(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Auto Closeout Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            completed_plan = {
+                "plan_title": "Auto Closeout Demo",
+                "project_prompt": "Finish the work",
+                "summary": "Everything is ready for closeout.",
+                "workflow_mode": "standard",
+                "execution_mode": "serial",
+                "default_test_command": "python -m unittest",
+                "steps": [
+                    {
+                        "step_id": "ST1",
+                        "title": "Implement",
+                        "display_description": "Implementation finished",
+                        "codex_description": "Implementation finished",
+                        "success_criteria": "Tests pass",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "status": "completed",
+                    }
+                ],
+            }
+
+            def fake_run_execution_closeout(self, project_dir, runtime, branch="main", origin_url=""):
+                context = self.local_project(project_dir)
+                assert context is not None
+                plan_state = self.load_execution_plan_state(context)
+                plan_state.closeout_status = "completed"
+                plan_state.closeout_started_at = "2026-03-26T00:10:00+00:00"
+                plan_state.closeout_completed_at = "2026-03-26T00:12:00+00:00"
+                plan_state.closeout_notes = "Closeout finished successfully."
+                saved = self.save_execution_plan_state(context, plan_state)
+                context.metadata.current_status = self._status_from_plan_state(saved)
+                self.workspace.save_project(context)
+                return context, saved
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ), mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.run_execution_closeout",
+                new=fake_run_execution_closeout,
+            ):
+                result = run_command(
+                    "run-plan",
+                    workspace_root,
+                    {
+                        **payload,
+                        "plan": completed_plan,
+                    },
+                )
+
+            self.assertEqual(result["plan"]["closeout_status"], "completed")
+            self.assertEqual(result["project"]["current_status"], "closed_out")
+            self.assertTrue(any("closeout-started" in line for line in result["activity"]))
+            self.assertTrue(any("closeout-finished" in line for line in result["activity"]))
+
     def test_load_project_normalizes_stale_awaiting_review_without_pending_flag(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

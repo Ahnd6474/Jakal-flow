@@ -13,7 +13,6 @@ export function IdeToolbar({
   onOpenSettings,
   onGeneratePlan,
   onRunPlan,
-  onRunCloseout,
   onApproveCheckpoint,
 }) {
   const projectStatus = projectDetail?.project?.current_status || "idle";
@@ -73,9 +72,6 @@ export function IdeToolbar({
             {t("action.approveCheckpoint")}
           </button>
         ) : null}
-        <button className="toolbar-button" onClick={onRunCloseout} type="button" disabled={busy}>
-          {t("action.closeout")}
-        </button>
       </div>
     </header>
   );

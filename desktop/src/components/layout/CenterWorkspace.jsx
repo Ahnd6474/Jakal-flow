@@ -98,7 +98,6 @@ export function CenterWorkspace({
   onSavePlan,
   onResetPlan,
   onRunPlan,
-  onRunCloseout,
   onRequestStop,
   onSelectStep,
   onUpdateStepField,
@@ -197,7 +196,6 @@ export function CenterWorkspace({
               onSavePlan={onSavePlan}
               onResetPlan={onResetPlan}
               onRunPlan={onRunPlan}
-              onRunCloseout={onRunCloseout}
               onRequestStop={onRequestStop}
               onGenerateShareLink={onGenerateShareLink}
               onCopyShareLink={onCopyShareLink}
@@ -221,7 +219,6 @@ export function CenterWorkspace({
               onSavePlan={onSavePlan}
               onResetPlan={onResetPlan}
               onRunPlan={onRunPlan}
-              onRunCloseout={onRunCloseout}
               onRequestStop={onRequestStop}
               onGenerateShareLink={onGenerateShareLink}
               onCopyShareLink={onCopyShareLink}

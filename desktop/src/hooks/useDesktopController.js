@@ -756,21 +756,6 @@ export function useDesktopController() {
     await startJob(BRIDGE_COMMANDS.RUN_PLAN, buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
   }
 
-  async function runCloseout() {
-    if (!(planDraft?.steps || []).length) {
-      setMessage(messagePayload("error", translate(language, "message.createPlanBeforeCloseout")));
-      return;
-    }
-    if ((planDraft.steps || []).some((step) => step.status !== "completed")) {
-      setMessage(messagePayload("error", translate(language, "message.closeoutAfterAllSteps")));
-      return;
-    }
-    if (!window.confirm(translate(language, "prompt.confirmCloseout"))) {
-      return;
-    }
-    await startJob(BRIDGE_COMMANDS.RUN_CLOSEOUT, buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
-  }
-
   async function requestStop() {
     if (!projectForm.project_dir.trim()) {
       return;
@@ -1051,7 +1036,6 @@ export function useDesktopController() {
     saveProgramSettings,
     generatePlan,
     runPlan,
-    runCloseout,
     requestStop,
     generateShareLink,
     revokeShareLink,
