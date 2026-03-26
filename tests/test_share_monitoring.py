@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from jakal_flow.orchestrator import Orchestrator
 from jakal_flow.share import (
     ShareSession,
+    ShareServerState,
     create_share_session,
     load_share_sessions,
     process_is_running,
@@ -24,8 +25,10 @@ from jakal_flow.share import (
     public_monitor_status,
     revoke_share_session,
     save_share_sessions,
+    share_server_status_payload,
     validate_share_session,
 )
+from jakal_flow.public_tunnel import normalize_tunnel_target_url
 from jakal_flow.share_server import ShareHTTPServer, ShareRequestHandler
 from jakal_flow.ui_bridge import run_command
 from jakal_flow.utils import append_jsonl
@@ -102,6 +105,16 @@ def _fake_codex_snapshot() -> mock.Mock:
 
 
 class ShareMonitoringTests(unittest.TestCase):
+    def test_normalize_tunnel_target_url_rewrites_wildcard_host(self) -> None:
+        self.assertEqual(
+            normalize_tunnel_target_url("http://0.0.0.0:55180"),
+            "http://127.0.0.1:55180",
+        )
+        self.assertEqual(
+            normalize_tunnel_target_url("https://example.com/base"),
+            "https://example.com/base",
+        )
+
     @mock.patch("jakal_flow.share.os.name", "nt")
     @mock.patch("jakal_flow.share.subprocess.run")
     def test_process_is_running_handles_non_utf8_tasklist_output(self, run_mock: mock.Mock) -> None:
@@ -224,6 +237,36 @@ class ShareMonitoringTests(unittest.TestCase):
             self.assertEqual(state_mock.call_count, 1)
             self.assertEqual(len(payload["sessions"]), 2)
             self.assertEqual(payload["server"]["share_base_url"], "https://share.example.com/base")
+
+    def test_share_server_status_ignores_stale_tunnel_target(self) -> None:
+        workspace_root = Path("C:/tmp/share-status-demo")
+        state = ShareServerState(
+            host="0.0.0.0",
+            port=43123,
+            pid=1234,
+            started_at="2026-03-26T00:00:00+00:00",
+        )
+        tunnel_payload = {
+            "running": True,
+            "provider": "cloudflare-quick-tunnel",
+            "public_url": "https://stale.trycloudflare.com",
+            "target_url": "http://127.0.0.1:99999",
+            "pid": 4242,
+            "started_at": "2026-03-26T00:00:00+00:00",
+            "available": True,
+        }
+
+        with mock.patch("jakal_flow.share.load_share_server_config", return_value=mock.Mock(public_base_url="", to_dict=lambda: {})), mock.patch(
+            "jakal_flow.share.load_share_server_state",
+            return_value=state,
+        ), mock.patch("jakal_flow.share.process_is_running", return_value=True), mock.patch(
+            "jakal_flow.public_tunnel.public_tunnel_status_payload",
+            return_value=tunnel_payload,
+        ):
+            payload = share_server_status_payload(workspace_root)
+
+        self.assertEqual(payload["share_base_url"], "http://0.0.0.0:43123")
+        self.assertEqual(payload["share_base_url_source"], "local")
 
     def test_share_logs_api_builds_monitor_status_once(self) -> None:
         with TemporaryTestDir() as temp_dir:

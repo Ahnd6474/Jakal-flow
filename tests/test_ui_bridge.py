@@ -12,6 +12,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from jakal_flow.bridge_server import BridgeServer
 from jakal_flow.cli import main as cli_main
 from jakal_flow.models import ExecutionPlanState, ExecutionStep
 from jakal_flow.ui_bridge import progress_caption, run_command, runtime_from_payload
@@ -90,6 +91,15 @@ def fake_codex_snapshot() -> mock.Mock:
 
 
 class UIBridgeTests(unittest.TestCase):
+    def test_bridge_server_treats_missing_workspace_root_as_default_path(self) -> None:
+        server = BridgeServer()
+        expected = Path("C:/tmp/jakal-default-workspace").resolve()
+
+        with mock.patch("jakal_flow.bridge_server.default_workspace_root", return_value=expected):
+            self.assertEqual(server._resolve_workspace_root(None), expected)
+            self.assertEqual(server._resolve_workspace_root(""), expected)
+            self.assertEqual(server._resolve_workspace_root("None"), expected)
+
     def test_progress_caption_reports_ready_nodes_for_parallel_dag(self) -> None:
         caption = progress_caption(
             ExecutionPlanState(
@@ -1135,6 +1145,74 @@ class UIBridgeTests(unittest.TestCase):
             self.assertIn("content_signature", second)
             self.assertIn("detail_signature", second)
 
+    def test_load_project_invalidates_cached_core_payload_when_share_state_changes(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Cached Share Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            first = run_command(
+                "load-project",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                    "refresh_codex_status": False,
+                    "detail_level": "core",
+                },
+            )
+            self.assertFalse(first["payload_cache_hit"])
+
+            share_sessions_file = Path(detail["project"]["project_root"]) / "state" / "share_sessions.json"
+            share_sessions_file.write_text(
+                json.dumps(
+                    {
+                        "sessions": [
+                            {
+                                "session_id": "demo-session",
+                                "viewer_token": "demo-token",
+                                "created_at": "2026-03-26T00:00:00+00:00",
+                                "expires_at": "2026-03-26T01:00:00+00:00",
+                                "revoked_at": None,
+                                "created_by": "unit-test",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            second = run_command(
+                "load-project",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                    "refresh_codex_status": False,
+                    "detail_level": "core",
+                },
+            )
+
+            self.assertFalse(second["payload_cache_hit"])
+
     def test_share_bridge_commands_create_and_revoke_read_only_session(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"
@@ -1226,6 +1304,29 @@ class UIBridgeTests(unittest.TestCase):
                 run_command("save-project-setup", workspace_root, payload)
 
             try:
+                def tunnel_status_for_workspace(_workspace_root):
+                    state_path = workspace_root / "share_server.json"
+                    if not state_path.exists():
+                        return {
+                            "running": False,
+                            "provider": "cloudflare-quick-tunnel",
+                            "public_url": None,
+                            "target_url": None,
+                            "pid": None,
+                            "started_at": None,
+                            "available": True,
+                        }
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                    return {
+                        "running": True,
+                        "provider": "cloudflare-quick-tunnel",
+                        "public_url": "https://demo.trycloudflare.com",
+                        "target_url": f"http://127.0.0.1:{state['port']}",
+                        "pid": 4242,
+                        "started_at": "2026-03-26T00:00:00+00:00",
+                        "available": True,
+                    }
+
                 with mock.patch(
                     "jakal_flow.ui_bridge.start_cloudflare_quick_tunnel",
                     return_value={
@@ -1239,15 +1340,7 @@ class UIBridgeTests(unittest.TestCase):
                     },
                 ) as start_tunnel, mock.patch(
                     "jakal_flow.public_tunnel.public_tunnel_status_payload",
-                    return_value={
-                        "running": True,
-                        "provider": "cloudflare-quick-tunnel",
-                        "public_url": "https://demo.trycloudflare.com",
-                        "target_url": "http://0.0.0.0:43123",
-                        "pid": 4242,
-                        "started_at": "2026-03-26T00:00:00+00:00",
-                        "available": True,
-                    },
+                    side_effect=tunnel_status_for_workspace,
                 ), mock.patch(
                     "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
                     side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
