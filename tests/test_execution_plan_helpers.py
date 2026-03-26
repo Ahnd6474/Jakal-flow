@@ -282,6 +282,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         preset = model_preset_by_id("auto-medium")
 
         self.assertEqual(preset.preset_id, "medium")
+        self.assertEqual(preset.label, "Medium Only")
         self.assertEqual(preset.effort, "medium")
 
     def test_source_prompt_templates_exist_and_keep_expected_placeholders(self) -> None:

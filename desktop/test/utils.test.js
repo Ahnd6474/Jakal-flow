@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  autoRoutingPresetLabel,
   configReasoningOptions,
   basename,
   blankProjectForm,
@@ -12,6 +13,7 @@ import {
   reasoningEffortLabel,
   deriveGithubMode,
   firstSelectableStepId,
+  mergeProjectDetailCodexStatus,
   progressCaption,
   projectFormFromDetail,
   runtimeSummary,
@@ -111,6 +113,28 @@ test("projectFormFromDetail merges persisted runtime and derives GitHub mode", (
       model: "gpt-5.4",
     },
   });
+});
+
+test("mergeProjectDetailCodexStatus preserves the last known catalog when a lightweight detail omits it", () => {
+  const fallbackStatus = {
+    available: true,
+    model_catalog: [{ model: "auto", display_name: "Auto" }],
+    account: { email: "demo@example.com" },
+  };
+  const merged = mergeProjectDetailCodexStatus(
+    {
+      project: { repo_id: "repo-a" },
+      codex_status: {},
+      snapshot: {},
+      bottom_panels: {},
+    },
+    fallbackStatus,
+    fallbackStatus.model_catalog,
+  );
+
+  assert.deepEqual(merged.codex_status, fallbackStatus);
+  assert.deepEqual(merged.snapshot.codex_status, fallbackStatus);
+  assert.deepEqual(merged.bottom_panels.codex_status, fallbackStatus);
 });
 
 test("shouldKeepUnsavedPlan only preserves local edits for the same project", () => {
@@ -217,6 +241,8 @@ test("config reasoning helpers keep auto separate from explicit efforts", () => 
   assert.equal(selectedConfigReasoning(modelCatalog, { model: "auto", model_preset: "auto", effort: "medium" }), "auto");
   assert.equal(selectedConfigReasoning(modelCatalog, { model: "auto", model_preset: "medium", effort: "medium" }), "medium");
   assert.equal(reasoningEffortLabel("auto"), "Auto");
+  assert.equal(autoRoutingPresetLabel("low"), "Low Only");
+  assert.equal(autoRoutingPresetLabel("xhigh", "ko"), "매우 높음만");
 });
 
 test("progressCaption summarizes empty, partial, and completed plans", () => {

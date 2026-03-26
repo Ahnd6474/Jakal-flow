@@ -93,6 +93,7 @@ export function SidebarPane({
   onChangeTab,
   projects,
   selectedProjectId,
+  loadingProjectId,
   selectedProjectSummary,
   projectFilter,
   workspaceFilter,
@@ -137,7 +138,9 @@ export function SidebarPane({
                 projects.map((project) => (
                   <button
                     key={project.repo_id}
-                    className={`sidebar-project ${project.repo_id === selectedProjectId ? "selected" : ""}`}
+                    className={`sidebar-project ${project.repo_id === selectedProjectId ? "selected" : ""} ${
+                      project.repo_id === loadingProjectId ? "loading" : ""
+                    }`}
                     onClick={() => onSelectProject(project.repo_id)}
                     type="button"
                   >

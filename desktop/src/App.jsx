@@ -80,6 +80,7 @@ export default function App() {
             onChangeTab={controller.setSidebarTab}
             projects={controller.filteredProjects}
             selectedProjectId={controller.selectedProjectId}
+            loadingProjectId={controller.loadingProjectId}
             selectedProjectSummary={controller.selectedProjectSummary}
             projectFilter={controller.projectFilter}
             workspaceFilter={controller.workspaceFilter}

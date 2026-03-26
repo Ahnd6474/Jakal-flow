@@ -540,6 +540,20 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  position: relative;
+}
+
+.sidebar-project.loading::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(95, 151, 214, 0.2), rgba(95, 151, 214, 0.95), rgba(95, 151, 214, 0.2));
+  transform-origin: center;
+  animation: sidebar-project-loading 1.1s ease-in-out infinite;
 }
 
 .status-dot {
@@ -922,6 +936,23 @@ pre {
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   background: rgba(255, 255, 255, 0.03);
+}
+
+@keyframes sidebar-project-loading {
+  0% {
+    opacity: 0.45;
+    transform: scaleX(0.35);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+
+  100% {
+    opacity: 0.45;
+    transform: scaleX(0.35);
+  }
 }
 
 @media (max-width: 1280px) {

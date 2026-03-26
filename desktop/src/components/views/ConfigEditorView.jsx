@@ -1,6 +1,7 @@
 import { useI18n } from "../../i18n";
 import {
   AUTO_REASONING_OPTION,
+  autoRoutingPresetLabel,
   configReasoningOptions,
   defaultReasoningOption,
   findModelCatalogEntry,
@@ -9,11 +10,11 @@ import {
   selectedConfigReasoning,
 } from "../../utils";
 
-function EffortButton({ effort, selected, onSelect, disabled, language, description }) {
+function EffortButton({ effort, selected, onSelect, disabled, language, description, label }) {
   return (
     <button className={`choice-card ${selected ? "selected" : ""}`} onClick={() => onSelect(effort)} type="button" disabled={disabled}>
       <div className="choice-card__title">
-        <strong>{reasoningEffortLabel(effort, language)}</strong>
+        <strong>{label}</strong>
         <span>{effort}</span>
       </div>
       <p>{description}</p>
@@ -26,6 +27,18 @@ function autoPresetId(effort) {
 }
 
 function effortDescription(modelLabel, effort, language) {
+  if (String(modelLabel || "").trim().toLowerCase() === "auto") {
+    if (language === "ko") {
+      if (effort === AUTO_REASONING_OPTION) {
+        return "Codex 자동 라우팅의 기본 추론 설정을 사용합니다.";
+      }
+      return `Codex 자동 라우팅을 유지하면서 추론은 ${autoRoutingPresetLabel(effort, language)}으로 고정합니다.`;
+    }
+    if (effort === AUTO_REASONING_OPTION) {
+      return "Use Codex automatic routing with its default reasoning setting.";
+    }
+    return `Keep Codex automatic routing enabled and lock reasoning to ${autoRoutingPresetLabel(effort, language)}.`;
+  }
   const reasoningLabel = reasoningEffortLabel(effort, language);
   if (language === "ko") {
     if (effort === AUTO_REASONING_OPTION) {
@@ -314,6 +327,7 @@ export function ConfigEditorView({
                 <EffortButton
                   key={effort}
                   effort={effort}
+                  label={selectedModel === "auto" ? autoRoutingPresetLabel(effort, language) : reasoningEffortLabel(effort, language)}
                   selected={selectedEffort === effort}
                   onSelect={(nextEffort) =>
                     onChangeForm((current) => ({

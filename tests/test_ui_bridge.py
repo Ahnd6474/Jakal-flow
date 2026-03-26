@@ -351,6 +351,54 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(len(loaded["checkpoints"]["items"]), 1)
             self.assertEqual(loaded["checkpoints"]["pending"]["checkpoint_id"], "CP1")
 
+    def test_load_project_can_skip_codex_status_refresh(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Fast Load Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("codex_auto.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                run_command("save-project-setup", workspace_root, payload)
+
+            with mock.patch(
+                "codex_auto.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=AssertionError("Codex status refresh should be skipped."),
+            ):
+                loaded = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "project_dir": str(repo_dir),
+                        "refresh_codex_status": False,
+                        "detail_level": "core",
+                    },
+                )
+
+            self.assertEqual(loaded["project"]["display_name"], "Fast Load Demo")
+            self.assertEqual(loaded["detail_level"], "core")
+            self.assertEqual(loaded["codex_status"], {})
+            self.assertEqual(loaded["bottom_panels"]["codex_status"], {})
+            self.assertEqual(loaded["history"]["blocks"], [])
+            self.assertEqual(loaded["workspace_tree"], [])
+            self.assertEqual(loaded["checkpoints"]["items"], [])
+
     def test_share_bridge_commands_create_and_revoke_read_only_session(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

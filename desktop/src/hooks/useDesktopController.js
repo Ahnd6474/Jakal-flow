@@ -10,6 +10,7 @@ import {
   cloneValue,
   commandLabel,
   firstSelectableStepId,
+  mergeProjectDetailCodexStatus,
   projectFormFromDetail,
   shouldKeepUnsavedPlan,
   shouldReplaceVisibleProject,
@@ -42,6 +43,7 @@ export function useDesktopController() {
   const [selectedStepId, setSelectedStepId] = usePersistentState("codex-auto:selected-step", "");
   const [planDirty, setPlanDirty] = useState(false);
   const [pendingAction, setPendingAction] = useState("");
+  const [loadingProjectId, setLoadingProjectId] = useState("");
   const [activeJobId, setActiveJobId] = useState("");
   const [activeJob, setActiveJob] = useState(null);
   const [message, setMessage] = useState(null);
@@ -89,6 +91,28 @@ export function useDesktopController() {
     }
   }, [sidebarTab, setSidebarTab]);
 
+  function needsExpandedProjectDetail() {
+    if (centerTab === "dashboard" || centerTab === "reports" || centerTab === "history") {
+      return true;
+    }
+    if (sidebarTab === "workspace" || sidebarTab === "plans") {
+      return true;
+    }
+    return !bottomCollapsed && bottomTab === "tokens";
+  }
+
+  async function fetchProjectDetail(repoId, options = {}) {
+    return bridgeRequest(
+      "load-project",
+      {
+        repo_id: repoId,
+        refresh_codex_status: options.refreshCodexStatus ?? true,
+        detail_level: options.detailLevel ?? "full",
+      },
+      workspaceRoot || null,
+    );
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -126,26 +150,28 @@ export function useDesktopController() {
   }, []);
 
   function applyProjectDetail(detail, options = {}) {
+    const normalizedDetail = mergeProjectDetailCodexStatus(detail, projectDetail?.codex_status, modelCatalog);
     const preserveDirtyPlan = shouldKeepUnsavedPlan(
       projectDetail?.project?.repo_id,
-      detail?.project?.repo_id,
+      normalizedDetail?.project?.repo_id,
       options.preserveDirtyPlan ?? planDirty,
     );
-    setProjectDetail(detail);
-    setModelCatalog(detail?.codex_status?.model_catalog || []);
-    setShareSettings(shareSettingsFromDetail(detail));
+    setProjectDetail(normalizedDetail);
+    setModelCatalog(normalizedDetail?.codex_status?.model_catalog || modelCatalog);
+    setShareSettings(shareSettingsFromDetail(normalizedDetail));
+    setLoadingProjectId("");
     setProjectForm((current) => {
       if (current.project_dir && preserveDirtyPlan) {
         return current;
       }
-      return projectFormFromDetail(detail, defaultRuntime);
+      return projectFormFromDetail(normalizedDetail, defaultRuntime);
     });
     if (!preserveDirtyPlan) {
-      setPlanDraft(cloneValue(detail.plan));
+      setPlanDraft(cloneValue(normalizedDetail.plan));
       if (options.preserveSelectedStep) {
-        setSelectedStepId((current) => current || firstSelectableStepId(detail.plan));
+        setSelectedStepId((current) => current || firstSelectableStepId(normalizedDetail.plan));
       } else {
-        setSelectedStepId(firstSelectableStepId(detail.plan));
+        setSelectedStepId(firstSelectableStepId(normalizedDetail.plan));
       }
       setPlanDirty(false);
     }
@@ -213,19 +239,23 @@ export function useDesktopController() {
 
     async function loadSelectedProject() {
       try {
-        const detail = await bridgeRequest("load-project", { repo_id: selectedProjectId }, workspaceRoot || null);
+        setLoadingProjectId(selectedProjectId);
+        const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: false });
         if (cancelled) {
           return;
         }
         applyProjectDetail(detail);
       } catch (error) {
+        if (!cancelled) {
+          setLoadingProjectId("");
+        }
         if (!cancelled && !pendingAction) {
           setMessage(messagePayload("error", String(error)));
         }
       }
     }
 
-    if (!selectedProjectId || activeJobId) {
+    if (!selectedProjectId || activeJobId || pendingAction || loadingProjectId) {
       return undefined;
     }
     if (projectDetail?.project?.repo_id === selectedProjectId) {
@@ -236,7 +266,58 @@ export function useDesktopController() {
     return () => {
       cancelled = true;
     };
-  }, [activeJobId, defaultRuntime, pendingAction, planDirty, projectDetail?.project?.repo_id, selectedProjectId, workspaceRoot]);
+  }, [activeJobId, defaultRuntime, loadingProjectId, pendingAction, planDirty, projectDetail?.project?.repo_id, selectedProjectId, workspaceRoot]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadExpandedProjectDetail() {
+      try {
+        const detail = await fetchProjectDetail(selectedProjectId, {
+          refreshCodexStatus: centerTab === "dashboard" || (!bottomCollapsed && bottomTab === "tokens"),
+          detailLevel: "full",
+        });
+        if (cancelled) {
+          return;
+        }
+        applyProjectDetail(detail, { preserveSelectedStep: true });
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(messagePayload("error", String(error)));
+        }
+      }
+    }
+
+    if (!selectedProjectId || activeJobId || pendingAction || loadingProjectId) {
+      return undefined;
+    }
+    if (projectDetail?.project?.repo_id !== selectedProjectId) {
+      return undefined;
+    }
+    if (projectDetail?.detail_level === "full") {
+      return undefined;
+    }
+    if (!needsExpandedProjectDetail()) {
+      return undefined;
+    }
+
+    loadExpandedProjectDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeJobId,
+    bottomCollapsed,
+    bottomTab,
+    centerTab,
+    loadingProjectId,
+    pendingAction,
+    projectDetail?.detail_level,
+    projectDetail?.project?.repo_id,
+    selectedProjectId,
+    sidebarTab,
+    workspaceRoot,
+  ]);
 
   async function refreshProjects() {
     const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
@@ -264,7 +345,7 @@ export function useDesktopController() {
       setWorkspaceStats(listing.workspace || null);
 
       if (selectedProjectId) {
-        const detail = await bridgeRequest("load-project", { repo_id: selectedProjectId }, workspaceRoot || null);
+        const detail = await fetchProjectDetail(selectedProjectId, { refreshCodexStatus: true });
         applyProjectDetail(detail, { preserveSelectedStep: true });
       } else if (listing.projects?.length) {
         setSelectedProjectId(listing.projects[0].repo_id);
@@ -276,20 +357,25 @@ export function useDesktopController() {
     }
   }
 
-  async function loadProject(repoId) {
+  async function loadProject(repoId, options = {}) {
+    if (!repoId) {
+      return null;
+    }
     const previousProjectId = selectedProjectId;
-    setPendingAction("load-project");
+    setLoadingProjectId(repoId);
     setSelectedProjectId(repoId);
     try {
-      const detail = await bridgeRequest("load-project", { repo_id: repoId }, workspaceRoot || null);
+      const detail = await fetchProjectDetail(repoId, {
+        refreshCodexStatus: options.refreshCodexStatus ?? false,
+        detailLevel: options.detailLevel ?? "core",
+      });
       applyProjectDetail(detail);
       return detail;
     } catch (error) {
+      setLoadingProjectId("");
       setSelectedProjectId(previousProjectId);
       setMessage(messagePayload("error", String(error)));
       return null;
-    } finally {
-      setPendingAction("");
     }
   }
 
@@ -350,6 +436,7 @@ export function useDesktopController() {
   function startNewProject() {
     setMessage(null);
     setPlanDirty(false);
+    setLoadingProjectId("");
     setSelectedStepId("");
     setProjectDetail(null);
     setSelectedProjectId("");
@@ -496,10 +583,15 @@ export function useDesktopController() {
         },
         workspaceRoot || null,
       );
-      const detail = await bridgeRequest("load-project", { project_dir: projectForm.project_dir.trim() }, workspaceRoot || null);
-      setProjectDetail(detail);
-      setModelCatalog(detail?.codex_status?.model_catalog || []);
-      setShareSettings(shareSettingsFromDetail(detail));
+      const detail = await bridgeRequest(
+        "load-project",
+        {
+          project_dir: projectForm.project_dir.trim(),
+          refresh_codex_status: false,
+        },
+        workspaceRoot || null,
+      );
+      applyProjectDetail(detail, { preserveSelectedStep: true });
       setMessage(messagePayload("info", translate(language, "message.stopRequested")));
     });
   }
@@ -604,7 +696,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.noProjectOpen")));
       return;
     }
-    await loadProject(selectedProjectId);
+    await loadProject(selectedProjectId, { refreshCodexStatus: true });
     setMessage(messagePayload("success", translate(language, "message.projectReloaded")));
   }
 
@@ -709,6 +801,7 @@ export function useDesktopController() {
     planDraft,
     selectedStepId,
     pendingAction,
+    loadingProjectId,
     activeJob,
     activeJobId,
     message,

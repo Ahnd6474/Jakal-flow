@@ -555,11 +555,17 @@ def config_payload(context: ProjectContext) -> dict[str, Any]:
     }
 
 
-def bottom_panel_payload(context: ProjectContext, plan_state: ExecutionPlanState, codex_status: dict[str, Any]) -> dict[str, Any]:
+def bottom_panel_payload(
+    context: ProjectContext,
+    plan_state: ExecutionPlanState,
+    codex_status: dict[str, Any],
+    *,
+    detail_level: str = "full",
+) -> dict[str, Any]:
     latest_block = read_last_jsonl(context.paths.block_log_file) or {}
     latest_pass = read_last_jsonl(context.paths.pass_log_file) or {}
     return {
-        "execution_log_lines": build_activity_lines(context, plan_state),
+        "execution_log_lines": build_activity_lines(context, plan_state) if detail_level == "full" else [],
         "event_json": {
             "latest_block": latest_block,
             "latest_pass": latest_pass,
@@ -568,7 +574,7 @@ def bottom_panel_payload(context: ProjectContext, plan_state: ExecutionPlanState
         },
         "token_usage": recent_usage(context),
         "codex_status": codex_status,
-        "test_runs": read_jsonl_tail(context.paths.logs_dir / "test_runs.jsonl", 12),
+        "test_runs": read_jsonl_tail(context.paths.logs_dir / "test_runs.jsonl", 12 if detail_level == "full" else 5),
         "git_status": {
             "branch": context.metadata.branch,
             "repo_kind": context.metadata.repo_kind,
@@ -656,18 +662,60 @@ def project_list_item_payload(orchestrator: Orchestrator, project: ProjectContex
     }
 
 
-def project_detail_payload(orchestrator: Orchestrator, project: ProjectContext) -> dict[str, Any]:
+def project_detail_payload(
+    orchestrator: Orchestrator,
+    project: ProjectContext,
+    *,
+    refresh_codex_status: bool = True,
+    detail_level: str = "full",
+) -> dict[str, Any]:
+    normalized_detail_level = "core" if str(detail_level).strip().lower() == "core" else "full"
     plan_state = orchestrator.load_execution_plan_state(project)
-    recent_blocks = read_jsonl_tail(project.paths.block_log_file, 8)
-    recent_passes = read_jsonl_tail(project.paths.pass_log_file, 12)
     control = load_run_control(project)
-    reports = report_payload(project)
-    history = history_payload(project)
-    checkpoints = checkpoint_payload(project)
-    config = config_payload(project)
-    workspace_tree = managed_workspace_tree(project)
-    codex_status = fetch_codex_backend_snapshot(project.runtime.codex_path).to_dict()
-    bottom_panels = bottom_panel_payload(project, plan_state, codex_status)
+    recent_usage_payload = recent_usage(project)
+    if normalized_detail_level == "full":
+        recent_blocks = read_jsonl_tail(project.paths.block_log_file, 8)
+        recent_passes = read_jsonl_tail(project.paths.pass_log_file, 12)
+        reports = report_payload(project)
+        history = history_payload(project)
+        checkpoints = checkpoint_payload(project)
+        config = config_payload(project)
+        workspace_tree = managed_workspace_tree(project)
+        activity = build_activity_lines(project, plan_state)
+        latest_block = read_last_jsonl(project.paths.block_log_file)
+        latest_pass = read_last_jsonl(project.paths.pass_log_file)
+    else:
+        recent_blocks = []
+        recent_passes = []
+        pending_checkpoint = checkpoint_payload(project).get("pending")
+        reports = {}
+        history = {
+            "ui_events": [],
+            "blocks": [],
+            "passes": [],
+            "test_runs": [],
+        }
+        checkpoints = {
+            "items": [],
+            "pending": pending_checkpoint,
+            "timeline_markdown": "",
+        }
+        config = {}
+        workspace_tree = []
+        activity = []
+        latest_block = None
+        latest_pass = None
+    codex_status = (
+        fetch_codex_backend_snapshot(project.runtime.codex_path).to_dict()
+        if refresh_codex_status
+        else {}
+    )
+    bottom_panels = bottom_panel_payload(
+        project,
+        plan_state,
+        codex_status,
+        detail_level=normalized_detail_level,
+    )
     snapshot = {
         "project": project.metadata.to_dict(),
         "runtime": project.runtime.to_dict(),
@@ -675,13 +723,14 @@ def project_detail_payload(orchestrator: Orchestrator, project: ProjectContext) 
         "plan": plan_state.to_dict(),
         "recent_blocks": recent_blocks,
         "recent_passes": recent_passes,
-        "recent_usage": recent_usage(project),
+        "recent_usage": recent_usage_payload,
         "codex_status": codex_status,
         "run_control": control,
-        "latest_block": read_last_jsonl(project.paths.block_log_file),
-        "latest_pass": read_last_jsonl(project.paths.pass_log_file),
+        "latest_block": latest_block,
+        "latest_pass": latest_pass,
     }
     return {
+        "detail_level": normalized_detail_level,
         "project": project.metadata.to_dict(),
         "runtime": project.runtime.to_dict(),
         "loop_state": project.loop_state.to_dict(),
@@ -690,7 +739,7 @@ def project_detail_payload(orchestrator: Orchestrator, project: ProjectContext) 
         "progress": progress_caption(plan_state),
         "stats": project_stats(plan_state),
         "codex_status": codex_status,
-        "activity": build_activity_lines(project, plan_state),
+        "activity": activity,
         "snapshot": snapshot,
         "run_control": control,
         "recent_blocks": recent_blocks,
@@ -753,7 +802,12 @@ def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | No
 
     if command == "load-project":
         project = resolve_project(orchestrator, payload)
-        return project_detail_payload(orchestrator, project)
+        return project_detail_payload(
+            orchestrator,
+            project,
+            refresh_codex_status=coerce_bool(payload.get("refresh_codex_status", True), True),
+            detail_level=str(payload.get("detail_level", "full")).strip().lower() or "full",
+        )
 
     if command == "get_share_server_status":
         return share_server_status_payload(workspace_root)

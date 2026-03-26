@@ -26,6 +26,25 @@ export function reasoningEffortLabel(value, language = "en") {
   return translate(locale, `reasoning.${normalized}`);
 }
 
+export function autoRoutingPresetLabel(value, language = "en") {
+  const normalized = String(value || "").trim().toLowerCase();
+  const locale = normalizeLanguage(language);
+  switch (normalized) {
+    case AUTO_REASONING_OPTION:
+      return translate(locale, "preset.auto");
+    case "low":
+      return translate(locale, "preset.lowOnly");
+    case "medium":
+      return translate(locale, "preset.mediumOnly");
+    case "high":
+      return translate(locale, "preset.highOnly");
+    case "xhigh":
+      return translate(locale, "preset.xhighOnly");
+    default:
+      return reasoningEffortLabel(normalized, locale);
+  }
+}
+
 export function basename(path) {
   return String(path || "")
     .split(/[\\/]/)
@@ -63,6 +82,48 @@ export function projectFormFromDetail(detail, defaultRuntime) {
       ...(cloneValue(defaultRuntime) || {}),
       ...(cloneValue(detail?.runtime) || {}),
     },
+  };
+}
+
+function normalizeModelCatalog(value, fallback = []) {
+  return Array.isArray(value) ? value : fallback;
+}
+
+export function mergeProjectDetailCodexStatus(detail, fallbackCodexStatus = null, fallbackModelCatalog = []) {
+  if (!detail) {
+    return detail;
+  }
+  const nextCodexStatus =
+    detail?.codex_status && Array.isArray(detail.codex_status.model_catalog)
+      ? detail.codex_status
+      : fallbackCodexStatus
+        ? {
+            ...fallbackCodexStatus,
+            ...(detail?.codex_status || {}),
+            model_catalog: normalizeModelCatalog(fallbackCodexStatus.model_catalog, fallbackModelCatalog),
+          }
+        : {
+            ...(detail?.codex_status || {}),
+            model_catalog: normalizeModelCatalog(detail?.codex_status?.model_catalog, fallbackModelCatalog),
+          };
+  return {
+    ...detail,
+    codex_status: nextCodexStatus,
+    snapshot: detail?.snapshot
+      ? {
+          ...detail.snapshot,
+          codex_status: nextCodexStatus,
+        }
+      : detail.snapshot,
+    bottom_panels: detail?.bottom_panels
+      ? {
+          ...detail.bottom_panels,
+          codex_status:
+            detail.bottom_panels.codex_status && Array.isArray(detail.bottom_panels.codex_status.model_catalog)
+              ? detail.bottom_panels.codex_status
+              : nextCodexStatus,
+        }
+      : detail.bottom_panels,
   };
 }
 
