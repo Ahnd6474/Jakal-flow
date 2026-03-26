@@ -11,7 +11,7 @@ Prefer narrow, sequential blocks that Codex can realistically complete in one fo
 Do not combine unrelated work into the same block.
 Do not require concrete test commands at planning time.
 At this stage, define blocks by clear success conditions rather than by existing test commands.
-optimize the plan for a fully runnable and maintainable prototype.
+Optimize the plan for a fully runnable and maintainable prototype.
 Prefer implementation choices that are simple but not obviously disposable if the project continues.
 If the requested outcome cannot be completed reliably without setup, integration, validation, cleanup, or supporting implementation work that the user did not explicitly mention, include that work in the plan.
 Treat only directly necessary supporting work as in scope; do not add speculative roadmap items or optional expansion beyond the requested prototype outcome.
@@ -25,45 +25,41 @@ Use the following priority order while planning:
 Requested execution mode:
 {execution_mode}
 
-If execution mode is `serial`, plan narrow sequential checkpoints.
-If execution mode is `parallel`, plan a DAG execution tree instead of a simple list.
-Use `step_id` and `depends_on` to define the graph.
-Only let steps become parallel-ready when their dependencies are complete.
-For any steps that may run in parallel, provide non-empty `owned_paths` that are disjoint from each other.
-Do not put risky, tightly coupled, or same-file refactors in the same parallel-ready wave.
+The app is currently in serial mode. Plan a strict sequential checkpoint list.
+Each task should unlock the next task directly.
 Do not include the final closeout sweep inside the normal task list. The app runs a separate closeout block after all planned tasks finish.
 
 Return exactly one JSON object with a top-level "tasks" array containing 3 to {max_steps} items.
 
 JSON shape:
 {{
-"title" : "short project name"
-"summary": "one short paragraph",
-"tasks": [
-{{
-"step_id": "stable id like ST1",
-"task_title": "short stage name",
-"display_description": "one sentence or less for UI display",
-"codex_description": "one paragraph or less with the actual execution instruction for Codex",
-"reasoning_effort": "one of low, medium, high, xhigh based on expected difficulty",
-"depends_on": ["step ids that must complete first"],
-"owned_paths": ["repo-relative paths or directories this step primarily owns"],
-"success_criteria": "clear completion condition that can be judged locally"
-}}
-]
+  "title": "short project name",
+  "summary": "one short paragraph",
+  "tasks": [
+    {{
+      "step_id": "stable id like ST1",
+      "task_title": "short stage name",
+      "display_description": "one sentence or less for UI display",
+      "codex_description": "one paragraph or less with the actual execution instruction for Codex",
+      "reasoning_effort": "one of low, medium, high, xhigh based on expected difficulty",
+      "depends_on": ["leave empty or reference only the immediately previous step"],
+      "owned_paths": ["optional repo-relative ownership hint; use [] when not needed"],
+      "success_criteria": "clear completion condition that can be judged locally"
+    }}
+  ]
 }}
 
 Field requirements:
 
--"title": short and concise title for project
+- "title": short and concise title for project.
 - "summary": a short paragraph explaining the overall execution flow from a project perspective. It must briefly describe the role of each task in the broader project, not just restate the user request.
-- "step_id": use stable ids like `ST1`, `ST2`, `ST3` so dependency references stay unambiguous.
-- "task_title": short and actionable title for task
+- "step_id": use stable ids like `ST1`, `ST2`, `ST3` so references stay unambiguous.
+- "task_title": short and actionable title for task.
 - "display_description": very short user-facing explanation, no more than one sentence.
 - "codex_description": the actual instruction for Codex, no more than one paragraph, specific enough to execute.
 - "reasoning_effort": choose only `low`, `medium`, `high`, or `xhigh`. Use `low` for narrow mechanical edits, `medium` for normal implementation, `high` for multi-file or tricky work, and `xhigh` only for the hardest investigations or refactors.
-- "depends_on": in `serial` mode, keep this empty or reference the immediately previous step. In `parallel` mode, use it to encode the DAG.
-- "owned_paths": in `parallel` mode, list the main repo-relative files or directories each step owns so independently ready steps can be batched safely. Use an empty array only when the step should run alone.
+- "depends_on": in serial mode, keep this empty unless one explicit previous-step dependency materially improves clarity.
+- "owned_paths": optional in serial mode; use it only as a narrow scope hint.
 - "success_criteria": a concrete, locally judgeable done condition, describing what must be true when the block is complete.
 
 Do not include markdown fences or commentary outside the JSON.

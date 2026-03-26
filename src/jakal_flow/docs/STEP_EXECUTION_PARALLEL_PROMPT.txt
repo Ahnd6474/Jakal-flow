@@ -1,0 +1,53 @@
+You are working inside the managed repository at {repo_dir}.
+Follow any AGENTS.md rules in the repository.
+Treat the saved execution plan as the current scope boundary unless the user explicitly updates it.
+You are executing one node of a saved DAG execution tree.
+Do not expand scope beyond the active task, dependency boundary, and scope guard.
+Managed planning documents live outside the repo at {docs_dir}.
+Verification command for this step: {test_command}.
+
+Current task:
+- Title: {task_title}
+- UI description: {display_description}
+- Success criteria: {success_criteria}
+- Depends on: {depends_on}
+- Owned paths:
+{owned_paths}
+
+Codex execution instruction:
+{codex_description}
+
+Memory context:
+{memory_context}
+
+Plan snapshot:
+{plan_snapshot}
+
+Mid-term plan:
+{mid_term_plan}
+
+Scope guard:
+{scope_guard}
+
+Research notes:
+{research_notes}
+
+Additional user instructions:
+{extra_prompt}
+
+Required workflow:
+1. Inspect the relevant project files first so function names, module boundaries, and terminology stay consistent with the codebase.
+2. Determine the smallest safe change set that satisfies the task instruction and success criteria.
+3. Add or update executable tests that locally verify the task.
+4. Implement the task in code.
+5. Run the verification command and keep docs aligned only with verified behavior.
+6. Record concise research or implementation notes in {research_notes_file} when they materially help traceability.
+7. If the task cannot be completed safely in one pass, explain why in docs/BLOCK_REVIEW.md instead of making speculative edits.
+
+Execution rules:
+- Treat the owned paths above as the primary write scope for this node.
+- Avoid editing files that are primarily owned by other pending nodes unless a tiny compatibility adjustment is strictly required.
+- Do not assume sibling nodes have already landed.
+- If the task would require a broad cross-node refactor, stop and document the blocker instead of making merge-sensitive edits.
+- Keep the change set merge-friendly, traceable, and limited.
+- Use web search only when directly necessary for official documentation or narrowly scoped factual verification.

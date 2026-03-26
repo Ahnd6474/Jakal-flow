@@ -205,8 +205,10 @@ The tool creates or maintains these files for each managed repository project:
 Source prompt and scope templates:
 
 - `src/jakal_flow/docs/REFERENCE_GUIDE.md`
-- `src/jakal_flow/docs/PLAN_GENERATION_PROMPT.txt`
-- `src/jakal_flow/docs/STEP_EXECUTION_PROMPT.txt`
+- `src/jakal_flow/docs/PLAN_GENERATION_SERIAL_PROMPT.txt`
+- `src/jakal_flow/docs/PLAN_GENERATION_PARALLEL_PROMPT.txt`
+- `src/jakal_flow/docs/STEP_EXECUTION_SERIAL_PROMPT.txt`
+- `src/jakal_flow/docs/STEP_EXECUTION_PARALLEL_PROMPT.txt`
 - `src/jakal_flow/docs/FINALIZATION_PROMPT.txt`
 - `src/jakal_flow/docs/SCOPE_GUARD_TEMPLATE.md`
 

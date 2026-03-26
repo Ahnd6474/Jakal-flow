@@ -25,14 +25,20 @@ from jakal_flow.models import ExecutionPlanState, ExecutionStep, RuntimeOptions
 from jakal_flow.orchestrator import Orchestrator
 from jakal_flow.planning import (
     FINALIZATION_PROMPT_FILENAME,
+    PLAN_GENERATION_PARALLEL_PROMPT_FILENAME,
     PLAN_GENERATION_PROMPT_FILENAME,
+    PLAN_GENERATION_SERIAL_PROMPT_FILENAME,
     REFERENCE_GUIDE_FILENAME,
     SCOPE_GUARD_TEMPLATE_FILENAME,
+    STEP_EXECUTION_PARALLEL_PROMPT_FILENAME,
     STEP_EXECUTION_PROMPT_FILENAME,
+    STEP_EXECUTION_SERIAL_PROMPT_FILENAME,
     bootstrap_plan_prompt,
     execution_plan_svg,
+    load_plan_generation_prompt_template,
     load_reference_guide_text,
     load_source_prompt_template,
+    load_step_execution_prompt_template,
     parse_execution_plan_response,
     prompt_to_execution_plan_prompt,
     scan_repository_inputs,
@@ -412,32 +418,45 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(preset.effort, "medium")
 
     def test_source_prompt_templates_exist_and_keep_expected_placeholders(self) -> None:
-        plan_template = load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)
-        step_template = load_source_prompt_template(STEP_EXECUTION_PROMPT_FILENAME)
+        serial_plan_template = load_source_prompt_template(PLAN_GENERATION_SERIAL_PROMPT_FILENAME)
+        parallel_plan_template = load_source_prompt_template(PLAN_GENERATION_PARALLEL_PROMPT_FILENAME)
+        serial_step_template = load_source_prompt_template(STEP_EXECUTION_SERIAL_PROMPT_FILENAME)
+        parallel_step_template = load_source_prompt_template(STEP_EXECUTION_PARALLEL_PROMPT_FILENAME)
         final_template = load_source_prompt_template(FINALIZATION_PROMPT_FILENAME)
         scope_template = load_source_prompt_template(SCOPE_GUARD_TEMPLATE_FILENAME)
 
         self.assertTrue(source_prompt_template_path(PLAN_GENERATION_PROMPT_FILENAME).exists())
+        self.assertTrue(source_prompt_template_path(PLAN_GENERATION_PARALLEL_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(STEP_EXECUTION_PROMPT_FILENAME).exists())
+        self.assertTrue(source_prompt_template_path(STEP_EXECUTION_PARALLEL_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(FINALIZATION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(SCOPE_GUARD_TEMPLATE_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(REFERENCE_GUIDE_FILENAME).exists())
-        self.assertIn("{repo_dir}", plan_template)
-        self.assertIn("{user_prompt}", plan_template)
-        self.assertIn("{max_steps}", plan_template)
-        self.assertIn("{execution_mode}", plan_template)
-        self.assertIn('"step_id": "stable id like ST1"', plan_template)
-        self.assertIn('"depends_on": ["step ids that must complete first"]', plan_template)
-        self.assertIn('"owned_paths": ["repo-relative paths or directories this step primarily owns"]', plan_template)
-        self.assertIn("{reference_notes}", plan_template)
-        self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", plan_template)
-        self.assertIn("{task_title}", step_template)
-        self.assertIn("{display_description}", step_template)
-        self.assertIn("{codex_description}", step_template)
-        self.assertIn("{success_criteria}", step_template)
-        self.assertIn("{depends_on}", step_template)
-        self.assertIn("{owned_paths}", step_template)
-        self.assertIn("{plan_snapshot}", step_template)
+        self.assertIn("{repo_dir}", serial_plan_template)
+        self.assertIn("{user_prompt}", serial_plan_template)
+        self.assertIn("{max_steps}", serial_plan_template)
+        self.assertIn("{execution_mode}", serial_plan_template)
+        self.assertIn('"step_id": "stable id like ST1"', serial_plan_template)
+        self.assertIn("strict sequential checkpoint list", serial_plan_template)
+        self.assertIn('"step_id": "stable id like ST1"', parallel_plan_template)
+        self.assertIn('"depends_on": ["step ids that must complete first"]', parallel_plan_template)
+        self.assertIn('"owned_paths": ["repo-relative paths or directories this step primarily owns"]', parallel_plan_template)
+        self.assertIn("DAG execution tree", parallel_plan_template)
+        self.assertIn("{reference_notes}", parallel_plan_template)
+        self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", parallel_plan_template)
+        self.assertIn("{task_title}", serial_step_template)
+        self.assertIn("{display_description}", serial_step_template)
+        self.assertIn("{codex_description}", serial_step_template)
+        self.assertIn("{success_criteria}", serial_step_template)
+        self.assertIn("{depends_on}", serial_step_template)
+        self.assertIn("{owned_paths}", serial_step_template)
+        self.assertIn("{plan_snapshot}", serial_step_template)
+        self.assertIn("saved DAG execution tree", parallel_step_template)
+        self.assertIn("primary write scope", parallel_step_template)
+        self.assertEqual(load_plan_generation_prompt_template("serial"), serial_plan_template)
+        self.assertEqual(load_plan_generation_prompt_template("parallel"), parallel_plan_template)
+        self.assertEqual(load_step_execution_prompt_template("serial"), serial_step_template)
+        self.assertEqual(load_step_execution_prompt_template("parallel"), parallel_step_template)
         self.assertIn("{completed_steps}", final_template)
         self.assertIn("{closeout_report_file}", final_template)
         self.assertIn("{test_command}", final_template)

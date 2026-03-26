@@ -17,8 +17,12 @@ class PlanItem:
     text: str
 
 
-PLAN_GENERATION_PROMPT_FILENAME = "PLAN_GENERATION_PROMPT.txt"
-STEP_EXECUTION_PROMPT_FILENAME = "STEP_EXECUTION_PROMPT.txt"
+PLAN_GENERATION_SERIAL_PROMPT_FILENAME = "PLAN_GENERATION_SERIAL_PROMPT.txt"
+PLAN_GENERATION_PARALLEL_PROMPT_FILENAME = "PLAN_GENERATION_PARALLEL_PROMPT.txt"
+PLAN_GENERATION_PROMPT_FILENAME = PLAN_GENERATION_SERIAL_PROMPT_FILENAME
+STEP_EXECUTION_SERIAL_PROMPT_FILENAME = "STEP_EXECUTION_SERIAL_PROMPT.txt"
+STEP_EXECUTION_PARALLEL_PROMPT_FILENAME = "STEP_EXECUTION_PARALLEL_PROMPT.txt"
+STEP_EXECUTION_PROMPT_FILENAME = STEP_EXECUTION_SERIAL_PROMPT_FILENAME
 FINALIZATION_PROMPT_FILENAME = "FINALIZATION_PROMPT.txt"
 SCOPE_GUARD_TEMPLATE_FILENAME = "SCOPE_GUARD_TEMPLATE.md"
 REFERENCE_GUIDE_FILENAME = "REFERENCE_GUIDE.md"
@@ -35,6 +39,30 @@ def source_prompt_template_path(name: str) -> Path:
 
 def load_source_prompt_template(name: str) -> str:
     return source_prompt_template_path(name).read_text(encoding="utf-8")
+
+
+def _normalize_execution_mode(value: str | None) -> str:
+    return "parallel" if str(value or "").strip().lower() == "parallel" else "serial"
+
+
+def plan_generation_prompt_filename(execution_mode: str | None) -> str:
+    if _normalize_execution_mode(execution_mode) == "parallel":
+        return PLAN_GENERATION_PARALLEL_PROMPT_FILENAME
+    return PLAN_GENERATION_SERIAL_PROMPT_FILENAME
+
+
+def step_execution_prompt_filename(execution_mode: str | None) -> str:
+    if _normalize_execution_mode(execution_mode) == "parallel":
+        return STEP_EXECUTION_PARALLEL_PROMPT_FILENAME
+    return STEP_EXECUTION_SERIAL_PROMPT_FILENAME
+
+
+def load_plan_generation_prompt_template(execution_mode: str | None) -> str:
+    return load_source_prompt_template(plan_generation_prompt_filename(execution_mode))
+
+
+def load_step_execution_prompt_template(execution_mode: str | None) -> str:
+    return load_source_prompt_template(step_execution_prompt_filename(execution_mode))
 
 
 def load_reference_guide_text() -> str:
@@ -360,7 +388,7 @@ def prompt_to_execution_plan_prompt(
     execution_mode: str = "serial",
     template_text: str | None = None,
 ) -> str:
-    template = template_text or load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)
+    template = template_text or load_plan_generation_prompt_template(execution_mode)
     try:
         return template.format(
             repo_dir=context.paths.repo_dir,
@@ -531,7 +559,7 @@ def implementation_prompt(
     mid_term = read_text(context.paths.mid_term_plan_file)
     scope_guard = read_text(context.paths.scope_guard_file)
     research_notes = read_text(context.paths.research_notes_file)
-    template = template_text or load_source_prompt_template(STEP_EXECUTION_PROMPT_FILENAME)
+    template = template_text or load_step_execution_prompt_template(getattr(context.runtime, "execution_mode", "serial"))
     task_title = execution_step.title if execution_step else candidate.title
     display_description = execution_step.display_description.strip() if execution_step else ""
     codex_description = execution_step.codex_description.strip() if execution_step else ""

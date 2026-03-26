@@ -15,8 +15,6 @@ from .model_selection import normalize_reasoning_effort
 from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, LoopState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions, TestRunResult
 from .planning import (
     FINALIZATION_PROMPT_FILENAME,
-    PLAN_GENERATION_PROMPT_FILENAME,
-    STEP_EXECUTION_PROMPT_FILENAME,
     attempt_history_entry,
     assess_repository_maturity,
     build_mid_term_plan,
@@ -34,12 +32,14 @@ from .planning import (
     generate_project_plan,
     implementation_prompt,
     is_plan_markdown,
+    load_plan_generation_prompt_template,
     parse_execution_plan_response,
     parse_work_breakdown_response,
     prompt_to_execution_plan_prompt,
     reflection_markdown,
     scan_repository_inputs,
     select_candidate,
+    load_step_execution_prompt_template,
     validate_mid_term_subset,
     work_breakdown_prompt,
     write_active_task,
@@ -132,7 +132,7 @@ class Orchestrator:
     ) -> tuple[ProjectContext, ExecutionPlanState]:
         context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
         project_prompt = project_prompt.strip()
-        planning_prompt_template = load_source_prompt_template(PLAN_GENERATION_PROMPT_FILENAME)
+        planning_prompt_template = load_plan_generation_prompt_template(self._normalize_execution_mode(runtime.execution_mode))
         repo_inputs = scan_repository_inputs(context.paths.repo_dir)
         runner = CodexRunner(context.runtime.codex_path)
         prompt = prompt_to_execution_plan_prompt(
@@ -1728,7 +1728,7 @@ class Orchestrator:
         execution_step: ExecutionStep | None = None,
     ) -> tuple:
         memory_context = memory_context_override or "No additional memory context."
-        execution_prompt_template = load_source_prompt_template(STEP_EXECUTION_PROMPT_FILENAME)
+        execution_prompt_template = load_step_execution_prompt_template(context.runtime.execution_mode)
         prompt = implementation_prompt(
             context=context,
             candidate=candidate,

@@ -44,7 +44,8 @@ Required workflow:
 7. If the task cannot be completed safely in one pass, explain why in docs/BLOCK_REVIEW.md instead of making speculative edits.
 
 Execution rules:
+- Focus on one sequential checkpoint.
 - Use a single focused pass to inspect, write tests, implement, and verify.
-- Prefer direct, repository-consistent naming over new parallel abstractions.
+- Prefer direct, repository-consistent naming over new abstractions.
 - Keep changes traceable and limited.
 - Use web search only when directly necessary for official documentation or narrowly scoped factual verification.
