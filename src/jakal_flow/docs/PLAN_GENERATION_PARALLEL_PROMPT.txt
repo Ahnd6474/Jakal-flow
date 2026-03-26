@@ -31,6 +31,7 @@ The app is currently in parallel mode. Plan a DAG execution tree instead of a si
 Use `step_id` and `depends_on` to define the graph.
 Only let steps become parallel-ready when their dependencies are complete.
 Maximize safe frontier width. Prefer plans that create at least one credible parallel-ready wave with 2 or more steps after any required prerequisite setup.
+Unless Agent A identifies a real safety blocker, convert its parallelizable groups into at least one concrete 2+ step ready wave.
 For any steps that may run in parallel, provide non-empty `owned_paths` and make them as narrow as possible.
 Prefer exact files or leaf directories over broad package roots so the scheduler can batch more work safely.
 Keep exact-path ownership exclusive across the same ready wave.
@@ -54,7 +55,13 @@ JSON shape:
       "reasoning_effort": "one of low, medium, high, xhigh based on expected difficulty",
       "depends_on": ["step ids that must complete first"],
       "owned_paths": ["repo-relative paths or directories this step primarily owns"],
-      "success_criteria": "clear completion condition that can be judged locally"
+      "success_criteria": "clear completion condition that can be judged locally",
+      "metadata": {{
+        "candidate_block_id": "Planner Agent A block id",
+        "parallelizable_after": ["Planner Agent A block ids or contract names carried through"],
+        "planning_docstring": "executor-facing design note carried forward from Planner Agent A",
+        "candidate_owned_paths": ["Planner Agent A ownership hint for post-processing and traceability"]
+      }}
     }}
   ]
 }}
@@ -71,6 +78,8 @@ Field requirements:
 - "depends_on": in parallel mode, use this to encode the DAG.
 - "owned_paths": in parallel mode, list the main repo-relative files or directories each step owns so independently ready steps can be batched safely. Prefer narrow exact files or leaf directories. Use an empty array only when the step should run alone.
 - "success_criteria": a concrete, locally judgeable done condition, describing what must be true when the block is complete.
+- "metadata": carry Planner Agent A traceability hints. Preserve `candidate_block_id`, carry `parallelizable_after`, and copy Planner Agent A's executor docstring into `planning_docstring`.
+- Use Planner Agent A docstrings to make `codex_description` sharper and more implementation-specific rather than generic.
 
 Do not include markdown fences or commentary outside the JSON.
 

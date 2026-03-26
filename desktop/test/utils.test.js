@@ -17,6 +17,7 @@ import {
   commandLabel,
   detailApplySignature,
   computePlanStats,
+  planStepsWithCloseout,
   deriveExecutionProgress,
   reasoningEffortLabel,
   deriveIdleProjectStatus,
@@ -646,6 +647,30 @@ test("firstSelectableStepId prefers the first incomplete step", () => {
   );
   assert.equal(firstSelectableStepId({ steps: [{ step_id: "S1", status: "completed" }] }), "S1");
   assert.equal(firstSelectableStepId({ steps: [] }), "");
+});
+
+test("planStepsWithCloseout appends a synthetic final closeout node", () => {
+  const steps = planStepsWithCloseout(
+    {
+      closeout_status: "not_started",
+      closeout_notes: "",
+      steps: [
+        { step_id: "ST1", status: "completed" },
+        { step_id: "ST2", status: "pending" },
+      ],
+    },
+    {
+      title: "Closeout",
+      description: "Closeout report",
+      successCriteria: "Closeout report",
+    },
+  );
+
+  assert.equal(steps.length, 3);
+  assert.equal(steps[2].step_id, "CO1");
+  assert.equal(steps[2].status, "pending");
+  assert.deepEqual(steps[2].depends_on, ["ST1", "ST2"]);
+  assert.equal(canEditStep(steps[2], false), false);
 });
 
 /*

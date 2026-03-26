@@ -194,6 +194,8 @@ test("CenterWorkspace renders the serial flow view for serial plans", async () =
   assert.match(html, /Flow Chart/);
   assert.match(html, /Execution Mode/);
   assert.match(html, /Serial/);
+  assert.match(html, /CO1/);
+  assert.doesNotMatch(html, />Closeout<\/button>/);
   assert.doesNotMatch(html, /Execution Tree/);
 });
 
@@ -265,6 +267,8 @@ test("CenterWorkspace renders the parallel execution tree for parallel plans", a
   assert.match(html, /Ready Nodes/);
   assert.match(html, /Depends On/);
   assert.match(html, /Owned Paths/);
+  assert.match(html, /CO1/);
+  assert.doesNotMatch(html, />Closeout<\/button>/);
   assert.doesNotMatch(html, /Flow Chart/);
 });
 
@@ -306,6 +310,7 @@ test("IdeToolbar renders the active command and DAG-ready progress text", async 
   assert.match(html, /Run Remaining Steps/);
   assert.match(html, /Completed 1\/3 steps, ready: ST2, ST3/);
   assert.match(html, /Program Settings/);
+  assert.doesNotMatch(html, />Closeout<\/button>/);
 });
 
 test("IdeToolbar exposes checkpoint approval when a checkpoint is waiting for review", async () => {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
@@ -13,6 +14,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jakal_flow.cli import main as cli_main
+import jakal_flow.ui_bridge_payloads as ui_bridge_payloads
 from jakal_flow.models import ExecutionPlanState, ExecutionStep
 from jakal_flow.ui_bridge import progress_caption, run_command, runtime_from_payload
 
@@ -1209,6 +1211,76 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(second["detail_signature"], first["detail_signature"])
             self.assertIn("content_signature", second)
             self.assertIn("detail_signature", second)
+
+    def test_load_project_full_detail_reads_each_log_tail_once_on_cache_miss(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Full Detail Tail Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            project_root = Path(detail["project"]["project_root"])
+            full_cache = project_root / "state" / "PROJECT_DETAIL_CACHE_FULL.json"
+            if full_cache.exists():
+                full_cache.unlink()
+
+            tail_calls: list[str] = []
+            last_calls: list[str] = []
+            original_tail = ui_bridge_payloads.read_jsonl_tail
+            original_last = ui_bridge_payloads.read_last_jsonl
+
+            def counting_tail(path, *args, **kwargs):
+                tail_calls.append(Path(path).name)
+                return original_tail(path, *args, **kwargs)
+
+            def counting_last(path, *args, **kwargs):
+                last_calls.append(Path(path).name)
+                return original_last(path, *args, **kwargs)
+
+            with mock.patch("jakal_flow.ui_bridge_payloads.read_jsonl_tail", side_effect=counting_tail), mock.patch(
+                "jakal_flow.ui_bridge_payloads.read_last_jsonl",
+                side_effect=counting_last,
+            ), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                loaded = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": False,
+                        "detail_level": "full",
+                    },
+                )
+
+            counts = Counter(tail_calls)
+            self.assertFalse(loaded["payload_cache_hit"])
+            self.assertEqual(counts["ui_events.jsonl"], 1)
+            self.assertEqual(counts["blocks.jsonl"], 1)
+            self.assertEqual(counts["passes.jsonl"], 1)
+            self.assertEqual(counts["test_runs.jsonl"], 1)
+            self.assertNotIn("blocks.jsonl", last_calls)
+            self.assertNotIn("passes.jsonl", last_calls)
 
     def test_share_bridge_commands_create_and_revoke_read_only_session(self) -> None:
         with TemporaryTestDir() as temp_dir:

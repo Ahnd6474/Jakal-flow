@@ -29,9 +29,12 @@ from jakal_flow.planning import (
     DEBUGGER_PROMPT_FILENAME,
     DEBUGGER_SERIAL_PROMPT_FILENAME,
     FINALIZATION_PROMPT_FILENAME,
+    ML_PLAN_DECOMPOSITION_PROMPT_FILENAME,
     ML_FINALIZATION_PROMPT_FILENAME,
     ML_PLAN_GENERATION_PROMPT_FILENAME,
     ML_STEP_EXECUTION_PROMPT_FILENAME,
+    PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME,
+    PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME,
     PLAN_GENERATION_PARALLEL_PROMPT_FILENAME,
     PLAN_GENERATION_PROMPT_FILENAME,
     PLAN_GENERATION_SERIAL_PROMPT_FILENAME,
@@ -44,11 +47,13 @@ from jakal_flow.planning import (
     execution_plan_svg,
     load_debugger_prompt_template,
     load_finalization_prompt_template,
+    load_plan_decomposition_prompt_template,
     load_plan_generation_prompt_template,
     load_reference_guide_text,
     load_source_prompt_template,
     load_step_execution_prompt_template,
     parse_execution_plan_response,
+    prompt_to_plan_decomposition_prompt,
     prompt_to_execution_plan_prompt,
     scan_repository_inputs,
     source_prompt_template_path,
@@ -1291,6 +1296,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(preset.effort, "medium")
 
     def test_source_prompt_templates_exist_and_keep_expected_placeholders(self) -> None:
+        serial_decomposition_template = load_source_prompt_template(PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME)
+        parallel_decomposition_template = load_source_prompt_template(PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME)
+        ml_decomposition_template = load_source_prompt_template(ML_PLAN_DECOMPOSITION_PROMPT_FILENAME)
         serial_plan_template = load_source_prompt_template(PLAN_GENERATION_SERIAL_PROMPT_FILENAME)
         parallel_plan_template = load_source_prompt_template(PLAN_GENERATION_PARALLEL_PROMPT_FILENAME)
         ml_plan_template = load_source_prompt_template(ML_PLAN_GENERATION_PROMPT_FILENAME)
@@ -1303,6 +1311,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         ml_final_template = load_source_prompt_template(ML_FINALIZATION_PROMPT_FILENAME)
         scope_template = load_source_prompt_template(SCOPE_GUARD_TEMPLATE_FILENAME)
 
+        self.assertTrue(source_prompt_template_path(PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME).exists())
+        self.assertTrue(source_prompt_template_path(PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(PLAN_GENERATION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(PLAN_GENERATION_PARALLEL_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(STEP_EXECUTION_PROMPT_FILENAME).exists())
@@ -1310,17 +1320,25 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertTrue(source_prompt_template_path(DEBUGGER_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(DEBUGGER_PARALLEL_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(FINALIZATION_PROMPT_FILENAME).exists())
+        self.assertTrue(source_prompt_template_path(ML_PLAN_DECOMPOSITION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(ML_PLAN_GENERATION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(ML_STEP_EXECUTION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(ML_FINALIZATION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(SCOPE_GUARD_TEMPLATE_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(REFERENCE_GUIDE_FILENAME).exists())
+        self.assertIn("Planner Agent A", serial_decomposition_template)
+        self.assertIn('"candidate_blocks": [', serial_decomposition_template)
+        self.assertIn("Planner Agent A", parallel_decomposition_template)
+        self.assertIn('"candidate_blocks": [', parallel_decomposition_template)
+        self.assertIn("candidate_experiments", ml_decomposition_template)
         self.assertIn("{repo_dir}", serial_plan_template)
         self.assertIn("{user_prompt}", serial_plan_template)
         self.assertIn("{max_steps}", serial_plan_template)
         self.assertIn("{execution_mode}", serial_plan_template)
+        self.assertIn("{planner_outline}", serial_plan_template)
         self.assertIn('"step_id": "stable id like ST1"', serial_plan_template)
         self.assertIn("strict sequential checkpoint list", serial_plan_template)
+        self.assertIn("{planner_outline}", parallel_plan_template)
         self.assertIn('"step_id": "stable id like ST1"', parallel_plan_template)
         self.assertIn('"depends_on": ["step ids that must complete first"]', parallel_plan_template)
         self.assertIn('"owned_paths": ["repo-relative paths or directories this step primarily owns"]', parallel_plan_template)
@@ -1333,6 +1351,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("Prevent data leakage", ml_plan_template)
         self.assertIn("Maximize safe experiment frontier width", ml_plan_template)
         self.assertIn("small coordination node", ml_plan_template)
+        self.assertIn("{planner_outline}", ml_plan_template)
         self.assertIn("{workflow_mode}", ml_plan_template)
         self.assertIn("{task_title}", serial_step_template)
         self.assertIn("{display_description}", serial_step_template)
@@ -1356,6 +1375,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("merged parallel batch", parallel_debugger_template)
         self.assertIn("cherry-pick conflict", parallel_debugger_template)
         self.assertIn("Do not edit README.md during debugger recovery.", parallel_debugger_template)
+        self.assertEqual(load_plan_decomposition_prompt_template("serial"), serial_decomposition_template)
+        self.assertEqual(load_plan_decomposition_prompt_template("parallel"), parallel_decomposition_template)
+        self.assertEqual(load_plan_decomposition_prompt_template("parallel", "ml"), ml_decomposition_template)
         self.assertEqual(load_plan_generation_prompt_template("serial"), serial_plan_template)
         self.assertEqual(load_plan_generation_prompt_template("parallel"), parallel_plan_template)
         self.assertEqual(load_plan_generation_prompt_template("parallel", "ml"), ml_plan_template)
@@ -1394,15 +1416,30 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                     repo_url="https://github.com/example/project.git",
                     branch="main",
                 ),
+                runtime=SimpleNamespace(workflow_mode="standard"),
             )
+            decomposition_prompt = prompt_to_plan_decomposition_prompt(context, repo_inputs, "Build a desktop flow screen.", 4, "parallel")
             plan_prompt = prompt_to_execution_plan_prompt(context, repo_inputs, "Build a desktop flow screen.", 4, "parallel")
+            packed_plan_prompt = prompt_to_execution_plan_prompt(
+                context,
+                repo_inputs,
+                "Build a desktop flow screen.",
+                4,
+                "parallel",
+                planner_outline='{"candidate_blocks":[{"block_id":"B1","goal":"demo"}]}',
+            )
             bootstrap_prompt = bootstrap_plan_prompt(context, repo_inputs, "Build a desktop flow screen.")
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 
+        self.assertIn("Planner Agent A", decomposition_prompt)
+        self.assertIn("candidate_blocks", decomposition_prompt)
         self.assertIn("Use the following priority order while planning:", plan_prompt)
         self.assertIn("Requested execution mode:", plan_prompt)
         self.assertIn("parallel", plan_prompt)
+        self.assertIn("Planner Agent A decomposition artifact:", plan_prompt)
+        self.assertIn("Planner Agent A output unavailable.", plan_prompt)
+        self.assertIn('"block_id":"B1"', packed_plan_prompt)
         self.assertIn("step_id", plan_prompt)
         self.assertIn("depends_on", plan_prompt)
         self.assertIn("owned_paths", plan_prompt)
@@ -1411,6 +1448,122 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("1. Follow AGENTS.md and explicit repository constraints first.", bootstrap_prompt)
         self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", bootstrap_prompt)
         self.assertIn("React + Tauri", bootstrap_prompt)
+
+    def test_generate_execution_plan_runs_planner_agent_a_then_agent_b(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_dual_planner_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
+        (repo_dir / "AGENTS.md").write_text("AGENTS summary", encoding="utf-8")
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="high", execution_mode="parallel", test_cmd="python -m pytest")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            outline_json = """
+            {
+              "title": "Dual planner demo",
+              "strategy_summary": "Freeze a contract, then fan out.",
+              "shared_contracts": ["step schema"],
+              "skeleton_step": {
+                "needed": true,
+                "task_title": "Freeze the contract",
+                "purpose": "Unblock safe downstream fan-out.",
+                "candidate_owned_paths": ["src/contracts.py"],
+                "success_criteria": "The shared contract exists."
+              },
+              "candidate_blocks": [
+                {
+                  "block_id": "B1",
+                  "goal": "Implement UI work",
+                  "work_items": ["Build the UI slice"],
+                  "testable_boundary": "UI path is wired.",
+                  "candidate_owned_paths": ["desktop/src"],
+                  "parallelizable_after": ["step schema"],
+                  "parallel_notes": "Independent after contract freeze."
+                }
+              ],
+              "packing_notes": ["Prefer one bootstrap then one ready wave."]
+            }
+            """
+            final_plan_json = """
+            {
+              "title": "Dual planner demo",
+              "summary": "Freeze the contract first, then execute parallel implementation slices.",
+              "tasks": [
+                {
+                  "step_id": "ST1",
+                  "task_title": "Freeze the contract",
+                  "display_description": "Add the shared contract.",
+                  "codex_description": "Create the contract module that later slices will share.",
+                  "reasoning_effort": "medium",
+                  "depends_on": [],
+                  "owned_paths": ["src/contracts.py"],
+                  "success_criteria": "The shared contract exists."
+                },
+                {
+                  "step_id": "ST2",
+                  "task_title": "Implement the UI slice",
+                  "display_description": "Build the UI work.",
+                  "codex_description": "Implement the UI slice against the frozen contract.",
+                  "reasoning_effort": "high",
+                  "depends_on": ["ST1"],
+                  "owned_paths": ["desktop/src"],
+                  "success_criteria": "The UI slice is wired."
+                }
+              ]
+            }
+            """
+            run_results = [
+                CodexRunResult(
+                    pass_type="plan-agent-a-decomposition",
+                    prompt_file=context.paths.logs_dir / "a.prompt.md",
+                    output_file=context.paths.logs_dir / "a.last_message.txt",
+                    event_file=context.paths.logs_dir / "a.events.jsonl",
+                    returncode=0,
+                    search_enabled=False,
+                    changed_files=[],
+                    usage={"input_tokens": 10},
+                    last_message=outline_json,
+                ),
+                CodexRunResult(
+                    pass_type="plan-agent-b-packing",
+                    prompt_file=context.paths.logs_dir / "b.prompt.md",
+                    output_file=context.paths.logs_dir / "b.last_message.txt",
+                    event_file=context.paths.logs_dir / "b.events.jsonl",
+                    returncode=0,
+                    search_enabled=False,
+                    changed_files=[],
+                    usage={"input_tokens": 12},
+                    last_message=final_plan_json,
+                ),
+            ]
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch(
+                "jakal_flow.orchestrator.CodexRunner.run_pass",
+                side_effect=run_results,
+            ) as mocked_run_pass:
+                _context, plan_state = orchestrator.generate_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    project_prompt="Build a dual planner demo.",
+                    max_steps=4,
+                )
+                first_prompt = mocked_run_pass.call_args_list[0].kwargs["prompt"]
+                second_prompt = mocked_run_pass.call_args_list[1].kwargs["prompt"]
+                outline_text = (context.paths.docs_dir / "PLAN_AGENT_A_OUTLINE.md").read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual([call.kwargs["pass_type"] for call in mocked_run_pass.call_args_list], ["plan-agent-a-decomposition", "plan-agent-b-packing"])
+        self.assertIn("Planner Agent A", first_prompt)
+        self.assertIn("Freeze the contract", outline_text)
+        self.assertIn("Planner Agent A decomposition artifact:", second_prompt)
+        self.assertIn('"block_id": "B1"', second_prompt)
+        self.assertEqual(plan_state.plan_title, "Dual planner demo")
+        self.assertEqual([step.step_id for step in plan_state.steps], ["ST1", "ST2"])
 
     def test_ensure_gitignore_adds_missing_entries_once(self) -> None:
         project_dir = Path(__file__).resolve().parents[1] / ".tmp_gitignore_test"

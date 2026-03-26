@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -17,6 +18,18 @@ from .utils import compact_text, normalize_workflow_mode, read_json, read_jsonl_
 
 
 DETAIL_CACHE_VERSION = 3
+
+
+@dataclass(slots=True)
+class DetailLogSnapshot:
+    ui_events: list[dict[str, Any]]
+    blocks: list[dict[str, Any]]
+    passes: list[dict[str, Any]]
+    test_runs: list[dict[str, Any]]
+    latest_block: dict[str, Any]
+    latest_pass: dict[str, Any]
+    run_control_json: Any
+    loop_state_json: Any
 
 
 def _path_signature(path: Path) -> str:
@@ -119,6 +132,21 @@ def _detail_signature(content_signature: str, codex_status: dict[str, Any]) -> s
     return digest.hexdigest()
 
 
+def _tail_slice(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    if len(items) <= limit:
+        return list(items)
+    return list(items[-limit:])
+
+
+def _latest_entry(items: list[dict[str, Any]]) -> dict[str, Any]:
+    if not items:
+        return {}
+    latest = items[-1]
+    return latest if isinstance(latest, dict) else {}
+
+
 def progress_caption(plan_state: ExecutionPlanState) -> str:
     completed = len([step for step in plan_state.steps if step.status == "completed"])
     total = len(plan_state.steps)
@@ -155,11 +183,12 @@ def project_summary(
     plan_state: ExecutionPlanState | None = None,
     *,
     current_status: str | None = None,
+    recent_blocks: list[dict[str, Any]] | None = None,
 ) -> str:
     plan = plan_state or orchestrator.load_execution_plan_state(project)
     remaining = [step.step_id for step in plan.steps if step.status != "completed"]
-    recent_blocks = read_jsonl_tail(project.paths.block_log_file, 5)
-    recent_statuses = [str(item.get("status", "")) for item in recent_blocks][-3:]
+    blocks = recent_blocks if recent_blocks is not None else read_jsonl_tail(project.paths.block_log_file, 5)
+    recent_statuses = [str(item.get("status", "")) for item in blocks][-3:]
     runtime_provider = normalize_model_provider(str(getattr(project.runtime, "model_provider", "openai") or "openai").strip())
     local_provider = normalize_local_model_provider(str(getattr(project.runtime, "local_model_provider", "") or "").strip())
     preset = provider_preset(runtime_provider)
@@ -318,6 +347,15 @@ def history_payload(context: ProjectContext) -> dict[str, Any]:
     }
 
 
+def history_payload_from_snapshot(snapshot: DetailLogSnapshot) -> dict[str, Any]:
+    return {
+        "ui_events": list(snapshot.ui_events),
+        "blocks": list(snapshot.blocks),
+        "passes": list(snapshot.passes),
+        "test_runs": list(snapshot.test_runs),
+    }
+
+
 def checkpoint_payload(context: ProjectContext) -> dict[str, Any]:
     raw = safe_json(context.paths.checkpoint_state_file, default={"checkpoints": []})
     raw_items = raw.get("checkpoints", []) if isinstance(raw, dict) else []
@@ -356,28 +394,69 @@ def config_payload(context: ProjectContext) -> dict[str, Any]:
     }
 
 
+def config_payload_from_snapshot(context: ProjectContext, snapshot: DetailLogSnapshot) -> dict[str, Any]:
+    return {
+        "metadata_json": safe_json(context.paths.metadata_file, default={}) or {},
+        "runtime_json": safe_json(context.paths.project_config_file, default={}) or {},
+        "loop_state_json": snapshot.loop_state_json,
+        "run_control_json": snapshot.run_control_json,
+    }
+
+
+def _load_detail_log_snapshot(context: ProjectContext) -> DetailLogSnapshot:
+    ui_events = read_jsonl_tail(context.paths.ui_event_log_file, 40)
+    blocks = read_jsonl_tail(context.paths.block_log_file, 20)
+    passes = read_jsonl_tail(context.paths.pass_log_file, 30)
+    test_runs = read_jsonl_tail(context.paths.logs_dir / "test_runs.jsonl", 20)
+    return DetailLogSnapshot(
+        ui_events=ui_events,
+        blocks=blocks,
+        passes=passes,
+        test_runs=test_runs,
+        latest_block=_latest_entry(blocks),
+        latest_pass=_latest_entry(passes),
+        run_control_json=safe_json(context.paths.ui_control_file, default={}) or {},
+        loop_state_json=safe_json(context.paths.loop_state_file, default={}) or {},
+    )
+
+
 def bottom_panel_payload(
     context: ProjectContext,
     plan_state: ExecutionPlanState,
     codex_status: dict[str, Any],
     *,
     detail_level: str = "full",
+    execution_log_lines: list[str] | None = None,
+    latest_block: dict[str, Any] | None = None,
+    latest_pass: dict[str, Any] | None = None,
+    usage: dict[str, int] | None = None,
+    run_control_json: Any = None,
+    loop_state_json: Any = None,
+    test_runs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    latest_block = read_last_jsonl(context.paths.block_log_file) or {}
-    latest_pass = read_last_jsonl(context.paths.pass_log_file) or {}
-    usage = recent_usage(context)
+    latest_block = latest_block if latest_block is not None else read_last_jsonl(context.paths.block_log_file) or {}
+    latest_pass = latest_pass if latest_pass is not None else read_last_jsonl(context.paths.pass_log_file) or {}
+    usage = usage if usage is not None else recent_usage(context)
+    run_control_json = run_control_json if run_control_json is not None else safe_json(context.paths.ui_control_file, default={}) or {}
+    loop_state_json = loop_state_json if loop_state_json is not None else safe_json(context.paths.loop_state_file, default={}) or {}
+    execution_log_lines = (
+        execution_log_lines
+        if execution_log_lines is not None
+        else (build_activity_lines(context, plan_state) if detail_level == "full" else [])
+    )
+    test_runs = test_runs if test_runs is not None else read_jsonl_tail(context.paths.logs_dir / "test_runs.jsonl", 12 if detail_level == "full" else 5)
     return {
-        "execution_log_lines": build_activity_lines(context, plan_state) if detail_level == "full" else [],
+        "execution_log_lines": execution_log_lines,
         "event_json": {
             "latest_block": latest_block,
             "latest_pass": latest_pass,
-            "run_control": safe_json(context.paths.ui_control_file, default={}) or {},
-            "loop_state": safe_json(context.paths.loop_state_file, default={}) or {},
+            "run_control": run_control_json,
+            "loop_state": loop_state_json,
         },
         "token_usage": usage,
         "runtime_insights": build_runtime_insights(context, plan_state, usage),
         "codex_status": codex_status,
-        "test_runs": read_jsonl_tail(context.paths.logs_dir / "test_runs.jsonl", 12 if detail_level == "full" else 5),
+        "test_runs": test_runs,
         "git_status": {
             "branch": context.metadata.branch,
             "repo_kind": context.metadata.repo_kind,
@@ -391,7 +470,7 @@ def bottom_panel_payload(
     }
 
 
-def recent_usage(context: ProjectContext) -> dict[str, int]:
+def recent_usage(context: ProjectContext, pass_items: list[dict[str, Any]] | None = None) -> dict[str, int]:
     usage: dict[str, int] = {
         "input_tokens": 0,
         "cached_input_tokens": 0,
@@ -399,7 +478,8 @@ def recent_usage(context: ProjectContext) -> dict[str, int]:
         "reasoning_output_tokens": 0,
         "total_tokens": 0,
     }
-    for item in read_jsonl_tail(context.paths.pass_log_file, 25):
+    items = _tail_slice(pass_items, 25) if pass_items is not None else read_jsonl_tail(context.paths.pass_log_file, 25)
+    for item in items:
         raw = item.get("usage", {})
         if not isinstance(raw, dict):
             continue
@@ -412,9 +492,17 @@ def recent_usage(context: ProjectContext) -> dict[str, int]:
     return usage
 
 
-def build_activity_lines(context: ProjectContext, plan_state: ExecutionPlanState) -> list[str]:
+def build_activity_lines(
+    context: ProjectContext,
+    plan_state: ExecutionPlanState,
+    *,
+    ui_events: list[dict[str, Any]] | None = None,
+    latest_pass: dict[str, Any] | None = None,
+    blocks: list[dict[str, Any]] | None = None,
+) -> list[str]:
     lines: list[str] = []
-    for event in reversed(read_jsonl_tail(context.paths.ui_event_log_file, 30)):
+    event_items = ui_events if ui_events is not None else read_jsonl_tail(context.paths.ui_event_log_file, 30)
+    for event in reversed(event_items):
         timestamp = str(event.get("timestamp", "")).strip()
         message = str(event.get("message", "")).strip()
         event_type = str(event.get("event_type", "")).strip()
@@ -429,14 +517,14 @@ def build_activity_lines(context: ProjectContext, plan_state: ExecutionPlanState
         return lines
 
     if str(context.metadata.current_status).strip().lower().startswith("running:debug"):
-        latest_pass = read_last_jsonl(context.paths.pass_log_file)
-        if isinstance(latest_pass, dict) and latest_pass:
-            title = compact_text(str(latest_pass.get("selected_task", "")).strip(), max_chars=120)
-            test_results = latest_pass.get("test_results", {})
+        debug_pass = latest_pass if latest_pass is not None else read_last_jsonl(context.paths.pass_log_file)
+        if isinstance(debug_pass, dict) and debug_pass:
+            title = compact_text(str(debug_pass.get("selected_task", "")).strip(), max_chars=120)
+            test_results = debug_pass.get("test_results", {})
             summary = ""
             if isinstance(test_results, dict):
                 summary = compact_text(str(test_results.get("summary", "")).strip(), max_chars=120)
-            rollback = str(latest_pass.get("rollback_status", "")).strip() or "debugger_invoked"
+            rollback = str(debug_pass.get("rollback_status", "")).strip() or "debugger_invoked"
             lines.append(
                 f"debugger | {rollback} | Debugging {title or 'current task'} | "
                 f"{summary or 'Inspecting the failing verification logs and preparing a recovery fix.'}"
@@ -447,7 +535,8 @@ def build_activity_lines(context: ProjectContext, plan_state: ExecutionPlanState
         )
         return lines
 
-    for block in reversed(read_jsonl_tail(context.paths.block_log_file, 12)):
+    block_items = blocks if blocks is not None else read_jsonl_tail(context.paths.block_log_file, 12)
+    for block in reversed(block_items):
         block_index = block.get("block_index", "?")
         status = block.get("status", "unknown")
         title = compact_text(str(block.get("selected_task", "")).strip(), max_chars=120)
@@ -494,20 +583,30 @@ def _build_project_detail_base_payload(
     plan_state = orchestrator.load_execution_plan_state(project)
     current_status = effective_project_status(project.metadata.current_status, plan_state, project.loop_state)
     control = load_run_control(project)
-    recent_usage_payload = recent_usage(project)
-    runtime_insights = build_runtime_insights(project, plan_state, recent_usage_payload)
+    log_snapshot: DetailLogSnapshot | None = None
     if normalized_detail_level == "full":
-        recent_blocks = read_jsonl_tail(project.paths.block_log_file, 8)
-        recent_passes = read_jsonl_tail(project.paths.pass_log_file, 12)
+        log_snapshot = _load_detail_log_snapshot(project)
+        recent_usage_payload = recent_usage(project, pass_items=log_snapshot.passes)
+        runtime_insights = build_runtime_insights(project, plan_state, recent_usage_payload)
+        recent_blocks = _tail_slice(log_snapshot.blocks, 8)
+        recent_passes = _tail_slice(log_snapshot.passes, 12)
         reports = report_payload(project)
-        history = history_payload(project)
+        history = history_payload_from_snapshot(log_snapshot)
         checkpoints = checkpoint_payload(project)
-        config = config_payload(project)
+        config = config_payload_from_snapshot(project, log_snapshot)
         workspace_tree = managed_workspace_tree(project)
-        activity = build_activity_lines(project, plan_state)
-        latest_block = read_last_jsonl(project.paths.block_log_file)
-        latest_pass = read_last_jsonl(project.paths.pass_log_file)
+        activity = build_activity_lines(
+            project,
+            plan_state,
+            ui_events=_tail_slice(log_snapshot.ui_events, 30),
+            latest_pass=log_snapshot.latest_pass,
+            blocks=_tail_slice(log_snapshot.blocks, 12),
+        )
+        latest_block = log_snapshot.latest_block
+        latest_pass = log_snapshot.latest_pass
     else:
+        recent_usage_payload = recent_usage(project)
+        runtime_insights = build_runtime_insights(project, plan_state, recent_usage_payload)
         recent_blocks = []
         recent_passes = []
         pending_checkpoint = checkpoint_payload(project).get("pending")
@@ -533,6 +632,13 @@ def _build_project_detail_base_payload(
         plan_state,
         {},
         detail_level=normalized_detail_level,
+        execution_log_lines=activity if normalized_detail_level == "full" else None,
+        latest_block=latest_block,
+        latest_pass=latest_pass,
+        usage=recent_usage_payload,
+        run_control_json=log_snapshot.run_control_json if normalized_detail_level == "full" else None,
+        loop_state_json=log_snapshot.loop_state_json if normalized_detail_level == "full" else None,
+        test_runs=_tail_slice(log_snapshot.test_runs, 12) if normalized_detail_level == "full" else None,
     )
     if isinstance(bottom_panels.get("git_status"), dict):
         bottom_panels["git_status"]["current_status"] = current_status
@@ -558,7 +664,13 @@ def _build_project_detail_base_payload(
         "runtime": project.runtime.to_dict(),
         "loop_state": project.loop_state.to_dict(),
         "plan": plan_state.to_dict(),
-        "summary": project_summary(orchestrator, project, plan_state, current_status=current_status),
+        "summary": project_summary(
+            orchestrator,
+            project,
+            plan_state,
+            current_status=current_status,
+            recent_blocks=_tail_slice(log_snapshot.blocks, 5) if normalized_detail_level == "full" else None,
+        ),
         "progress": progress_caption(plan_state),
         "stats": project_stats(plan_state),
         "codex_status": {},

@@ -46,7 +46,11 @@ JSON shape:
       "reasoning_effort": "one of low, medium, high, xhigh based on expected difficulty",
       "depends_on": ["leave empty or reference only the immediately previous step"],
       "owned_paths": ["optional repo-relative ownership hint; use [] when not needed"],
-      "success_criteria": "clear completion condition that can be judged locally"
+      "success_criteria": "clear completion condition that can be judged locally",
+      "metadata": {{
+        "candidate_block_id": "Planner Agent A block id",
+        "planning_docstring": "executor-facing design note carried forward from Planner Agent A"
+      }}
     }}
   ]
 }}
@@ -63,6 +67,8 @@ Field requirements:
 - "depends_on": in serial mode, keep this empty unless one explicit previous-step dependency materially improves clarity.
 - "owned_paths": optional in serial mode; use it only as a narrow scope hint.
 - "success_criteria": a concrete, locally judgeable done condition, describing what must be true when the block is complete.
+- "metadata": preserve `candidate_block_id` and carry Planner Agent A's executor docstring in `planning_docstring`.
+- Use Planner Agent A docstrings to make `codex_description` sharper and more implementation-specific rather than generic.
 
 Do not include markdown fences or commentary outside the JSON.
 

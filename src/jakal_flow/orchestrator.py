@@ -35,8 +35,10 @@ from .planning import (
     implementation_prompt,
     is_plan_markdown,
     load_debugger_prompt_template,
+    load_plan_decomposition_prompt_template,
     load_plan_generation_prompt_template,
     parse_execution_plan_response,
+    prompt_to_plan_decomposition_prompt,
     parse_work_breakdown_response,
     prompt_to_execution_plan_prompt,
     reflection_markdown,
@@ -141,21 +143,44 @@ class Orchestrator:
         project_prompt = project_prompt.strip()
         previous_plan_state = self.load_execution_plan_state(context)
         workflow_mode = normalize_workflow_mode(runtime.workflow_mode)
-        planning_prompt_template = load_plan_generation_prompt_template(self._normalize_execution_mode(runtime.execution_mode), workflow_mode)
+        normalized_execution_mode = self._normalize_execution_mode(runtime.execution_mode)
+        decomposition_prompt_template = load_plan_decomposition_prompt_template(normalized_execution_mode, workflow_mode)
+        planning_prompt_template = load_plan_generation_prompt_template(normalized_execution_mode, workflow_mode)
         repo_inputs = scan_repository_inputs(context.paths.repo_dir)
         runner = CodexRunner(context.runtime.codex_path)
+        decomposition_prompt = prompt_to_plan_decomposition_prompt(
+            context=context,
+            repo_inputs=repo_inputs,
+            user_prompt=project_prompt,
+            max_steps=max_steps,
+            execution_mode=normalized_execution_mode,
+            template_text=decomposition_prompt_template,
+        )
+        decomposition_result = runner.run_pass(
+            context=context,
+            prompt=decomposition_prompt,
+            pass_type="plan-agent-a-decomposition",
+            block_index=max(0, context.loop_state.block_index),
+            search_enabled=False,
+        )
+        planner_outline = (decomposition_result.last_message or "").strip() if decomposition_result.returncode == 0 else ""
+        write_text(
+            context.paths.docs_dir / "PLAN_AGENT_A_OUTLINE.md",
+            planner_outline or "Planner Agent A did not return a reusable decomposition artifact.",
+        )
         prompt = prompt_to_execution_plan_prompt(
             context=context,
             repo_inputs=repo_inputs,
             user_prompt=project_prompt,
             max_steps=max_steps,
-            execution_mode=self._normalize_execution_mode(runtime.execution_mode),
+            execution_mode=normalized_execution_mode,
+            planner_outline=planner_outline,
             template_text=planning_prompt_template,
         )
         result = runner.run_pass(
             context=context,
             prompt=prompt,
-            pass_type="plan-interactive-execution",
+            pass_type="plan-agent-b-packing",
             block_index=max(0, context.loop_state.block_index),
             search_enabled=False,
         )
@@ -188,7 +213,7 @@ class Orchestrator:
             project_prompt=project_prompt.strip(),
             summary=summary.strip(),
             workflow_mode=workflow_mode,
-            execution_mode=self._normalize_execution_mode(runtime.execution_mode),
+            execution_mode=normalized_execution_mode,
             default_test_command=runtime.test_cmd,
             last_updated_at=now_utc_iso(),
             steps=steps,
