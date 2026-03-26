@@ -243,6 +243,11 @@ export function activityLineSummary(line = "") {
   return parts[parts.length - 1];
 }
 
+export function isDebuggingStatus(status = "") {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "debugging" || normalized === "running:debugging" || normalized === "running:parallel-debugging";
+}
+
 export function deriveExecutionProgress(detail = null, planDraft = null, activeJob = null) {
   const detailPlan = detail?.plan && typeof detail.plan === "object" ? detail.plan : null;
   const fallbackPlan = planDraft && typeof planDraft === "object" ? planDraft : {};
@@ -254,7 +259,9 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
   const nextStep = steps.find((step) => step.status !== "completed") || null;
   const readyIds = readyExecutionNodeIds(plan);
   const closeoutRunning = String(plan?.closeout_status || "").trim().toLowerCase() === "running";
-  const status = String(detail?.project?.current_status || "").trim().toLowerCase();
+  const currentStatus = String(detail?.project?.current_status || "").trim();
+  const status = currentStatus.toLowerCase();
+  const debugging = isDebuggingStatus(currentStatus);
   const recentActivity = (Array.isArray(detail?.activity) ? detail.activity : [])
     .map((line) => activityLineSummary(line))
     .filter(Boolean)
@@ -270,6 +277,8 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     phase = "planning";
   } else if (command === "run-closeout" || closeoutRunning) {
     phase = "closeout";
+  } else if (debugging) {
+    phase = "debugging";
   } else if (command || runningStep || nextStep) {
     phase = "step";
   }
@@ -299,6 +308,8 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     isActive,
     phase,
     command,
+    status: currentStatus,
+    debugging,
     plan,
     totalSteps: steps.length,
     completedSteps: Math.max(0, Number(stats?.completed_steps || 0)),

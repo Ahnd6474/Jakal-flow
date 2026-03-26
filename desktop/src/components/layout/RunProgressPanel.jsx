@@ -1,4 +1,5 @@
 import { useI18n } from "../../i18n";
+import { displayStatus } from "../../locale";
 import { commandLabel, deriveExecutionProgress, executionProgressCaption } from "../../utils";
 
 function stepLabel(step) {
@@ -18,6 +19,8 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
     currentWork = t("run.planGeneration");
   } else if (progress.phase === "closeout") {
     currentWork = t("run.closeoutRunning");
+  } else if (progress.phase === "debugging") {
+    currentWork = t("run.debugging");
   } else if (progress.runningStep) {
     currentWork = t("run.workingOnStep", { step: stepLabel(progress.runningStep) });
   } else if (progress.nextStep) {
@@ -26,6 +29,10 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
 
   const progressSummary = executionProgressCaption(progress.plan, language);
   const percentLabel = progress.indeterminate ? t("status.running") : t("run.progressPercent", { percent: progress.percent ?? 0 });
+  const badgeLabel =
+    progress.phase === "debugging"
+      ? displayStatus(progress.status || "running:debugging", language)
+      : commandLabel(progress.command, language) || t("action.backgroundJob");
 
   return (
     <section className="run-progress-banner">
@@ -34,7 +41,7 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
           <span className="eyebrow">{t("run.liveRun")}</span>
           <strong>{currentWork || t("action.backgroundJob")}</strong>
         </div>
-        <span className="status-badge status-badge--info">{commandLabel(progress.command, language) || t("action.backgroundJob")}</span>
+        <span className="status-badge status-badge--info">{badgeLabel}</span>
       </div>
 
       <div

@@ -1883,6 +1883,12 @@ class Orchestrator:
     ):
         debug_pass_name = self._debug_pass_name(failing_pass_name)
         debugger_prompt_template = load_debugger_prompt_template(context.runtime.execution_mode)
+        previous_status = context.metadata.current_status
+        previous_task = context.loop_state.current_task
+        context.metadata.current_status = "running:debugging"
+        context.metadata.last_run_at = now_utc_iso()
+        context.loop_state.current_task = f"Debugging {candidate.title}".strip()
+        self.workspace.save_project(context)
         prompt = debugger_prompt(
             context=context,
             candidate=candidate,
@@ -1894,27 +1900,34 @@ class Orchestrator:
             execution_step=execution_step,
             template_text=debugger_prompt_template,
         )
-        run_result = runner.run_pass(
-            context=context,
-            prompt=prompt,
-            pass_type=debug_pass_name,
-            block_index=block_index,
-            search_enabled=False,
-        )
-        run_result.changed_files = self.git.changed_files(context.paths.repo_dir)
-        if run_result.returncode != 0:
-            return debug_pass_name, run_result, None, None
-
-        test_result = self._run_test_command(context, block_index, debug_pass_name)
-        test_result.summary = f"{test_result.summary} after debugger recovery"
-        reporter.save_test_result(block_index, debug_pass_name, test_result)
-        commit_hash: str | None = None
-        if test_result.returncode == 0 and self.git.has_changes(context.paths.repo_dir):
-            commit_hash = self.git.commit_all(
-                context.paths.repo_dir,
-                self._commit_message(block_index, debug_pass_name, candidate.title),
+        try:
+            run_result = runner.run_pass(
+                context=context,
+                prompt=prompt,
+                pass_type=debug_pass_name,
+                block_index=block_index,
+                search_enabled=False,
             )
-        return debug_pass_name, run_result, test_result, commit_hash
+            run_result.changed_files = self.git.changed_files(context.paths.repo_dir)
+            if run_result.returncode != 0:
+                return debug_pass_name, run_result, None, None
+
+            test_result = self._run_test_command(context, block_index, debug_pass_name)
+            test_result.summary = f"{test_result.summary} after debugger recovery"
+            reporter.save_test_result(block_index, debug_pass_name, test_result)
+            commit_hash: str | None = None
+            if test_result.returncode == 0 and self.git.has_changes(context.paths.repo_dir):
+                commit_hash = self.git.commit_all(
+                    context.paths.repo_dir,
+                    self._commit_message(block_index, debug_pass_name, candidate.title),
+                )
+            return debug_pass_name, run_result, test_result, commit_hash
+        finally:
+            context.metadata.last_run_at = now_utc_iso()
+            if context.metadata.current_status == "running:debugging":
+                context.metadata.current_status = previous_status
+            context.loop_state.current_task = previous_task
+            self.workspace.save_project(context)
 
     def _build_parallel_batch_debug_step(
         self,

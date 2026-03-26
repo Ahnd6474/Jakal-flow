@@ -682,6 +682,7 @@ STRINGS.en["run.preparingStep"] = "Preparing {step}";
 STRINGS.en["run.progressPercent"] = "{percent}% complete";
 STRINGS.en["run.readyNodeSummary"] = "{count} ready node(s)";
 STRINGS.en["run.stepProgress"] = "Step Progress";
+STRINGS.en["run.debugging"] = "Debugging";
 STRINGS.en["run.workingOnStep"] = "Working on {step}";
 STRINGS.en["prompt.confirmDeleteAllProjects"] =
   "Remove all projects from jakal-flow? The managed docs, logs, and state will be deleted, but the original repository folders will stay in place.";
@@ -892,6 +893,7 @@ KO_HIGH_QUALITY_OVERRIDES["run.preparingStep"] = "{step} 준비 중";
 KO_HIGH_QUALITY_OVERRIDES["run.progressPercent"] = "{percent}% 완료";
 KO_HIGH_QUALITY_OVERRIDES["run.readyNodeSummary"] = "실행 가능 노드 {count}개";
 KO_HIGH_QUALITY_OVERRIDES["run.stepProgress"] = "단계 진행도";
+KO_HIGH_QUALITY_OVERRIDES["run.debugging"] = "디버깅";
 KO_HIGH_QUALITY_OVERRIDES["run.workingOnStep"] = "{step} 작업 중";
 
 const ALL_STRINGS = Object.fromEntries(
@@ -964,6 +966,9 @@ export function displayStatus(status, language) {
   const normalized = raw.toLowerCase();
   if (!normalized) {
     return translate(normalizedLanguage, "status.unknown");
+  }
+  if (normalized === "debugging" || normalized === "running:debugging" || normalized === "running:parallel-debugging") {
+    return translate(normalizedLanguage, "run.debugging");
   }
   if (normalized.startsWith("running:")) {
     const detail = humanizeToken(raw.slice(raw.indexOf(":") + 1));

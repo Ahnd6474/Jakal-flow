@@ -411,6 +411,45 @@ test("deriveExecutionProgress falls back to an indeterminate planning state", ()
   assert.equal(progress.totalSteps, 0);
 });
 
+test("deriveExecutionProgress marks debugger recovery as an active debugging phase", () => {
+  const progress = deriveExecutionProgress(
+    {
+      project: {
+        current_status: "running:debugging",
+      },
+      activity: [
+        "debugger | debugger_invoked | Debugging ST2 - Build | python -m pytest exited with 1",
+      ],
+      plan: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "running" },
+        ],
+      },
+      stats: {
+        total_steps: 2,
+        completed_steps: 1,
+        failed_steps: 0,
+        running_steps: 1,
+        remaining_steps: 1,
+      },
+    },
+    null,
+    {
+      status: "running",
+      command: "run-plan",
+    },
+  );
+
+  assert.equal(progress.isActive, true);
+  assert.equal(progress.phase, "debugging");
+  assert.equal(progress.debugging, true);
+  assert.equal(progress.status, "running:debugging");
+  assert.equal(progress.headlineActivity, "Debugging ST2 - Build | python -m pytest exited with 1");
+});
+
 test("buildProjectPayload trims fields, blanks origin_url for existing repos, and clones plan data", () => {
   const form = {
     project_dir: "  C:/work/demo  ",

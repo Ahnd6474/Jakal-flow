@@ -531,7 +531,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             )
             reporter = Reporter(context)
             runner = mock.Mock()
-            runner.run_pass.side_effect = [
+            observed_statuses: list[str] = []
+            run_results = [
                 CodexRunResult(
                     pass_type="block-search-pass",
                     prompt_file=context.paths.logs_dir / "initial.prompt.md",
@@ -555,6 +556,12 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                     last_message="debugger recovery pass",
                 ),
             ]
+
+            def fake_run_pass(**kwargs):
+                observed_statuses.append(context.metadata.current_status)
+                return run_results.pop(0)
+
+            runner.run_pass.side_effect = fake_run_pass
 
             block_dir = context.paths.logs_dir / "block_0001"
             block_dir.mkdir(parents=True, exist_ok=True)
@@ -621,6 +628,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual([item["pass_type"] for item in pass_entries], ["block-search-pass", "block-search-debug"])
         self.assertEqual(pass_entries[0]["rollback_status"], "debugger_invoked")
         self.assertEqual(pass_entries[1]["rollback_status"], "not_needed")
+        self.assertEqual(observed_statuses, ["initialized", "running:debugging"])
 
     def test_parallel_batch_verification_failure_invokes_debugger(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_batch_debugger_test"

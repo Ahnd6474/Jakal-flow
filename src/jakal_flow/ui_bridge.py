@@ -663,6 +663,25 @@ def build_activity_lines(context: ProjectContext, plan_state: ExecutionPlanState
     if lines:
         return lines
 
+    if str(context.metadata.current_status).strip().lower().startswith("running:debug"):
+        latest_pass = read_last_jsonl(context.paths.pass_log_file)
+        if isinstance(latest_pass, dict) and latest_pass:
+            title = compact_text(str(latest_pass.get("selected_task", "")).strip(), max_chars=120)
+            test_results = latest_pass.get("test_results", {})
+            summary = ""
+            if isinstance(test_results, dict):
+                summary = compact_text(str(test_results.get("summary", "")).strip(), max_chars=120)
+            rollback = str(latest_pass.get("rollback_status", "")).strip() or "debugger_invoked"
+            lines.append(
+                f"debugger | {rollback} | Debugging {title or 'current task'} | "
+                f"{summary or 'Inspecting the failing verification logs and preparing a recovery fix.'}"
+            )
+            return lines
+        lines.append(
+            "debugger | running | Debugging current task | Inspecting the failing verification logs and preparing a recovery fix."
+        )
+        return lines
+
     for block in reversed(read_jsonl_tail(context.paths.block_log_file, 12)):
         block_index = block.get("block_index", "?")
         status = block.get("status", "unknown")

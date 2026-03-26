@@ -1,6 +1,6 @@
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { codexUsageBuckets, commandLabel, rateLimitRemainingLabel, rateLimitWindowSummary, runtimeSummary, statusTone } from "../../utils";
+import { codexUsageBuckets, commandLabel, isDebuggingStatus, rateLimitRemainingLabel, rateLimitWindowSummary, runtimeSummary, statusTone } from "../../utils";
 
 function Stat({ label, value, tone = "neutral" }) {
   return (
@@ -18,10 +18,11 @@ export function DashboardView({ detail, planDraft, form, busy, modelPresets, mod
   const account = codexStatus.account || {};
   const usageBuckets = codexUsageBuckets(codexStatus, language);
   const pendingSteps = (planDraft?.steps || []).filter((step) => step.status !== "completed");
+  const projectStatus = detail?.project?.current_status || "idle";
   const activeStatus =
-    activeJob?.status === "running"
+    activeJob?.status === "running" && !isDebuggingStatus(projectStatus)
       ? displayStatus(`running:${commandLabel(activeJob.command, language)}`, language)
-      : displayStatus(detail?.project?.current_status || "idle", language);
+      : displayStatus(projectStatus, language);
 
   return (
     <section className="workspace-view">

@@ -1,6 +1,6 @@
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { commandLabel, statusTone, toolbarProgressCaption } from "../../utils";
+import { commandLabel, isDebuggingStatus, statusTone, toolbarProgressCaption } from "../../utils";
 
 export function IdeToolbar({
   projectDetail,
@@ -14,10 +14,14 @@ export function IdeToolbar({
   onRunPlan,
   onRunCloseout,
 }) {
-  const status = activeJob?.status === "running" ? "running" : projectDetail?.project?.current_status || "idle";
+  const projectStatus = projectDetail?.project?.current_status || "idle";
+  const status = activeJob?.status === "running" && !isDebuggingStatus(projectStatus) ? "running" : projectStatus;
   const projectName = projectDetail?.project?.display_name || projectDetail?.project?.slug || null;
   const { language, t } = useI18n();
-  const statusLabel = activeJob?.status === "running" ? commandLabel(activeJob.command, language) : displayStatus(status, language);
+  const statusLabel =
+    activeJob?.status === "running" && !isDebuggingStatus(projectStatus)
+      ? commandLabel(activeJob.command, language)
+      : displayStatus(status, language);
 
   return (
     <header className="ide-toolbar">

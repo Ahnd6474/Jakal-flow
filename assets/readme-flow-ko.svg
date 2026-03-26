@@ -1,83 +1,221 @@
-<svg width="1200" height="340" viewBox="0 0 1200 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="1440" height="980" viewBox="0 0 1440 980" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="30" y1="20" x2="1170" y2="320" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F7F3EA"/>
-      <stop offset="1" stop-color="#E6EEF7"/>
+    <linearGradient id="bg" x1="80" y1="60" x2="1360" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F4EFE6"/>
+      <stop offset="0.5" stop-color="#EEF3F8"/>
+      <stop offset="1" stop-color="#E7F1EE"/>
     </linearGradient>
-    <linearGradient id="dot1" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1D4ED8"/>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.94"/>
+      <stop offset="1" stop-color="#F8FBFD" stop-opacity="0.88"/>
+    </linearGradient>
+    <linearGradient id="accentBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0F4C81"/>
       <stop offset="1" stop-color="#2563EB"/>
     </linearGradient>
-    <linearGradient id="dot2" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0F766E"/>
+    <linearGradient id="accentTeal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0F766E"/>
       <stop offset="1" stop-color="#14B8A6"/>
     </linearGradient>
-    <linearGradient id="dot3" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#7C3AED"/>
-      <stop offset="1" stop-color="#A855F7"/>
-    </linearGradient>
-    <linearGradient id="dot4" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#B45309"/>
+    <linearGradient id="accentAmber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#92400E"/>
       <stop offset="1" stop-color="#F59E0B"/>
     </linearGradient>
-    <linearGradient id="dot5" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#BE123C"/>
+    <linearGradient id="accentRose" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9F1239"/>
       <stop offset="1" stop-color="#F43F5E"/>
     </linearGradient>
-    <filter id="shadow" x="-30" y="-30" width="180" height="180" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <filter id="shadow" x="-80" y="-80" width="1600" height="1140" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
       <feFlood flood-opacity="0" result="BackgroundImageFix"/>
       <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
-      <feOffset dy="10"/>
-      <feGaussianBlur stdDeviation="12"/>
+      <feOffset dy="18"/>
+      <feGaussianBlur stdDeviation="20"/>
       <feColorMatrix type="matrix" values="0 0 0 0 0.0588 0 0 0 0 0.0941 0 0 0 0 0.1568 0 0 0 0.12 0"/>
       <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1"/>
       <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1" result="shape"/>
     </filter>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-      <path d="M0 0L10 5L0 10V0Z" fill="#475569"/>
+      <path d="M0 0L10 5L0 10V0Z" fill="#516173"/>
     </marker>
+    <style>
+      .title { font: 700 34px 'Segoe UI', 'Malgun Gothic', sans-serif; fill: #17202A; }
+      .subtitle { font: 500 15px 'Segoe UI', 'Malgun Gothic', sans-serif; fill: #536273; }
+      .section { font: 700 15px 'Segoe UI', 'Malgun Gothic', sans-serif; fill: #203040; letter-spacing: 0.08em; text-transform: uppercase; }
+      .cardTitle { font: 700 20px 'Segoe UI', 'Malgun Gothic', sans-serif; fill: #182431; }
+      .cardText { font: 500 14px 'Segoe UI', 'Malgun Gothic', sans-serif; fill: #506072; }
+      .cardTextOnDark { font: 500 14px 'Segoe UI', 'Malgun Gothic', sans-serif; fill: #FFFFFF; }
+      .small { font: 600 12px 'Segoe UI', 'Malgun Gothic', sans-serif; fill: #667789; }
+      .mono { font: 600 12px 'Consolas', 'Courier New', monospace; fill: #203040; }
+      .chip { font: 700 12px 'Segoe UI', 'Malgun Gothic', sans-serif; fill: #FFFFFF; }
+      .folder { font: 600 13px 'Consolas', 'Courier New', monospace; fill: #213243; }
+      .note { font: 600 12px 'Segoe UI', 'Malgun Gothic', sans-serif; fill: #314253; }
+      .outline { fill: url(#panel); stroke: #D7E0E8; stroke-width: 1.5; }
+      .thin { stroke: #AEBECD; stroke-width: 1.5; }
+      .arrow { stroke: #516173; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .dash { stroke-dasharray: 7 7; }
+    </style>
   </defs>
 
-  <rect x="20" y="20" width="1160" height="300" rx="28" fill="url(#bg)"/>
-  <text x="60" y="72" fill="#1F2937" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="28" font-weight="700">jakal-flow 타임라인</text>
-  <text x="60" y="100" fill="#4B5563" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="15">사용자는 repo와 장기 계획을 넣고, 시스템은 블록 단위로 반복하며 체크포인트에서 멈춥니다.</text>
+  <rect x="20" y="20" width="1400" height="940" rx="34" fill="url(#bg)"/>
 
-  <path d="M125 185H1075" stroke="#94A3B8" stroke-width="8" stroke-linecap="round" marker-end="url(#arrow)"/>
-  <path d="M880 185C915 130 980 130 1015 185" stroke="#94A3B8" stroke-width="5" stroke-dasharray="9 10" fill="none"/>
-  <text x="948" y="128" text-anchor="middle" fill="#64748B" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="14" font-weight="700">반복</text>
+  <circle cx="1280" cy="120" r="74" fill="#DCEBFF" fill-opacity="0.58"/>
+  <circle cx="180" cy="880" r="118" fill="#E2F2E7" fill-opacity="0.56"/>
+  <circle cx="1360" cy="860" r="92" fill="#FCE4D2" fill-opacity="0.7"/>
 
-  <g filter="url(#shadow)" transform="translate(110 145)">
-    <circle cx="0" cy="0" r="38" fill="url(#dot1)"/>
-    <text x="0" y="8" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="24" font-weight="700">1</text>
+  <text x="68" y="86" class="title">jakal-flow Architecture</text>
+  <text x="68" y="114" class="subtitle">Interfaces stay separate from orchestration. Each managed repository gets its own traceable workspace with safe revisions, logs, reports, and review checkpoints.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="52" y="150" width="1336" height="116" rx="26" class="outline"/>
   </g>
-  <text x="110" y="242" text-anchor="middle" fill="#1F2937" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="21" font-weight="700">입력</text>
-  <text x="110" y="264" text-anchor="middle" fill="#4B5563" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="13">repo / plan</text>
+  <text x="78" y="184" class="section">Entry Points</text>
 
-  <g filter="url(#shadow)" transform="translate(325 145)">
-    <circle cx="0" cy="0" r="38" fill="url(#dot2)"/>
-    <text x="0" y="8" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="24" font-weight="700">2</text>
-  </g>
-  <text x="325" y="242" text-anchor="middle" fill="#1F2937" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="21" font-weight="700">초기화</text>
-  <text x="325" y="264" text-anchor="middle" fill="#4B5563" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="13">clone + docs</text>
+  <rect x="78" y="202" width="248" height="42" rx="18" fill="url(#accentBlue)"/>
+  <text x="102" y="229" class="chip">CLI</text>
+  <text x="180" y="229" class="cardTextOnDark">init-repo / run / resume / status / report</text>
 
-  <g filter="url(#shadow)" transform="translate(540 145)">
-    <circle cx="0" cy="0" r="38" fill="url(#dot3)"/>
-    <text x="0" y="8" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="24" font-weight="700">3</text>
-  </g>
-  <text x="540" y="242" text-anchor="middle" fill="#1F2937" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="21" font-weight="700">계획</text>
-  <text x="540" y="264" text-anchor="middle" fill="#4B5563" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="13">mid task</text>
+  <rect x="374" y="202" width="314" height="42" rx="18" fill="url(#accentTeal)"/>
+  <text x="398" y="229" class="chip">Desktop UI</text>
+  <text x="509" y="229" class="cardTextOnDark">React + Tauri shell for setup, flow editing, run control, closeout</text>
 
-  <g filter="url(#shadow)" transform="translate(755 145)">
-    <circle cx="0" cy="0" r="38" fill="url(#dot4)"/>
-    <text x="0" y="8" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="24" font-weight="700">4</text>
-  </g>
-  <text x="755" y="242" text-anchor="middle" fill="#1F2937" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="21" font-weight="700">실행</text>
-  <text x="755" y="264" text-anchor="middle" fill="#4B5563" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="13">pass + test</text>
+  <rect x="738" y="202" width="278" height="42" rx="18" fill="url(#accentAmber)"/>
+  <text x="762" y="229" class="chip">Share Viewer</text>
+  <text x="883" y="229" class="cardTextOnDark">Read-only remote monitor served from the local share server</text>
 
-  <g filter="url(#shadow)" transform="translate(970 145)">
-    <circle cx="0" cy="0" r="38" fill="url(#dot5)"/>
-    <text x="0" y="8" text-anchor="middle" fill="white" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="24" font-weight="700">5</text>
+  <rect x="1064" y="202" width="290" height="42" rx="18" fill="url(#accentRose)"/>
+  <text x="1088" y="229" class="chip">Program Settings</text>
+  <text x="1223" y="229" class="cardTextOnDark">Model, sandbox, approval, verification defaults, parallel workers</text>
+
+  <g filter="url(#shadow)">
+    <rect x="52" y="302" width="320" height="238" rx="28" class="outline"/>
+    <rect x="406" y="302" width="628" height="398" rx="28" class="outline"/>
+    <rect x="1068" y="302" width="320" height="398" rx="28" class="outline"/>
   </g>
-  <text x="970" y="242" text-anchor="middle" fill="#1F2937" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="21" font-weight="700">체크포인트</text>
-  <text x="970" y="264" text-anchor="middle" fill="#4B5563" font-family="'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" font-size="13">승인 / push</text>
+
+  <text x="78" y="336" class="section">Control Layer</text>
+  <text x="432" y="336" class="section">Orchestration Core</text>
+  <text x="1094" y="336" class="section">External Systems</text>
+
+  <rect x="80" y="360" width="264" height="60" rx="18" fill="#F5FAFF" stroke="#CDE1F6" stroke-width="1.5"/>
+  <text x="102" y="388" class="cardTitle">Tauri Shell + React Screens</text>
+  <text x="102" y="409" class="cardText">Project setup, plan editor, run controls, checkpoint approval, share-link actions.</text>
+
+  <rect x="80" y="438" width="264" height="62" rx="18" fill="#F4FFFD" stroke="#C8EEE6" stroke-width="1.5"/>
+  <text x="102" y="466" class="cardTitle">ui_bridge.py</text>
+  <text x="102" y="487" class="cardText">JSON bridge that turns desktop events into orchestrator commands and reloads project state.</text>
+
+  <rect x="80" y="518" width="264" height="62" rx="18" fill="#FFF9F1" stroke="#F7DFC1" stroke-width="1.5"/>
+  <text x="102" y="546" class="cardTitle">share_server.py + public_tunnel.py</text>
+  <text x="102" y="567" class="cardText">Serve masked live status, optional public URL, and temporary read-only sessions.</text>
+
+  <rect x="432" y="360" width="576" height="84" rx="22" fill="#EEF5FF" stroke="#CFE0F7" stroke-width="1.5"/>
+  <text x="458" y="392" class="cardTitle">orchestrator.py</text>
+  <text x="458" y="414" class="cardText">Owns plan execution, safe revision tracking, block retries, rollback, checkpoint flow, serial runs, parallel batches, and closeout.</text>
+  <rect x="886" y="376" width="102" height="28" rx="14" fill="url(#accentBlue)"/>
+  <text x="906" y="394" class="chip">safe revision</text>
+  <rect x="886" y="410" width="102" height="28" rx="14" fill="url(#accentRose)"/>
+  <text x="914" y="428" class="chip">rollback</text>
+
+  <rect x="432" y="466" width="178" height="82" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="454" y="495" class="cardTitle">planning.py</text>
+  <text x="454" y="516" class="cardText">Saved plan, mid-term plan, execution prompts, scope guard, DAG-ready steps.</text>
+
+  <rect x="630" y="466" width="178" height="82" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="652" y="495" class="cardTitle">codex_runner.py</text>
+  <text x="652" y="516" class="cardText">Runs Codex non-interactively, stores prompts, output, events, diagnostics.</text>
+
+  <rect x="828" y="466" width="178" height="82" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="850" y="495" class="cardTitle">git_ops.py</text>
+  <text x="850" y="516" class="cardText">Clone, commit, push, worktree setup, cherry-pick, reset, clean, conflict handling.</text>
+
+  <rect x="432" y="566" width="178" height="82" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="454" y="595" class="cardTitle">workspace.py</text>
+  <text x="454" y="616" class="cardText">Maps repository identity to an isolated project root under the managed workspace.</text>
+
+  <rect x="630" y="566" width="178" height="82" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="652" y="595" class="cardTitle">memory.py + reporting.py</text>
+  <text x="652" y="616" class="cardText">Success and failure memory, block reviews, status reports, PR-ready failure bundles.</text>
+
+  <rect x="828" y="566" width="178" height="82" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="850" y="595" class="cardTitle">models.py + utils.py</text>
+  <text x="850" y="616" class="cardText">Typed state, runtime settings, JSONL helpers, timestamps, normalization utilities.</text>
+
+  <rect x="1094" y="360" width="268" height="72" rx="18" fill="#F4F8FF" stroke="#D2DEF2" stroke-width="1.5"/>
+  <text x="1116" y="389" class="cardTitle">Codex CLI</text>
+  <text x="1116" y="410" class="cardText">Prompt execution with event streams and usage telemetry.</text>
+
+  <rect x="1094" y="450" width="268" height="72" rx="18" fill="#FFF8F2" stroke="#F3D8BC" stroke-width="1.5"/>
+  <text x="1116" y="479" class="cardTitle">Managed Git Repository</text>
+  <text x="1116" y="500" class="cardText">Repo root used for code edits, test commands, commits, and safe reset targets.</text>
+
+  <rect x="1094" y="540" width="268" height="72" rx="18" fill="#F5FBF7" stroke="#D0E9D7" stroke-width="1.5"/>
+  <text x="1116" y="569" class="cardTitle">GitHub / Remote Origin</text>
+  <text x="1116" y="590" class="cardText">Push safe commits, detect PR context, and post failure comments when allowed.</text>
+
+  <rect x="1094" y="630" width="268" height="72" rx="18" fill="#FFF3F5" stroke="#F4D4DC" stroke-width="1.5"/>
+  <text x="1116" y="659" class="cardTitle">Browser / Tunnel Endpoint</text>
+  <text x="1116" y="680" class="cardText">Temporary read-only monitoring via local host, reverse proxy, or Quick Tunnel.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="52" y="736" width="1336" height="188" rx="28" class="outline"/>
+  </g>
+  <text x="78" y="770" class="section">Per-Project Workspace</text>
+  <text x="78" y="794" class="cardText">The core works against an isolated project root, not the global app state. Every repository keeps its own docs, state, memory, logs, and reports.</text>
+
+  <rect x="84" y="822" width="214" height="74" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="106" y="852" class="cardTitle">repo/</text>
+  <text x="106" y="873" class="cardText">Working tree, test command target, local git identity.</text>
+
+  <rect x="318" y="822" width="214" height="74" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="340" y="852" class="cardTitle">docs/</text>
+  <text x="340" y="873" class="cardText">PLAN, MID_TERM_PLAN, SCOPE_GUARD, BLOCK_REVIEW, CLOSEOUT_REPORT.</text>
+
+  <rect x="552" y="822" width="214" height="74" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="574" y="852" class="cardTitle">memory/</text>
+  <text x="574" y="873" class="cardText">success_patterns.jsonl, failure_patterns.jsonl, task_summaries.jsonl.</text>
+
+  <rect x="786" y="822" width="214" height="74" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="808" y="852" class="cardTitle">logs/</text>
+  <text x="808" y="873" class="cardText">passes.jsonl, blocks.jsonl, test logs, UI events, block event files.</text>
+
+  <rect x="1020" y="822" width="164" height="74" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="1042" y="852" class="cardTitle">reports/</text>
+  <text x="1042" y="873" class="cardText">latest_report, failure bundle, optional Word closeout.</text>
+
+  <rect x="1204" y="822" width="158" height="74" rx="18" fill="#FFFFFF" stroke="#D8E3ED" stroke-width="1.5"/>
+  <text x="1226" y="852" class="cardTitle">state/</text>
+  <text x="1226" y="873" class="cardText">loop state, checkpoints, UI control, share sessions.</text>
+
+  <path d="M210 244V290" class="arrow"/>
+  <path d="M532 244V290" class="arrow"/>
+  <path d="M876 244V290" class="arrow"/>
+  <path d="M1209 244V290" class="arrow"/>
+
+  <path d="M344 469H404" class="arrow"/>
+  <path d="M344 550H404" class="arrow"/>
+  <path d="M610 507H630" class="thin"/>
+  <path d="M808 507H828" class="thin"/>
+  <path d="M610 607H630" class="thin"/>
+  <path d="M808 607H828" class="thin"/>
+
+  <path d="M1008 402H1080" class="arrow"/>
+  <path d="M1008 507H1080" class="arrow"/>
+  <path d="M1008 607H1080" class="arrow"/>
+  <path d="M1230 702V808" class="arrow"/>
+  <path d="M720 700V808" class="arrow"/>
+
+  <path d="M1088 730C1040 760 1008 774 952 808" class="arrow dash"/>
+  <path d="M286 730C354 760 420 780 510 808" class="arrow dash"/>
+
+  <rect x="86" y="286" width="142" height="26" rx="13" fill="url(#accentBlue)"/>
+  <text x="114" y="303" class="chip">commands</text>
+  <rect x="470" y="710" width="148" height="28" rx="14" fill="url(#accentTeal)"/>
+  <text x="492" y="728" class="chip">serial or DAG parallel</text>
+  <rect x="644" y="710" width="136" height="28" rx="14" fill="url(#accentAmber)"/>
+  <text x="667" y="728" class="chip">checkpoint review</text>
+  <rect x="806" y="710" width="134" height="28" rx="14" fill="url(#accentRose)"/>
+  <text x="833" y="728" class="chip">failure bundle</text>
+
+  <text x="1142" y="728" class="small">Share server reads masked status from workspace state and logs.</text>
+  <text x="80" y="944" class="note">Design intent: UI, orchestration, storage, git integration, and remote monitoring stay decoupled so the system remains maintainable while preserving rollback and traceability.</text>
 </svg>
