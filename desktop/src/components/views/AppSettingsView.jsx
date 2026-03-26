@@ -56,6 +56,15 @@ export function AppSettingsView({
               />
               <span>{t("option.lightMode")}</span>
             </label>
+            <label className="choice-radio">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.developer_mode)}
+                onChange={(event) => onChangeSettings((current) => ({ ...current, developer_mode: event.target.checked }))}
+                disabled={busy}
+              />
+              <span>{t("option.developerMode")}</span>
+            </label>
           </div>
         </div>
 

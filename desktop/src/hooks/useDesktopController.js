@@ -58,10 +58,7 @@ export function useDesktopController() {
   });
 
   const [centerTab, setCenterTab] = usePersistentState("codex-auto:center-tab", "run");
-  const [bottomTab, setBottomTab] = usePersistentState("codex-auto:bottom-tab", "json");
   const [sidebarTab, setSidebarTab] = usePersistentState("codex-auto:sidebar-tab", "projects");
-  const [bottomCollapsed, setBottomCollapsed] = usePersistentState("codex-auto:bottom-collapsed", false);
-  const [bottomHeight, setBottomHeight] = usePersistentState("codex-auto:bottom-height", 250);
   const [projectFilter, setProjectFilter] = usePersistentState("codex-auto:project-filter", "");
   const [workspaceFilter, setWorkspaceFilter] = usePersistentState("codex-auto:workspace-filter", "");
   const defaultRuntime = useMemo(() => applyProgramSettings(baseRuntime, storedProgramSettings), [baseRuntime, storedProgramSettings]);
@@ -83,6 +80,12 @@ export function useDesktopController() {
   }, [projectFilter, projects]);
 
   useEffect(() => {
+    if (!programSettings?.developer_mode && (centerTab === "reports" || centerTab === "history")) {
+      setCenterTab("dashboard");
+    }
+  }, [centerTab, programSettings?.developer_mode, setCenterTab]);
+
+  useEffect(() => {
     if (centerTab === "overview") {
       setCenterTab("run");
     }
@@ -101,7 +104,7 @@ export function useDesktopController() {
     if (sidebarTab === "workspace" || sidebarTab === "plans") {
       return true;
     }
-    return !bottomCollapsed && bottomTab === "tokens";
+    return false;
   }
 
   async function fetchProjectDetail(repoId, options = {}) {
@@ -280,7 +283,7 @@ export function useDesktopController() {
     async function loadExpandedProjectDetail() {
       try {
         const detail = await fetchProjectDetail(selectedProjectId, {
-          refreshCodexStatus: centerTab === "dashboard" || (!bottomCollapsed && bottomTab === "tokens"),
+          refreshCodexStatus: centerTab === "dashboard",
           detailLevel: "full",
         });
         if (cancelled) {
@@ -313,8 +316,6 @@ export function useDesktopController() {
     };
   }, [
     activeJobId,
-    bottomCollapsed,
-    bottomTab,
     centerTab,
     loadingProjectId,
     pendingAction,
@@ -625,7 +626,6 @@ export function useDesktopController() {
       setActiveJobId(job.id);
       setActiveJob(job);
       setCenterTab("run");
-      setBottomTab("json");
       setMessage(
         messagePayload(
           "info",
@@ -925,10 +925,7 @@ export function useDesktopController() {
     message,
     shareSettings,
     centerTab,
-    bottomTab,
     sidebarTab,
-    bottomCollapsed,
-    bottomHeight,
     projectFilter,
     workspaceFilter,
     planDirty,
@@ -938,10 +935,7 @@ export function useDesktopController() {
     setSelectedStepId,
     setProgramSettings,
     setCenterTab,
-    setBottomTab,
     setSidebarTab,
-    setBottomCollapsed,
-    setBottomHeight,
     setProjectFilter,
     setWorkspaceFilter,
     setShareSettings,
