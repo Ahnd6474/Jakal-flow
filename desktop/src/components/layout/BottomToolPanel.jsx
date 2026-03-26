@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { statusTone } from "../../utils";
 
 function ToolTab({ value, activeTab, onChange, label }) {
@@ -12,6 +13,7 @@ export function BottomToolPanel({ activeTab, onChangeTab, data }) {
   const tokenUsage = data?.token_usage || {};
   const gitStatus = data?.git_status || {};
   const testRuns = data?.test_runs || [];
+  const serializedEventJson = useMemo(() => JSON.stringify(data?.event_json || {}, null, 2), [data?.event_json]);
 
   return (
     <section className="tool-window">
@@ -26,7 +28,7 @@ export function BottomToolPanel({ activeTab, onChangeTab, data }) {
 
       {activeTab === "json" ? (
         <div className="tool-window__body tool-window__body--log">
-          <pre>{JSON.stringify(data?.event_json || {}, null, 2)}</pre>
+          <pre>{serializedEventJson}</pre>
         </div>
       ) : null}
 

@@ -260,6 +260,18 @@ fn run_bridge_command(
     )
 }
 
+async fn run_bridge_command_async(
+    command: String,
+    payload: Option<Value>,
+    workspace_root: Option<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_bridge_command(&command, payload, workspace_root)
+    })
+    .await
+    .map_err(|error| format!("Bridge task join error: {error}"))?
+}
+
 fn register_job_start(state: &AppState, command: &str) -> Result<JobSnapshot, String> {
     let command = normalize_bridge_command(command)?;
     let mut jobs = state
@@ -325,12 +337,12 @@ fn list_job_snapshots(state: &AppState) -> Vec<JobSnapshot> {
 }
 
 #[tauri::command]
-fn bridge_request(
+async fn bridge_request(
     command: String,
     payload: Option<Value>,
     workspace_root: Option<String>,
 ) -> Result<Value, String> {
-    run_bridge_command(&command, payload, workspace_root)
+    run_bridge_command_async(command, payload, workspace_root).await
 }
 
 #[tauri::command]

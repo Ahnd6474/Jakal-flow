@@ -1,4 +1,8 @@
+import { useMemo } from "react";
+
 export function ReportsView({ reports }) {
+  const serializedLatestReport = useMemo(() => JSON.stringify(reports?.latest_report_json || {}, null, 2), [reports?.latest_report_json]);
+
   return (
     <section className="workspace-view">
       <div className="view-header">
@@ -20,7 +24,7 @@ export function ReportsView({ reports }) {
           <div className="content-card__header">
             <strong>Latest Report JSON</strong>
           </div>
-          <pre>{JSON.stringify(reports?.latest_report_json || {}, null, 2)}</pre>
+          <pre>{serializedLatestReport}</pre>
         </div>
       </div>
 

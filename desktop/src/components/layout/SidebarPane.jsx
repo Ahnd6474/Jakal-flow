@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { statusTone } from "../../utils";
 
 function SidebarSectionTabs({ activeTab, onChange }) {
@@ -24,8 +24,7 @@ function SidebarSectionTabs({ activeTab, onChange }) {
   );
 }
 
-function filterTree(node, query) {
-  const normalized = query.trim().toLowerCase();
+function filterTree(node, normalizedQuery) {
   const sortedChildren = [...(node.children || [])].sort((left, right) => {
     const leftFolder = left.kind === "dir" || left.kind === "directory" || Boolean((left.children || []).length);
     const rightFolder = right.kind === "dir" || right.kind === "directory" || Boolean((right.children || []).length);
@@ -34,16 +33,17 @@ function filterTree(node, query) {
     }
     return String(left.label || "").localeCompare(String(right.label || ""));
   });
-  if (!normalized) {
+  if (!normalizedQuery) {
     return {
       ...node,
       children: sortedChildren,
     };
   }
   const children = sortedChildren
-    .map((child) => filterTree(child, normalized))
+    .map((child) => filterTree(child, normalizedQuery))
     .filter(Boolean);
-  const selfMatch = node.label.toLowerCase().includes(normalized) || String(node.path || "").toLowerCase().includes(normalized);
+  const selfMatch =
+    node.label.toLowerCase().includes(normalizedQuery) || String(node.path || "").toLowerCase().includes(normalizedQuery);
   if (selfMatch || children.length) {
     return {
       ...node,
@@ -107,7 +107,10 @@ export function SidebarPane({
   checkpoints,
   github,
 }) {
-  const filteredWorkspaceTree = (workspaceTree || []).map((node) => filterTree(node, workspaceFilter)).filter(Boolean);
+  const filteredWorkspaceTree = useMemo(() => {
+    const normalizedQuery = workspaceFilter.trim().toLowerCase();
+    return (workspaceTree || []).map((node) => filterTree(node, normalizedQuery)).filter(Boolean);
+  }, [workspaceFilter, workspaceTree]);
 
   return (
     <aside className="ide-sidebar">

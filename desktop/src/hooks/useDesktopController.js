@@ -110,60 +110,72 @@ export function useDesktopController() {
   useEffect(() => {
     let cancelled = false;
 
-    async function tick() {
+    async function tickJob() {
       try {
-        if (activeJobId) {
-          const job = await getBridgeJob(activeJobId);
-          if (cancelled || !job) {
-            return;
-          }
-          setActiveJob(job);
-          if (job.status !== "running") {
-            setActiveJobId("");
-            if (job.result?.project) {
-              setProjectDetail(job.result);
-              setProjectForm(projectFormFromDetail(job.result, defaultRuntime));
-              setPlanDraft(cloneValue(job.result.plan));
-              setSelectedStepId(firstSelectableStepId(job.result.plan));
-              setPlanDirty(false);
-            }
-            const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
-            if (!cancelled) {
-              setProjects(listing.projects || []);
-              setWorkspaceStats(listing.workspace || null);
-              setMessage(
-                job.status === "completed"
-                  ? messagePayload("success", `${commandLabel(job.command)} completed.`)
-                  : messagePayload("error", job.error || `${commandLabel(job.command)} failed.`),
-              );
-            }
-          }
+        const job = await getBridgeJob(activeJobId);
+        if (cancelled || !job) {
           return;
         }
-
-        if (selectedProjectId) {
-          const detail = await bridgeRequest("load-project", { repo_id: selectedProjectId }, workspaceRoot || null);
-          if (cancelled) {
-            return;
-          }
-          setProjectDetail(detail);
-          setProjectForm((current) => {
-            if (current.project_dir && planDirty) {
-              return current;
-            }
-            return projectFormFromDetail(detail, defaultRuntime);
-          });
-          if (!planDirty) {
-            setPlanDraft(cloneValue(detail.plan));
-            setSelectedStepId((current) => current || firstSelectableStepId(detail.plan));
-          }
+        setActiveJob(job);
+        if (job.status === "running") {
           return;
         }
-
+        setActiveJobId("");
+        if (job.result?.project) {
+          setProjectDetail(job.result);
+          setProjectForm(projectFormFromDetail(job.result, defaultRuntime));
+          setPlanDraft(cloneValue(job.result.plan));
+          setSelectedStepId(firstSelectableStepId(job.result.plan));
+          setPlanDirty(false);
+        }
         const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);
         if (!cancelled) {
           setProjects(listing.projects || []);
           setWorkspaceStats(listing.workspace || null);
+          setMessage(
+            job.status === "completed"
+              ? messagePayload("success", `${commandLabel(job.command)} completed.`)
+              : messagePayload("error", job.error || `${commandLabel(job.command)} failed.`),
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(messagePayload("error", String(error)));
+        }
+      }
+    }
+
+    if (!activeJobId) {
+      return undefined;
+    }
+
+    tickJob();
+    const handle = window.setInterval(tickJob, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+    };
+  }, [activeJobId, defaultRuntime, workspaceRoot]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSelectedProject() {
+      try {
+        const detail = await bridgeRequest("load-project", { repo_id: selectedProjectId }, workspaceRoot || null);
+        if (cancelled) {
+          return;
+        }
+        setProjectDetail(detail);
+        setProjectForm((current) => {
+          if (current.project_dir && planDirty) {
+            return current;
+          }
+          return projectFormFromDetail(detail, defaultRuntime);
+        });
+        if (!planDirty) {
+          setPlanDraft(cloneValue(detail.plan));
+          setSelectedStepId(firstSelectableStepId(detail.plan));
         }
       } catch (error) {
         if (!cancelled && !pendingAction) {
@@ -172,12 +184,18 @@ export function useDesktopController() {
       }
     }
 
-    const handle = window.setInterval(tick, 2000);
+    if (!selectedProjectId || activeJobId) {
+      return undefined;
+    }
+    if (projectDetail?.project?.repo_id === selectedProjectId) {
+      return undefined;
+    }
+
+    loadSelectedProject();
     return () => {
       cancelled = true;
-      window.clearInterval(handle);
     };
-  }, [activeJobId, defaultRuntime, pendingAction, planDirty, selectedProjectId, workspaceRoot]);
+  }, [activeJobId, defaultRuntime, pendingAction, planDirty, projectDetail?.project?.repo_id, selectedProjectId, workspaceRoot]);
 
   async function refreshProjects() {
     const listing = await bridgeRequest("list-projects", null, workspaceRoot || null);

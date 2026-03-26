@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { CenterWorkspace } from "./components/layout/CenterWorkspace";
 import { BottomToolPanel } from "./components/layout/BottomToolPanel";
 import { IdeToolbar } from "./components/layout/IdeToolbar";
@@ -12,26 +12,38 @@ function clamp(value, min, max) {
 
 export default function App() {
   const controller = useDesktopController();
+  const keybindingActionsRef = useRef({
+    setCenterTab: controller.setCenterTab,
+    setBottomCollapsed: controller.setBottomCollapsed,
+  });
+
+  useEffect(() => {
+    keybindingActionsRef.current = {
+      setCenterTab: controller.setCenterTab,
+      setBottomCollapsed: controller.setBottomCollapsed,
+    };
+  }, [controller.setBottomCollapsed, controller.setCenterTab]);
 
   useEffect(() => {
     function handleKeyDown(event) {
+      const { setCenterTab, setBottomCollapsed } = keybindingActionsRef.current;
       if (!(event.ctrlKey || event.metaKey)) {
         return;
       }
       if (event.key >= "1" && event.key <= "5") {
         const tabs = ["run", "dashboard", "reports", "history", "config"];
-        controller.setCenterTab(tabs[Number.parseInt(event.key, 10) - 1]);
+        setCenterTab(tabs[Number.parseInt(event.key, 10) - 1]);
         event.preventDefault();
       }
       if (event.key.toLowerCase() === "b") {
-        controller.setBottomCollapsed((current) => !current);
+        setBottomCollapsed((current) => !current);
         event.preventDefault();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [controller]);
+  }, []);
 
   const detail = controller.projectDetail;
 
@@ -71,10 +83,7 @@ export default function App() {
             workspaceFilter={controller.workspaceFilter}
             onProjectFilterChange={controller.setProjectFilter}
             onWorkspaceFilterChange={controller.setWorkspaceFilter}
-            onSelectProject={(repoId) => {
-              controller.setSelectedProjectId(repoId);
-              controller.loadProject(repoId);
-            }}
+            onSelectProject={controller.loadProject}
             onNewProject={controller.startNewProject}
             workspaceTree={detail?.workspace_tree}
             checkpoints={detail?.checkpoints}
