@@ -44,7 +44,7 @@ export function useDesktopController() {
   const [projectForm, setProjectForm] = useState(blankProjectForm(null));
   const [programSettings, setProgramSettings] = useState(programSettingsFromRuntime(null));
   const [projectDetail, setProjectDetail] = useState(null);
-  const [planDraft, setPlanDraft] = useState({ steps: [], project_prompt: "", closeout_status: "not_started" });
+  const [planDraft, setPlanDraft] = useState({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
   const [selectedStepId, setSelectedStepId] = usePersistentState("jakal-flow:selected-step", "");
   const [planDirty, setPlanDirty] = useState(false);
   const [pendingAction, setPendingAction] = useState("");
@@ -464,7 +464,7 @@ export function useDesktopController() {
     setProjectDetail(null);
     setSelectedProjectId("");
     setProjectForm(blankProjectForm(defaultRuntime));
-    setPlanDraft({ steps: [], project_prompt: "", closeout_status: "not_started" });
+    setPlanDraft({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
     setShareSettings({ bind_host: "127.0.0.1", public_base_url: "" });
     setCenterTab("config");
     setSidebarTab("projects");
@@ -562,7 +562,7 @@ export function useDesktopController() {
       setPlanDirty(false);
       setLoadingProjectId("");
       setProjectForm(blankProjectForm(defaultRuntime));
-      setPlanDraft({ steps: [], project_prompt: "", closeout_status: "not_started" });
+      setPlanDraft({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
       setShareSettings({ bind_host: "127.0.0.1", public_base_url: "" });
       if ((result.projects || []).length) {
         setSelectedProjectId(result.projects[0].repo_id);
@@ -595,7 +595,7 @@ export function useDesktopController() {
         setPlanDirty(false);
         setLoadingProjectId("");
         setProjectForm(blankProjectForm(defaultRuntime));
-        setPlanDraft({ steps: [], project_prompt: "", closeout_status: "not_started" });
+        setPlanDraft({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
         setShareSettings({ bind_host: "127.0.0.1", public_base_url: "" });
       }
       if ((result.projects || []).length && (!selectedProjectId || repoId === selectedProjectId)) {
@@ -622,7 +622,7 @@ export function useDesktopController() {
       setPlanDirty(false);
       setLoadingProjectId("");
       setProjectForm(blankProjectForm(defaultRuntime));
-      setPlanDraft({ steps: [], project_prompt: "", closeout_status: "not_started" });
+      setPlanDraft({ steps: [], project_prompt: "", execution_mode: "serial", closeout_status: "not_started" });
       setShareSettings({ bind_host: "127.0.0.1", public_base_url: "" });
       setMessage(messagePayload("success", translate(language, "message.allProjectsDeleted")));
     });
@@ -905,6 +905,7 @@ export function useDesktopController() {
       test_command: projectForm.runtime?.test_cmd || "python -m pytest",
       success_criteria: translate(language, "run.stepSuccessCriteria"),
       reasoning_effort: projectForm.runtime?.effort || "high",
+      parallel_group: "",
       status: "pending",
       notes: "",
     };

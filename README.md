@@ -64,8 +64,8 @@ The desktop app lets you:
 - start from a managed project screen with working directory, display name, GitHub connection mode, and verification command inputs
 - keep managed projects in a reusable list with saved status, summaries, and runtime settings
 - generate, edit, reorder, and persist execution-plan steps
-- run the remaining steps sequentially and inspect activity/snapshot traces
-- request stop-after-step and run closeout after all plan steps complete
+- choose serial or parallel execution for the remaining steps and inspect activity/snapshot traces
+- request stop-after-step and run a separate closeout block after all plan steps complete
 - generate a temporary read-only monitoring link, copy it, and revoke it from the desktop UI
 - keep the Python orchestration backend, workspace layout, logs, reports, and rollback behavior intact
 

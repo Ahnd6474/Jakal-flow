@@ -94,6 +94,8 @@ class UIBridgeTests(unittest.TestCase):
                 "max_blocks": "not-a-number",
                 "allow_push": "false",
                 "require_checkpoint_approval": "true",
+                "execution_mode": "PARALLEL",
+                "parallel_workers": "bogus",
                 "no_progress_limit": "-3",
                 "regression_limit": "bogus",
                 "empty_cycle_limit": 0,
@@ -106,6 +108,8 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.max_blocks, 5)
         self.assertFalse(runtime.allow_push)
         self.assertTrue(runtime.require_checkpoint_approval)
+        self.assertEqual(runtime.execution_mode, "parallel")
+        self.assertEqual(runtime.parallel_workers, 2)
         self.assertEqual(runtime.no_progress_limit, 1)
         self.assertEqual(runtime.regression_limit, 3)
         self.assertEqual(runtime.empty_cycle_limit, 1)
@@ -307,6 +311,8 @@ class UIBridgeTests(unittest.TestCase):
                     "model_preset": "high",
                     "effort": "high",
                     "test_cmd": "python -m pytest",
+                    "execution_mode": "parallel",
+                    "parallel_workers": 3,
                     "max_blocks": 4,
                 },
             }
@@ -326,6 +332,7 @@ class UIBridgeTests(unittest.TestCase):
                     "plan_title": "Desktop rollout",
                     "project_prompt": "Build the React and Tauri desktop app.",
                     "summary": "Deliver the desktop shell in small verified steps.",
+                    "execution_mode": "parallel",
                     "default_test_command": "python -m pytest",
                     "steps": [
                         {
@@ -336,6 +343,7 @@ class UIBridgeTests(unittest.TestCase):
                             "test_command": "python -m pytest",
                             "success_criteria": "The desktop bridge can load and save projects.",
                             "reasoning_effort": "medium",
+                            "parallel_group": "PG1",
                         },
                         {
                             "step_id": "custom-2",
@@ -345,6 +353,7 @@ class UIBridgeTests(unittest.TestCase):
                             "test_command": "python -m pytest",
                             "success_criteria": "The desktop app can render the plan flow.",
                             "reasoning_effort": "xhigh",
+                            "parallel_group": "PG1",
                         },
                     ],
                 },
@@ -360,6 +369,10 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(saved["plan"]["steps"][1]["step_id"], "ST2")
             self.assertEqual(saved["plan"]["steps"][0]["reasoning_effort"], "medium")
             self.assertEqual(saved["plan"]["steps"][1]["reasoning_effort"], "xhigh")
+            self.assertEqual(saved["plan"]["execution_mode"], "parallel")
+            self.assertEqual(saved["plan"]["steps"][0]["parallel_group"], "PG1")
+            self.assertEqual(saved["runtime"]["execution_mode"], "parallel")
+            self.assertEqual(saved["runtime"]["parallel_workers"], 3)
             self.assertEqual(saved["stats"]["total_steps"], 2)
 
             stop_payload = run_command(

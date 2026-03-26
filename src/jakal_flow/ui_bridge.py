@@ -264,11 +264,18 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         merged.get("checkpoint_interval_blocks", 1),
         default=1,
     )
+    merged["parallel_workers"] = coerce_positive_int(
+        merged.get("parallel_workers", 2),
+        default=2,
+    )
     merged["allow_push"] = coerce_bool(merged.get("allow_push", True), True)
     merged["require_checkpoint_approval"] = coerce_bool(
         merged.get("require_checkpoint_approval", False),
         False,
     )
+    merged["execution_mode"] = str(merged.get("execution_mode", "serial")).strip().lower()
+    if merged["execution_mode"] not in {"serial", "parallel"}:
+        merged["execution_mode"] = "serial"
     merged["test_cmd"] = str(merged.get("test_cmd", "python -m pytest")).strip() or "python -m pytest"
     merged["model"] = str(merged.get("model", "")).strip().lower()
     merged["model_preset"] = normalize_model_preset_id(str(merged.get("model_preset", "")), fallback="")
@@ -305,6 +312,8 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
 
 def parse_plan_state(payload: dict[str, Any]) -> ExecutionPlanState:
     state = ExecutionPlanState.from_dict(payload)
+    if "execution_mode" not in payload:
+        state.execution_mode = ""
     state.default_test_command = payload.get("default_test_command", state.default_test_command) or state.default_test_command
     return state
 
@@ -1061,13 +1070,68 @@ def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | No
         save_run_control(project, default_run_control())
         append_ui_event(project, "run-started", "Started running the remaining execution steps.")
         try:
-            for step in [item for item in saved.steps if item.status != "completed"]:
+            while True:
                 latest_project = orchestrator.local_project(project_dir)
                 if latest_project is None:
                     raise RuntimeError("The managed project could not be reloaded during execution.")
+                current_plan = orchestrator.load_execution_plan_state(latest_project)
+                batches = orchestrator.pending_execution_batches(current_plan)
+                if not batches:
+                    break
                 if stop_requested(latest_project):
                     append_ui_event(latest_project, "run-paused", "Paused before the next step because a stop was requested.")
                     break
+                batch = batches[0]
+                if (
+                    len(batch) > 1
+                    and str(current_plan.execution_mode).strip().lower() == "parallel"
+                    and runtime.parallel_workers > 1
+                ):
+                    step_ids = [item.step_id for item in batch]
+                    append_ui_event(
+                        latest_project,
+                        "batch-started",
+                        f"Running parallel batch: {', '.join(step_ids)}",
+                        {"step_ids": step_ids, "execution_mode": "parallel"},
+                    )
+                    for step in batch:
+                        append_ui_event(
+                            latest_project,
+                            "step-started",
+                            f"Running {step.step_id}: {step.title}",
+                            {"step_id": step.step_id, "title": step.title, "execution_mode": "parallel"},
+                        )
+                    project, saved, result_steps = orchestrator.run_parallel_execution_batch(
+                        project_dir=project_dir,
+                        runtime=runtime,
+                        step_ids=step_ids,
+                        branch=branch,
+                        origin_url=origin_url,
+                    )
+                    for result_step in result_steps:
+                        append_ui_event(
+                            project,
+                            "step-finished",
+                            f"{result_step.step_id} finished with status {result_step.status}.",
+                            {
+                                "step_id": result_step.step_id,
+                                "status": result_step.status,
+                                "commit_hash": result_step.commit_hash,
+                            },
+                        )
+                    append_ui_event(
+                        project,
+                        "batch-finished",
+                        f"Parallel batch finished for {', '.join(step_ids)}.",
+                        {
+                            "step_ids": step_ids,
+                            "statuses": {item.step_id: item.status for item in result_steps},
+                        },
+                    )
+                    if any(item.status != "completed" for item in result_steps):
+                        break
+                    continue
+                step = batch[0]
                 append_ui_event(
                     latest_project,
                     "step-started",

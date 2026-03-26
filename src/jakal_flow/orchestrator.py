@@ -438,6 +438,9 @@ class Orchestrator:
                 ordered_targets.append(step)
         if len(ordered_targets) < 2:
             raise RuntimeError("No remaining parallel batch steps were found.")
+        parallel_groups = {step.parallel_group.strip() for step in ordered_targets}
+        if "" in parallel_groups or len(parallel_groups) != 1:
+            raise RuntimeError("Parallel execution batch steps must share one non-empty parallel group.")
 
         batch_label = ", ".join(step.step_id for step in ordered_targets)
         batch_started_at = now_utc_iso()
@@ -473,7 +476,7 @@ class Orchestrator:
 
         reporter = Reporter(context)
         base_revision = context.metadata.current_safe_revision or self.git.current_revision(context.paths.repo_dir)
-        batch_token = f"{now_utc_iso().replace(':', '').replace('-', '')}-{uuid4().hex[:8]}"
+        batch_token = f"{now_utc_iso().replace(':', '').replace('-', '').replace('+', '').replace('T', 't')}-{uuid4().hex[:8]}"
         worker_results: list[dict[str, object]] = []
         merged_commit_hashes: list[str] = []
         group_test_result: TestRunResult | None = None
@@ -482,7 +485,8 @@ class Orchestrator:
         batch_summary = ""
 
         try:
-            with ThreadPoolExecutor(max_workers=self._parallel_worker_count(context.runtime.parallel_workers)) as executor:
+            worker_limit = min(len(ordered_targets), self._parallel_worker_count(context.runtime.parallel_workers))
+            with ThreadPoolExecutor(max_workers=worker_limit) as executor:
                 future_map = {
                     executor.submit(
                         self._run_parallel_step_worker,
@@ -515,7 +519,8 @@ class Orchestrator:
                     for result in worker_results:
                         worker_commit = str(result.get("commit_hash") or "").strip()
                         if not worker_commit:
-                            raise RuntimeError(f"{result.get('step_id')} completed without a commit to merge.")
+                            merged_commit_hashes.append("")
+                            continue
                         self.git.cherry_pick(context.paths.repo_dir, worker_commit)
                         merged_commit_hashes.append(self.git.current_revision(context.paths.repo_dir))
                 except Exception as exc:
@@ -529,10 +534,14 @@ class Orchestrator:
                         step.notes = batch_summary
                     context.metadata.current_status = "failed"
                 else:
-                    if merged_commit_hashes:
+                    verification_block_index = max(1, context.loop_state.block_index + len(ordered_targets))
+                    if any(commit_hash.strip() for commit_hash in merged_commit_hashes):
                         close_block_index = max(1, context.loop_state.block_index + len(ordered_targets))
                         group_test_result = self._run_test_command(context, close_block_index, "parallel-batch-pass")
                         reporter.save_test_result(close_block_index, "parallel-batch-pass", group_test_result)
+                    else:
+                        group_test_result = self._run_test_command(context, verification_block_index, "parallel-batch-pass")
+                        reporter.save_test_result(verification_block_index, "parallel-batch-pass", group_test_result)
                     if group_test_result and group_test_result.returncode != 0:
                         self.git.hard_reset(context.paths.repo_dir, base_revision)
                         rollback_status = "rolled_back_to_safe_revision"
@@ -548,11 +557,13 @@ class Orchestrator:
                         for index, step in enumerate(ordered_targets):
                             step.status = "completed"
                             step.completed_at = now_utc_iso()
-                            step.commit_hash = merged_commit_hashes[index] if index < len(merged_commit_hashes) else None
+                            merged_commit = merged_commit_hashes[index] if index < len(merged_commit_hashes) else ""
+                            step.commit_hash = merged_commit or None
                             worker_note = str(worker_results[index].get("test_summary") or "").strip()
                             step.notes = worker_note if worker_note else batch_summary
-                        if merged_commit_hashes:
-                            last_commit = merged_commit_hashes[-1]
+                        merged_commits = [item for item in merged_commit_hashes if item]
+                        if merged_commits:
+                            last_commit = merged_commits[-1]
                             context.metadata.current_safe_revision = last_commit
                             context.loop_state.current_safe_revision = last_commit
                             context.loop_state.last_commit_hash = last_commit
@@ -621,6 +632,244 @@ class Orchestrator:
             self.workspace.save_project(context)
             for result in worker_results:
                 self._cleanup_parallel_worker(context.paths.repo_dir, result)
+
+    def _normalize_execution_mode(self, value: str | None) -> str:
+        normalized = str(value or "").strip().lower()
+        return "parallel" if normalized == "parallel" else "serial"
+
+    def _parallel_worker_count(self, value: object) -> int:
+        try:
+            parsed = int(str(value).strip())
+        except (TypeError, ValueError):
+            return 2
+        return max(1, min(parsed, 8))
+
+    def _parallel_worker_slug(self, step: ExecutionStep, worker_index: int) -> str:
+        raw = f"{worker_index:02d}-{step.step_id.strip().lower() or 'step'}"
+        return "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in raw).strip("-") or f"worker-{worker_index:02d}"
+
+    def _build_parallel_worker_runtime(
+        self,
+        runtime: RuntimeOptions,
+        step: ExecutionStep,
+    ) -> RuntimeOptions:
+        fallback_effort = normalize_reasoning_effort(runtime.effort, fallback="high")
+        return RuntimeOptions(
+            **{
+                **runtime.to_dict(),
+                "test_cmd": step.test_command.strip() or runtime.test_cmd,
+                "effort": normalize_reasoning_effort(step.reasoning_effort, fallback=fallback_effort),
+                "execution_mode": "serial",
+                "parallel_workers": 1,
+                "max_blocks": 1,
+                "allow_push": False,
+                "require_checkpoint_approval": False,
+                "checkpoint_interval_blocks": 1,
+            }
+        )
+
+    def _build_parallel_worker_paths(
+        self,
+        context: ProjectContext,
+        batch_token: str,
+        worker_slug: str,
+        worktree_dir: Path,
+    ) -> ProjectPaths:
+        worker_root = context.paths.project_root / ".parallel_runs" / batch_token / worker_slug
+        docs_dir = worker_root / "docs"
+        memory_dir = worker_root / "memory"
+        logs_dir = worker_root / "logs"
+        reports_dir = worker_root / "reports"
+        state_dir = worker_root / "state"
+        for directory in [worker_root, docs_dir, memory_dir, logs_dir, reports_dir, state_dir]:
+            ensure_dir(directory)
+        return ProjectPaths(
+            workspace_root=context.paths.workspace_root,
+            projects_root=context.paths.projects_root,
+            project_root=worker_root,
+            repo_dir=worktree_dir,
+            docs_dir=docs_dir,
+            memory_dir=memory_dir,
+            logs_dir=logs_dir,
+            reports_dir=reports_dir,
+            state_dir=state_dir,
+            metadata_file=worker_root / "metadata.json",
+            project_config_file=worker_root / "project_config.json",
+            loop_state_file=state_dir / "LOOP_STATE.json",
+            plan_file=docs_dir / "PLAN.md",
+            mid_term_plan_file=docs_dir / "MID_TERM_PLAN.md",
+            scope_guard_file=docs_dir / "SCOPE_GUARD.md",
+            active_task_file=docs_dir / "ACTIVE_TASK.md",
+            block_review_file=docs_dir / "BLOCK_REVIEW.md",
+            checkpoint_timeline_file=docs_dir / "CHECKPOINT_TIMELINE.md",
+            research_notes_file=docs_dir / "RESEARCH_NOTES.md",
+            attempt_history_file=docs_dir / "attempt_history.md",
+            success_patterns_file=memory_dir / "success_patterns.jsonl",
+            failure_patterns_file=memory_dir / "failure_patterns.jsonl",
+            task_summaries_file=memory_dir / "task_summaries.jsonl",
+            pass_log_file=logs_dir / "passes.jsonl",
+            block_log_file=logs_dir / "blocks.jsonl",
+            checkpoint_state_file=state_dir / "CHECKPOINTS.json",
+            execution_plan_file=state_dir / "EXECUTION_PLAN.json",
+            ui_control_file=state_dir / "UI_RUN_CONTROL.json",
+            ui_event_log_file=logs_dir / "ui_events.jsonl",
+            execution_flow_svg_file=docs_dir / "EXECUTION_FLOW.svg",
+            closeout_report_file=docs_dir / "CLOSEOUT_REPORT.md",
+            closeout_report_docx_file=reports_dir / "CLOSEOUT_REPORT.docx",
+        )
+
+    def _copy_parallel_worker_support_files(self, context: ProjectContext, worker_paths: ProjectPaths) -> None:
+        for source_dir, target_dir in [
+            (context.paths.docs_dir, worker_paths.docs_dir),
+            (context.paths.memory_dir, worker_paths.memory_dir),
+            (context.paths.state_dir, worker_paths.state_dir),
+        ]:
+            ensure_dir(target_dir)
+            if source_dir.exists():
+                shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+
+    def _build_parallel_worker_context(
+        self,
+        context: ProjectContext,
+        runtime: RuntimeOptions,
+        step: ExecutionStep,
+        base_revision: str,
+        batch_token: str,
+        worker_index: int,
+    ) -> dict[str, object]:
+        worker_slug = self._parallel_worker_slug(step, worker_index)
+        worker_root = context.paths.project_root / ".parallel_runs" / batch_token / worker_slug
+        worktree_dir = worker_root / "repo"
+        branch_name = f"jakal-flow-parallel-{batch_token}-{worker_slug}"
+        self.git.add_worktree(context.paths.repo_dir, worktree_dir, branch_name, base_revision)
+        worker_paths = self._build_parallel_worker_paths(context, batch_token, worker_slug, worktree_dir)
+        self._copy_parallel_worker_support_files(context, worker_paths)
+        worker_runtime = self._build_parallel_worker_runtime(runtime, step)
+        worker_metadata = RepoMetadata(
+            repo_id=f"{context.metadata.repo_id}:{step.step_id.lower()}",
+            slug=f"{context.metadata.slug}-{worker_slug}",
+            repo_url=context.metadata.repo_url,
+            branch=branch_name,
+            project_root=worker_paths.project_root,
+            repo_path=worktree_dir,
+            created_at=now_utc_iso(),
+            last_run_at=None,
+            current_status="parallel_worker_ready",
+            current_safe_revision=base_revision,
+            repo_kind=context.metadata.repo_kind,
+            display_name=f"{context.metadata.display_name or context.metadata.slug} [{step.step_id}]",
+            origin_url=context.metadata.origin_url,
+        )
+        worker_loop_state = LoopState(
+            repo_id=worker_metadata.repo_id,
+            repo_slug=worker_metadata.slug,
+            current_safe_revision=base_revision,
+        )
+        worker_context = ProjectContext(
+            metadata=worker_metadata,
+            runtime=worker_runtime,
+            paths=worker_paths,
+            loop_state=worker_loop_state,
+        )
+        self._ensure_project_documents(worker_context)
+        write_json(worker_paths.metadata_file, worker_metadata.to_dict())
+        write_json(worker_paths.project_config_file, worker_runtime.to_dict())
+        write_json(worker_paths.loop_state_file, worker_loop_state.to_dict())
+        return {
+            "branch_name": branch_name,
+            "worker_root": worker_root,
+            "worker_context": worker_context,
+            "worktree_dir": worktree_dir,
+        }
+
+    def _run_parallel_step_worker(
+        self,
+        context: ProjectContext,
+        runtime: RuntimeOptions,
+        step: ExecutionStep,
+        base_revision: str,
+        batch_token: str,
+        worker_index: int,
+    ) -> dict[str, object]:
+        worker_slug = self._parallel_worker_slug(step, worker_index)
+        worker_root = context.paths.project_root / ".parallel_runs" / batch_token / worker_slug
+        worktree_dir = worker_root / "repo"
+        branch_name = f"jakal-flow-parallel-{batch_token}-{worker_slug}"
+        worker_result: dict[str, object] = {
+            "step_id": step.step_id,
+            "status": "failed",
+            "notes": "Parallel worker did not complete.",
+            "commit_hash": None,
+            "changed_files": [],
+            "branch_name": branch_name,
+            "worktree_dir": worktree_dir,
+            "worker_root": worker_root,
+            "pass_log": {},
+            "block_log": {},
+            "test_summary": "",
+        }
+        try:
+            worker_info = self._build_parallel_worker_context(context, runtime, step, base_revision, batch_token, worker_index)
+            worker_context = worker_info["worker_context"]
+            if not isinstance(worker_context, ProjectContext):
+                raise RuntimeError("Parallel worker context could not be created.")
+            candidate = CandidateTask(
+                candidate_id=step.step_id,
+                title=step.title,
+                rationale=self._execution_step_rationale(step, worker_context.runtime.test_cmd),
+                plan_refs=[step.step_id],
+                score=1.0,
+            )
+            runner = CodexRunner(worker_context.runtime.codex_path)
+            memory = MemoryStore(worker_context.paths)
+            reporter = Reporter(worker_context)
+            self._run_single_block(
+                context=worker_context,
+                runner=runner,
+                memory=memory,
+                reporter=reporter,
+                candidate_override=candidate,
+                execution_step_override=deepcopy(step),
+            )
+            latest_block = read_last_jsonl(worker_context.paths.block_log_file) or {}
+            latest_pass = read_last_jsonl(worker_context.paths.pass_log_file) or {}
+            changed_files = latest_block.get("changed_files", latest_pass.get("changed_files", []))
+            commit_hashes = latest_block.get("commit_hashes", [])
+            commit_hash = None
+            if isinstance(commit_hashes, list) and commit_hashes:
+                commit_hash = str(commit_hashes[-1]).strip() or None
+            worker_result.update(
+                {
+                    "status": "completed" if latest_block.get("status") == "completed" else "failed",
+                    "notes": str(latest_block.get("test_summary") or "").strip() or "Parallel worker finished.",
+                    "commit_hash": commit_hash,
+                    "changed_files": [
+                        str(item).strip()
+                        for item in changed_files
+                        if str(item).strip()
+                    ]
+                    if isinstance(changed_files, list)
+                    else [],
+                    "pass_log": latest_pass,
+                    "block_log": latest_block,
+                    "test_summary": str(latest_block.get("test_summary") or "").strip(),
+                }
+            )
+        except Exception as exc:
+            worker_result["status"] = "failed"
+            worker_result["notes"] = str(exc).strip() or "Parallel worker failed."
+        return worker_result
+
+    def _cleanup_parallel_worker(self, repo_dir: Path, worker_result: dict[str, object]) -> None:
+        worktree_dir = worker_result.get("worktree_dir")
+        branch_name = str(worker_result.get("branch_name") or "").strip()
+        worker_root = worker_result.get("worker_root")
+        if isinstance(worktree_dir, Path):
+            self.git.remove_worktree(repo_dir, worktree_dir, force=True)
+        if branch_name:
+            self.git.delete_branch(repo_dir, branch_name, force=True)
+        if isinstance(worker_root, Path):
+            shutil.rmtree(worker_root, ignore_errors=True)
 
     def run_execution_closeout(
         self,

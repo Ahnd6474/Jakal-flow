@@ -59,6 +59,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
               "display_description": "Expose the new flag to users.",
               "codex_description": "Inspect the CLI parser, add the flag, and cover it with tests.",
               "reasoning_effort": "medium",
+              "parallel_group": "PG1",
               "success_criteria": "CLI parsing succeeds."
             },
             {
@@ -81,6 +82,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("CLI parser", steps[0].codex_description)
         self.assertEqual(steps[0].test_command, "python -m unittest")
         self.assertEqual(steps[0].reasoning_effort, "medium")
+        self.assertEqual(steps[0].parallel_group, "PG1")
         self.assertEqual(steps[1].step_id, "ST2")
         self.assertEqual(steps[1].test_command, "python -m unittest")
         self.assertEqual(steps[1].reasoning_effort, "high")
@@ -150,15 +152,18 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 "step_id": "ST1",
                 "title": "Reasoning task",
                 "reasoning_effort": "xhigh",
+                "parallel_group": "PG2",
             }
         )
 
         self.assertEqual(step.reasoning_effort, "xhigh")
+        self.assertEqual(step.parallel_group, "PG2")
 
     def test_execution_plan_state_reads_closeout_fields(self) -> None:
         state = ExecutionPlanState.from_dict(
             {
                 "plan_title": "demo",
+                "execution_mode": "parallel",
                 "closeout_status": "completed",
                 "closeout_started_at": "2026-01-01T00:00:00+00:00",
                 "closeout_completed_at": "2026-01-01T01:00:00+00:00",
@@ -168,9 +173,61 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             }
         )
 
+        self.assertEqual(state.execution_mode, "parallel")
         self.assertEqual(state.closeout_status, "completed")
         self.assertEqual(state.closeout_commit_hash, "abc123")
         self.assertEqual(state.closeout_notes, "final tests passed")
+
+    def test_pending_execution_batches_groups_contiguous_parallel_steps(self) -> None:
+        orchestrator = Orchestrator(Path.cwd() / ".tmp_pending_batches_workspace")
+        plan_state = ExecutionPlanState(
+            execution_mode="parallel",
+            steps=[
+                ExecutionStep(step_id="ST1", title="A", parallel_group="PG1"),
+                ExecutionStep(step_id="ST2", title="B", parallel_group="PG1"),
+                ExecutionStep(step_id="ST3", title="C", parallel_group=""),
+                ExecutionStep(step_id="ST4", title="D", parallel_group="PG2", status="completed"),
+                ExecutionStep(step_id="ST5", title="E", parallel_group="PG3"),
+                ExecutionStep(step_id="ST6", title="F", parallel_group="PG3"),
+            ],
+        )
+
+        batches = orchestrator.pending_execution_batches(plan_state)
+
+        self.assertEqual([[step.step_id for step in batch] for batch in batches], [["ST1", "ST2"], ["ST3"], ["ST5", "ST6"]])
+
+    def test_save_execution_plan_state_clears_parallel_group_in_serial_mode(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_serial_parallel_group_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", execution_mode="serial")
+
+        try:
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"):
+                context, plan_state = orchestrator.update_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    plan_state=ExecutionPlanState(
+                        execution_mode="",
+                        default_test_command="python -m pytest",
+                        steps=[
+                            ExecutionStep(
+                                step_id="custom-1",
+                                title="Serialized step",
+                                parallel_group="PG1",
+                            )
+                        ],
+                    ),
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(context.runtime.execution_mode, "serial")
+        self.assertEqual(plan_state.execution_mode, "serial")
+        self.assertEqual(plan_state.steps[0].parallel_group, "")
 
     def test_run_saved_execution_step_uses_step_reasoning_effort(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_reasoning_test"
@@ -312,6 +369,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("{repo_dir}", plan_template)
         self.assertIn("{user_prompt}", plan_template)
         self.assertIn("{max_steps}", plan_template)
+        self.assertIn("{execution_mode}", plan_template)
         self.assertIn("{reference_notes}", plan_template)
         self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", plan_template)
         self.assertIn("{task_title}", step_template)
@@ -346,12 +404,14 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                     branch="main",
                 ),
             )
-            plan_prompt = prompt_to_execution_plan_prompt(context, repo_inputs, "Build a desktop flow screen.", 4)
+            plan_prompt = prompt_to_execution_plan_prompt(context, repo_inputs, "Build a desktop flow screen.", 4, "parallel")
             bootstrap_prompt = bootstrap_plan_prompt(context, repo_inputs, "Build a desktop flow screen.")
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 
         self.assertIn("Use the following priority order while planning:", plan_prompt)
+        self.assertIn("Requested execution mode:", plan_prompt)
+        self.assertIn("parallel", plan_prompt)
         self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", plan_prompt)
         self.assertIn("React + Tauri", plan_prompt)
         self.assertIn("1. Follow AGENTS.md and explicit repository constraints first.", bootstrap_prompt)

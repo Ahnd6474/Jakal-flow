@@ -20,6 +20,8 @@ export const PROGRAM_RUNTIME_KEYS = [
   "codex_path",
   "allow_push",
   "require_checkpoint_approval",
+  "execution_mode",
+  "parallel_workers",
 ];
 export const PROGRAM_UI_KEYS = ["ui_theme"];
 
@@ -30,6 +32,8 @@ const DEFAULT_PROGRAM_RUNTIME = {
   codex_path: "codex.cmd",
   allow_push: true,
   require_checkpoint_approval: false,
+  execution_mode: "serial",
+  parallel_workers: 2,
 };
 const DEFAULT_PROGRAM_UI = {
   ui_theme: "dark",
@@ -208,7 +212,13 @@ export function buildProjectPayload(form, plan = null) {
     runtime: cloneValue(form.runtime) || {},
   };
   if (plan) {
-    payload.plan = cloneValue(plan);
+    const nextPlan = cloneValue(plan) || {};
+    const executionMode = String(payload.runtime?.execution_mode || nextPlan.execution_mode || "serial")
+      .trim()
+      .toLowerCase();
+    nextPlan.execution_mode = executionMode === "parallel" ? "parallel" : "serial";
+    nextPlan.default_test_command = nextPlan.default_test_command || payload.runtime?.test_cmd || "python -m pytest";
+    payload.plan = nextPlan;
   }
   return payload;
 }
@@ -325,9 +335,14 @@ export function firstSelectableStepId(plan) {
 }
 
 export function runtimeSummary(runtime, modelPresets = [], language = "en", modelCatalog = []) {
+  const executionSuffix =
+    String(runtime?.execution_mode || "serial").trim().toLowerCase() === "parallel"
+      ? ` | parallel x${Math.max(1, Number.parseInt(String(runtime?.parallel_workers || 2), 10) || 1)}`
+      : " | serial";
   const preset = modelPresets.find((item) => item.preset_id === runtime?.model_preset);
   if (preset) {
-    return runtime?.use_fast_mode ? `${preset.summary} | /fast` : preset.summary;
+    const summary = `${preset.summary}${executionSuffix}`;
+    return runtime?.use_fast_mode ? `${summary} | /fast` : summary;
   }
   if (runtime?.model) {
     const label = modelDisplayName(modelCatalog, runtime.model);
@@ -340,9 +355,10 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
         model: label,
         effort: effortLabel,
       });
-      return runtime?.use_fast_mode ? `${summary} | /fast` : summary;
+      const nextSummary = `${summary}${executionSuffix}`;
+      return runtime?.use_fast_mode ? `${nextSummary} | /fast` : nextSummary;
     }
-    const summary = `${label} | reasoning ${effortLabel}`;
+    const summary = `${label} | reasoning ${effortLabel}${executionSuffix}`;
     return runtime?.use_fast_mode ? `${summary} | /fast` : summary;
   }
   return translate(language, "runtime.noModelSelected");

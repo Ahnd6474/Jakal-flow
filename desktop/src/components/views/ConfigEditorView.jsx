@@ -148,6 +148,43 @@ export function ConfigEditorView({
               disabled={busy}
             />
           </label>
+          <label className="field">
+            <span>{t("field.executionMode")}</span>
+            <select
+              value={runtime.execution_mode || "serial"}
+              onChange={(event) =>
+                onChangeForm((current) => ({
+                  ...current,
+                  runtime: {
+                    ...current.runtime,
+                    execution_mode: event.target.value,
+                  },
+                }))
+              }
+              disabled={busy}
+            >
+              <option value="serial">{t("option.executionSerial")}</option>
+              <option value="parallel">{t("option.executionParallel")}</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>{t("field.parallelWorkers")}</span>
+            <input
+              type="number"
+              min="1"
+              value={runtime.parallel_workers || 2}
+              onChange={(event) =>
+                onChangeForm((current) => ({
+                  ...current,
+                  runtime: {
+                    ...current.runtime,
+                    parallel_workers: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
+                  },
+                }))
+              }
+              disabled={busy}
+            />
+          </label>
           <label className="choice-radio">
             <input
               type="checkbox"

@@ -110,6 +110,32 @@ export function AppSettingsView({
                 />
               </label>
               <label className="field">
+                <span>{t("field.executionMode")}</span>
+                <select
+                  value={settings.execution_mode || "serial"}
+                  onChange={(event) => onChangeSettings((current) => ({ ...current, execution_mode: event.target.value }))}
+                  disabled={busy}
+                >
+                  <option value="serial">{t("option.executionSerial")}</option>
+                  <option value="parallel">{t("option.executionParallel")}</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>{t("field.parallelWorkers")}</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={settings.parallel_workers || 2}
+                  onChange={(event) =>
+                    onChangeSettings((current) => ({
+                      ...current,
+                      parallel_workers: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
+                    }))
+                  }
+                  disabled={busy}
+                />
+              </label>
+              <label className="field">
                 <span>{t("field.codexPath")}</span>
                 <input
                   value={settings.codex_path || "codex.cmd"}
