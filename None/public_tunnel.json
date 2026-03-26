@@ -1,0 +1,14 @@
+{
+  "command": [
+    "C:\\Users\\alber\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Cloudflare.cloudflared_Microsoft.Winget.Source_8wekyb3d8bbwe\\cloudflared.exe",
+    "tunnel",
+    "--url",
+    "http://0.0.0.0:55180",
+    "--no-autoupdate"
+  ],
+  "pid": 40800,
+  "provider": "cloudflare-quick-tunnel",
+  "public_url": "https://subsequent-bibliography-optimize-misc.trycloudflare.com",
+  "started_at": "2026-03-26T12:47:26+00:00",
+  "target_url": "http://0.0.0.0:55180"
+}

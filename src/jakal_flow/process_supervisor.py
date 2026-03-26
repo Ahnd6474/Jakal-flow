@@ -25,6 +25,15 @@ def hidden_window_creationflags() -> int:
     return getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def hidden_window_startupinfo() -> subprocess.STARTUPINFO | None:
+    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
+        return None
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+    startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    return startupinfo
+
+
 def spawn_background_process(
     command: list[str],
     *,
@@ -42,6 +51,7 @@ def spawn_background_process(
         stdout=stdout,
         stderr=stderr,
         creationflags=background_creationflags() if creationflags is None else creationflags,
+        startupinfo=hidden_window_startupinfo(),
         close_fds=True,
     )
 

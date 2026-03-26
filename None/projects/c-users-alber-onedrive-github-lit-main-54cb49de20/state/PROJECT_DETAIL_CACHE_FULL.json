@@ -1,7 +1,8 @@
 {
-  "content_signature": "08dc84341c571c2dec4c72e7c237e1eb473ab0a9",
+  "content_signature": "e97555f5beb850edb8677555d6215d7767097714",
   "payload": {
     "activity": [
+      "2026-03-26T12:47:27+00:00 | share-session-created | Created a temporary read-only share session.",
       "2026-03-26T12:45:46+00:00 | project-saved | Saved project setup from the desktop shell."
     ],
     "bottom_panels": {
@@ -36,6 +37,7 @@
         }
       },
       "execution_log_lines": [
+        "2026-03-26T12:47:27+00:00 | share-session-created | Created a temporary read-only share session.",
         "2026-03-26T12:45:46+00:00 | project-saved | Saved project setup from the desktop shell."
       ],
       "git_status": {
@@ -298,7 +300,7 @@
         "workflow_mode": "standard"
       }
     },
-    "content_signature": "08dc84341c571c2dec4c72e7c237e1eb473ab0a9",
+    "content_signature": "e97555f5beb850edb8677555d6215d7767097714",
     "detail_level": "full",
     "files": {
       "execution_plan_file": "C:\\Users\\alber\\OneDrive\\\ubb38\uc11c\\GitHub\\codex_auto\\None\\projects\\c-users-alber-onedrive-github-lit-main-54cb49de20\\state\\EXECUTION_PLAN.json",
@@ -323,6 +325,15 @@
           "event_type": "project-saved",
           "message": "Saved project setup from the desktop shell.",
           "timestamp": "2026-03-26T12:45:46+00:00"
+        },
+        {
+          "details": {
+            "expires_at": "2026-03-26T13:47:27+00:00",
+            "session_id": "94123db0526ac2384607e0682bfe7bf2"
+          },
+          "event_type": "share-session-created",
+          "message": "Created a temporary read-only share session.",
+          "timestamp": "2026-03-26T12:47:27+00:00"
         }
       ]
     },
@@ -587,32 +598,54 @@
       }
     },
     "share": {
-      "active_session": null,
+      "active_session": {
+        "active": true,
+        "created_at": "2026-03-26T12:47:27+00:00",
+        "created_by": "tauri-react-ui",
+        "expires_at": "2026-03-26T13:47:27+00:00",
+        "local_url": "http://127.0.0.1:55180/share/view?session=94123db0526ac2384607e0682bfe7bf2&token=i-fuEp1slRwGweynHugC5pYMxW5LU4wG",
+        "revoked_at": null,
+        "session_id": "94123db0526ac2384607e0682bfe7bf2",
+        "share_url": "https://subsequent-bibliography-optimize-misc.trycloudflare.com/share/view?session=94123db0526ac2384607e0682bfe7bf2&token=i-fuEp1slRwGweynHugC5pYMxW5LU4wG"
+      },
       "server": {
-        "base_url": null,
+        "base_url": "http://0.0.0.0:55180",
         "config": {
-          "bind_host": "127.0.0.1",
+          "bind_host": "0.0.0.0",
           "preferred_port": 0,
           "public_base_url": ""
         },
-        "host": "127.0.0.1",
-        "port": null,
+        "host": "0.0.0.0",
+        "pid": 23248,
+        "port": 55180,
         "public_tunnel": {
           "available": true,
           "command_path": "C:\\Users\\alber\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Cloudflare.cloudflared_Microsoft.Winget.Source_8wekyb3d8bbwe\\cloudflared.exe",
-          "pid": null,
+          "pid": 40800,
           "provider": "cloudflare-quick-tunnel",
-          "public_url": null,
-          "running": false,
-          "started_at": null,
-          "target_url": null
+          "public_url": "https://subsequent-bibliography-optimize-misc.trycloudflare.com",
+          "running": true,
+          "started_at": "2026-03-26T12:47:26+00:00",
+          "target_url": "http://0.0.0.0:55180"
         },
-        "running": false,
-        "share_base_url": null,
-        "share_base_url_source": null,
+        "running": true,
+        "share_base_url": "https://subsequent-bibliography-optimize-misc.trycloudflare.com",
+        "share_base_url_source": "quick_tunnel",
+        "started_at": "2026-03-26T12:45:54+00:00",
         "viewer_path": "/share/view"
       },
-      "sessions": []
+      "sessions": [
+        {
+          "active": true,
+          "created_at": "2026-03-26T12:47:27+00:00",
+          "created_by": "tauri-react-ui",
+          "expires_at": "2026-03-26T13:47:27+00:00",
+          "local_url": "http://127.0.0.1:55180/share/view?session=94123db0526ac2384607e0682bfe7bf2&token=i-fuEp1slRwGweynHugC5pYMxW5LU4wG",
+          "revoked_at": null,
+          "session_id": "94123db0526ac2384607e0682bfe7bf2",
+          "share_url": "https://subsequent-bibliography-optimize-misc.trycloudflare.com/share/view?session=94123db0526ac2384607e0682bfe7bf2&token=i-fuEp1slRwGweynHugC5pYMxW5LU4wG"
+        }
+      ]
     },
     "snapshot": {
       "codex_status": {},
@@ -1142,6 +1175,11 @@
             "kind": "file",
             "label": "PROJECT_DETAIL_CACHE_FULL.json",
             "path": "C:\\Users\\alber\\OneDrive\\\ubb38\uc11c\\GitHub\\codex_auto\\None\\projects\\c-users-alber-onedrive-github-lit-main-54cb49de20\\state\\PROJECT_DETAIL_CACHE_FULL.json"
+          },
+          {
+            "kind": "file",
+            "label": "share_sessions.json",
+            "path": "C:\\Users\\alber\\OneDrive\\\ubb38\uc11c\\GitHub\\codex_auto\\None\\projects\\c-users-alber-onedrive-github-lit-main-54cb49de20\\state\\share_sessions.json"
           },
           {
             "kind": "file",
