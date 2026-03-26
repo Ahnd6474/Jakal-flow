@@ -398,6 +398,46 @@ export function progressCaption(plan, language = "en") {
     : `Completed ${completed}/${total} steps, next: ${nextStep?.step_id || "done"}`;
 }
 
+export function executionProgressCaption(plan, language = "en") {
+  const steps = plan?.steps || [];
+  const completed = steps.filter((step) => step.status === "completed").length;
+  const total = steps.length;
+  const locale = normalizeLanguage(language);
+  if (!total) {
+    return locale === "ko" ? "아직 계획이 없습니다" : "No plan yet";
+  }
+  if (completed === total) {
+    if (plan?.closeout_status === "completed") {
+      return locale === "ko" ? `${completed}/${total}단계 완료, 마감 완료` : `Completed ${completed}/${total} steps, closeout completed`;
+    }
+    if (plan?.closeout_status === "running") {
+      return locale === "ko" ? `${completed}/${total}단계 완료, 마감 진행 중` : `Completed ${completed}/${total} steps, closeout running`;
+    }
+    if (plan?.closeout_status === "failed") {
+      return locale === "ko" ? `${completed}/${total}단계 완료, 마감 실패` : `Completed ${completed}/${total} steps, closeout failed`;
+    }
+    return locale === "ko" ? `${completed}/${total}단계 완료, 마감 대기` : `Completed ${completed}/${total} steps, closeout pending`;
+  }
+  const usesDag =
+    String(plan?.execution_mode || "serial").trim().toLowerCase() === "parallel" &&
+    steps.some((step) => (step?.depends_on || []).length || (step?.owned_paths || []).length);
+  if (usesDag) {
+    const completedIds = new Set(steps.filter((step) => step.status === "completed").map((step) => step.step_id));
+    const readyIds = steps
+      .filter(
+        (step) =>
+          step.status !== "completed" &&
+          (step.depends_on || []).every((dependency) => completedIds.has(dependency)),
+      )
+      .map((step) => step.step_id);
+    return locale === "ko"
+      ? `${completed}/${total}단계 완료, 실행 가능: ${readyIds.join(", ") || "blocked"}`
+      : `Completed ${completed}/${total} steps, ready: ${readyIds.join(", ") || "blocked"}`;
+  }
+  const nextStep = steps.find((step) => step.status !== "completed");
+  return locale === "ko" ? `${completed}/${total}단계 완료, 다음: ${nextStep?.step_id || "완료"}` : `Completed ${completed}/${total} steps, next: ${nextStep?.step_id || "done"}`;
+}
+
 export function canEditStep(step, busy) {
   return Boolean(step) && step.status === "pending" && !busy;
 }
