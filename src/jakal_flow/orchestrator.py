@@ -633,6 +633,10 @@ class Orchestrator:
         plan_state.default_test_command = runtime.test_cmd
         plan_state.execution_mode = "parallel"
         plan_state = self.save_execution_plan_state(context, plan_state)
+        # save_execution_plan_state normalizes and recreates step objects, so refresh
+        # the batch targets before mutating status/notes during execution.
+        refreshed_targets = {step.step_id: step for step in plan_state.steps}
+        ordered_targets = [refreshed_targets[step.step_id] for step in ordered_targets]
 
         previous_runtime = context.runtime
         context.runtime = RuntimeOptions(

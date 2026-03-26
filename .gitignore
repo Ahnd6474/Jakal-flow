@@ -18,3 +18,5 @@ desktop/src-tauri/target/
 .tmp_parallel_dag_plan_test/
 .tmp_step_retry_success_test/
 .tmp_step_retry_failure_test/
+.tmp_step_debugger_test/
+.tmp_parallel_batch_debugger_test/

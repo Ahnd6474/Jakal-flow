@@ -491,27 +491,35 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         repo_dir.mkdir(parents=True, exist_ok=True)
         orchestrator = Orchestrator(workspace_root)
         runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        debugger_prompt_text = ""
+        pass_entries: list[dict[str, object]] = []
 
         try:
-            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"):
-                context, saved = orchestrator.update_execution_plan(
-                    project_dir=repo_dir,
-                    runtime=runtime,
-                    plan_state=ExecutionPlanState(
-                        plan_title="Debugger Demo",
-                        default_test_command="python -m pytest",
-                        steps=[
-                            ExecutionStep(
-                                step_id="custom-1",
-                                title="Implement fix",
-                                display_description="Repair the broken behavior.",
-                                codex_description="Update the implementation and keep tests passing.",
-                                test_command="python -m pytest",
-                                success_criteria="The verification command passes.",
-                            )
-                        ],
-                    ),
-                )
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            context.metadata.current_safe_revision = "safe-revision"
+            context.loop_state.current_safe_revision = "safe-revision"
+            orchestrator.workspace.save_project(context)
+            saved = orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Debugger Demo",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(
+                            step_id="custom-1",
+                            title="Implement fix",
+                            display_description="Repair the broken behavior.",
+                            codex_description="Update the implementation and keep tests passing.",
+                            test_command="python -m pytest",
+                            success_criteria="The verification command passes.",
+                        )
+                    ],
+                ),
+            )
 
             execution_step = saved.steps[0]
             candidate = CandidateTask(
@@ -594,6 +602,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                     memory_context_override="Recent memory context",
                     execution_step=execution_step,
                 )
+                debugger_prompt_text = runner.run_pass.call_args_list[1].kwargs["prompt"]
+                pass_entries = read_jsonl_tail(context.paths.pass_log_file, 5)
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 
@@ -604,12 +614,10 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(run_result.changed_files, ["src/app.py", "src/fix.py"])
         mocked_commit.assert_called_once()
         mocked_reset.assert_not_called()
-        debugger_prompt_text = runner.run_pass.call_args_list[1].kwargs["prompt"]
         self.assertIn("Implement fix", debugger_prompt_text)
         self.assertIn("AssertionError: expected value", debugger_prompt_text)
         self.assertIn("Traceback: test failure details", debugger_prompt_text)
         self.assertIn("Do not modify tests unless", debugger_prompt_text)
-        pass_entries = read_jsonl_tail(context.paths.pass_log_file, 5)
         self.assertEqual([item["pass_type"] for item in pass_entries], ["block-search-pass", "block-search-debug"])
         self.assertEqual(pass_entries[0]["rollback_status"], "debugger_invoked")
         self.assertEqual(pass_entries[1]["rollback_status"], "not_needed")
@@ -628,38 +636,45 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             execution_mode="parallel",
             parallel_workers=2,
         )
+        debug_prompt_text = ""
 
         try:
-            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"):
-                orchestrator.update_execution_plan(
-                    project_dir=repo_dir,
-                    runtime=runtime,
-                    plan_state=ExecutionPlanState(
-                        plan_title="Parallel Debugger Demo",
-                        execution_mode="parallel",
-                        default_test_command="python -m pytest",
-                        steps=[
-                            ExecutionStep(
-                                step_id="node-a",
-                                title="Desktop slice",
-                                codex_description="Implement the desktop slice.",
-                                test_command="python -m pytest",
-                                success_criteria="The desktop slice passes verification.",
-                                depends_on=[],
-                                owned_paths=["desktop/src"],
-                            ),
-                            ExecutionStep(
-                                step_id="node-b",
-                                title="Backend slice",
-                                codex_description="Implement the backend slice.",
-                                test_command="python -m pytest",
-                                success_criteria="The backend slice passes verification.",
-                                depends_on=[],
-                                owned_paths=["src/jakal_flow"],
-                            ),
-                        ],
-                    ),
-                )
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            context.metadata.current_safe_revision = "safe-revision"
+            context.loop_state.current_safe_revision = "safe-revision"
+            orchestrator.workspace.save_project(context)
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Parallel Debugger Demo",
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(
+                            step_id="node-a",
+                            title="Desktop slice",
+                            codex_description="Implement the desktop slice.",
+                            test_command="python -m pytest",
+                            success_criteria="The desktop slice passes verification.",
+                            depends_on=[],
+                            owned_paths=["desktop/src"],
+                        ),
+                        ExecutionStep(
+                            step_id="node-b",
+                            title="Backend slice",
+                            codex_description="Implement the backend slice.",
+                            test_command="python -m pytest",
+                            success_criteria="The backend slice passes verification.",
+                            depends_on=[],
+                            owned_paths=["src/jakal_flow"],
+                        ),
+                    ],
+                ),
+            )
 
             failing_stdout = workspace_root / "parallel-batch-pass.stdout.log"
             failing_stderr = workspace_root / "parallel-batch-pass.stderr.log"
@@ -719,7 +734,22 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 orchestrator.git,
                 "commit_all",
                 return_value="parallel-debug-commit",
-            ), mock.patch("jakal_flow.orchestrator.CodexRunner.run_pass") as mocked_run_pass:
+            ), mock.patch.object(
+                orchestrator.git,
+                "current_revision",
+                side_effect=["merge-commit-1", "merge-commit-2"],
+            ), mock.patch.object(
+                orchestrator.git,
+                "changed_files",
+                return_value=["desktop/src/app.jsx", "src/jakal_flow/orchestrator.py"],
+            ), mock.patch.object(
+                orchestrator,
+                "setup_local_project",
+                return_value=context,
+            ), mock.patch("jakal_flow.orchestrator.CodexRunner.run_pass") as mocked_run_pass, mock.patch(
+                "jakal_flow.orchestrator.ensure_virtualenv",
+                return_value=repo_dir / ".venv",
+            ):
                 mocked_run_pass.return_value = CodexRunResult(
                     pass_type="parallel-batch-debug",
                     prompt_file=workspace_root / "parallel-debug.prompt.md",
@@ -731,18 +761,19 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                     usage={"input_tokens": 12},
                     last_message="parallel debugger pass",
                 )
-                context, _plan_state, steps = orchestrator.run_parallel_execution_batch(
+                context, plan_state, steps = orchestrator.run_parallel_execution_batch(
                     project_dir=repo_dir,
                     runtime=runtime,
                     step_ids=["ST1", "ST2"],
                 )
+                debug_prompt_text = mocked_run_pass.call_args.kwargs["prompt"]
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 
         self.assertEqual([step.status for step in steps], ["completed", "completed"])
+        self.assertEqual([step.status for step in plan_state.steps], ["completed", "completed"])
         self.assertEqual(context.metadata.current_status, "plan_completed")
         self.assertEqual(context.metadata.current_safe_revision, "parallel-debug-commit")
-        debug_prompt_text = mocked_run_pass.call_args.kwargs["prompt"]
         self.assertIn("Recover merged parallel batch ST1, ST2", debug_prompt_text)
         self.assertIn("integration assertion failed", debug_prompt_text)
         self.assertIn("parallel batch traceback", debug_prompt_text)
