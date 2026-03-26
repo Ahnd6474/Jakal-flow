@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import shutil
 
 from .models import LoopCounters, LoopState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions
 from .utils import ensure_dir, now_utc_iso, read_json, stable_repo_identity, write_json
@@ -272,3 +273,14 @@ class WorkspaceManager:
             if project.metadata.repo_path.resolve() == resolved_target:
                 return project
         return None
+
+    def delete_project(self, repo_id: str) -> None:
+        self.ensure_workspace()
+        registry = read_json(self.registry_file, default={"projects": {}})
+        item = registry["projects"].pop(repo_id, None)
+        if not item:
+            raise KeyError(f"Unknown repository id: {repo_id}")
+        write_json(self.registry_file, registry)
+        project_root = (self.projects_root / str(item.get("slug", "")).strip()).resolve()
+        if project_root != self.projects_root and self.projects_root in project_root.parents and project_root.exists():
+            shutil.rmtree(project_root, ignore_errors=True)

@@ -810,6 +810,23 @@ def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | No
             detail_level=str(payload.get("detail_level", "full")).strip().lower() or "full",
         )
 
+    if command == "delete-project":
+        project = resolve_project(orchestrator, payload)
+        repo_id = project.metadata.repo_id
+        project_dir = str(project.metadata.repo_path)
+        display_name = project.metadata.display_name or project.metadata.slug
+        orchestrator.workspace.delete_project(repo_id)
+        listing = list_projects_payload(orchestrator)
+        return {
+            "deleted": {
+                "repo_id": repo_id,
+                "project_dir": project_dir,
+                "display_name": display_name,
+            },
+            "projects": listing["projects"],
+            "workspace": listing["workspace"],
+        }
+
     if command == "get_share_server_status":
         return share_server_status_payload(workspace_root)
 
