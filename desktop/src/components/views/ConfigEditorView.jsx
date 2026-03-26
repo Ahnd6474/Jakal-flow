@@ -85,13 +85,15 @@ export function ConfigEditorView({
   const supportedEfforts = configReasoningOptions(modelCatalog, selectedModel, runtime.effort || "medium");
   const selectedEffort = selectedConfigReasoning(modelCatalog, runtime);
 
-  const visibleModels = (modelCatalog || []).filter((item) => item && item.model);
+  const visibleModels = (modelCatalog || []).filter(
+    (item) => item && item.model && (item.model !== "auto" || selectedModel === "auto"),
+  );
   const allModels = visibleModels.length
     ? visibleModels
     : [
         {
-          model: "auto",
-          display_name: "Auto",
+          model: selectedModel || "auto",
+          display_name: selectedCatalogEntry?.display_name || selectedModel || "Auto",
           hidden: false,
         },
       ];
@@ -104,7 +106,6 @@ export function ConfigEditorView({
         <div>
           <span className="eyebrow">{t("tab.config")}</span>
           <h2>{t("tab.config")}</h2>
-          <p>{t("config.projectConfigurationDescription")}</p>
         </div>
         <div className="field-row">
           <button className="toolbar-button" onClick={onDeleteProject} type="button" disabled={busy || !form.project_dir?.trim()}>
@@ -164,7 +165,6 @@ export function ConfigEditorView({
             />
             <span>{t("option.useFastMode")}</span>
           </label>
-          <p>{t("config.fastModeDescription")}</p>
 
           <div className="subsection">
             <div className="subsection__header">
@@ -199,7 +199,6 @@ export function ConfigEditorView({
                 disabled={busy}
               />
             </label>
-            <p>{t("config.programSettingsMoved")}</p>
           </div>
         </div>
 
@@ -207,7 +206,6 @@ export function ConfigEditorView({
           <div className="subsection">
             <div className="subsection__header">
               <strong>{t("config.githubConnection")}</strong>
-              <span>{t("config.githubConnectionDescription")}</span>
             </div>
             <div className="choice-list">
               {[
@@ -281,7 +279,6 @@ export function ConfigEditorView({
                 />
               ))}
             </div>
-            {selectedCatalogEntry?.description ? <p>{selectedCatalogEntry.description}</p> : null}
           </div>
         </div>
       </div>

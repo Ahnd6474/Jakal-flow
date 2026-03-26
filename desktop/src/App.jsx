@@ -24,6 +24,14 @@ export default function App() {
   }, [controller.programSettings?.ui_theme]);
 
   useEffect(() => {
+    if (!controller.message || controller.message.tone === "error") {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => controller.setMessage(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [controller.message, controller.setMessage]);
+
+  useEffect(() => {
     function handleKeyDown(event) {
       const { setCenterTab } = keybindingActionsRef.current;
       if (!(event.ctrlKey || event.metaKey)) {
