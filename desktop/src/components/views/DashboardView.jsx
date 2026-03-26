@@ -11,7 +11,7 @@ function Stat({ label, value, tone = "neutral" }) {
   );
 }
 
-export function DashboardView({ detail, planDraft, form, busy, modelPresets, modelCatalog, activeJob, onChangeForm, onSaveProject }) {
+export function DashboardView({ detail, planDraft, form, busy, modelPresets, modelCatalog, activeJob, onChangeForm }) {
   const { language, t } = useI18n();
   const usage = detail?.snapshot?.recent_usage || {};
   const codexStatus = detail?.codex_status || {};
@@ -101,11 +101,6 @@ export function DashboardView({ detail, planDraft, form, busy, modelPresets, mod
             <span>{t("option.generateWordReport")}</span>
           </label>
           <p>{t("config.wordReportDescription")}</p>
-          <div className="action-row">
-            <button className="toolbar-button toolbar-button--accent" onClick={onSaveProject} type="button" disabled={busy}>
-              {t("action.saveConfiguration")}
-            </button>
-          </div>
         </div>
       </div>
     </section>

@@ -4,10 +4,8 @@ export function AppSettingsView({
   settings,
   shareSettings,
   shareDetail,
-  dirty,
   busy,
   onChangeSettings,
-  onSaveSettings,
   onGenerateShareLink,
   onCopyShareLink,
   onRevokeShareLink,
@@ -25,9 +23,6 @@ export function AppSettingsView({
           <h2>{t("tab.programSettings")}</h2>
           <p>{t("settings.programSettingsDescription")}</p>
         </div>
-        <button className="toolbar-button toolbar-button--accent" onClick={onSaveSettings} type="button" disabled={busy || !dirty}>
-          {t("action.saveProgramSettings")}
-        </button>
       </div>
 
       <div className="form-layout">

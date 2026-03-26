@@ -75,7 +75,6 @@ export function ConfigEditorView({
   busy,
   onChangeForm,
   onChooseDirectory,
-  onSaveProject,
   onDeleteProject,
 }) {
   const runtime = form.runtime || {};
@@ -109,9 +108,6 @@ export function ConfigEditorView({
         <div className="field-row">
           <button className="toolbar-button" onClick={onDeleteProject} type="button" disabled={busy || !form.project_dir?.trim()}>
             {t("action.delete")}
-          </button>
-          <button className="toolbar-button toolbar-button--accent" onClick={onSaveProject} type="button" disabled={busy}>
-            {t("action.saveConfiguration")}
           </button>
         </div>
       </div>

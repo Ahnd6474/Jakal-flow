@@ -21,7 +21,6 @@ export function CenterWorkspace({
   form,
   shareSettings,
   programSettings,
-  programSettingsDirty,
   planDraft,
   selectedStepId,
   modelPresets,
@@ -30,9 +29,7 @@ export function CenterWorkspace({
   onChangeForm,
   onChangeProgramSettings,
   onChooseDirectory,
-  onSaveProject,
   onDeleteProject,
-  onSaveProgramSettings,
   onGenerateShareLink,
   onCopyShareLink,
   onRevokeShareLink,
@@ -111,7 +108,6 @@ export function CenterWorkspace({
           modelCatalog={modelCatalog}
           activeJob={activeJob}
           onChangeForm={onChangeForm}
-          onSaveProject={onSaveProject}
         />
       ) : null}
       {developerMode && activeTab === "reports" ? <ReportsView reports={detail?.reports} /> : null}
@@ -124,7 +120,6 @@ export function CenterWorkspace({
           busy={busy}
           onChangeForm={onChangeForm}
           onChooseDirectory={onChooseDirectory}
-          onSaveProject={onSaveProject}
           onDeleteProject={onDeleteProject}
         />
       ) : null}
@@ -133,10 +128,8 @@ export function CenterWorkspace({
           settings={programSettings}
           shareSettings={shareSettings}
           shareDetail={detail?.share}
-          dirty={programSettingsDirty}
           busy={busy}
           onChangeSettings={onChangeProgramSettings}
-          onSaveSettings={onSaveProgramSettings}
           onGenerateShareLink={onGenerateShareLink}
           onCopyShareLink={onCopyShareLink}
           onRevokeShareLink={onRevokeShareLink}

@@ -95,7 +95,6 @@ export default function App() {
             detail={detail}
             form={controller.projectForm}
             programSettings={controller.programSettings}
-            programSettingsDirty={controller.programSettingsDirty}
             planDraft={controller.planDraft}
             shareSettings={controller.shareSettings}
             selectedStepId={controller.selectedStepId}
@@ -105,9 +104,7 @@ export default function App() {
             onChangeForm={controller.setProjectForm}
             onChangeProgramSettings={controller.setProgramSettings}
             onChooseDirectory={controller.chooseDirectory}
-            onSaveProject={controller.saveProject}
             onDeleteProject={controller.deleteProject}
-            onSaveProgramSettings={controller.saveProgramSettings}
             onGenerateShareLink={controller.generateShareLink}
             onCopyShareLink={controller.copyShareLink}
             onRevokeShareLink={controller.revokeShareLink}
