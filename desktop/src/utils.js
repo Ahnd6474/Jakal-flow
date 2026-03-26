@@ -217,6 +217,106 @@ export function computePlanStats(plan = {}) {
   };
 }
 
+function readyExecutionNodeIds(plan = {}) {
+  const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+  const completedIds = new Set(steps.filter((step) => step.status === "completed").map((step) => step.step_id));
+  return steps
+    .filter(
+      (step) =>
+        step.status !== "completed" &&
+        (step.depends_on || []).every((dependency) => completedIds.has(dependency)),
+    )
+    .map((step) => step.step_id);
+}
+
+export function activityLineSummary(line = "") {
+  const parts = String(line || "")
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.length) {
+    return "";
+  }
+  if (parts.length >= 3) {
+    return parts.slice(2).join(" | ");
+  }
+  return parts[parts.length - 1];
+}
+
+export function deriveExecutionProgress(detail = null, planDraft = null, activeJob = null) {
+  const detailPlan = detail?.plan && typeof detail.plan === "object" ? detail.plan : null;
+  const fallbackPlan = planDraft && typeof planDraft === "object" ? planDraft : {};
+  const plan = cloneValue(detailPlan || fallbackPlan) || {};
+  const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+  const stats = detail?.stats || computePlanStats(plan);
+  const command = activeJob?.status === "running" ? String(activeJob?.command || "").trim() : "";
+  const runningStep = steps.find((step) => step.status === "running") || null;
+  const nextStep = steps.find((step) => step.status !== "completed") || null;
+  const readyIds = readyExecutionNodeIds(plan);
+  const closeoutRunning = String(plan?.closeout_status || "").trim().toLowerCase() === "running";
+  const status = String(detail?.project?.current_status || "").trim().toLowerCase();
+  const recentActivity = (Array.isArray(detail?.activity) ? detail.activity : [])
+    .map((line) => activityLineSummary(line))
+    .filter(Boolean)
+    .slice(0, 3);
+  const isActive =
+    activeJob?.status === "running" ||
+    Boolean(runningStep) ||
+    closeoutRunning ||
+    status.startsWith("running:");
+
+  let phase = "idle";
+  if (command === "generate-plan") {
+    phase = "planning";
+  } else if (command === "run-closeout" || closeoutRunning) {
+    phase = "closeout";
+  } else if (command || runningStep || nextStep) {
+    phase = "step";
+  }
+
+  let percent = null;
+  let visualPercent = 0;
+  let indeterminate = false;
+  if (isActive) {
+    if (phase === "planning" && !steps.length) {
+      indeterminate = true;
+    } else if (phase === "closeout") {
+      percent = 100;
+      visualPercent = steps.length ? 96 : 92;
+    } else if (steps.length) {
+      percent = Math.round((Math.max(0, Number(stats?.completed_steps || 0)) / steps.length) * 100);
+      visualPercent = percent > 0 ? percent : 6;
+      if ((runningStep || command === "run-plan") && percent < 95) {
+        visualPercent = Math.max(visualPercent, 10);
+        visualPercent = Math.min(95, visualPercent);
+      }
+    } else {
+      indeterminate = true;
+    }
+  }
+
+  return {
+    isActive,
+    phase,
+    command,
+    plan,
+    totalSteps: steps.length,
+    completedSteps: Math.max(0, Number(stats?.completed_steps || 0)),
+    failedSteps: Math.max(0, Number(stats?.failed_steps || 0)),
+    runningSteps: Math.max(0, Number(stats?.running_steps || 0)),
+    remainingSteps: Math.max(0, Number(stats?.remaining_steps || 0)),
+    runningStep,
+    nextStep,
+    readyIds,
+    recentActivity,
+    headlineActivity: recentActivity[0] || "",
+    closeoutRunning,
+    percent,
+    visualPercent,
+    indeterminate,
+  };
+}
+
 export function workspaceStatsFromProjects(projects = []) {
   let running = 0;
   let readyLike = 0;

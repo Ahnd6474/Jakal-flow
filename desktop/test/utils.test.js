@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  activityLineSummary,
   applyProgramSettings,
   applyProgramSettingsToForm,
   autoRoutingPresetLabel,
@@ -14,6 +15,7 @@ import {
   cloneValue,
   commandLabel,
   computePlanStats,
+  deriveExecutionProgress,
   reasoningEffortLabel,
   deriveIdleProjectStatus,
   deriveGithubMode,
@@ -330,6 +332,83 @@ test("job-aware sanitizers clear stale running status without touching active jo
   assert.equal(sanitizedDetail.bottom_panels.git_status.current_status, "plan_ready");
   assert.equal(activeDetail.project.current_status, "running:block:2");
   assert.equal(sanitizedList[0].status, "plan_ready");
+});
+
+test("activityLineSummary strips the timestamp and event prefix", () => {
+  assert.equal(
+    activityLineSummary("2026-03-26T09:00:00Z | step-started [ST2] | Running ST2: Build the screen"),
+    "Running ST2: Build the screen",
+  );
+  assert.equal(activityLineSummary("single message"), "single message");
+  assert.equal(activityLineSummary(""), "");
+});
+
+test("deriveExecutionProgress summarizes active step progress and recent activity", () => {
+  const progress = deriveExecutionProgress(
+    {
+      project: {
+        current_status: "running:block:2",
+      },
+      stats: {
+        total_steps: 3,
+        completed_steps: 1,
+        failed_steps: 0,
+        running_steps: 1,
+        remaining_steps: 2,
+      },
+      activity: [
+        "2026-03-26T09:01:00Z | step-started [ST2] | Running ST2: Build the screen",
+        "2026-03-26T09:00:00Z | batch-started | Running parallel batch: ST2, ST3",
+      ],
+      plan: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+          { step_id: "ST3", title: "Backend", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+        ],
+      },
+    },
+    null,
+    {
+      status: "running",
+      command: "run-plan",
+    },
+  );
+
+  assert.equal(progress.isActive, true);
+  assert.equal(progress.phase, "step");
+  assert.equal(progress.runningStep.step_id, "ST2");
+  assert.deepEqual(progress.readyIds, ["ST2", "ST3"]);
+  assert.equal(progress.percent, 33);
+  assert.equal(progress.headlineActivity, "Running ST2: Build the screen");
+});
+
+test("deriveExecutionProgress falls back to an indeterminate planning state", () => {
+  const progress = deriveExecutionProgress(
+    {
+      project: {
+        current_status: "running:generate-plan",
+      },
+      activity: ["2026-03-26T09:02:00Z | plan-generated | Drafting execution plan"],
+      plan: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [],
+      },
+    },
+    null,
+    {
+      status: "running",
+      command: "generate-plan",
+    },
+  );
+
+  assert.equal(progress.isActive, true);
+  assert.equal(progress.phase, "planning");
+  assert.equal(progress.indeterminate, true);
+  assert.equal(progress.totalSteps, 0);
 });
 
 test("buildProjectPayload trims fields, blanks origin_url for existing repos, and clones plan data", () => {

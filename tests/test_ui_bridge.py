@@ -532,6 +532,7 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(loaded["history"]["blocks"], [])
             self.assertEqual(loaded["workspace_tree"], [])
             self.assertEqual(loaded["checkpoints"]["items"], [])
+            self.assertTrue(loaded["activity"])
 
     def test_share_bridge_commands_create_and_revoke_read_only_session(self) -> None:
         with TemporaryTestDir() as temp_dir:

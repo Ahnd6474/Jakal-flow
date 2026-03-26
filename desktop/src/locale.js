@@ -674,6 +674,15 @@ STRINGS.en["progress.closeoutRunning"] = "Completed {completed}/{total} steps, c
 STRINGS.en["progress.closeoutFailed"] = "Completed {completed}/{total} steps, closeout failed";
 STRINGS.en["progress.closeoutPending"] = "Completed {completed}/{total} steps, closeout pending";
 STRINGS.en["action.backgroundJob"] = "Background Job";
+STRINGS.en["run.closeoutRunning"] = "Running closeout";
+STRINGS.en["run.completedStepsSummary"] = "{completed}/{total} steps completed";
+STRINGS.en["run.liveRun"] = "Live Run";
+STRINGS.en["run.planGeneration"] = "Generating execution plan";
+STRINGS.en["run.preparingStep"] = "Preparing {step}";
+STRINGS.en["run.progressPercent"] = "{percent}% complete";
+STRINGS.en["run.readyNodeSummary"] = "{count} ready node(s)";
+STRINGS.en["run.stepProgress"] = "Step Progress";
+STRINGS.en["run.workingOnStep"] = "Working on {step}";
 STRINGS.en["prompt.confirmDeleteAllProjects"] =
   "Remove all projects from jakal-flow? The managed docs, logs, and state will be deleted, but the original repository folders will stay in place.";
 STRINGS.en["sidebar.projectContextDelete"] = "Right-click to open project actions";
@@ -874,6 +883,16 @@ const KO_HIGH_QUALITY_OVERRIDES = {
   "usage.window5h": "5시간 사용량",
   "usage.window7d": "7일 사용량",
 };
+
+KO_HIGH_QUALITY_OVERRIDES["run.closeoutRunning"] = "마감 실행 중";
+KO_HIGH_QUALITY_OVERRIDES["run.completedStepsSummary"] = "{completed}/{total}단계 완료";
+KO_HIGH_QUALITY_OVERRIDES["run.liveRun"] = "실행 중인 작업";
+KO_HIGH_QUALITY_OVERRIDES["run.planGeneration"] = "계획 생성 중";
+KO_HIGH_QUALITY_OVERRIDES["run.preparingStep"] = "{step} 준비 중";
+KO_HIGH_QUALITY_OVERRIDES["run.progressPercent"] = "{percent}% 완료";
+KO_HIGH_QUALITY_OVERRIDES["run.readyNodeSummary"] = "실행 가능 노드 {count}개";
+KO_HIGH_QUALITY_OVERRIDES["run.stepProgress"] = "단계 진행도";
+KO_HIGH_QUALITY_OVERRIDES["run.workingOnStep"] = "{step} 작업 중";
 
 const ALL_STRINGS = Object.fromEntries(
   Array.from(new Set([...Object.keys(STRINGS), ...Object.keys(GENERATED_STRINGS), ...Object.keys(MANUAL_LOCALE_OVERRIDES)])).map((language) => [

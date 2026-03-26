@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { CenterWorkspace } from "./components/layout/CenterWorkspace";
 import { IdeToolbar } from "./components/layout/IdeToolbar";
+import { RunProgressPanel } from "./components/layout/RunProgressPanel";
 import { SidebarPane } from "./components/layout/SidebarPane";
 import { useDesktopController } from "./hooks/useDesktopController";
 import { useI18n } from "./i18n";
@@ -64,6 +65,8 @@ export default function App() {
         onRunPlan={controller.runPlan}
         onRunCloseout={controller.runCloseout}
       />
+
+      <RunProgressPanel detail={detail} planDraft={controller.planDraft} activeJob={controller.activeJob} />
 
       {controller.message ? (
         <section className={`banner banner--${controller.message.tone}`}>

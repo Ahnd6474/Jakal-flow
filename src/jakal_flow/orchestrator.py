@@ -500,8 +500,6 @@ class Orchestrator:
         runner = CodexRunner(context.runtime.codex_path)
         memory = MemoryStore(context.paths)
         reporter = Reporter(context)
-        previous_block = read_last_jsonl(context.paths.block_log_file)
-        previous_block_index = int(previous_block.get("block_index", -1)) if previous_block else -1
         candidate = CandidateTask(
             candidate_id=target_step.step_id,
             title=target_step.title,
@@ -511,19 +509,14 @@ class Orchestrator:
         )
         target_step = next(step for step in plan_state.steps if step.step_id == target_step.step_id)
         try:
-            self._run_single_block(
+            latest_block, attempt_count = self._run_execution_step_attempts(
                 context=context,
                 runner=runner,
                 memory=memory,
                 reporter=reporter,
-                candidate_override=candidate,
-                execution_step_override=target_step,
+                candidate=candidate,
+                execution_step=target_step,
             )
-            context.metadata.last_run_at = now_utc_iso()
-            latest_block = read_last_jsonl(context.paths.block_log_file)
-            latest_block_index = int(latest_block.get("block_index", -1)) if latest_block else -1
-            if latest_block_index <= previous_block_index:
-                latest_block = None
             if latest_block and latest_block.get("status") == "completed":
                 target_step.status = "completed"
                 target_step.completed_at = now_utc_iso()
@@ -534,7 +527,12 @@ class Orchestrator:
                 context.metadata.current_status = self._status_from_plan_state(plan_state)
             else:
                 target_step.status = "failed"
-                target_step.notes = str(context.loop_state.stop_reason or "Step execution failed.").strip()
+                failure_summary = ""
+                if latest_block:
+                    failure_summary = str(latest_block.get("test_summary", "")).strip()
+                if not failure_summary:
+                    failure_summary = str(context.loop_state.stop_reason or f"Step execution failed after {attempt_count} attempt(s).").strip()
+                target_step.notes = failure_summary or "Step execution failed."
                 context.metadata.current_status = "failed"
         except Exception as exc:
             target_step.status = "failed"
@@ -547,6 +545,46 @@ class Orchestrator:
             self.workspace.save_project(context)
 
         return context, plan_state, target_step
+
+    def _run_execution_step_attempts(
+        self,
+        *,
+        context: ProjectContext,
+        runner: CodexRunner,
+        memory: MemoryStore,
+        reporter: Reporter,
+        candidate: CandidateTask,
+        execution_step: ExecutionStep,
+        final_failure_reports: bool = True,
+    ) -> tuple[dict[str, object] | None, int]:
+        attempt_limit = max(1, int(context.runtime.regression_limit or 1))
+        latest_block: dict[str, object] | None = None
+        attempts = 0
+        while attempts < attempt_limit:
+            attempts += 1
+            previous_block = read_last_jsonl(context.paths.block_log_file)
+            previous_block_index = int(previous_block.get("block_index", -1)) if previous_block else -1
+            self._run_single_block(
+                context=context,
+                runner=runner,
+                memory=memory,
+                reporter=reporter,
+                candidate_override=candidate,
+                execution_step_override=execution_step,
+                suppress_failure_reporting=not final_failure_reports or attempts < attempt_limit,
+            )
+            context.metadata.last_run_at = now_utc_iso()
+            latest_block = read_last_jsonl(context.paths.block_log_file)
+            latest_block_index = int(latest_block.get("block_index", -1)) if latest_block else -1
+            if latest_block_index <= previous_block_index:
+                latest_block = None
+            if latest_block and latest_block.get("status") == "completed":
+                return latest_block, attempts
+            if context.loop_state.stop_reason:
+                break
+            if attempts < attempt_limit:
+                context.metadata.current_status = f"running:retry-{execution_step.step_id.lower()}"
+        return latest_block, attempts
 
     def run_parallel_execution_batch(
         self,
@@ -980,15 +1018,16 @@ class Orchestrator:
             runner = CodexRunner(worker_context.runtime.codex_path)
             memory = MemoryStore(worker_context.paths)
             reporter = Reporter(worker_context)
-            self._run_single_block(
+            latest_block, _attempt_count = self._run_execution_step_attempts(
                 context=worker_context,
                 runner=runner,
                 memory=memory,
                 reporter=reporter,
-                candidate_override=candidate,
-                execution_step_override=deepcopy(step),
+                candidate=candidate,
+                execution_step=deepcopy(step),
+                final_failure_reports=False,
             )
-            latest_block = read_last_jsonl(worker_context.paths.block_log_file) or {}
+            latest_block = latest_block or {}
             latest_pass = read_last_jsonl(worker_context.paths.pass_log_file) or {}
             changed_files = latest_block.get("changed_files", latest_pass.get("changed_files", []))
             commit_hashes = latest_block.get("commit_hashes", [])
@@ -1546,6 +1585,7 @@ class Orchestrator:
         work_items: list[str] | None = None,
         candidate_override: CandidateTask | None = None,
         execution_step_override: ExecutionStep | None = None,
+        suppress_failure_reporting: bool = False,
     ) -> None:
         context.loop_state.block_index += 1
         block_index = context.loop_state.block_index
@@ -1638,14 +1678,15 @@ class Orchestrator:
                     "rollback_status": "rolled_back_to_safe_revision",
                 }
             )
-            self._report_failure(
-                context,
-                reporter,
-                failure_type="block_failed",
-                summary="Search-enabled Codex pass regressed tests and was rolled back.",
-                block_index=block_index,
-                selected_task=selected_task,
-            )
+            if not suppress_failure_reporting:
+                self._report_failure(
+                    context,
+                    reporter,
+                    failure_type="block_failed",
+                    summary="Search-enabled Codex pass regressed tests and was rolled back.",
+                    block_index=block_index,
+                    selected_task=selected_task,
+                )
             return
         if search_commit:
             block_commit_hashes.append(search_commit)

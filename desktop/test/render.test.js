@@ -292,3 +292,66 @@ test("IdeToolbar renders the active command and DAG-ready progress text", async 
   assert.match(html, /Completed 1\/3 steps, ready: ST2, ST3/);
   assert.match(html, /Program Settings/);
 });
+
+test("RunProgressPanel renders current work, progress, and recent activity", async () => {
+  const module = await importBundledModule(
+    "run-progress-panel-render",
+    `
+      import React from "react";
+      import { renderToStaticMarkup } from "react-dom/server";
+      import { I18nProvider } from "./src/i18n.jsx";
+      import { RunProgressPanel } from "./src/components/layout/RunProgressPanel.jsx";
+
+      export function renderComponent(props) {
+        return renderToStaticMarkup(
+          React.createElement(I18nProvider, { initialLanguage: "en" }, React.createElement(RunProgressPanel, props))
+        );
+      }
+    `,
+  );
+
+  const html = module.renderComponent({
+    detail: {
+      project: {
+        current_status: "running:block:2",
+      },
+      activity: [
+        "2026-03-26T09:01:00Z | step-started [ST2] | Running ST2: Build the screen",
+      ],
+      plan: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+          { step_id: "ST3", title: "Backend", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+        ],
+      },
+      stats: {
+        total_steps: 3,
+        completed_steps: 1,
+        failed_steps: 0,
+        running_steps: 1,
+        remaining_steps: 2,
+      },
+    },
+    planDraft: {
+      execution_mode: "parallel",
+      closeout_status: "not_started",
+      steps: [
+        { step_id: "ST1", title: "Plan", status: "completed" },
+        { step_id: "ST2", title: "Build", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+        { step_id: "ST3", title: "Backend", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+      ],
+    },
+    activeJob: {
+      status: "running",
+      command: "run-plan",
+    },
+  });
+
+  assert.match(html, /Live Run/);
+  assert.match(html, /Working on ST2 - Build/);
+  assert.match(html, /Completed 1\/3 steps, ready: ST2, ST3/);
+  assert.match(html, /Running ST2: Build the screen/);
+});

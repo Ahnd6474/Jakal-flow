@@ -351,6 +351,133 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(step.reasoning_effort, "xhigh")
         self.assertEqual(step.commit_hash, "abc123")
 
+    def test_run_saved_execution_step_retries_rolled_back_attempts_until_success(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_retry_success_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest", regression_limit=3)
+        attempt_indexes: list[int] = []
+        suppression_flags: list[bool] = []
+
+        def fake_run_single_block(*args, **kwargs) -> None:
+            context = kwargs["context"]
+            attempt_index = len(attempt_indexes) + 1
+            attempt_indexes.append(attempt_index)
+            suppression_flags.append(bool(kwargs.get("suppress_failure_reporting")))
+            append_jsonl(
+                context.paths.block_log_file,
+                {
+                    "block_index": attempt_index,
+                    "status": "rolled_back" if attempt_index == 1 else "completed",
+                    "commit_hashes": [] if attempt_index == 1 else ["retry-success-commit"],
+                    "test_summary": "rolled back on the first attempt" if attempt_index == 1 else "step passed on retry",
+                },
+            )
+
+        try:
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch.object(
+                orchestrator,
+                "_run_single_block",
+                side_effect=fake_run_single_block,
+            ):
+                orchestrator.update_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    plan_state=ExecutionPlanState(
+                        plan_title="Retry Demo",
+                        default_test_command="python -m pytest",
+                        steps=[
+                            ExecutionStep(
+                                step_id="custom-1",
+                                title="Retryable checkpoint",
+                                codex_description="Retry after a rollback before giving up.",
+                                test_command="python -m pytest",
+                                success_criteria="The step completes after retrying.",
+                            )
+                        ],
+                    ),
+                )
+                context, _plan_state, step = orchestrator.run_saved_execution_step(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_id="ST1",
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(attempt_indexes, [1, 2])
+        self.assertEqual(suppression_flags, [True, True])
+        self.assertEqual(step.status, "completed")
+        self.assertEqual(step.commit_hash, "retry-success-commit")
+        self.assertEqual(step.notes, "step passed on retry")
+        self.assertEqual(context.metadata.current_status, "plan_completed")
+
+    def test_run_saved_execution_step_marks_failed_after_retry_limit(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_retry_failure_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest", regression_limit=2)
+        attempt_indexes: list[int] = []
+        suppression_flags: list[bool] = []
+
+        def fake_run_single_block(*args, **kwargs) -> None:
+            context = kwargs["context"]
+            attempt_index = len(attempt_indexes) + 1
+            attempt_indexes.append(attempt_index)
+            suppression_flags.append(bool(kwargs.get("suppress_failure_reporting")))
+            append_jsonl(
+                context.paths.block_log_file,
+                {
+                    "block_index": attempt_index,
+                    "status": "rolled_back",
+                    "commit_hashes": [],
+                    "test_summary": f"attempt {attempt_index} failed",
+                },
+            )
+
+        try:
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch.object(
+                orchestrator,
+                "_run_single_block",
+                side_effect=fake_run_single_block,
+            ):
+                orchestrator.update_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    plan_state=ExecutionPlanState(
+                        plan_title="Retry Failure Demo",
+                        default_test_command="python -m pytest",
+                        steps=[
+                            ExecutionStep(
+                                step_id="custom-1",
+                                title="Eventually failing checkpoint",
+                                codex_description="Stop after the retry budget is exhausted.",
+                                test_command="python -m pytest",
+                                success_criteria="The step eventually succeeds.",
+                            )
+                        ],
+                    ),
+                )
+                context, _plan_state, step = orchestrator.run_saved_execution_step(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_id="ST1",
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(attempt_indexes, [1, 2])
+        self.assertEqual(suppression_flags, [True, False])
+        self.assertEqual(step.status, "failed")
+        self.assertEqual(step.notes, "attempt 2 failed")
+        self.assertEqual(context.metadata.current_status, "failed")
+
     def test_execution_plan_svg_includes_step_statuses(self) -> None:
         svg = execution_plan_svg(
             "demo flow",

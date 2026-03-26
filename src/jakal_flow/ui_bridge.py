@@ -740,7 +740,7 @@ def project_detail_payload(
         }
         config = {}
         workspace_tree = []
-        activity = []
+        activity = build_activity_lines(project, plan_state)[:8]
         latest_block = None
         latest_pass = None
     codex_status = (
