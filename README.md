@@ -12,7 +12,6 @@ It is designed around a saved project plan:
 
 ![jakal-flow flow chart (EN)](assets/readme-flow.svg)
 
-![jakal-flow 플로우 차트 (KO)](assets/readme-flow-ko.svg)
 
 한국어 문서는 [README.ko.md](README.ko.md)에서 볼 수 있습니다.
 
