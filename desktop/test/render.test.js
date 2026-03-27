@@ -210,6 +210,15 @@ test("CenterWorkspace renders the parallel execution tree for parallel plans", a
           execution_mode: "parallel",
           effort: "medium",
         },
+        runtime_insights: {
+          parallel: {
+            recommended_workers: 1,
+            cpu_parallel_limit: 4,
+            cpu_logical_count: 16,
+            memory_parallel_limit: 1,
+            memory_available_bytes: 2218209280,
+          },
+        },
       },
       form: {
         runtime: {
@@ -264,9 +273,187 @@ test("CenterWorkspace renders the parallel execution tree for parallel plans", a
   assert.match(html, /Ready Nodes/);
   assert.match(html, /Depends On/);
   assert.match(html, /Owned Paths/);
+  assert.match(html, /Parallel Limit/);
+  assert.match(html, /Memory cap 1, CPU cap 4, free 2.1 GiB/);
+  assert.doesNotMatch(html, /Not started/);
+  assert.doesNotMatch(html, /Est\. Cost/);
+  assert.doesNotMatch(html, /src\/jakal_flow/);
   assert.match(html, /CO1/);
   assert.doesNotMatch(html, />Closeout<\/button>/);
   assert.doesNotMatch(html, /Flow Chart/);
+});
+
+test("CenterWorkspace shows estimated cost only for paid configured runtimes", async () => {
+  const html = await renderBundledComponent(
+    "parallel-workspace-paid-cost-render",
+    "./src/components/layout/CenterWorkspace.jsx",
+    "CenterWorkspace",
+    baseWorkspaceProps({
+      detail: {
+        project: {
+          current_status: "running:parallel",
+        },
+        runtime: {
+          execution_mode: "parallel",
+          effort: "medium",
+          billing_mode: "token",
+          model_provider: "openrouter",
+        },
+        runtime_insights: {
+          execution: {
+            remaining_seconds: 90,
+          },
+          cost: {
+            estimated_total_cost_usd: 1.23,
+            recent: {
+              billing_mode: "token",
+              configured: true,
+              estimated_cost_usd: 0.45,
+            },
+            remaining: {
+              billing_mode: "token",
+              configured: true,
+              estimated_cost_usd: 0.78,
+            },
+          },
+          parallel: {
+            recommended_workers: 1,
+            cpu_parallel_limit: 4,
+            cpu_logical_count: 16,
+            memory_parallel_limit: 1,
+            memory_available_bytes: 2218209280,
+          },
+        },
+        plan: {
+          project_prompt: "Ship the paid flow",
+          execution_mode: "parallel",
+          closeout_status: "running",
+          steps: [
+            { step_id: "ST1", title: "Plan", status: "completed" },
+            { step_id: "ST2", title: "Build", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+          ],
+        },
+      },
+      planDraft: {
+        project_prompt: "Ship the paid flow",
+        execution_mode: "parallel",
+        closeout_status: "running",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+        ],
+      },
+      selectedStepId: "ST2",
+      busy: true,
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+    }),
+  );
+
+  assert.match(html, /Est\. Cost/);
+  assert.match(html, /\$1\.23/);
+  assert.match(html, /Closeout[\s\S]*Running/);
+});
+
+test("CenterWorkspace prefers the live detail plan while a run is active", async () => {
+  const html = await renderBundledComponent(
+    "parallel-workspace-live-plan-render",
+    "./src/components/layout/CenterWorkspace.jsx",
+    "CenterWorkspace",
+    baseWorkspaceProps({
+      detail: {
+        project: {
+          current_status: "running:parallel",
+        },
+        runtime: {
+          execution_mode: "parallel",
+          effort: "medium",
+        },
+        plan: {
+          project_prompt: "Ship the live UI",
+          execution_mode: "parallel",
+          closeout_status: "not_started",
+          steps: [
+            { step_id: "ST1", title: "Plan", status: "completed" },
+            { step_id: "ST2", title: "Build", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+            { step_id: "ST3", title: "Backend", status: "running", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+          ],
+        },
+      },
+      planDraft: {
+        project_prompt: "Ship the stale UI",
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "pending", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+          { step_id: "ST3", title: "Backend", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+        ],
+      },
+      selectedStepId: "ST2",
+      busy: true,
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+    }),
+  );
+
+  const runningBadgeMatches = html.match(/status-badge--info">Running<\/span>/g) || [];
+  assert.match(html, /Running: Parallel/);
+  assert.match(html, /Ship the live UI/);
+  assert.equal(runningBadgeMatches.length, 3);
+});
+
+test("CenterWorkspace shows debugging badges in yellow while debugger recovery is active", async () => {
+  const html = await renderBundledComponent(
+    "parallel-workspace-debugging-render",
+    "./src/components/layout/CenterWorkspace.jsx",
+    "CenterWorkspace",
+    baseWorkspaceProps({
+      detail: {
+        project: {
+          current_status: "running:debugging",
+        },
+        runtime: {
+          execution_mode: "parallel",
+          effort: "medium",
+        },
+        plan: {
+          project_prompt: "Recover the flow",
+          execution_mode: "parallel",
+          closeout_status: "not_started",
+          steps: [
+            { step_id: "ST1", title: "Plan", status: "completed" },
+            { step_id: "ST2", title: "Build", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+            { step_id: "ST3", title: "Backend", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+          ],
+        },
+      },
+      planDraft: {
+        project_prompt: "Recover the stale flow",
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "pending", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+          { step_id: "ST3", title: "Backend", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+        ],
+      },
+      selectedStepId: "ST2",
+      busy: true,
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+    }),
+  );
+
+  assert.match(html, /Debugging/);
+  assert.match(html, /status-badge--warning">Debugging<\/span>/);
+  assert.match(html, /run-node--warning/);
 });
 
 test("IdeToolbar renders the active command and DAG-ready progress text", async () => {
@@ -308,6 +495,54 @@ test("IdeToolbar renders the active command and DAG-ready progress text", async 
   assert.match(html, /Completed 1\/3 steps, ready: ST2, ST3/);
   assert.match(html, /Program Settings/);
   assert.doesNotMatch(html, />Closeout<\/button>/);
+});
+
+test("IdeToolbar prefers the live plan progress while a run is active", async () => {
+  const html = await renderBundledComponent(
+    "ide-toolbar-live-plan-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projectDetail: {
+        project: {
+          display_name: "Demo",
+          current_status: "running:parallel",
+        },
+        plan: {
+          execution_mode: "parallel",
+          closeout_status: "not_started",
+          steps: [
+            { step_id: "ST1", status: "completed" },
+            { step_id: "ST2", status: "running", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+            { step_id: "ST3", status: "running", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+          ],
+        },
+      },
+      planDraft: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", status: "completed" },
+          { step_id: "ST2", status: "pending", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+          { step_id: "ST3", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+        ],
+      },
+      busy: true,
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+      activeCenterTab: "run",
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onGeneratePlan: noop,
+      onRunPlan: noop,
+      onRunCloseout: noop,
+      onApproveCheckpoint: noop,
+    },
+  );
+
+  assert.match(html, /Completed 1\/3 steps, running: ST2, ST3/);
 });
 
 test("IdeToolbar exposes checkpoint approval when a checkpoint is waiting for review", async () => {
@@ -703,6 +938,189 @@ test("DashboardView hides cards that are disabled in program settings", async ()
   assert.doesNotMatch(html, /Status/);
   assert.doesNotMatch(html, /Runtime/);
   assert.doesNotMatch(html, /Closeout Report/);
+});
+
+test("DashboardView shows the parallel limit reason in the runtime card", async () => {
+  const html = await renderBundledComponent(
+    "dashboard-view-parallel-limit-render",
+    "./src/components/views/DashboardView.jsx",
+    "DashboardView",
+    {
+      detail: {
+        project: {
+          display_name: "Demo",
+          slug: "demo",
+          current_status: "running:parallel",
+          branch: "main",
+          origin_url: "",
+        },
+        runtime: {
+          execution_mode: "parallel",
+          model: "auto",
+          effort: "medium",
+        },
+        snapshot: {
+          recent_usage: {},
+        },
+        runtime_insights: {
+          execution: {
+            remaining_seconds: 90,
+            estimated_total_seconds: 120,
+          },
+          cost: {
+            estimated_total_cost_usd: 1.23,
+            recent: {
+              estimated_cost_usd: 0.45,
+            },
+          },
+          parallel: {
+            recommended_workers: 1,
+            cpu_parallel_limit: 4,
+            cpu_logical_count: 16,
+            memory_parallel_limit: 1,
+            memory_available_bytes: 2218209280,
+          },
+        },
+        checkpoints: {
+          pending: null,
+        },
+        codex_status: {
+          account: {
+            plan_type: "pro",
+          },
+          rate_limits: {
+            items: [],
+          },
+          error: "",
+        },
+      },
+      planDraft: {
+        steps: [
+          { step_id: "ST1", status: "completed" },
+          { step_id: "ST2", status: "pending" },
+          { step_id: "ST3", status: "pending" },
+        ],
+      },
+      form: {
+        runtime: {
+          generate_word_report: true,
+        },
+      },
+      programSettings: {
+        dashboard_visibility: {
+          status: true,
+          remaining_steps: true,
+          estimated_remaining: true,
+          runtime_card: true,
+          codex_usage_card: false,
+          word_report_card: false,
+        },
+      },
+      busy: false,
+      modelPresets: [],
+      modelCatalog: [],
+      activeJob: null,
+      onChangeForm: noop,
+    },
+  );
+
+  assert.match(html, /Runtime/);
+  assert.match(html, /Parallel Workers[\s\S]*1 worker/);
+  assert.match(html, /Parallel Limit[\s\S]*Memory cap 1, CPU cap 4, free 2.1 GiB/);
+});
+
+test("DashboardView hides cost metrics for included billing", async () => {
+  const html = await renderBundledComponent(
+    "dashboard-view-included-billing-render",
+    "./src/components/views/DashboardView.jsx",
+    "DashboardView",
+    {
+      detail: {
+        project: {
+          display_name: "Demo",
+          slug: "demo",
+          current_status: "plan_ready",
+          branch: "main",
+          origin_url: "",
+        },
+        runtime: {
+          execution_mode: "serial",
+          model_provider: "openai",
+          billing_mode: "included",
+          model: "auto",
+          effort: "medium",
+        },
+        snapshot: {
+          recent_usage: {
+            input_tokens: 12,
+            output_tokens: 34,
+          },
+        },
+        runtime_insights: {
+          execution: {
+            remaining_seconds: 90,
+            estimated_total_seconds: 120,
+          },
+          cost: {
+            estimated_total_cost_usd: 1.23,
+            recent: {
+              billing_mode: "included",
+              configured: true,
+              estimated_cost_usd: 0.45,
+            },
+            remaining: {
+              billing_mode: "included",
+              configured: true,
+              estimated_cost_usd: 0.78,
+            },
+          },
+        },
+        checkpoints: {
+          pending: null,
+        },
+        codex_status: {
+          account: {
+            plan_type: "pro",
+          },
+          rate_limits: {
+            items: [],
+          },
+          error: "",
+        },
+      },
+      planDraft: {
+        steps: [
+          { step_id: "ST1", status: "completed" },
+          { step_id: "ST2", status: "pending" },
+        ],
+      },
+      form: {
+        runtime: {
+          generate_word_report: true,
+        },
+      },
+      programSettings: {
+        dashboard_visibility: {
+          status: true,
+          remaining_steps: true,
+          estimated_remaining: true,
+          estimated_cost: true,
+          actual_cost: true,
+          runtime_card: false,
+          codex_usage_card: false,
+          word_report_card: false,
+        },
+      },
+      busy: false,
+      modelPresets: [],
+      modelCatalog: [],
+      activeJob: null,
+      onChangeForm: noop,
+    },
+  );
+
+  assert.doesNotMatch(html, /Estimated Cost/);
+  assert.doesNotMatch(html, /Actual Cost/);
 });
 
 test("AppSettingsView exposes dashboard visibility controls", async () => {

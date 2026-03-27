@@ -245,6 +245,7 @@ export function blankProjectForm(defaultRuntime) {
       ...(cloneValue(defaultRuntime) || {}),
       generate_word_report: defaultRuntime?.generate_word_report ?? true,
       max_blocks: defaultRuntime?.max_blocks || 5,
+      optimization_mode: defaultRuntime?.optimization_mode || "light",
       test_cmd: defaultRuntime?.test_cmd || "python -m pytest",
       execution_mode: "parallel",
     },
@@ -435,6 +436,17 @@ export function activityLineSummary(line = "") {
 export function isDebuggingStatus(status = "") {
   const normalized = String(status || "").trim().toLowerCase();
   return normalized === "debugging" || normalized === "running:debugging" || normalized === "running:parallel-debugging";
+}
+
+export function effectiveStepStatus(step = null, projectStatus = "") {
+  const rawStepStatus = String(step?.status || "").trim().toLowerCase();
+  if (!rawStepStatus) {
+    return "";
+  }
+  if (isDebuggingStatus(projectStatus) && rawStepStatus === "running") {
+    return "running:debugging";
+  }
+  return String(step?.status || "").trim();
 }
 
 export function deriveExecutionProgress(detail = null, planDraft = null, activeJob = null) {
@@ -780,6 +792,14 @@ export function normalizedModelProvider(runtime = {}) {
   return MODEL_PROVIDER_OPTIONS.includes(normalized) ? normalized : "openai";
 }
 
+export function normalizedBillingMode(runtime = {}, fallback = "") {
+  const normalized = String(runtime?.billing_mode || fallback || "").trim().toLowerCase();
+  if (normalized === "token" || normalized === "per_pass" || normalized === "included") {
+    return normalized;
+  }
+  return "";
+}
+
 export function normalizedLocalModelProvider(runtime = {}) {
   return String(runtime?.local_model_provider || "ollama").trim().toLowerCase() === "lmstudio" ? "lmstudio" : "ollama";
 }
@@ -965,6 +985,90 @@ export function formatUsd(value, language = "en") {
     minimumFractionDigits: amount > 0 && amount < 1 ? 4 : 2,
     maximumFractionDigits: amount > 0 && amount < 1 ? 4 : 2,
   }).format(amount);
+}
+
+export function formatBinaryGiB(value, language = "en") {
+  const bytes = Number(value || 0);
+  const locale = normalizeLanguage(language);
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return translate(locale, "common.unavailable");
+  }
+  const gib = bytes / 1024 ** 3;
+  const fractionDigits = gib >= 10 ? 0 : 1;
+  return `${new Intl.NumberFormat(locale === "ko" ? "ko-KR" : "en-US", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(gib)} GiB`;
+}
+
+export function shouldShowEstimatedCost(runtime = {}, costEstimate = {}) {
+  const recentMode = normalizedBillingMode(costEstimate?.recent, "");
+  const remainingMode = normalizedBillingMode(costEstimate?.remaining, "");
+  const fallbackMode = normalizedBillingMode(runtime, defaultBillingMode(normalizedModelProvider(runtime)));
+  const billingMode = recentMode || remainingMode || fallbackMode;
+  if (billingMode === "included" || !billingMode) {
+    return false;
+  }
+  if (billingMode === "token") {
+    return Boolean(costEstimate?.recent?.configured || costEstimate?.remaining?.configured);
+  }
+  if (billingMode === "per_pass") {
+    return Boolean(costEstimate?.recent?.configured || costEstimate?.remaining?.configured);
+  }
+  return false;
+}
+
+export function parallelWorkerLabel(count, language = "en") {
+  const safeCount = Math.max(1, Number.parseInt(String(count || 1), 10) || 1);
+  return normalizeLanguage(language) === "ko" ? `${safeCount}개 워커` : `${safeCount} worker${safeCount === 1 ? "" : "s"}`;
+}
+
+export function parallelLimitDescription(parallel = {}, language = "en") {
+  const locale = normalizeLanguage(language);
+  const cpuCap = Math.max(1, Number.parseInt(String(parallel?.cpu_parallel_limit || 1), 10) || 1);
+  const logicalCpuCount = Math.max(1, Number.parseInt(String(parallel?.cpu_logical_count || cpuCap), 10) || cpuCap);
+  const recommended = Math.max(1, Number.parseInt(String(parallel?.recommended_workers || 1), 10) || 1);
+  const requested = Math.max(0, Number.parseInt(String(parallel?.requested_workers || 0), 10) || 0);
+  const rawMemoryCap = Number.parseInt(String(parallel?.memory_parallel_limit || 0), 10);
+  const memoryCap = Number.isFinite(rawMemoryCap) && rawMemoryCap > 0 ? rawMemoryCap : null;
+  const freeMemory = formatBinaryGiB(parallel?.memory_available_bytes, language);
+
+  if (String(parallel?.worker_mode || "").trim().toLowerCase() === "manual" && requested > recommended) {
+    return translate(locale, "run.parallelLimitRequestedCap", {
+      requested,
+      recommended,
+      cpuCap,
+      memoryCap: memoryCap ?? translate(locale, "common.unavailable"),
+    });
+  }
+  if (memoryCap !== null && memoryCap < cpuCap) {
+    return translate(locale, "run.parallelLimitMemoryCap", {
+      memoryCap,
+      cpuCap,
+      freeMemory,
+    });
+  }
+  if (cpuCap <= recommended) {
+    return translate(locale, "run.parallelLimitCpuCap", {
+      cpuCap,
+      logicalCpuCount,
+    });
+  }
+  return translate(locale, "run.parallelLimitAutoCap", {
+    cpuCap,
+    memoryCap: memoryCap ?? translate(locale, "common.unavailable"),
+  });
+}
+
+export function parallelLimitTone(parallel = {}) {
+  const cpuCap = Math.max(1, Number.parseInt(String(parallel?.cpu_parallel_limit || 1), 10) || 1);
+  const recommended = Math.max(1, Number.parseInt(String(parallel?.recommended_workers || 1), 10) || 1);
+  const rawMemoryCap = Number.parseInt(String(parallel?.memory_parallel_limit || 0), 10);
+  const memoryCap = Number.isFinite(rawMemoryCap) && rawMemoryCap > 0 ? rawMemoryCap : null;
+  if (recommended <= 1 || (memoryCap !== null && memoryCap < cpuCap)) {
+    return "warning";
+  }
+  return "info";
 }
 
 export function firstSelectableStepId(plan) {
@@ -1187,6 +1291,9 @@ export function commandLabel(command, language = "en") {
 }
 
 export function statusTone(status) {
+  if (isDebuggingStatus(status)) {
+    return "warning";
+  }
   if (String(status || "").includes("failed")) {
     return "danger";
   }

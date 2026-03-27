@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import shutil
 from pathlib import Path
@@ -25,13 +26,33 @@ class GitOps:
             args.extend(["-c", f"safe.directory={normalized}"])
         return args
 
-    def run(self, args: list[str], cwd: Path, check: bool = True) -> CommandResult:
+    def _commit_env(self, author_name: str | None = None) -> dict[str, str] | None:
+        normalized = str(author_name or "").strip()
+        if not normalized:
+            return None
+        return {
+            "GIT_AUTHOR_NAME": normalized,
+            "GIT_COMMITTER_NAME": normalized,
+        }
+
+    def run(
+        self,
+        args: list[str],
+        cwd: Path,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> CommandResult:
         command = ["git", *self._safe_directory_args(cwd), *args]
+        process_env = None
+        if env:
+            process_env = os.environ.copy()
+            process_env.update(env)
         completed = subprocess.run(
             command,
             cwd=cwd,
             capture_output=True,
             check=False,
+            env=process_env,
         )
         stdout = decode_process_output(completed.stdout)
         stderr = decode_process_output(completed.stderr)
@@ -118,17 +139,21 @@ class GitOps:
                 changed.append(line[3:].strip())
         return changed
 
-    def commit_all(self, repo_dir: Path, message: str) -> str:
+    def commit_all(self, repo_dir: Path, message: str, author_name: str | None = None) -> str:
         self.run(["add", "-A"], cwd=repo_dir)
-        self.run(["commit", "-m", message], cwd=repo_dir)
+        self.run(["commit", "-m", message], cwd=repo_dir, env=self._commit_env(author_name))
         return self.current_revision(repo_dir)
 
     def add_all(self, repo_dir: Path) -> None:
         self.run(["add", "-A"], cwd=repo_dir)
 
-    def create_initial_commit(self, repo_dir: Path, message: str) -> str:
+    def create_initial_commit(self, repo_dir: Path, message: str, author_name: str | None = None) -> str:
         self.run(["add", "-A"], cwd=repo_dir)
-        self.run(["commit", "--allow-empty", "-m", message], cwd=repo_dir)
+        self.run(["commit", "--allow-empty", "-m", message], cwd=repo_dir, env=self._commit_env(author_name))
+        return self.current_revision(repo_dir)
+
+    def commit_staged(self, repo_dir: Path, message: str, author_name: str | None = None) -> str:
+        self.run(["commit", "-m", message], cwd=repo_dir, env=self._commit_env(author_name))
         return self.current_revision(repo_dir)
 
     def push(self, repo_dir: Path, branch: str) -> None:

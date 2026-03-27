@@ -6,7 +6,6 @@ import json
 import locale
 import os
 import re
-from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -163,23 +162,50 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return entries
 
 
+def _iter_jsonl_lines_from_end(path: Path, chunk_size: int = 8192):
+    file_size = path.stat().st_size
+    if file_size <= 0:
+        return
+    with path.open("rb") as handle:
+        position = file_size
+        remainder = b""
+        while position > 0:
+            read_size = min(chunk_size, position)
+            position -= read_size
+            handle.seek(position)
+            chunk = handle.read(read_size)
+            buffer = chunk + remainder
+            parts = buffer.split(b"\n")
+            remainder = parts[0]
+            for line in reversed(parts[1:]):
+                yield line.rstrip(b"\r").decode("utf-8")
+        if remainder:
+            yield remainder.rstrip(b"\r").decode("utf-8")
+
+
 def read_jsonl_tail(path: Path, limit: int) -> list[dict[str, Any]]:
     if limit <= 0 or not path.exists():
         return []
-    tail: deque[dict[str, Any]] = deque(maxlen=limit)
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            payload = _parse_jsonl_line(line)
-            if payload is not None:
-                tail.append(payload)
-    return list(tail)
+    tail: list[dict[str, Any]] = []
+    for line in _iter_jsonl_lines_from_end(path):
+        payload = _parse_jsonl_line(line)
+        if payload is None:
+            continue
+        tail.append(payload)
+        if len(tail) >= limit:
+            break
+    tail.reverse()
+    return tail
 
 
 def read_last_jsonl(path: Path) -> dict[str, Any] | None:
-    items = read_jsonl_tail(path, 1)
-    if not items:
+    if not path.exists():
         return None
-    return items[0]
+    for line in _iter_jsonl_lines_from_end(path):
+        payload = _parse_jsonl_line(line)
+        if payload is not None:
+            return payload
+    return None
 
 
 def decode_process_output(data: bytes) -> str:

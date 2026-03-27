@@ -1,6 +1,20 @@
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { canEditStep, formatDurationCompact, formatUsd, isSystemStep, planStepsWithCloseout, REASONING_OPTIONS, reasoningEffortLabel, statusTone } from "../../utils";
+import {
+  canEditStep,
+  effectiveStepStatus,
+  formatDurationCompact,
+  formatUsd,
+  isSystemStep,
+  parallelLimitDescription,
+  parallelLimitTone,
+  parallelWorkerLabel,
+  planStepsWithCloseout,
+  REASONING_OPTIONS,
+  reasoningEffortLabel,
+  shouldShowEstimatedCost,
+  statusTone,
+} from "../../utils";
 
 function normalizeListText(value) {
   const rawItems = Array.isArray(value) ? value : String(value || "").split(/[\r\n,]+/);
@@ -41,18 +55,18 @@ function readyPendingSteps(steps) {
   );
 }
 
-function DagNode({ step, selected, onSelect, language, t }) {
-  const tone = statusTone(step.status);
+function DagNode({ step, projectStatus, selected, onSelect, language, t }) {
+  const stepStatus = effectiveStepStatus(step, projectStatus);
+  const tone = statusTone(stepStatus);
+  const summary = step.display_description || step.success_criteria || t("run.noSummary");
   return (
     <button className={`run-node run-node--${tone} ${selected ? "selected" : ""}`} onClick={() => onSelect(step.step_id)} type="button">
       <div className="run-node__meta">
         <span className="run-node__id">{step.step_id}</span>
-        <span className={`status-badge status-badge--${tone}`}>{displayStatus(step.status, language)}</span>
+        <span className={`status-badge status-badge--${tone}`}>{displayStatus(stepStatus, language)}</span>
       </div>
       <strong>{step.title}</strong>
-      <p>{step.display_description || step.test_command || t("run.noSummary")}</p>
-      <p>{t("field.dependsOn")}: {(step.depends_on || []).join(", ") || t("common.none")}</p>
-      <p>{t("field.ownedPaths")}: {(step.owned_paths || []).join(", ") || t("common.none")}</p>
+      <p>{summary}</p>
     </button>
   );
 }
@@ -60,6 +74,7 @@ function DagNode({ step, selected, onSelect, language, t }) {
 export function ParallelRunControlView({
   detail,
   planDraft,
+  activeJob,
   selectedStepId,
   busy,
   onPromptChange,
@@ -75,7 +90,8 @@ export function ParallelRunControlView({
   onDeleteStep,
 }) {
   const { language, t } = useI18n();
-  const steps = planStepsWithCloseout(planDraft, {
+  const livePlan = activeJob?.status === "running" && detail?.plan ? detail.plan : planDraft;
+  const steps = planStepsWithCloseout(livePlan, {
     title: t("run.closeout"),
     description: t("reports.closeoutReport"),
     successCriteria: t("reports.closeoutReport"),
@@ -86,10 +102,19 @@ export function ParallelRunControlView({
   const runtimeInsights = detail?.runtime_insights || {};
   const executionEstimate = runtimeInsights?.execution || {};
   const costEstimate = runtimeInsights?.cost || {};
+  const parallelInsight = runtimeInsights?.parallel || {};
   const selectedStepEstimate = (executionEstimate.step_estimates || []).find((item) => item.step_id === selectedStepId) || null;
   const editableStep = canEditStep(selectedStep, busy);
   const completedCount = steps.filter((step) => step.status === "completed").length;
   const selectedSystemStep = isSystemStep(selectedStep);
+  const parallelLimitValue = parallelWorkerLabel(parallelInsight.recommended_workers ?? 1, language);
+  const parallelLimitDetails = parallelLimitDescription(parallelInsight, language);
+  const parallelLimitCardTone = parallelLimitTone(parallelInsight);
+  const projectStatus = detail?.project?.current_status || "";
+  const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
+  const closeoutStatus = String(livePlan?.closeout_status || "not_started").trim().toLowerCase();
+  const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
+  const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
 
   return (
     <section className="workspace-view">
@@ -117,14 +142,23 @@ export function ParallelRunControlView({
           <span>{t("run.estimatedRemaining")}</span>
           <strong>{formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language)}</strong>
         </div>
-        <div className={`metric-card metric-card--${statusTone(planDraft?.closeout_status)}`}>
-          <span>{t("run.closeout")}</span>
-          <strong>{displayStatus(planDraft?.closeout_status || "not_started", language)}</strong>
+        <div className={`metric-card metric-card--${parallelLimitCardTone}`}>
+          <span>{t("run.parallelLimit")}</span>
+          <strong>{parallelLimitValue}</strong>
+          <span>{parallelLimitDetails}</span>
         </div>
-        <div className="metric-card">
-          <span>{t("run.estimatedCost")}</span>
-          <strong>{formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</strong>
-        </div>
+        {showCloseoutStatus ? (
+          <div className={`metric-card metric-card--${statusTone(livePlan?.closeout_status)}`}>
+            <span>{t("run.closeout")}</span>
+            <strong>{displayStatus(livePlan?.closeout_status || "not_started", language)}</strong>
+          </div>
+        ) : null}
+        {showEstimatedCost ? (
+          <div className="metric-card">
+            <span>{t("run.estimatedCost")}</span>
+            <strong>{formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</strong>
+          </div>
+        ) : null}
       </div>
 
       <div className="content-card content-card--flow">
@@ -159,7 +193,15 @@ export function ParallelRunControlView({
                   </div>
                   <div className="choice-grid">
                     {layer.map((step) => (
-                      <DagNode key={step.step_id} step={step} selected={step.step_id === selectedStepId} onSelect={onSelectStep} language={language} t={t} />
+                      <DagNode
+                        key={step.step_id}
+                        step={step}
+                        projectStatus={projectStatus}
+                        selected={step.step_id === selectedStepId}
+                        onSelect={onSelectStep}
+                        language={language}
+                        t={t}
+                      />
                     ))}
                   </div>
                 </div>
@@ -176,13 +218,13 @@ export function ParallelRunControlView({
           <div className="content-card__header">
             <strong>{t("field.prompt")}</strong>
           </div>
-          <textarea className="editor-textarea editor-textarea--prompt" value={planDraft?.project_prompt || ""} onChange={(event) => onPromptChange(event.target.value)} disabled={busy} />
+          <textarea className="editor-textarea editor-textarea--prompt" value={livePlan?.project_prompt || ""} onChange={(event) => onPromptChange(event.target.value)} disabled={busy} />
         </div>
 
         <div className="content-card">
           <div className="content-card__header">
             <strong>{t("run.selectedStep")}</strong>
-            <span className={`status-badge status-badge--${statusTone(selectedStep?.status)}`}>{selectedStep ? displayStatus(selectedStep.status, language) : t("common.none")}</span>
+            <span className={`status-badge status-badge--${statusTone(selectedStepStatus)}`}>{selectedStep ? displayStatus(selectedStepStatus, language) : t("common.none")}</span>
           </div>
           {selectedStep ? (
             selectedSystemStep ? (

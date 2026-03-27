@@ -17,6 +17,7 @@ export function IdeToolbar({
 }) {
   const projectStatus = projectDetail?.project?.current_status || "idle";
   const status = activeJob?.status === "running" && !isDebuggingStatus(projectStatus) ? "running" : projectStatus;
+  const livePlan = activeJob?.status === "running" && projectDetail?.plan ? projectDetail.plan : planDraft;
   const projectName = projectDetail?.project?.display_name || projectDetail?.project?.slug || null;
   const { language, t } = useI18n();
   const statusLabel =
@@ -49,7 +50,7 @@ export function IdeToolbar({
         ) : null}
         <div className="toolbar-status toolbar-status--neutral">
           <span>{t("toolbar.plan")}</span>
-          <strong>{toolbarProgressCaption(planDraft)}</strong>
+          <strong>{toolbarProgressCaption(livePlan)}</strong>
         </div>
       </div>
 

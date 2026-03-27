@@ -17,6 +17,9 @@ export function isJobUpdatedEvent(eventPayload) {
 }
 
 export function isProjectChangedEvent(eventPayload) {
-  const type = bridgeEventType(eventPayload);
-  return type === BRIDGE_EVENTS.PROJECT_CHANGED || type === BRIDGE_EVENTS.PROJECT_UI_EVENT;
+  return bridgeEventType(eventPayload) === BRIDGE_EVENTS.PROJECT_CHANGED;
+}
+
+export function isProjectUiEvent(eventPayload) {
+  return bridgeEventType(eventPayload) === BRIDGE_EVENTS.PROJECT_UI_EVENT;
 }

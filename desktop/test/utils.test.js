@@ -23,6 +23,7 @@ import {
   reasoningEffortLabel,
   deriveIdleProjectStatus,
   deriveGithubMode,
+  effectiveStepStatus,
   firstSelectableStepId,
   mergeProjectDetailCodexStatus,
   normalizeInterruptedPlan,
@@ -34,6 +35,7 @@ import {
   sanitizeProjectListForJobState,
   selectedConfigReasoning,
   shouldKeepUnsavedPlan,
+  shouldShowEstimatedCost,
   shouldReplaceVisibleProject,
   statusTone,
   workspaceStatsFromProjects,
@@ -240,6 +242,7 @@ test("blankProjectForm falls back to repository defaults when runtime is missing
 
   assert.equal(form.runtime.generate_word_report, true);
   assert.equal(form.runtime.max_blocks, 5);
+  assert.equal(form.runtime.optimization_mode, "light");
   assert.equal(form.runtime.test_cmd, "python -m pytest");
 });
 
@@ -277,6 +280,7 @@ test("projectFormFromDetail merges persisted runtime and derives GitHub mode", (
   const defaultRuntime = {
     max_blocks: 7,
     effort: "high",
+    optimization_mode: "refactor",
   };
 
   const form = projectFormFromDetail(detail, defaultRuntime);
@@ -290,6 +294,7 @@ test("projectFormFromDetail merges persisted runtime and derives GitHub mode", (
     runtime: {
       max_blocks: 7,
       effort: "high",
+      optimization_mode: "refactor",
       execution_mode: "parallel",
       test_cmd: "npm run check",
       model: "gpt-5.4",
@@ -835,7 +840,40 @@ test("commandLabel maps known commands and humanizes unknown ones", () => {
 test("statusTone maps operational states to UI tones", () => {
   assert.equal(statusTone("failed"), "danger");
   assert.equal(statusTone("running"), "info");
+  assert.equal(statusTone("running:debugging"), "warning");
+  assert.equal(statusTone("running:parallel-debugging"), "warning");
   assert.equal(statusTone("completed"), "success");
   assert.equal(statusTone("paused_for_review"), "warning");
   assert.equal(statusTone("pending"), "neutral");
+});
+
+test("effectiveStepStatus overlays debugging on the active running step", () => {
+  assert.equal(effectiveStepStatus({ status: "running" }, "running:debugging"), "running:debugging");
+  assert.equal(effectiveStepStatus({ status: "running" }, "running:parallel-debugging"), "running:debugging");
+  assert.equal(effectiveStepStatus({ status: "pending" }, "running:debugging"), "pending");
+  assert.equal(effectiveStepStatus({ status: "running" }, "running:block:2"), "running");
+});
+
+test("shouldShowEstimatedCost only enables paid cost displays when configured", () => {
+  assert.equal(
+    shouldShowEstimatedCost(
+      { billing_mode: "included", model_provider: "openai" },
+      { recent: { billing_mode: "included", configured: true }, remaining: { billing_mode: "included", configured: true } },
+    ),
+    false,
+  );
+  assert.equal(
+    shouldShowEstimatedCost(
+      { billing_mode: "token", model_provider: "openrouter" },
+      { recent: { billing_mode: "token", configured: true }, remaining: { billing_mode: "token", configured: false } },
+    ),
+    true,
+  );
+  assert.equal(
+    shouldShowEstimatedCost(
+      { billing_mode: "per_pass", model_provider: "oss" },
+      { recent: { billing_mode: "per_pass", configured: false }, remaining: { billing_mode: "per_pass", configured: false } },
+    ),
+    false,
+  );
 });

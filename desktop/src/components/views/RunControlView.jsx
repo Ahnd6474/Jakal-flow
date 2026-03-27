@@ -1,18 +1,19 @@
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { canEditStep, formatDurationCompact, formatUsd, isSystemStep, planStepsWithCloseout, REASONING_OPTIONS, reasoningEffortLabel, statusTone } from "../../utils";
+import { canEditStep, effectiveStepStatus, formatDurationCompact, formatUsd, isSystemStep, planStepsWithCloseout, REASONING_OPTIONS, reasoningEffortLabel, shouldShowEstimatedCost, statusTone } from "../../utils";
 
-function FlowNode({ step, selected, onSelect, language, t }) {
-  const tone = statusTone(step.status);
+function FlowNode({ step, projectStatus, selected, onSelect, language, t }) {
+  const stepStatus = effectiveStepStatus(step, projectStatus);
+  const tone = statusTone(stepStatus);
+  const summary = step.display_description || step.success_criteria || t("run.noSummary");
   return (
     <button className={`run-node run-node--${tone} ${selected ? "selected" : ""}`} onClick={() => onSelect(step.step_id)} type="button">
       <div className="run-node__meta">
         <span className="run-node__id">{step.step_id}</span>
-        <span className={`status-badge status-badge--${tone}`}>{displayStatus(step.status, language)}</span>
+        <span className={`status-badge status-badge--${tone}`}>{displayStatus(stepStatus, language)}</span>
       </div>
       <strong>{step.title}</strong>
-      <p>{step.display_description || step.test_command || t("run.noSummary")}</p>
-      <p>{t("run.reasoning", { effort: reasoningEffortLabel(step.reasoning_effort || "high", language) })}</p>
+      <p>{summary}</p>
     </button>
   );
 }
@@ -51,6 +52,11 @@ export function RunControlView({
   const executionMode = "parallel";
   const flowColumns = 3;
   const selectedSystemStep = isSystemStep(selectedStep);
+  const projectStatus = detail?.project?.current_status || "";
+  const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
+  const closeoutStatus = String(planDraft?.closeout_status || "not_started").trim().toLowerCase();
+  const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
+  const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
 
   return (
     <section className="workspace-view">
@@ -82,14 +88,18 @@ export function RunControlView({
           <span>{t("run.executionMode")}</span>
           <strong>{t("option.executionParallel")}</strong>
         </div>
-        <div className={`metric-card metric-card--${statusTone(planDraft?.closeout_status)}`}>
-          <span>{t("run.closeout")}</span>
-          <strong>{displayStatus(planDraft?.closeout_status || "not_started", language)}</strong>
-        </div>
-        <div className="metric-card">
-          <span>{t("run.estimatedCost")}</span>
-          <strong>{formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</strong>
-        </div>
+        {showCloseoutStatus ? (
+          <div className={`metric-card metric-card--${statusTone(planDraft?.closeout_status)}`}>
+            <span>{t("run.closeout")}</span>
+            <strong>{displayStatus(planDraft?.closeout_status || "not_started", language)}</strong>
+          </div>
+        ) : null}
+        {showEstimatedCost ? (
+          <div className="metric-card">
+            <span>{t("run.estimatedCost")}</span>
+            <strong>{formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</strong>
+          </div>
+        ) : null}
       </div>
 
       <div className="content-card content-card--flow">
@@ -114,10 +124,10 @@ export function RunControlView({
           </div>
         </div>
         <div className="run-flow">
-          {steps.length ? (
-            steps.map((step, index) => (
-              <div className="run-flow__item" key={step.step_id}>
-                <FlowNode step={step} selected={step.step_id === selectedStepId} onSelect={onSelectStep} language={language} t={t} />
+            {steps.length ? (
+              steps.map((step, index) => (
+                <div className="run-flow__item" key={step.step_id}>
+                <FlowNode step={step} projectStatus={projectStatus} selected={step.step_id === selectedStepId} onSelect={onSelectStep} language={language} t={t} />
                 {index < steps.length - 1 ? (
                   <div
                     className={`run-flow__connector ${
@@ -145,7 +155,7 @@ export function RunControlView({
         <div className="content-card">
           <div className="content-card__header">
             <strong>{t("run.selectedStep")}</strong>
-            <span className={`status-badge status-badge--${statusTone(selectedStep?.status)}`}>{selectedStep ? displayStatus(selectedStep.status, language) : t("common.none")}</span>
+            <span className={`status-badge status-badge--${statusTone(selectedStepStatus)}`}>{selectedStep ? displayStatus(selectedStepStatus, language) : t("common.none")}</span>
           </div>
           {selectedStep ? (
             selectedSystemStep ? (

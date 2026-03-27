@@ -640,8 +640,7 @@ pre {
 }
 
 .sidebar-project.selected,
-.choice-card.selected,
-.run-node.selected {
+.choice-card.selected {
   border-color: var(--bg-accent-strong);
   background: var(--bg-active);
 }
@@ -1035,6 +1034,7 @@ pre {
 }
 
 .run-node.selected {
+  border-color: var(--bg-accent-strong);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 24px rgba(0, 0, 0, 0.2);
 }
 

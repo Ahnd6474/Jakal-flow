@@ -184,6 +184,7 @@ export function CenterWorkspace({
           <ParallelRunControlView
             detail={detail}
             planDraft={planDraft}
+            activeJob={activeJob}
             shareSettings={shareSettings}
             selectedStepId={selectedStepId}
             busy={busy}

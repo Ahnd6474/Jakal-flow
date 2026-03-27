@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from types import SimpleNamespace
 from pathlib import Path
 import shutil
@@ -31,6 +32,7 @@ from jakal_flow.planning import (
     DEBUGGER_SERIAL_PROMPT_FILENAME,
     FINALIZATION_PROMPT_FILENAME,
     ML_PLAN_DECOMPOSITION_PROMPT_FILENAME,
+    OPTIMIZATION_PROMPT_FILENAME,
     ML_FINALIZATION_PROMPT_FILENAME,
     ML_PLAN_GENERATION_PROMPT_FILENAME,
     ML_STEP_EXECUTION_PROMPT_FILENAME,
@@ -48,6 +50,7 @@ from jakal_flow.planning import (
     execution_plan_svg,
     load_debugger_prompt_template,
     load_finalization_prompt_template,
+    load_optimization_prompt_template,
     load_plan_decomposition_prompt_template,
     load_plan_generation_prompt_template,
     load_reference_guide_text,
@@ -264,6 +267,19 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(plan.cpu_logical_count, 16)
         self.assertEqual(plan.cpu_parallel_limit, 4)
         self.assertEqual(plan.recommended_workers, 4)
+
+    def test_parallel_resource_plan_auto_uses_two_workers_on_four_core_machine(self) -> None:
+        with mock.patch("jakal_flow.parallel_resources.os.cpu_count", return_value=4), mock.patch(
+            "jakal_flow.parallel_resources._detect_memory_bytes",
+            return_value=(16 * 1024**3, 12 * 1024**3),
+        ):
+            plan = build_parallel_resource_plan("auto", 0)
+
+        self.assertEqual(plan.worker_mode, "auto")
+        self.assertEqual(plan.cpu_logical_count, 4)
+        self.assertEqual(plan.cpu_parallel_limit, 2)
+        self.assertEqual(plan.memory_parallel_limit, 4)
+        self.assertEqual(plan.recommended_workers, 2)
 
     def test_parallel_resource_plan_manual_respects_resource_cap(self) -> None:
         with mock.patch("jakal_flow.parallel_resources.os.cpu_count", return_value=12), mock.patch(
@@ -865,6 +881,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("after debugger recovery", test_result.summary)
         self.assertEqual(run_result.changed_files, ["src/app.py", "src/fix.py"])
         mocked_commit.assert_called_once()
+        self.assertEqual(mocked_commit.call_args.args[1], "Implement fix debugging")
+        self.assertEqual(mocked_commit.call_args.kwargs["author_name"], "Jakal-Flow-debugger")
         mocked_reset.assert_not_called()
         self.assertIn("Implement fix", debugger_prompt_text)
         self.assertIn("AssertionError: expected value", debugger_prompt_text)
@@ -987,7 +1005,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 orchestrator.git,
                 "commit_all",
                 return_value="parallel-debug-commit",
-            ), mock.patch.object(
+            ) as mocked_commit, mock.patch.object(
                 orchestrator.git,
                 "current_revision",
                 side_effect=["merge-commit-1", "merge-commit-2"],
@@ -1027,6 +1045,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual([step.status for step in plan_state.steps], ["completed", "completed"])
         self.assertEqual(context.metadata.current_status, "plan_completed")
         self.assertEqual(context.metadata.current_safe_revision, "parallel-debug-commit")
+        mocked_commit.assert_called_once()
+        self.assertEqual(mocked_commit.call_args.args[1], "Desktop slice, Backend slice debugging")
+        self.assertEqual(mocked_commit.call_args.kwargs["author_name"], "Jakal-Flow-debugger")
         self.assertIn("Recover merged parallel batch ST1, ST2", debug_prompt_text)
         self.assertIn("integration assertion failed", debug_prompt_text)
         self.assertIn("parallel batch traceback", debug_prompt_text)
@@ -1157,11 +1178,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 return_value=True,
             ), mock.patch.object(orchestrator.git, "add_all") as mocked_add_all, mock.patch.object(
                 orchestrator.git,
-                "continue_cherry_pick",
-            ) as mocked_continue, mock.patch.object(
-                orchestrator.git,
-                "commit_all",
-                return_value="unexpected-debug-commit",
+                "commit_staged",
+                return_value="merge-recovery-commit",
             ) as mocked_commit, mock.patch.object(
                 orchestrator.git,
                 "current_revision",
@@ -1214,8 +1232,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(context.metadata.current_status, "plan_completed")
         self.assertEqual(context.metadata.current_safe_revision, "merge-recovery-commit")
         mocked_add_all.assert_called_once_with(context.paths.repo_dir)
-        mocked_continue.assert_called_once_with(context.paths.repo_dir)
-        mocked_commit.assert_not_called()
+        mocked_commit.assert_called_once()
+        self.assertEqual(mocked_commit.call_args.args[1], "Desktop slice, Backend slice conflict resolution")
+        self.assertEqual(mocked_commit.call_args.kwargs["author_name"], "Jakal-Flow-merge-resolver")
         mocked_abort.assert_not_called()
         mocked_reset.assert_not_called()
         self.assertIn("git cherry-pick worker-2-commit conflicted", debug_prompt_text)
@@ -1347,6 +1366,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         serial_debugger_template = load_source_prompt_template(DEBUGGER_SERIAL_PROMPT_FILENAME)
         parallel_debugger_template = load_source_prompt_template(DEBUGGER_PARALLEL_PROMPT_FILENAME)
         final_template = load_source_prompt_template(FINALIZATION_PROMPT_FILENAME)
+        optimization_template = load_source_prompt_template(OPTIMIZATION_PROMPT_FILENAME)
         ml_final_template = load_source_prompt_template(ML_FINALIZATION_PROMPT_FILENAME)
         scope_template = load_source_prompt_template(SCOPE_GUARD_TEMPLATE_FILENAME)
 
@@ -1435,6 +1455,10 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("{completed_steps}", final_template)
         self.assertIn("{closeout_report_file}", final_template)
         self.assertIn("{test_command}", final_template)
+        self.assertIn("{optimization_mode}", optimization_template)
+        self.assertIn("{candidate_files}", optimization_template)
+        self.assertIn("{optimization_candidates}", optimization_template)
+        self.assertEqual(load_optimization_prompt_template(), optimization_template)
         self.assertIn("{ml_mode_state_file}", ml_final_template)
         self.assertIn("{ml_experiment_reports_dir}", ml_final_template)
         self.assertEqual(load_finalization_prompt_template("ml"), ml_final_template)
@@ -1652,6 +1676,45 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         log_file.write_text('{"index": 1}\nUnexpected token < in JSON\n{"index": 2}\n', encoding="utf-8")
 
         tail = read_jsonl_tail(log_file, 5)
+        last = read_last_jsonl(log_file)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        self.assertEqual([item["index"] for item in tail], [1, 2])
+        self.assertEqual(last, {"index": 2})
+
+    def test_jsonl_tail_helpers_handle_missing_trailing_newline_and_large_utf8_lines(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp_jsonl_tail_test_utf8"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        log_file = temp_dir / "events.jsonl"
+        long_message = "가나다라" * 3000
+        log_file.write_text(
+            "\n".join(
+                [
+                    json.dumps({"index": 1, "message": "first"}, ensure_ascii=False),
+                    json.dumps({"index": 2, "message": long_message}, ensure_ascii=False),
+                    json.dumps({"index": 3, "message": "last"}, ensure_ascii=False),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        tail = read_jsonl_tail(log_file, 2)
+        last = read_last_jsonl(log_file)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        self.assertEqual([item["index"] for item in tail], [2, 3])
+        self.assertEqual(tail[0]["message"], long_message)
+        self.assertEqual(last, {"index": 3, "message": "last"})
+
+    def test_jsonl_tail_helpers_skip_malformed_trailing_line_without_scanning_from_start(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp_jsonl_tail_test_trailing_invalid"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        log_file = temp_dir / "events.jsonl"
+        log_file.write_text('{"index": 1}\n{"index": 2}\n{"index":', encoding="utf-8")
+
+        tail = read_jsonl_tail(log_file, 2)
         last = read_last_jsonl(log_file)
         shutil.rmtree(temp_dir, ignore_errors=True)
 

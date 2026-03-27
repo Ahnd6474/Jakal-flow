@@ -84,6 +84,8 @@ def build_parallel_resource_plan(
     normalized_mode = normalize_parallel_worker_mode(worker_mode)
     cpu_logical_count = max(1, int(os.cpu_count() or 1))
     cpu_parallel_limit = max(1, cpu_logical_count // 4)
+    if cpu_logical_count >= 4:
+        cpu_parallel_limit = max(2, cpu_parallel_limit)
     memory_total_bytes, memory_available_bytes = _detect_memory_bytes()
     memory_parallel_limit: int | None = None
     if memory_available_bytes is not None and memory_available_bytes > 0:

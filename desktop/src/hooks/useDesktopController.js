@@ -2,7 +2,8 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 import { open } from "@tauri-apps/plugin-dialog";
 import { bridgeRequest, startBridgeJob, subscribeBridgeEvents } from "../api";
 import { BRIDGE_COMMANDS } from "../bridgeProtocol";
-import { bridgeEventJob, bridgeEventProject, isJobUpdatedEvent, isProjectChangedEvent } from "../controller/bridgeEvents";
+import { bridgeEventJob, bridgeEventProject, isJobUpdatedEvent, isProjectChangedEvent, isProjectUiEvent } from "../controller/bridgeEvents";
+import { mergeRefreshRepoId, projectRefreshDebounceMs, shouldRefreshSelectedProject } from "../controller/projectRefresh";
 import {
   defaultShareSettings,
   emptyPlanDraft,
@@ -30,12 +31,14 @@ import {
   fetchProjectDetailBySelector,
   loadInitialDesktopState,
   loadProjectListing,
+  refreshVisibleProjectState,
   syncRunningJobSnapshot,
 } from "../controller/projectQueries";
 import {
   applyActiveJobState,
   applyListingState,
   applyProjectDetailState,
+  applyProjectDetailListingState,
   clearSelectedProjectState as clearProjectSelectionState,
 } from "../controller/projectStore";
 import { usePersistentState } from "./usePersistentState";
@@ -65,7 +68,11 @@ export function useDesktopController() {
   const projectAutosaveTimerRef = useRef(null);
   const lastAppliedDetailSignatureRef = useRef("");
   const bridgeRefreshInFlightRef = useRef(false);
+  const bridgeRefreshTimerRef = useRef(null);
+  const pendingBridgeRefreshRepoIdRef = useRef("");
+  const pendingBridgeRefreshListingRef = useRef(false);
   const activeJobRef = useRef(null);
+  const projectsRef = useRef([]);
 
   const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "run");
   const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
@@ -115,12 +122,19 @@ export function useDesktopController() {
       if (projectAutosaveTimerRef.current) {
         window.clearTimeout(projectAutosaveTimerRef.current);
       }
+      if (bridgeRefreshTimerRef.current) {
+        window.clearTimeout(bridgeRefreshTimerRef.current);
+      }
     };
   }, []);
 
   useEffect(() => {
     activeJobRef.current = activeJob;
   }, [activeJob]);
+
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
 
   function applyCurrentJobSnapshot(jobSnapshot) {
     return applyActiveJobState({
@@ -132,7 +146,7 @@ export function useDesktopController() {
   }
 
   function applyProjectDetail(detail, options = {}) {
-    return applyProjectDetailState({
+    const applied = applyProjectDetailState({
       detail,
       options,
       refs: {
@@ -141,7 +155,7 @@ export function useDesktopController() {
       state: {
         projectDetail,
         modelCatalog,
-        activeJob,
+        activeJob: activeJobRef.current,
         defaultRuntime,
         storedProgramSettings,
         planDirty,
@@ -158,6 +172,19 @@ export function useDesktopController() {
         setPlanDirty,
       },
     });
+    if (applied) {
+      const nextProjects = applyProjectDetailListingState({
+        projects: projectsRef.current,
+        detail,
+        runningJob: options.runningJob ?? activeJobRef.current,
+        setProjects,
+        setWorkspaceStats,
+      });
+      if (nextProjects) {
+        projectsRef.current = nextProjects;
+      }
+    }
+    return applied;
   }
 
   useEffect(() => {
@@ -187,6 +214,7 @@ export function useDesktopController() {
           setProjects,
           setWorkspaceStats,
         });
+        projectsRef.current = nextProjects;
         if (!nextProjects.some((item) => item.repo_id === selectedProjectId)) {
           setSelectedProjectId(nextProjects[0]?.repo_id || "");
         }
@@ -256,6 +284,68 @@ export function useDesktopController() {
   useEffect(() => {
     let cancelled = false;
 
+    async function flushBridgeRefresh() {
+      if (bridgeRefreshInFlightRef.current || !workspaceRoot) {
+        return;
+      }
+      bridgeRefreshInFlightRef.current = true;
+      const pendingRepoId = pendingBridgeRefreshRepoIdRef.current;
+      const refreshListing = pendingBridgeRefreshListingRef.current;
+      pendingBridgeRefreshRepoIdRef.current = "";
+      pendingBridgeRefreshListingRef.current = false;
+      try {
+        const runningJob = activeJobRef.current?.status === "running" ? activeJobRef.current : null;
+        const shouldLoadDetail = shouldRefreshSelectedProject(selectedProjectId, pendingRepoId);
+        const { listing, detail } = await refreshVisibleProjectState(
+          bridgeRequest,
+          workspaceRoot,
+          shouldLoadDetail ? selectedProjectId : "",
+          {
+            refreshCodexStatus: false,
+            detailLevel: wantsExpandedDetail ? "full" : "core",
+            refreshListing,
+          },
+        );
+        if (cancelled) {
+          return;
+        }
+        if (listing) {
+          const nextProjects = applyListingState({
+            listing,
+            runningJob,
+            setProjects,
+            setWorkspaceStats,
+          });
+          projectsRef.current = nextProjects;
+        }
+        if (detail && !cancelled) {
+          applyProjectDetail(detail, {
+            preserveSelectedStep: true,
+            runningJob,
+          });
+        }
+      } catch {
+        // Keep event-driven refresh failures quiet; manual refresh still surfaces errors.
+      } finally {
+        bridgeRefreshInFlightRef.current = false;
+        if (!cancelled && pendingBridgeRefreshRepoIdRef.current) {
+          scheduleBridgeRefresh(pendingBridgeRefreshRepoIdRef.current);
+        }
+      }
+    }
+
+    function scheduleBridgeRefresh(eventRepoId = "", options = {}) {
+      pendingBridgeRefreshRepoIdRef.current = mergeRefreshRepoId(pendingBridgeRefreshRepoIdRef.current, eventRepoId);
+      pendingBridgeRefreshListingRef.current = pendingBridgeRefreshListingRef.current || options.refreshListing !== false;
+      if (bridgeRefreshTimerRef.current) {
+        window.clearTimeout(bridgeRefreshTimerRef.current);
+      }
+      bridgeRefreshTimerRef.current = window.setTimeout(() => {
+        bridgeRefreshTimerRef.current = null;
+        void flushBridgeRefresh();
+      }, projectRefreshDebounceMs(activeJobRef.current));
+    }
+
     async function handleBridgeEvent(eventPayload) {
       if (!workspaceRoot) {
         return;
@@ -279,12 +369,13 @@ export function useDesktopController() {
           if (cancelled) {
             return;
           }
-          applyListingState({
+          const nextProjects = applyListingState({
             listing,
             runningJob: null,
             setProjects,
             setWorkspaceStats,
           });
+          projectsRef.current = nextProjects;
           setMessage(
             job.status === "completed"
               ? messagePayload(
@@ -305,41 +396,18 @@ export function useDesktopController() {
         return;
       }
 
-      if (!isProjectChangedEvent(eventPayload) || bridgeRefreshInFlightRef.current) {
+      if (isProjectChangedEvent(eventPayload)) {
+        const project = bridgeEventProject(eventPayload);
+        const eventRepoId = String(project?.repo_id || "").trim();
+        scheduleBridgeRefresh(eventRepoId, { refreshListing: true });
         return;
       }
-
-      const project = bridgeEventProject(eventPayload);
-      const eventRepoId = String(project?.repo_id || "").trim();
-      bridgeRefreshInFlightRef.current = true;
-      try {
-        const listing = await loadProjectListing(bridgeRequest, workspaceRoot);
-        if (cancelled) {
-          return;
+      if (isProjectUiEvent(eventPayload)) {
+        const project = bridgeEventProject(eventPayload);
+        const eventRepoId = String(project?.repo_id || "").trim();
+        if (shouldRefreshSelectedProject(selectedProjectId, eventRepoId)) {
+          scheduleBridgeRefresh(eventRepoId, { refreshListing: false });
         }
-        const runningJob = activeJobRef.current?.status === "running" ? activeJobRef.current : null;
-        applyListingState({
-          listing,
-          runningJob,
-          setProjects,
-          setWorkspaceStats,
-        });
-        if (selectedProjectId && (!eventRepoId || eventRepoId === selectedProjectId)) {
-          const detail = await fetchProjectDetail(bridgeRequest, selectedProjectId, workspaceRoot, {
-            refreshCodexStatus: false,
-            detailLevel: wantsExpandedDetail ? "full" : "core",
-          });
-          if (!cancelled) {
-            applyProjectDetail(detail, {
-              preserveSelectedStep: true,
-              runningJob,
-            });
-          }
-        }
-      } catch {
-        // Keep event-driven refresh failures quiet; manual refresh still surfaces errors.
-      } finally {
-        bridgeRefreshInFlightRef.current = false;
       }
     }
 
@@ -352,6 +420,10 @@ export function useDesktopController() {
 
     return () => {
       cancelled = true;
+      if (bridgeRefreshTimerRef.current) {
+        window.clearTimeout(bridgeRefreshTimerRef.current);
+        bridgeRefreshTimerRef.current = null;
+      }
       void subscription.then(() => {
         if (typeof unlisten === "function") {
           return unlisten();
@@ -374,6 +446,7 @@ export function useDesktopController() {
       setProjects,
       setWorkspaceStats,
     });
+    projectsRef.current = nextProjects;
     if (!selectedProjectId && nextProjects.length) {
       setSelectedProjectId(nextProjects[0].repo_id);
     }
@@ -390,6 +463,7 @@ export function useDesktopController() {
         setProjects,
         setWorkspaceStats,
       });
+      projectsRef.current = nextProjects;
 
       if (selectedProjectId) {
         const detail = await fetchProjectDetail(bridgeRequest, selectedProjectId, workspaceRoot, {
@@ -720,8 +794,10 @@ export function useDesktopController() {
           }),
         ),
       );
+      return job;
     } catch (error) {
       setMessage(messagePayload("error", String(error)));
+      return null;
     }
   }
 
@@ -754,7 +830,10 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.createStepBeforeRun")));
       return;
     }
-    await startJob(BRIDGE_COMMANDS.RUN_PLAN, buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
+    const job = await startJob(BRIDGE_COMMANDS.RUN_PLAN, buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
+    if (job) {
+      setPlanDirty(false);
+    }
   }
 
   async function requestStop() {
