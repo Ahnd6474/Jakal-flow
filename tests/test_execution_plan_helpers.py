@@ -1718,6 +1718,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         mocked_reset.assert_not_called()
         self.assertIn("git cherry-pick worker-2-commit conflicted", debug_prompt_text)
         self.assertIn("CONFLICT (content): Merge conflict in src/jakal_flow/orchestrator.py", debug_prompt_text)
+        self.assertIn("the debugger now owns the merge", debug_prompt_text)
         self.assertIn("resolve the final merged code intentionally", debug_prompt_text)
 
     def test_execution_plan_svg_includes_step_statuses(self) -> None:
@@ -1909,6 +1910,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("{owned_paths}", parallel_debugger_template)
         self.assertIn("merged parallel batch", parallel_debugger_template)
         self.assertIn("cherry-pick conflict", parallel_debugger_template)
+        self.assertIn("the debugger now owns the merge", parallel_debugger_template)
         self.assertIn("Do not edit README.md during debugger recovery.", parallel_debugger_template)
         self.assertEqual(load_plan_decomposition_prompt_template("serial"), parallel_decomposition_template)
         self.assertEqual(load_plan_decomposition_prompt_template("parallel"), parallel_decomposition_template)

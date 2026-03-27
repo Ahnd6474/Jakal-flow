@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import sys
 import unittest
 from unittest import mock
@@ -543,6 +544,63 @@ class UIBridgeTests(unittest.TestCase):
                 )
 
             self.assertEqual(restarted["project"]["display_name"], "Delete Demo Restarted")
+
+    def test_delete_project_removes_readonly_git_objects_inside_managed_workspace(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            (repo_dir / "README.md").write_text("demo", encoding="utf-8")
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Readonly Delete Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            managed_root = Path(detail["project"]["project_root"])
+            readonly_object = (
+                managed_root
+                / ".parallel_runs"
+                / "demo-batch"
+                / "02-st3"
+                / "repo"
+                / ".local"
+                / "targets"
+                / "sample-seed"
+                / ".git"
+                / "objects"
+                / "22"
+                / "cbf345e35e7bffda12b26f45bbc8dc86e2a97d"
+            )
+            readonly_object.parent.mkdir(parents=True, exist_ok=True)
+            readonly_object.write_text("git-object", encoding="utf-8")
+            os.chmod(readonly_object, stat.S_IREAD)
+
+            deleted = run_command(
+                "delete-project",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                },
+            )
+
+            self.assertEqual(deleted["deleted"]["display_name"], "Readonly Delete Demo")
+            self.assertFalse(managed_root.exists())
+            self.assertTrue(repo_dir.exists())
 
     def test_archive_all_projects_moves_registry_but_keeps_local_repos(self) -> None:
         with TemporaryTestDir() as temp_dir:
