@@ -6,6 +6,8 @@ import {
   defaultProviderBaseUrl,
   normalizeMemoryBudgetGiB,
   normalizeDashboardVisibility,
+  REASONING_OPTIONS,
+  reasoningEffortLabel,
 } from "../../utils";
 
 export function AppSettingsView({
@@ -21,6 +23,7 @@ export function AppSettingsView({
   onChangeShareSettings,
 }) {
   const { language, languageOptions, setLanguage, t } = useI18n();
+  const planningReasoningLabel = language === "ko" ? "계획 추론" : "Planning Reasoning";
   const activeShare = shareDetail?.active_session || null;
   const shareServer = shareDetail?.server || null;
   const dashboardVisibility = normalizeDashboardVisibility(settings?.dashboard_visibility);
@@ -243,6 +246,20 @@ export function AppSettingsView({
                 >
                   <option value="standard">{t("option.workflowStandard")}</option>
                   <option value="ml">{t("option.workflowML")}</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>{planningReasoningLabel}</span>
+                <select
+                  value={settings.planning_effort || settings.effort || "medium"}
+                  onChange={(event) => onChangeSettings((current) => ({ ...current, planning_effort: event.target.value }))}
+                  disabled={busy}
+                >
+                  {REASONING_OPTIONS.map((effort) => (
+                    <option key={effort} value={effort}>
+                      {reasoningEffortLabel(effort, language)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="field">

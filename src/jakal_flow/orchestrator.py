@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
@@ -37,6 +38,7 @@ from .planning import (
     implementation_prompt,
     is_plan_markdown,
     load_debugger_prompt_template,
+    load_merger_prompt_template,
     load_plan_decomposition_prompt_template,
     load_plan_generation_prompt_template,
     parse_execution_plan_response,
@@ -48,6 +50,7 @@ from .planning import (
     scan_repository_inputs,
     select_candidate,
     load_step_execution_prompt_template,
+    merger_prompt,
     validate_mid_term_subset,
     work_breakdown_prompt,
     write_active_task,
@@ -144,14 +147,44 @@ class Orchestrator:
         branch: str = "main",
         max_steps: int = 6,
         origin_url: str = "",
+        progress_callback: Callable[[ProjectContext, str, str, dict[str, object] | None], None] | None = None,
     ) -> tuple[ProjectContext, ExecutionPlanState]:
         context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
         project_prompt = project_prompt.strip()
         previous_plan_state = self.load_execution_plan_state(context)
         workflow_mode = normalize_workflow_mode(runtime.workflow_mode)
         normalized_execution_mode = self._normalize_execution_mode(runtime.execution_mode)
+        planning_effort = normalize_reasoning_effort(
+            getattr(runtime, "planning_effort", ""),
+            fallback=normalize_reasoning_effort(runtime.effort, fallback="high"),
+        )
+        planning_stage_count = 4
+
+        def report_progress(event_type: str, message: str, details: dict[str, object] | None = None) -> None:
+            if progress_callback is None:
+                return
+            progress_callback(
+                context,
+                event_type,
+                message,
+                {
+                    "flow": "planning",
+                    **(details or {}),
+                },
+            )
+
         decomposition_prompt_template = load_plan_decomposition_prompt_template(normalized_execution_mode, workflow_mode)
         planning_prompt_template = load_plan_generation_prompt_template(normalized_execution_mode, workflow_mode)
+        report_progress(
+            "plan-started",
+            "Collecting repository context for planning.",
+            {
+                "stage_key": "context_scan",
+                "stage_index": 1,
+                "stage_count": planning_stage_count,
+                "status": "running",
+            },
+        )
         repo_inputs = scan_repository_inputs(context.paths.repo_dir)
         runner = CodexRunner(context.runtime.codex_path)
         decomposition_prompt = prompt_to_plan_decomposition_prompt(
@@ -162,12 +195,38 @@ class Orchestrator:
             execution_mode=normalized_execution_mode,
             template_text=decomposition_prompt_template,
         )
+        report_progress(
+            "planner-agent-started",
+            "Planner Agent A is decomposing the work into implementation blocks.",
+            {
+                "stage_key": "planner_a",
+                "stage_index": 2,
+                "stage_count": planning_stage_count,
+                "status": "running",
+                "agent_key": "planner_a",
+                "agent_label": "Planner Agent A",
+            },
+        )
         decomposition_result = runner.run_pass(
             context=context,
             prompt=decomposition_prompt,
             pass_type="plan-agent-a-decomposition",
             block_index=max(0, context.loop_state.block_index),
             search_enabled=False,
+            reasoning_effort=planning_effort,
+        )
+        report_progress(
+            "planner-agent-finished",
+            "Planner Agent A finished the decomposition outline.",
+            {
+                "stage_key": "planner_a",
+                "stage_index": 2,
+                "stage_count": planning_stage_count,
+                "status": "completed" if decomposition_result.returncode == 0 else "failed",
+                "agent_key": "planner_a",
+                "agent_label": "Planner Agent A",
+                "returncode": decomposition_result.returncode,
+            },
         )
         planner_outline = (decomposition_result.last_message or "").strip() if decomposition_result.returncode == 0 else ""
         write_text(
@@ -183,12 +242,38 @@ class Orchestrator:
             planner_outline=planner_outline,
             template_text=planning_prompt_template,
         )
+        report_progress(
+            "planner-agent-started",
+            "Planner Agent B is packing the final execution plan.",
+            {
+                "stage_key": "planner_b",
+                "stage_index": 3,
+                "stage_count": planning_stage_count,
+                "status": "running",
+                "agent_key": "planner_b",
+                "agent_label": "Planner Agent B",
+            },
+        )
         result = runner.run_pass(
             context=context,
             prompt=prompt,
             pass_type="plan-agent-b-packing",
             block_index=max(0, context.loop_state.block_index),
             search_enabled=False,
+            reasoning_effort=planning_effort,
+        )
+        report_progress(
+            "planner-agent-finished",
+            "Planner Agent B finished the execution plan draft.",
+            {
+                "stage_key": "planner_b",
+                "stage_index": 3,
+                "stage_count": planning_stage_count,
+                "status": "completed" if result.returncode == 0 else "failed",
+                "agent_key": "planner_b",
+                "agent_label": "Planner Agent B",
+                "returncode": result.returncode,
+            },
         )
         plan_title = ""
         summary = ""
@@ -219,6 +304,16 @@ class Orchestrator:
             ]
             summary = summary or "Fallback execution plan created because Codex did not return a machine-readable breakdown."
 
+        report_progress(
+            "plan-finalizing",
+            "Validating, post-processing, and saving the execution plan.",
+            {
+                "stage_key": "finalize",
+                "stage_index": 4,
+                "stage_count": planning_stage_count,
+                "status": "running",
+            },
+        )
         plan_state = ExecutionPlanState(
             plan_title=plan_title.strip() or context.metadata.display_name or context.metadata.slug,
             project_prompt=project_prompt.strip(),
@@ -1086,6 +1181,218 @@ class Orchestrator:
             selected.append(lineage)
         return selected
 
+    def _integration_token(self, step: ExecutionStep) -> str:
+        raw = f"{step.step_id.strip().lower() or 'join'}-{uuid4().hex[:8]}"
+        return "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in raw).strip("-") or uuid4().hex[:8]
+
+    def _integration_root(self, context: ProjectContext, integration_token: str) -> Path:
+        return context.paths.project_root / ".integrations" / integration_token
+
+    def _integration_branch_name(self, step: ExecutionStep, integration_token: str) -> str:
+        step_slug = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in step.step_id.strip().lower()).strip("-") or "join"
+        token_slug = integration_token.strip().lower()[-8:] or uuid4().hex[:8]
+        return f"jakal-flow-integration-{step_slug}-{token_slug}"
+
+    def _build_integration_paths(
+        self,
+        context: ProjectContext,
+        integration_token: str,
+        worktree_dir: Path,
+    ) -> ProjectPaths:
+        integration_root = self._integration_root(context, integration_token)
+        docs_dir = integration_root / "docs"
+        memory_dir = integration_root / "memory"
+        logs_dir = integration_root / "logs"
+        reports_dir = integration_root / "reports"
+        state_dir = integration_root / "state"
+        for directory in [integration_root, docs_dir, memory_dir, logs_dir, reports_dir, state_dir]:
+            ensure_dir(directory)
+        return ProjectPaths(
+            workspace_root=context.paths.workspace_root,
+            projects_root=context.paths.projects_root,
+            project_root=integration_root,
+            repo_dir=worktree_dir,
+            docs_dir=docs_dir,
+            memory_dir=memory_dir,
+            logs_dir=logs_dir,
+            reports_dir=reports_dir,
+            state_dir=state_dir,
+            metadata_file=integration_root / "metadata.json",
+            project_config_file=integration_root / "project_config.json",
+            loop_state_file=state_dir / "LOOP_STATE.json",
+            plan_file=docs_dir / "PLAN.md",
+            mid_term_plan_file=docs_dir / "MID_TERM_PLAN.md",
+            scope_guard_file=docs_dir / "SCOPE_GUARD.md",
+            active_task_file=docs_dir / "ACTIVE_TASK.md",
+            block_review_file=docs_dir / "BLOCK_REVIEW.md",
+            checkpoint_timeline_file=docs_dir / "CHECKPOINT_TIMELINE.md",
+            research_notes_file=docs_dir / "RESEARCH_NOTES.md",
+            attempt_history_file=docs_dir / "attempt_history.md",
+            success_patterns_file=memory_dir / "success_patterns.jsonl",
+            failure_patterns_file=memory_dir / "failure_patterns.jsonl",
+            task_summaries_file=memory_dir / "task_summaries.jsonl",
+            pass_log_file=logs_dir / "passes.jsonl",
+            block_log_file=logs_dir / "blocks.jsonl",
+            checkpoint_state_file=state_dir / "CHECKPOINTS.json",
+            execution_plan_file=state_dir / "EXECUTION_PLAN.json",
+            lineage_state_file=state_dir / "LINEAGES.json",
+            ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
+            ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
+            ml_experiment_reports_dir=state_dir / "ml_experiments",
+            ui_control_file=state_dir / "UI_RUN_CONTROL.json",
+            ui_event_log_file=logs_dir / "ui_events.jsonl",
+            execution_flow_svg_file=docs_dir / "EXECUTION_FLOW.svg",
+            closeout_report_file=docs_dir / "CLOSEOUT_REPORT.md",
+            closeout_report_docx_file=reports_dir / "CLOSEOUT_REPORT.docx",
+            ml_experiment_report_file=docs_dir / "ML_EXPERIMENT_REPORT.md",
+            ml_experiment_results_svg_file=docs_dir / "ML_EXPERIMENT_RESULTS.svg",
+        )
+
+    def _build_integration_context(
+        self,
+        context: ProjectContext,
+        runtime: RuntimeOptions,
+        step: ExecutionStep,
+        base_revision: str,
+        integration_token: str,
+    ) -> dict[str, object]:
+        integration_root = self._integration_root(context, integration_token)
+        worktree_dir = integration_root / "repo"
+        branch_name = self._integration_branch_name(step, integration_token)
+        self.git.add_worktree(context.paths.repo_dir, worktree_dir, branch_name, base_revision)
+        integration_paths = self._build_integration_paths(context, integration_token, worktree_dir)
+        self._sync_lineage_support_files(context, integration_paths)
+        integration_runtime = self._build_parallel_worker_runtime(runtime, step)
+        integration_metadata = RepoMetadata(
+            repo_id=f"{context.metadata.repo_id}:integration:{integration_token}",
+            slug=f"{context.metadata.slug}-integration-{integration_token}",
+            repo_url=context.metadata.repo_url,
+            branch=branch_name,
+            project_root=integration_paths.project_root,
+            repo_path=worktree_dir,
+            created_at=now_utc_iso(),
+            last_run_at=None,
+            current_status="integration_ready",
+            current_safe_revision=base_revision,
+            repo_kind=context.metadata.repo_kind,
+            display_name=f"{context.metadata.display_name or context.metadata.slug} [integration {step.step_id}]",
+            origin_url=context.metadata.origin_url,
+        )
+        integration_loop_state = LoopState(
+            repo_id=integration_metadata.repo_id,
+            repo_slug=integration_metadata.slug,
+            current_safe_revision=base_revision,
+        )
+        integration_context = ProjectContext(
+            metadata=integration_metadata,
+            runtime=integration_runtime,
+            paths=integration_paths,
+            loop_state=integration_loop_state,
+        )
+        self._ensure_project_documents(integration_context)
+        self._persist_context_files(integration_context)
+        return {
+            "branch_name": branch_name,
+            "integration_root": integration_root,
+            "integration_context": integration_context,
+            "worktree_dir": worktree_dir,
+            "token": integration_token,
+        }
+
+    def _cleanup_integration_worktree(self, repo_dir: Path, integration_info: dict[str, object]) -> None:
+        worktree_dir = integration_info.get("worktree_dir")
+        branch_name = str(integration_info.get("branch_name") or "").strip()
+        if isinstance(worktree_dir, Path) and worktree_dir.exists():
+            self.git.remove_worktree(repo_dir, worktree_dir, force=True)
+        if branch_name:
+            self.git.delete_branch(repo_dir, branch_name, force=True)
+
+    def _merge_targets_for_lineages(self, plan_state: ExecutionPlanState, step: ExecutionStep) -> list[str]:
+        metadata = step.metadata if isinstance(step.metadata, dict) else {}
+        return self._coerce_string_list(metadata.get("merge_from", [])) or list(step.depends_on)
+
+    def _build_join_merge_step(
+        self,
+        plan_state: ExecutionPlanState,
+        step: ExecutionStep,
+        merge_targets: list[str],
+    ) -> ExecutionStep:
+        step_by_id = {item.step_id: item for item in plan_state.steps}
+        ordered_paths: list[str] = []
+        seen_paths: set[str] = set()
+        upstream_titles: list[str] = []
+        for step_id in merge_targets:
+            upstream_step = step_by_id.get(step_id)
+            if upstream_step is None:
+                continue
+            if upstream_step.title.strip():
+                upstream_titles.append(upstream_step.title.strip())
+            for path in upstream_step.owned_paths:
+                normalized = self._normalize_owned_path(path)
+                if not normalized or normalized in seen_paths:
+                    continue
+                seen_paths.add(normalized)
+                ordered_paths.append(normalized)
+        for path in step.owned_paths:
+            normalized = self._normalize_owned_path(path)
+            if not normalized or normalized in seen_paths:
+                continue
+            seen_paths.add(normalized)
+            ordered_paths.append(normalized)
+        metadata = deepcopy(step.metadata) if isinstance(step.metadata, dict) else {}
+        metadata["merge_phase"] = "integration"
+        metadata["merge_targets"] = merge_targets
+        if upstream_titles:
+            metadata["parallel_step_titles"] = upstream_titles
+        return ExecutionStep(
+            step_id=f"{step.step_id}-MERGE",
+            title=f"Resolve integration merge for {step.step_id}",
+            display_description=f"Resolve merge conflicts while integrating {', '.join(merge_targets) or step.step_id}.",
+            codex_description=(
+                "Resolve the current cherry-pick conflict inside the integration worktree, preserve the intent of all "
+                "upstream branches, and leave the worktree ready for the remaining merges or verification."
+            ),
+            test_command=step.test_command,
+            success_criteria="The merge conflict is resolved cleanly and the integration worktree can continue.",
+            reasoning_effort="high",
+            depends_on=merge_targets,
+            owned_paths=ordered_paths,
+            metadata=metadata,
+        )
+
+    def _build_parallel_batch_merge_step(
+        self,
+        steps: list[ExecutionStep],
+        test_command: str,
+    ) -> ExecutionStep:
+        step_ids = [step.step_id for step in steps if step.step_id.strip()]
+        titles = ", ".join(step_ids) if step_ids else "parallel batch"
+        parallel_step_titles = [step.title.strip() for step in steps if step.title.strip()]
+        ordered_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for step in steps:
+            for path in step.owned_paths:
+                normalized = self._normalize_owned_path(path)
+                if not normalized or normalized in seen_paths:
+                    continue
+                seen_paths.add(normalized)
+                ordered_paths.append(normalized)
+        return ExecutionStep(
+            step_id="BATCH-MERGE",
+            title=f"Resolve merged parallel batch conflict {titles}",
+            display_description=f"Resolve cherry-pick conflicts while merging {titles}.",
+            codex_description=(
+                "Resolve the current cherry-pick conflict for the merged parallel batch, preserve the intent of all "
+                "completed worker branches, and leave the repository ready for verification."
+            ),
+            test_command=test_command,
+            success_criteria="The merged parallel batch cherry-pick conflict is resolved cleanly.",
+            reasoning_effort="high",
+            depends_on=step_ids,
+            owned_paths=ordered_paths,
+            metadata={"parallel_step_titles": parallel_step_titles, "merge_phase": "parallel_batch"},
+        )
+
     def _normalize_hybrid_step_kind(self, value: object) -> str:
         normalized = str(value or "").strip().lower()
         if normalized in {"join", "barrier"}:
@@ -1334,9 +1641,6 @@ class Orchestrator:
                 metadata["join_policy"] = join_policy
                 metadata["merge_from"] = merge_from
                 step.metadata = metadata
-            elif step_kind == "barrier" and not step.depends_on:
-                raise ValueError(f"{step.step_id} must depend on at least one prior step to act as a barrier node.")
-
     def _validate_parallel_execution_steps(self, steps: list[ExecutionStep]) -> None:
         step_ids = {step.step_id for step in steps}
         indegree = {step.step_id: 0 for step in steps}
@@ -1413,15 +1717,13 @@ class Orchestrator:
     def _owned_paths_conflict(self, left: str, right: str) -> bool:
         return self._owned_paths_overlap_level(left, right) == "hard"
 
-    def run_saved_execution_step(
+    def _run_saved_execution_step_with_context(
         self,
-        project_dir: Path,
+        *,
+        context: ProjectContext,
         runtime: RuntimeOptions,
         step_id: str | None = None,
-        branch: str = "main",
-        origin_url: str = "",
     ) -> tuple[ProjectContext, ExecutionPlanState, ExecutionStep]:
-        context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
         plan_state = self.load_execution_plan_state(context)
         if not plan_state.steps:
             raise RuntimeError("No saved execution plan exists for this project.")
@@ -1525,6 +1827,17 @@ class Orchestrator:
             self.workspace.save_project(context)
 
         return context, plan_state, target_step
+
+    def run_saved_execution_step(
+        self,
+        project_dir: Path,
+        runtime: RuntimeOptions,
+        step_id: str | None = None,
+        branch: str = "main",
+        origin_url: str = "",
+    ) -> tuple[ProjectContext, ExecutionPlanState, ExecutionStep]:
+        context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
+        return self._run_saved_execution_step_with_context(context=context, runtime=runtime, step_id=step_id)
 
     def _run_execution_step_attempts(
         self,
@@ -1698,6 +2011,17 @@ class Orchestrator:
                 context.metadata.current_status = "failed"
             else:
                 verification_block_index = max(1, context.loop_state.block_index + len(ordered_targets))
+                batch_merge_step = self._build_parallel_batch_merge_step(
+                    ordered_targets,
+                    plan_state.default_test_command or runtime.test_cmd,
+                )
+                batch_merge_candidate = CandidateTask(
+                    candidate_id="parallel-batch-merge",
+                    title=batch_merge_step.title,
+                    rationale=self._execution_step_rationale(batch_merge_step, batch_merge_step.test_command),
+                    plan_refs=[step.step_id for step in ordered_targets],
+                    score=1.0,
+                )
                 batch_debug_step = self._build_parallel_batch_debug_step(
                     ordered_targets,
                     plan_state.default_test_command or runtime.test_cmd,
@@ -1730,37 +2054,35 @@ class Orchestrator:
                                 merge_result=merge_result,
                                 conflicted_files=conflicted_files,
                             )
-                            debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
+                            merge_pass_name, merge_run_result, merge_success, merge_commit_hash = self._run_merger_pass(
                                 context=context,
                                 runner=batch_runner,
                                 reporter=reporter,
                                 block_index=verification_block_index,
-                                candidate=batch_candidate,
-                                execution_step=batch_debug_step,
+                                candidate=batch_merge_candidate,
+                                execution_step=batch_merge_step,
                                 memory_context=batch_memory_context,
-                                failing_pass_name="parallel-batch-merge",
-                                failing_test_result=merge_test_result,
+                                failing_command="parallel-batch-merge",
+                                failing_summary=merge_test_result.summary,
+                                failing_stdout=read_text(merge_test_result.stdout_file),
+                                failing_stderr=read_text(merge_test_result.stderr_file),
+                                merge_targets=[step.step_id for step in ordered_targets],
                                 post_success_strategy="continue_cherry_pick",
                             )
-                            if (
-                                debug_run_result.returncode == 0
-                                and debug_test_result is not None
-                                and debug_test_result.returncode == 0
-                                and debug_commit_hash
-                            ):
+                            if merge_run_result.returncode == 0 and merge_success and merge_commit_hash:
                                 self._log_pass_result(
                                     context=context,
                                     reporter=reporter,
                                     block_index=verification_block_index,
-                                    candidate=batch_candidate,
-                                    pass_name=debug_pass_name,
-                                    run_result=debug_run_result,
-                                    test_result=debug_test_result,
-                                    commit_hash=debug_commit_hash,
+                                    candidate=batch_merge_candidate,
+                                    pass_name=merge_pass_name,
+                                    run_result=merge_run_result,
+                                    test_result=None,
+                                    commit_hash=merge_commit_hash,
                                     rollback_status="not_needed",
                                     search_enabled=False,
                                 )
-                                merged_commit_hashes.append(debug_commit_hash)
+                                merged_commit_hashes.append(merge_commit_hash)
                                 continue
                         raise RuntimeError(
                             f"Parallel merge conflict while cherry-picking {worker_commit}: {', '.join(conflicted_files) or merge_result.stderr.strip() or 'unknown conflict'}"
@@ -1973,68 +2295,188 @@ class Orchestrator:
         if self._step_kind(target_step) not in {"join", "barrier"}:
             raise RuntimeError(f"{target_step.step_id} is not a join or barrier step.")
 
+        started_at = now_utc_iso()
+        for step in plan_state.steps:
+            if step.step_id == target_step.step_id:
+                step.status = "running"
+                step.started_at = step.started_at or started_at
+                step.notes = ""
+            elif step.status == "running":
+                step.status = "paused"
+        plan_state.default_test_command = runtime.test_cmd
+        plan_state = self.save_execution_plan_state(context, plan_state)
+        target_step = next(step for step in plan_state.steps if step.step_id == target_step.step_id)
+
         lineages = self._load_lineage_states(context)
+        merge_targets = self._merge_targets_for_lineages(plan_state, target_step)
         merge_lineages = self._lineages_for_join_step(plan_state, target_step, lineages)
         pre_join_safe_revision = context.metadata.current_safe_revision or self.git.current_revision(context.paths.repo_dir)
         context.metadata.current_safe_revision = pre_join_safe_revision
         context.loop_state.current_safe_revision = pre_join_safe_revision
-        context.metadata.last_run_at = now_utc_iso()
+        context.metadata.current_status = f"running:{target_step.step_id.lower()}"
+        context.metadata.last_run_at = started_at
         self.workspace.save_project(context)
 
+        integration_info: dict[str, object] | None = None
         try:
+            integration_token = self._integration_token(target_step)
+            integration_info = self._build_integration_context(
+                context,
+                runtime,
+                target_step,
+                pre_join_safe_revision,
+                integration_token,
+            )
+            integration_context = integration_info.get("integration_context")
+            if not isinstance(integration_context, ProjectContext):
+                raise RuntimeError("Integration context could not be created.")
+            integration_plan_state = self.save_execution_plan_state(integration_context, deepcopy(plan_state))
+            self._save_lineage_states(integration_context, lineages)
+            integration_runner = CodexRunner(integration_context.runtime.codex_path)
+            integration_reporter = Reporter(integration_context)
+            integration_memory_context = MemoryStore(integration_context.paths).render_context(read_text(integration_context.paths.mid_term_plan_file))
+            merge_step = self._build_join_merge_step(integration_plan_state, target_step, merge_targets)
+            merge_candidate = CandidateTask(
+                candidate_id=f"{target_step.step_id}-merge",
+                title=merge_step.title,
+                rationale=self._execution_step_rationale(merge_step, merge_step.test_command),
+                plan_refs=merge_targets,
+                score=1.0,
+            )
+            merge_block_index = self._next_logged_block_index(integration_context)
+
             for lineage in merge_lineages:
                 source_commit = str(lineage.head_commit or lineage.safe_revision or "").strip()
                 if not source_commit:
                     raise RuntimeError(f"{target_step.step_id} could not find a mergeable commit for lineage {lineage.lineage_id}.")
-                merge_result = self.git.try_cherry_pick(context.paths.repo_dir, source_commit)
+                merge_result = self.git.try_cherry_pick(integration_context.paths.repo_dir, source_commit)
                 if merge_result.returncode == 0:
+                    integration_head = self.git.current_revision(integration_context.paths.repo_dir)
+                    integration_context.metadata.current_safe_revision = integration_head
+                    integration_context.loop_state.current_safe_revision = integration_head
+                    self.workspace.save_project(integration_context)
                     continue
-                conflicted_files = self.git.conflicted_files(context.paths.repo_dir)
-                self.git.abort_cherry_pick(context.paths.repo_dir)
-                self.git.hard_reset(context.paths.repo_dir, pre_join_safe_revision)
+                conflicted_files = self.git.conflicted_files(integration_context.paths.repo_dir)
+                merge_test_result = self._merge_conflict_test_result(
+                    context=integration_context,
+                    label="integration-merge",
+                    command=f"git cherry-pick {source_commit}",
+                    merge_result=merge_result,
+                    conflicted_files=conflicted_files,
+                )
+                if conflicted_files and self.git.cherry_pick_in_progress(integration_context.paths.repo_dir):
+                    merge_pass_name, merge_run_result, merge_success, merge_commit_hash = self._run_merger_pass(
+                        context=integration_context,
+                        runner=integration_runner,
+                        reporter=integration_reporter,
+                        block_index=merge_block_index,
+                        candidate=merge_candidate,
+                        execution_step=merge_step,
+                        memory_context=integration_memory_context,
+                        failing_command="integration-merge",
+                        failing_summary=merge_test_result.summary,
+                        failing_stdout=read_text(merge_test_result.stdout_file),
+                        failing_stderr=read_text(merge_test_result.stderr_file),
+                        merge_targets=merge_targets,
+                    )
+                    if merge_run_result.returncode == 0 and merge_success and merge_commit_hash:
+                        self._log_pass_result(
+                            context=integration_context,
+                            reporter=integration_reporter,
+                            block_index=merge_block_index,
+                            candidate=merge_candidate,
+                            pass_name=merge_pass_name,
+                            run_result=merge_run_result,
+                            test_result=None,
+                            commit_hash=merge_commit_hash,
+                            rollback_status="not_needed",
+                            search_enabled=False,
+                        )
+                        integration_context.metadata.current_safe_revision = merge_commit_hash
+                        integration_context.loop_state.current_safe_revision = merge_commit_hash
+                        self.workspace.save_project(integration_context)
+                        merge_block_index += 1
+                        continue
+                self.git.abort_cherry_pick(integration_context.paths.repo_dir)
+                self.git.hard_reset(integration_context.paths.repo_dir, pre_join_safe_revision)
+                if integration_info is not None:
+                    self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
                 target_step.status = "failed"
                 target_step.notes = (
                     f"{target_step.step_id} failed while merging {lineage.lineage_id}: "
                     f"{', '.join(conflicted_files) or merge_result.stderr.strip() or 'unknown conflict'}"
                 )
                 context.metadata.current_status = "failed"
-                self.save_execution_plan_state(context, plan_state)
+                saved = self.save_execution_plan_state(context, plan_state)
                 self.workspace.save_project(context)
-                return context, plan_state, target_step
+                return context, saved, target_step
 
-            project, saved, result_step = self.run_saved_execution_step(
-                project_dir=project_dir,
+            integration_context.metadata.current_safe_revision = self.git.current_revision(integration_context.paths.repo_dir)
+            integration_context.loop_state.current_safe_revision = integration_context.metadata.current_safe_revision
+            self.workspace.save_project(integration_context)
+
+            _integration_project, _integration_saved, result_step = self._run_saved_execution_step_with_context(
+                context=integration_context,
                 runtime=runtime,
                 step_id=target_step.step_id,
-                branch=branch,
-                origin_url=origin_url,
             )
-        except Exception:
-            self.git.abort_cherry_pick(context.paths.repo_dir)
-            self.git.hard_reset(context.paths.repo_dir, pre_join_safe_revision)
-            context.metadata.current_safe_revision = pre_join_safe_revision
-            context.loop_state.current_safe_revision = pre_join_safe_revision
+        except Exception as exc:
+            if integration_info is not None:
+                integration_context = integration_info.get("integration_context")
+                if isinstance(integration_context, ProjectContext):
+                    self.git.abort_cherry_pick(integration_context.paths.repo_dir)
+                    self.git.hard_reset(integration_context.paths.repo_dir, pre_join_safe_revision)
+                self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
+            context.metadata.current_status = "failed"
+            target_step.status = "failed"
+            target_step.notes = str(exc).strip() or "Join execution failed."
+            saved = self.save_execution_plan_state(context, plan_state)
             self.workspace.save_project(context)
             raise
 
         if result_step.status != "completed":
-            self.git.abort_cherry_pick(project.paths.repo_dir)
-            self.git.hard_reset(project.paths.repo_dir, pre_join_safe_revision)
-            project.metadata.current_safe_revision = pre_join_safe_revision
-            project.loop_state.current_safe_revision = pre_join_safe_revision
-            self.workspace.save_project(project)
-            return project, saved, result_step
+            if integration_info is not None:
+                integration_context = integration_info.get("integration_context")
+                if isinstance(integration_context, ProjectContext):
+                    self.git.abort_cherry_pick(integration_context.paths.repo_dir)
+                    self.git.hard_reset(integration_context.paths.repo_dir, pre_join_safe_revision)
+                self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
+            context.metadata.current_status = "failed"
+            target_step.status = "failed"
+            target_step.notes = result_step.notes or "Join execution failed."
+            saved = self.save_execution_plan_state(context, plan_state)
+            self.workspace.save_project(context)
+            return context, saved, target_step
 
-        integrated_revision = self.git.current_revision(project.paths.repo_dir)
-        project.metadata.current_safe_revision = integrated_revision
-        project.loop_state.current_safe_revision = integrated_revision
-        project.loop_state.last_commit_hash = integrated_revision
+        branch_name = str(integration_info.get("branch_name") if integration_info else "").strip()
+        try:
+            self.git.merge_ff_only(context.paths.repo_dir, branch_name)
+        except Exception as exc:
+            if integration_info is not None:
+                self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
+            self.git.hard_reset(context.paths.repo_dir, pre_join_safe_revision)
+            context.metadata.current_safe_revision = pre_join_safe_revision
+            context.loop_state.current_safe_revision = pre_join_safe_revision
+            context.metadata.current_status = "failed"
+            target_step.status = "failed"
+            target_step.notes = str(exc).strip() or "Failed to promote the integration worktree onto main."
+            saved = self.save_execution_plan_state(context, plan_state)
+            self.workspace.save_project(context)
+            return context, saved, target_step
 
-        refreshed = self.load_execution_plan_state(project)
-        refreshed_step = next((step for step in refreshed.steps if step.step_id == result_step.step_id), result_step)
+        integrated_revision = self.git.current_revision(context.paths.repo_dir)
+        context.metadata.current_safe_revision = integrated_revision
+        context.loop_state.current_safe_revision = integrated_revision
+        context.loop_state.last_commit_hash = integrated_revision
+
+        refreshed = self.load_execution_plan_state(context)
+        refreshed_step = next((step for step in refreshed.steps if step.step_id == result_step.step_id), target_step)
+        refreshed_step.status = "completed"
+        refreshed_step.completed_at = result_step.completed_at or now_utc_iso()
         refreshed_step.commit_hash = integrated_revision
-        refreshed_step.notes = refreshed_step.notes or "Join step completed successfully."
-        saved = self.save_execution_plan_state(project, refreshed)
+        refreshed_step.notes = result_step.notes or "Join step completed successfully."
+        saved = self.save_execution_plan_state(context, refreshed)
+        context.metadata.current_status = self._status_from_plan_state(saved)
 
         merged_at = now_utc_iso()
         for lineage in merge_lineages:
@@ -2042,10 +2484,12 @@ class Orchestrator:
             lineage.merged_by_step_id = refreshed_step.step_id
             lineage.updated_at = merged_at
             lineage.notes = refreshed_step.notes
-            self._cleanup_lineage_worktree(project.paths.repo_dir, lineage)
-        self._save_lineage_states(project, lineages)
-        self.workspace.save_project(project)
-        return project, saved, refreshed_step
+            self._cleanup_lineage_worktree(context.paths.repo_dir, lineage)
+        if integration_info is not None:
+            self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
+        self._save_lineage_states(context, lineages)
+        self.workspace.save_project(context)
+        return context, saved, refreshed_step
 
     def _normalize_execution_mode(self, value: str | None) -> str:
         return "parallel"
@@ -3490,6 +3934,14 @@ class Orchestrator:
             return f"{normalized[:-5]}-debug"
         return f"{normalized}-debug"
 
+    def _merge_pass_name(self, pass_name: str) -> str:
+        normalized = str(pass_name).strip() or "merge"
+        if normalized.endswith("-pass"):
+            return f"{normalized[:-5]}-merger"
+        if normalized.endswith("-merge"):
+            return f"{normalized[:-6]}-merger"
+        return f"{normalized}-merger"
+
     def _log_pass_result(
         self,
         *,
@@ -3603,6 +4055,99 @@ class Orchestrator:
         finally:
             context.metadata.last_run_at = now_utc_iso()
             if context.metadata.current_status == "running:debugging":
+                context.metadata.current_status = previous_status
+            context.loop_state.current_task = previous_task
+            self.workspace.save_project(context)
+
+    def _run_merger_pass(
+        self,
+        *,
+        context: ProjectContext,
+        runner: CodexRunner,
+        reporter: Reporter,
+        block_index: int,
+        candidate: CandidateTask,
+        execution_step: ExecutionStep | None,
+        memory_context: str,
+        failing_command: str,
+        failing_summary: str,
+        failing_stdout: str,
+        failing_stderr: str,
+        merge_targets: list[str] | None = None,
+        post_success_strategy: str = "continue_cherry_pick",
+    ) -> tuple[str, object, bool, str | None]:
+        merge_pass_name = self._merge_pass_name(failing_command)
+        merger_prompt_template = load_merger_prompt_template(context.runtime.execution_mode)
+        previous_status = context.metadata.current_status
+        previous_task = context.loop_state.current_task
+        context.metadata.current_status = "running:merging"
+        context.metadata.last_run_at = now_utc_iso()
+        context.loop_state.current_task = f"Merging {candidate.title}".strip()
+        self.workspace.save_project(context)
+        prompt = merger_prompt(
+            context=context,
+            candidate=candidate,
+            memory_context=memory_context,
+            failing_command=failing_command,
+            failing_summary=failing_summary,
+            failing_stdout=failing_stdout,
+            failing_stderr=failing_stderr,
+            merge_targets=merge_targets,
+            execution_step=execution_step,
+            template_text=merger_prompt_template,
+        )
+        try:
+            run_result = runner.run_pass(
+                context=context,
+                prompt=prompt,
+                pass_type=merge_pass_name,
+                block_index=block_index,
+                search_enabled=False,
+            )
+            run_result.changed_files = self.git.changed_files(context.paths.repo_dir)
+            if run_result.returncode != 0:
+                return merge_pass_name, run_result, False, None
+            if self.git.conflicted_files(context.paths.repo_dir):
+                return merge_pass_name, run_result, False, None
+
+            commit_hash: str | None = None
+            commit_descriptor = build_commit_descriptor(
+                context,
+                merge_pass_name,
+                candidate.title,
+                execution_step=execution_step,
+            )
+            if post_success_strategy == "continue_cherry_pick":
+                if self.git.cherry_pick_in_progress(context.paths.repo_dir):
+                    self.git.add_all(context.paths.repo_dir)
+                    commit_hash = self.git.commit_staged(
+                        context.paths.repo_dir,
+                        commit_descriptor.message,
+                        author_name=commit_descriptor.author_name,
+                    )
+                elif self.git.has_changes(context.paths.repo_dir):
+                    commit_hash = self.git.commit_all(
+                        context.paths.repo_dir,
+                        commit_descriptor.message,
+                        author_name=commit_descriptor.author_name,
+                    )
+                else:
+                    commit_hash = self.git.current_revision(context.paths.repo_dir)
+            elif post_success_strategy == "commit_if_changes":
+                if self.git.has_changes(context.paths.repo_dir):
+                    commit_hash = self.git.commit_all(
+                        context.paths.repo_dir,
+                        commit_descriptor.message,
+                        author_name=commit_descriptor.author_name,
+                    )
+                else:
+                    commit_hash = self.git.current_revision(context.paths.repo_dir)
+            else:
+                raise ValueError(f"Unsupported merger success strategy: {post_success_strategy}")
+            return merge_pass_name, run_result, True, commit_hash
+        finally:
+            context.metadata.last_run_at = now_utc_iso()
+            if context.metadata.current_status == "running:merging":
                 context.metadata.current_status = previous_status
             context.loop_state.current_task = previous_task
             self.workspace.save_project(context)
@@ -3854,18 +4399,20 @@ class Orchestrator:
             ),
         }
 
-    def _parallel_merge_conflict_test_result(
+    def _merge_conflict_test_result(
         self,
         *,
         context: ProjectContext,
-        worker_commit: str,
+        label: str,
+        command: str,
         merge_result,
         conflicted_files: list[str],
     ) -> TestRunResult:
-        merge_stdout = context.paths.logs_dir / "parallel-batch-merge.stdout.log"
-        merge_stderr = context.paths.logs_dir / "parallel-batch-merge.stderr.log"
+        normalized_label = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in label.strip().lower()).strip("-") or "merge"
+        merge_stdout = context.paths.logs_dir / f"{normalized_label}.stdout.log"
+        merge_stderr = context.paths.logs_dir / f"{normalized_label}.stderr.log"
         summary = (
-            f"git cherry-pick {worker_commit} conflicted on "
+            f"{command} conflicted on "
             f"{', '.join(conflicted_files) or 'unknown files'}"
         )
         write_text(merge_stdout, str(getattr(merge_result, "stdout", "") or ""))
@@ -3875,11 +4422,27 @@ class Orchestrator:
             or summary,
         )
         return TestRunResult(
-            command=f"git cherry-pick {worker_commit}",
+            command=command,
             returncode=getattr(merge_result, "returncode", 1) or 1,
             stdout_file=merge_stdout,
             stderr_file=merge_stderr,
             summary=summary,
+        )
+
+    def _parallel_merge_conflict_test_result(
+        self,
+        *,
+        context: ProjectContext,
+        worker_commit: str,
+        merge_result,
+        conflicted_files: list[str],
+    ) -> TestRunResult:
+        return self._merge_conflict_test_result(
+            context=context,
+            label="parallel-batch-merge",
+            command=f"git cherry-pick {worker_commit}",
+            merge_result=merge_result,
+            conflicted_files=conflicted_files,
         )
 
     def _report_failure(

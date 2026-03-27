@@ -98,8 +98,6 @@ export default function App() {
             onArchiveProject={controller.archiveProjectById}
             onDeleteProject={controller.deleteProjectById}
             onDeleteHistoryEntry={controller.deleteHistoryEntry}
-            onArchiveAllProjects={controller.archiveAllProjects}
-            onDeleteAllProjects={controller.deleteAllProjects}
             workspaceTree={detail?.workspace_tree}
             checkpoints={detail?.checkpoints}
             github={detail?.github}

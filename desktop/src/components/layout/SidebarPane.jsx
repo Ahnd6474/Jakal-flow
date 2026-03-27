@@ -161,8 +161,6 @@ export function SidebarPane({
   onArchiveProject,
   onDeleteProject,
   onDeleteHistoryEntry,
-  onArchiveAllProjects,
-  onDeleteAllProjects,
   workspaceTree,
   checkpoints,
   github,
@@ -239,22 +237,16 @@ export function SidebarPane({
           <>
             <div className="sidebar-panel__header">
               <strong>{t("common.project")}</strong>
-              <div className="action-row">
-                <button className="toolbar-button toolbar-button--ghost" onClick={onArchiveAllProjects} type="button" disabled={!projects.length}>
-                  {t("action.archiveAllProjects")}
-                </button>
-                <button className="toolbar-button" onClick={onDeleteAllProjects} type="button" disabled={!projects.length}>
-                  {t("action.deleteAllProjects")}
-                </button>
-                <button className="toolbar-button toolbar-button--ghost" onClick={onNewProject} type="button">
-                  {t("action.new")}
-                </button>
-              </div>
             </div>
             <label className="sidebar-search">
               <span>{t("common.filter")}</span>
               <input value={projectFilter} onChange={(event) => onProjectFilterChange(event.target.value)} placeholder={t("sidebar.searchProjects")} />
             </label>
+            <div className="action-row">
+              <button className="toolbar-button toolbar-button--ghost" onClick={onNewProject} type="button">
+                {t("action.new")}
+              </button>
+            </div>
             <div className="sidebar-list">
               {projects.length ? (
                 projects.map((project) => (

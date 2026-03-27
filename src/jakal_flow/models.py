@@ -59,6 +59,13 @@ def _int_or_default(value: Any, default: int, minimum: int | None = None) -> int
     return parsed
 
 
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 @dataclass(slots=True)
 class RuntimeOptions:
     model_provider: str = "openai"
@@ -81,6 +88,7 @@ class RuntimeOptions:
     codex_base_slug: str = ""
     codex_variant_slug: str = ""
     effort: str = "medium"
+    planning_effort: str = ""
     workflow_mode: str = "standard"
     ml_max_cycles: int = 3
     execution_mode: str = "parallel"
@@ -250,10 +258,10 @@ class LineageState:
             head_commit=str(data.get("head_commit", "")).strip(),
             safe_revision=str(data.get("safe_revision", "")).strip(),
             status=str(data.get("status", "active")).strip() or "active",
-            parent_lineage_id=str(data.get("parent_lineage_id", "")).strip() or None,
-            source_step_id=str(data.get("source_step_id", "")).strip() or None,
-            last_step_id=str(data.get("last_step_id", "")).strip() or None,
-            merged_by_step_id=str(data.get("merged_by_step_id", "")).strip() or None,
+            parent_lineage_id=_optional_str(data.get("parent_lineage_id")),
+            source_step_id=_optional_str(data.get("source_step_id")),
+            last_step_id=_optional_str(data.get("last_step_id")),
+            merged_by_step_id=_optional_str(data.get("merged_by_step_id")),
             step_ids=_string_list(data.get("step_ids", [])),
             notes=str(data.get("notes", "")).strip(),
         )

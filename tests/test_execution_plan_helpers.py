@@ -29,6 +29,7 @@ from jakal_flow.planning import (
     DEBUGGER_PARALLEL_PROMPT_FILENAME,
     DEBUGGER_PROMPT_FILENAME,
     FINALIZATION_PROMPT_FILENAME,
+    MERGER_PARALLEL_PROMPT_FILENAME,
     ML_PLAN_DECOMPOSITION_PROMPT_FILENAME,
     OPTIMIZATION_PROMPT_FILENAME,
     ML_FINALIZATION_PROMPT_FILENAME,
@@ -45,6 +46,7 @@ from jakal_flow.planning import (
     execution_plan_svg,
     load_debugger_prompt_template,
     load_finalization_prompt_template,
+    load_merger_prompt_template,
     load_optimization_prompt_template,
     load_plan_decomposition_prompt_template,
     load_plan_generation_prompt_template,
@@ -262,6 +264,23 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(state.closeout_commit_hash, "abc123")
         self.assertEqual(state.closeout_notes, "final tests passed")
 
+    def test_lineage_state_from_dict_preserves_optional_null_fields(self) -> None:
+        lineage = LineageState.from_dict(
+            {
+                "lineage_id": "LN1",
+                "branch_name": "jakal-flow-lineage-ln1",
+                "worktree_dir": "C:/tmp/ln1/repo",
+                "project_root": "C:/tmp/ln1",
+                "created_at": "2026-03-27T00:00:00+00:00",
+                "updated_at": "2026-03-27T00:00:00+00:00",
+                "merged_by_step_id": None,
+                "parent_lineage_id": None,
+            }
+        )
+
+        self.assertIsNone(lineage.merged_by_step_id)
+        self.assertIsNone(lineage.parent_lineage_id)
+
     def test_pending_execution_batches_uses_dependency_ready_waves(self) -> None:
         orchestrator = Orchestrator(Path.cwd() / ".tmp_pending_batches_workspace")
         plan_state = ExecutionPlanState(
@@ -389,6 +408,20 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual([[step.step_id for step in batch] for batch in batches], [["ST3"], ["ST4"]])
 
+    def test_pending_execution_batches_runs_root_barrier_nodes_as_singletons(self) -> None:
+        orchestrator = Orchestrator(Path.cwd() / ".tmp_pending_batches_workspace")
+        plan_state = ExecutionPlanState(
+            execution_mode="parallel",
+            steps=[
+                ExecutionStep(step_id="ST1", title="Freeze shared contract", metadata={"step_kind": "barrier"}),
+                ExecutionStep(step_id="ST2", title="Independent docs", owned_paths=["docs"]),
+            ],
+        )
+
+        batches = orchestrator.pending_execution_batches(plan_state)
+
+        self.assertEqual([[step.step_id for step in batch] for batch in batches], [["ST1"], ["ST2"]])
+
     def test_save_execution_plan_state_upgrades_legacy_serial_mode_to_parallel(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_serial_parallel_group_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -498,6 +531,46 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(join_step.metadata["merge_from"], ["ST1", "ST2"])
         self.assertEqual(join_step.metadata["join_policy"], "all")
         self.assertEqual(join_step.metadata["join_reason"], "Validate the integrated application before closeout.")
+
+    def test_save_execution_plan_state_allows_root_barrier_nodes(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_root_barrier_plan_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", execution_mode="parallel")
+
+        try:
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"):
+                _context, plan_state = orchestrator.update_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    plan_state=ExecutionPlanState(
+                        execution_mode="parallel",
+                        default_test_command="python -m pytest",
+                        steps=[
+                            ExecutionStep(
+                                step_id="NODE-A",
+                                title="Freeze contract surface",
+                                metadata={"step_kind": "barrier"},
+                            ),
+                            ExecutionStep(
+                                step_id="NODE-B",
+                                title="Implement feature slice",
+                                depends_on=["NODE-A"],
+                                owned_paths=["src/jakal_flow"],
+                            ),
+                        ],
+                    ),
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        barrier_step = plan_state.steps[0]
+        self.assertEqual(barrier_step.step_id, "ST1")
+        self.assertEqual(barrier_step.depends_on, [])
+        self.assertEqual(barrier_step.metadata["step_kind"], "barrier")
 
     def test_save_execution_plan_state_rejects_invalid_join_nodes(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_invalid_join_plan_test"
@@ -718,40 +791,60 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 },
             )
 
-            def fake_run_saved_execution_step(*args, **kwargs):
-                current = orchestrator.load_execution_plan_state(context)
-                join_step = next(step for step in current.steps if step.step_id == "ST4")
-                join_step.status = "completed"
-                join_step.completed_at = "2026-03-27T01:00:00+00:00"
-                join_step.notes = "Integrated selected branches."
-                join_step.commit_hash = None
-                saved = orchestrator.save_execution_plan_state(context, current)
-                context.metadata.current_status = orchestrator._status_from_plan_state(saved)
-                orchestrator.workspace.save_project(context)
-                return context, saved, next(step for step in saved.steps if step.step_id == "ST4")
-
-            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch.object(
-                orchestrator.git,
-                "try_cherry_pick",
-                return_value=CommandResult(command=["git", "cherry-pick"], returncode=0, stdout="", stderr=""),
-            ) as mocked_cherry_pick, mock.patch.object(
-                orchestrator,
-                "run_saved_execution_step",
-                side_effect=fake_run_saved_execution_step,
-            ), mock.patch.object(
+            with mock.patch.object(orchestrator.git, "add_worktree"), mock.patch.object(
                 orchestrator.git,
                 "current_revision",
                 return_value="main-integrated",
             ), mock.patch.object(
                 orchestrator,
                 "_cleanup_lineage_worktree",
-            ) as mocked_cleanup:
-                project, saved, step = orchestrator.run_join_execution_step(
-                    project_dir=repo_dir,
-                    runtime=runtime,
-                    step_id="ST4",
+            ) as mocked_cleanup, mock.patch.object(
+                orchestrator,
+                "_cleanup_integration_worktree",
+            ) as mocked_cleanup_integration:
+                integration_info = orchestrator._build_integration_context(
+                    context,
+                    runtime,
+                    ExecutionStep(step_id="ST4", title="Join selected branches"),
+                    "safe-main",
+                    "test-integration",
                 )
-                lineage_state = read_json(project.paths.lineage_state_file, default={})
+                integration_context = integration_info["integration_context"]
+
+                def fake_run_saved_execution_step_with_context(*args, **kwargs):
+                    current = orchestrator.load_execution_plan_state(integration_context)
+                    join_step = next(step for step in current.steps if step.step_id == "ST4")
+                    join_step.status = "completed"
+                    join_step.completed_at = "2026-03-27T01:00:00+00:00"
+                    join_step.notes = "Integrated selected branches."
+                    join_step.commit_hash = None
+                    saved = orchestrator.save_execution_plan_state(integration_context, current)
+                    integration_context.metadata.current_status = orchestrator._status_from_plan_state(saved)
+                    orchestrator.workspace.save_project(integration_context)
+                    return integration_context, saved, next(step for step in saved.steps if step.step_id == "ST4")
+
+                with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch.object(
+                    orchestrator,
+                    "_build_integration_context",
+                    return_value=integration_info,
+                ), mock.patch.object(
+                    orchestrator.git,
+                    "try_cherry_pick",
+                    return_value=CommandResult(command=["git", "cherry-pick"], returncode=0, stdout="", stderr=""),
+                ) as mocked_cherry_pick, mock.patch.object(
+                    orchestrator,
+                    "_run_saved_execution_step_with_context",
+                    side_effect=fake_run_saved_execution_step_with_context,
+                ), mock.patch.object(
+                    orchestrator.git,
+                    "merge_ff_only",
+                ) as mocked_ff_merge:
+                    project, saved, step = orchestrator.run_join_execution_step(
+                        project_dir=repo_dir,
+                        runtime=runtime,
+                        step_id="ST4",
+                    )
+                    lineage_state = read_json(project.paths.lineage_state_file, default={})
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 
@@ -759,7 +852,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(step.commit_hash, "main-integrated")
         self.assertEqual(project.metadata.current_safe_revision, "main-integrated")
         self.assertEqual([call.args[1] for call in mocked_cherry_pick.call_args_list], ["ln1-head", "ln3-head"])
+        mocked_ff_merge.assert_called_once()
         self.assertEqual(mocked_cleanup.call_count, 2)
+        mocked_cleanup_integration.assert_called_once()
         self.assertEqual(
             {item["lineage_id"]: item["status"] for item in lineage_state["lineages"]},
             {"LN1": "merged", "LN2": "active", "LN3": "merged"},
@@ -836,38 +931,59 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 },
             )
 
-            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch.object(
-                orchestrator.git,
-                "try_cherry_pick",
-                return_value=CommandResult(command=["git", "cherry-pick"], returncode=1, stdout="", stderr="merge conflict"),
-            ), mock.patch.object(
-                orchestrator.git,
-                "conflicted_files",
-                return_value=["src/conflict.py"],
-            ), mock.patch.object(
-                orchestrator.git,
-                "abort_cherry_pick",
-            ) as mocked_abort, mock.patch.object(
-                orchestrator.git,
-                "hard_reset",
-            ) as mocked_reset, mock.patch.object(
+            with mock.patch.object(orchestrator.git, "add_worktree"), mock.patch.object(
                 orchestrator,
-                "run_saved_execution_step",
-            ) as mocked_join_step:
-                project, saved, step = orchestrator.run_join_execution_step(
-                    project_dir=repo_dir,
-                    runtime=runtime,
-                    step_id="ST3",
+                "_cleanup_integration_worktree",
+            ) as mocked_cleanup_integration:
+                integration_info = orchestrator._build_integration_context(
+                    context,
+                    runtime,
+                    ExecutionStep(step_id="ST3", title="Join branches"),
+                    "safe-main",
+                    "test-integration",
                 )
-                lineage_state = read_json(project.paths.lineage_state_file, default={})
+                integration_context = integration_info["integration_context"]
+                with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch.object(
+                    orchestrator,
+                    "_build_integration_context",
+                    return_value=integration_info,
+                ), mock.patch.object(
+                    orchestrator.git,
+                    "try_cherry_pick",
+                    return_value=CommandResult(command=["git", "cherry-pick"], returncode=1, stdout="", stderr="merge conflict"),
+                ), mock.patch.object(
+                    orchestrator.git,
+                    "conflicted_files",
+                    return_value=["src/conflict.py"],
+                ), mock.patch.object(
+                    orchestrator.git,
+                    "cherry_pick_in_progress",
+                    return_value=False,
+                ), mock.patch.object(
+                    orchestrator.git,
+                    "abort_cherry_pick",
+                ) as mocked_abort, mock.patch.object(
+                    orchestrator.git,
+                    "hard_reset",
+                ) as mocked_reset, mock.patch.object(
+                    orchestrator,
+                    "_run_saved_execution_step_with_context",
+                ) as mocked_join_step:
+                    project, saved, step = orchestrator.run_join_execution_step(
+                        project_dir=repo_dir,
+                        runtime=runtime,
+                        step_id="ST3",
+                    )
+                    lineage_state = read_json(project.paths.lineage_state_file, default={})
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 
         self.assertEqual(step.status, "failed")
         self.assertIn("src/conflict.py", step.notes)
-        mocked_abort.assert_called_once_with(context.paths.repo_dir)
-        mocked_reset.assert_called_once_with(context.paths.repo_dir, "safe-main")
+        mocked_abort.assert_called_once_with(integration_context.paths.repo_dir)
+        mocked_reset.assert_called_once_with(integration_context.paths.repo_dir, "safe-main")
         mocked_join_step.assert_not_called()
+        mocked_cleanup_integration.assert_called_once()
         self.assertEqual(project.metadata.current_status, "failed")
         self.assertEqual(
             {item["lineage_id"]: item["status"] for item in lineage_state["lineages"]},
@@ -1532,7 +1648,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("parallel batch traceback", debug_prompt_text)
         self.assertIn("Do not modify tests unless", debug_prompt_text)
 
-    def test_parallel_batch_merge_conflict_invokes_debugger_and_continues(self) -> None:
+    def test_parallel_batch_merge_conflict_invokes_merger_and_continues(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_merge_debugger_test"
         shutil.rmtree(temp_root, ignore_errors=True)
         workspace_root = temp_root / "workspace"
@@ -1546,7 +1662,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             execution_mode="parallel",
             parallel_workers=2,
         )
-        debug_prompt_text = ""
+        merge_prompt_text = ""
 
         try:
             context = orchestrator.workspace.initialize_local_project(
@@ -1650,7 +1766,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             ), mock.patch.object(
                 orchestrator.git,
                 "conflicted_files",
-                return_value=["src/jakal_flow/orchestrator.py"],
+                side_effect=[["src/jakal_flow/orchestrator.py"], []],
             ), mock.patch.object(
                 orchestrator.git,
                 "cherry_pick_in_progress",
@@ -1686,22 +1802,22 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 return_value=repo_dir / ".venv",
             ):
                 mocked_run_pass.return_value = CodexRunResult(
-                    pass_type="parallel-batch-debug",
-                    prompt_file=workspace_root / "parallel-merge-debug.prompt.md",
-                    output_file=workspace_root / "parallel-merge-debug.last_message.txt",
-                    event_file=workspace_root / "parallel-merge-debug.events.jsonl",
+                    pass_type="parallel-batch-merger",
+                    prompt_file=workspace_root / "parallel-merge-merger.prompt.md",
+                    output_file=workspace_root / "parallel-merge-merger.last_message.txt",
+                    event_file=workspace_root / "parallel-merge-merger.events.jsonl",
                     returncode=0,
                     search_enabled=False,
                     changed_files=[],
                     usage={"input_tokens": 15},
-                    last_message="parallel merge debugger pass",
+                    last_message="parallel merge merger pass",
                 )
                 context, plan_state, steps = orchestrator.run_parallel_execution_batch(
                     project_dir=repo_dir,
                     runtime=runtime,
                     step_ids=["ST1", "ST2"],
                 )
-                debug_prompt_text = mocked_run_pass.call_args.kwargs["prompt"]
+                merge_prompt_text = mocked_run_pass.call_args.kwargs["prompt"]
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 
@@ -1716,9 +1832,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(mocked_commit.call_args.kwargs["author_name"], "Jakal-Flow-merge-resolver")
         mocked_abort.assert_not_called()
         mocked_reset.assert_not_called()
-        self.assertIn("git cherry-pick worker-2-commit conflicted", debug_prompt_text)
-        self.assertIn("CONFLICT (content): Merge conflict in src/jakal_flow/orchestrator.py", debug_prompt_text)
-        self.assertIn("resolve the final merged code intentionally", debug_prompt_text)
+        self.assertIn("git cherry-pick worker-2-commit conflicted", merge_prompt_text)
+        self.assertIn("CONFLICT (content): Merge conflict in src/jakal_flow/orchestrator.py", merge_prompt_text)
+        self.assertIn("Merge targets", merge_prompt_text)
 
     def test_execution_plan_svg_includes_step_statuses(self) -> None:
         svg = execution_plan_svg(
@@ -1846,6 +1962,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         parallel_step_template = load_source_prompt_template(STEP_EXECUTION_PARALLEL_PROMPT_FILENAME)
         ml_step_template = load_source_prompt_template(ML_STEP_EXECUTION_PROMPT_FILENAME)
         parallel_debugger_template = load_source_prompt_template(DEBUGGER_PARALLEL_PROMPT_FILENAME)
+        parallel_merger_template = load_source_prompt_template(MERGER_PARALLEL_PROMPT_FILENAME)
         final_template = load_source_prompt_template(FINALIZATION_PROMPT_FILENAME)
         optimization_template = load_source_prompt_template(OPTIMIZATION_PROMPT_FILENAME)
         ml_final_template = load_source_prompt_template(ML_FINALIZATION_PROMPT_FILENAME)
@@ -1858,6 +1975,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertTrue(source_prompt_template_path(STEP_EXECUTION_PARALLEL_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(DEBUGGER_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(DEBUGGER_PARALLEL_PROMPT_FILENAME).exists())
+        self.assertTrue(source_prompt_template_path(MERGER_PARALLEL_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(FINALIZATION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(ML_PLAN_DECOMPOSITION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(ML_PLAN_GENERATION_PROMPT_FILENAME).exists())
@@ -1910,6 +2028,10 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("merged parallel batch", parallel_debugger_template)
         self.assertIn("cherry-pick conflict", parallel_debugger_template)
         self.assertIn("Do not edit README.md during debugger recovery.", parallel_debugger_template)
+        self.assertIn("{merge_targets}", parallel_merger_template)
+        self.assertIn("integration worktree", parallel_merger_template)
+        self.assertIn("Failing merge context", parallel_merger_template)
+        self.assertIn("Do not edit README.md during merge recovery.", parallel_merger_template)
         self.assertEqual(load_plan_decomposition_prompt_template("serial"), parallel_decomposition_template)
         self.assertEqual(load_plan_decomposition_prompt_template("parallel"), parallel_decomposition_template)
         self.assertEqual(load_plan_decomposition_prompt_template("parallel", "ml"), ml_decomposition_template)
@@ -1921,6 +2043,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(load_step_execution_prompt_template("parallel", "ml"), ml_step_template)
         self.assertEqual(load_debugger_prompt_template("serial"), parallel_debugger_template)
         self.assertEqual(load_debugger_prompt_template("parallel"), parallel_debugger_template)
+        self.assertEqual(load_merger_prompt_template("serial"), parallel_merger_template)
+        self.assertEqual(load_merger_prompt_template("parallel"), parallel_merger_template)
         self.assertIn("{completed_steps}", final_template)
         self.assertIn("{closeout_report_file}", final_template)
         self.assertIn("{test_command}", final_template)
@@ -2013,10 +2137,17 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         (repo_dir / "src").mkdir(parents=True, exist_ok=True)
         (repo_dir / "src" / "contracts.py").write_text("class StepSchema:\n    pass\n", encoding="utf-8")
         orchestrator = Orchestrator(workspace_root)
-        runtime = RuntimeOptions(model="gpt-5.4", effort="high", execution_mode="parallel", test_cmd="python -m pytest")
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="high",
+            planning_effort="low",
+            execution_mode="parallel",
+            test_cmd="python -m pytest",
+        )
 
         try:
             context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            planning_events: list[tuple[str, str, dict[str, object] | None]] = []
             outline_json = """
             {
               "title": "Dual planner demo",
@@ -2106,6 +2237,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                     runtime=runtime,
                     project_prompt="Build a dual planner demo.",
                     max_steps=4,
+                    progress_callback=lambda _context, event_type, message, details=None: planning_events.append(
+                        (event_type, message, details)
+                    ),
                 )
                 first_prompt = mocked_run_pass.call_args_list[0].kwargs["prompt"]
                 second_prompt = mocked_run_pass.call_args_list[1].kwargs["prompt"]
@@ -2114,6 +2248,21 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             shutil.rmtree(temp_root, ignore_errors=True)
 
         self.assertEqual([call.kwargs["pass_type"] for call in mocked_run_pass.call_args_list], ["plan-agent-a-decomposition", "plan-agent-b-packing"])
+        self.assertEqual([call.kwargs["reasoning_effort"] for call in mocked_run_pass.call_args_list], ["low", "low"])
+        self.assertEqual(
+            [item[0] for item in planning_events],
+            [
+                "plan-started",
+                "planner-agent-started",
+                "planner-agent-finished",
+                "planner-agent-started",
+                "planner-agent-finished",
+                "plan-finalizing",
+            ],
+        )
+        self.assertEqual(planning_events[1][2]["stage_key"], "planner_a")
+        self.assertEqual(planning_events[3][2]["stage_key"], "planner_b")
+        self.assertEqual(planning_events[-1][2]["stage_key"], "finalize")
         self.assertIn("Planner Agent A", first_prompt)
         self.assertIn("Freeze the contract", outline_text)
         self.assertIn("Planner Agent A decomposition artifact:", second_prompt)

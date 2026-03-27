@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .codex_app_server import is_auto_model, resolve_codex_path
+from .model_selection import normalize_reasoning_effort
 from .model_providers import (
     normalize_local_model_provider,
     normalize_model_provider,
@@ -33,6 +34,7 @@ class CodexRunner:
         pass_type: str,
         block_index: int,
         search_enabled: bool = False,
+        reasoning_effort: str | None = None,
     ) -> CodexRunResult:
         pass_slug = pass_type.replace(" ", "_").replace("/", "_")
         block_dir = ensure_dir(context.paths.logs_dir / f"block_{block_index:04d}")
@@ -61,7 +63,7 @@ class CodexRunner:
             [
                 "exec",
                 "-c",
-                f'reasoning.effort="{context.runtime.effort}"',
+                f'reasoning.effort="{normalize_reasoning_effort(str(reasoning_effort or getattr(context.runtime, "effort", "")), fallback="medium")}"',
                 "-s",
                 context.runtime.sandbox_mode,
             ]

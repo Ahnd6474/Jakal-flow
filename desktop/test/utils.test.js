@@ -111,6 +111,7 @@ test("program settings helpers keep global runtime controls separate from projec
     provider_base_url: "",
     provider_api_key_env: "OPENAI_API_KEY",
     model: "auto",
+    planning_effort: "medium",
     model_preset: "auto",
     model_selection_mode: "slug",
     model_slug_input: "auto",
@@ -162,6 +163,7 @@ test("program settings helpers keep global runtime controls separate from projec
       provider_base_url: "",
       provider_api_key_env: "OPENAI_API_KEY",
       model: "auto",
+      planning_effort: "medium",
       model_preset: "auto",
       model_selection_mode: "slug",
       model_slug_input: "auto",
@@ -204,6 +206,7 @@ test("program settings helpers keep global runtime controls separate from projec
         local_model_provider: "ollama",
         provider_base_url: "",
         provider_api_key_env: "OPENAI_API_KEY",
+        planning_effort: "medium",
         approval_mode: "untrusted",
         sandbox_mode: "workspace-write",
         checkpoint_interval_blocks: 1,
@@ -612,6 +615,55 @@ test("deriveExecutionProgress falls back to an indeterminate planning state", ()
   assert.equal(progress.phase, "planning");
   assert.equal(progress.indeterminate, true);
   assert.equal(progress.totalSteps, 0);
+});
+
+test("deriveExecutionProgress uses structured planning progress when available", () => {
+  const progress = deriveExecutionProgress(
+    {
+      project: {
+        current_status: "setup_ready",
+      },
+      activity: [
+        "2026-03-26T09:02:00Z | planner-agent-started | Planner Agent A is decomposing the work into implementation blocks.",
+      ],
+      planning_progress: {
+        stage_count: 4,
+        completed_stages: 1,
+        percent: 38,
+        current_stage_key: "planner_a",
+        current_stage_index: 2,
+        current_stage_label: "Planner Agent A",
+        current_stage_status: "running",
+        current_agent_label: "Planner Agent A",
+        message: "Planner Agent A is decomposing the work into implementation blocks.",
+        stages: [
+          { key: "context_scan", index: 1, label: "Scan repository context", status: "completed" },
+          { key: "planner_a", index: 2, label: "Planner Agent A", status: "running", agent_label: "Planner Agent A" },
+          { key: "planner_b", index: 3, label: "Planner Agent B", status: "pending" },
+          { key: "finalize", index: 4, label: "Validate and save plan", status: "pending" },
+        ],
+      },
+      plan: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [],
+      },
+    },
+    null,
+    {
+      status: "running",
+      command: "generate-plan",
+    },
+  );
+
+  assert.equal(progress.isActive, true);
+  assert.equal(progress.phase, "planning");
+  assert.equal(progress.indeterminate, false);
+  assert.equal(progress.percent, 38);
+  assert.equal(progress.planningStageCount, 4);
+  assert.equal(progress.planningCurrentStage.label, "Planner Agent A");
+  assert.equal(progress.planningCurrentAgentLabel, "Planner Agent A");
+  assert.equal(progress.headlineActivity, "Planner Agent A is decomposing the work into implementation blocks.");
 });
 
 test("deriveExecutionProgress marks debugger recovery as an active debugging phase", () => {

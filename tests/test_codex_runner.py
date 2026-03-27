@@ -1,17 +1,34 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jakal_flow.codex_runner import CodexRunner
 from jakal_flow.models import RuntimeOptions
 from jakal_flow.workspace import WorkspaceManager
+
+
+def _local_temp_root() -> Path:
+    root = Path(__file__).resolve().parents[1] / ".tmp_codex_runner_tests"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+class _TemporaryTestDir:
+    def __enter__(self) -> Path:
+        self.path = _local_temp_root() / f"case_{uuid.uuid4().hex}"
+        self.path.mkdir(parents=True, exist_ok=True)
+        return self.path
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        shutil.rmtree(self.path, ignore_errors=True)
 
 
 class CodexRunnerTests(unittest.TestCase):
@@ -26,8 +43,7 @@ class CodexRunnerTests(unittest.TestCase):
         )
 
     def test_run_pass_retries_unexpected_token_failures(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_temp:
-            temp_root = Path(raw_temp)
+        with _TemporaryTestDir() as temp_root:
             context = self._context(temp_root)
             runner = CodexRunner("codex.cmd")
             attempts = {"count": 0}
@@ -75,8 +91,7 @@ class CodexRunnerTests(unittest.TestCase):
             self.assertTrue((block_dir / "demo_pass.diagnostics.json").exists())
 
     def test_run_pass_does_not_retry_other_failures(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_temp:
-            temp_root = Path(raw_temp)
+        with _TemporaryTestDir() as temp_root:
             context = self._context(temp_root)
             runner = CodexRunner("codex.cmd")
             attempts = {"count": 0}
@@ -108,8 +123,7 @@ class CodexRunnerTests(unittest.TestCase):
             mocked_sleep.assert_not_called()
 
     def test_run_pass_omits_model_flag_for_auto(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_temp:
-            temp_root = Path(raw_temp)
+        with _TemporaryTestDir() as temp_root:
             repo_dir = temp_root / "repo"
             repo_dir.mkdir(parents=True, exist_ok=True)
             manager = WorkspaceManager(temp_root / "workspace")
@@ -139,9 +153,33 @@ class CodexRunnerTests(unittest.TestCase):
             self.assertEqual(len(observed_commands), 1)
             self.assertNotIn("-m", observed_commands[0])
 
+    def test_run_pass_uses_reasoning_override_when_provided(self) -> None:
+        with _TemporaryTestDir() as temp_root:
+            context = self._context(temp_root)
+            runner = CodexRunner("codex.cmd")
+            observed_commands: list[list[str]] = []
+
+            def fake_run(command, input, capture_output, check, env=None):
+                observed_commands.append(command)
+                output_file = Path(command[command.index("-o") + 1])
+                output_file.write_text("Override response", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run):
+                runner.run_pass(
+                    context=context,
+                    prompt="Use the planning override",
+                    pass_type="demo pass",
+                    block_index=1,
+                    search_enabled=False,
+                    reasoning_effort="xhigh",
+                )
+
+            self.assertEqual(len(observed_commands), 1)
+            self.assertIn('reasoning.effort="xhigh"', observed_commands[0])
+
     def test_run_pass_prefixes_fast_command_when_enabled(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_temp:
-            temp_root = Path(raw_temp)
+        with _TemporaryTestDir() as temp_root:
             repo_dir = temp_root / "repo"
             repo_dir.mkdir(parents=True, exist_ok=True)
             manager = WorkspaceManager(temp_root / "workspace")
@@ -172,8 +210,7 @@ class CodexRunnerTests(unittest.TestCase):
             self.assertEqual(observed_inputs[0].decode("utf-8"), "/fast\n\nApply the requested fix")
 
     def test_run_pass_adds_oss_flags_for_local_models(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_temp:
-            temp_root = Path(raw_temp)
+        with _TemporaryTestDir() as temp_root:
             repo_dir = temp_root / "repo"
             repo_dir.mkdir(parents=True, exist_ok=True)
             manager = WorkspaceManager(temp_root / "workspace")
@@ -212,8 +249,7 @@ class CodexRunnerTests(unittest.TestCase):
             self.assertIn("qwen2.5-coder:0.5b", observed_commands[0])
 
     def test_run_pass_applies_openrouter_base_url_and_api_key_env(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_temp:
-            temp_root = Path(raw_temp)
+        with _TemporaryTestDir() as temp_root:
             repo_dir = temp_root / "repo"
             repo_dir.mkdir(parents=True, exist_ok=True)
             manager = WorkspaceManager(temp_root / "workspace")

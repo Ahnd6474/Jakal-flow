@@ -7,11 +7,12 @@ import {
   defaultReasoningOption,
   filterModelCatalogByProvider,
   findModelCatalogEntry,
+  normalizeMemoryBudgetGiB,
   normalizedModelProvider,
   providerSupportsAutoModel,
   providerSupportsCatalog,
+  REASONING_OPTIONS,
   reasoningEffortLabel,
-  normalizeMemoryBudgetGiB,
   runtimeSummary,
   selectedConfigReasoning,
 } from "../../utils";
@@ -88,6 +89,7 @@ export function ConfigEditorView({
 }) {
   const runtime = form.runtime || {};
   const { language, t } = useI18n();
+  const planningReasoningLabel = language === "ko" ? "계획 추론" : "Planning Reasoning";
   const selectedProvider = normalizedModelProvider(runtime);
   const providerHasCatalog = providerSupportsCatalog(selectedProvider);
   const providerHasAutoModel = providerSupportsAutoModel(selectedProvider);
@@ -181,6 +183,28 @@ export function ConfigEditorView({
             >
               <option value="standard">{t("option.workflowStandard")}</option>
               <option value="ml">{t("option.workflowML")}</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>{planningReasoningLabel}</span>
+            <select
+              value={runtime.planning_effort || runtime.effort || "medium"}
+              onChange={(event) =>
+                onChangeForm((current) => ({
+                  ...current,
+                  runtime: {
+                    ...current.runtime,
+                    planning_effort: event.target.value,
+                  },
+                }))
+              }
+              disabled={busy}
+            >
+              {REASONING_OPTIONS.map((effort) => (
+                <option key={effort} value={effort}>
+                  {reasoningEffortLabel(effort, language)}
+                </option>
+              ))}
             </select>
           </label>
           <label className="field">

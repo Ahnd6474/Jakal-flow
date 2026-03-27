@@ -108,6 +108,10 @@ def build_project_command_handlers(
             raise ValueError("prompt is required.")
         max_steps = max(1, int(str(ctx.payload.get("max_steps", runtime.max_blocks) or runtime.max_blocks)))
         existing = ctx.orchestrator.local_project(project_dir)
+
+        def planning_progress_event(project, event_type: str, message: str, details: dict | None = None) -> None:
+            append_ui_event(project, event_type, message, details or {})
+
         project, plan_state = ctx.orchestrator.generate_execution_plan(
             project_dir=project_dir,
             runtime=runtime,
@@ -115,12 +119,21 @@ def build_project_command_handlers(
             branch=branch,
             max_steps=max_steps,
             origin_url=origin_url,
+            progress_callback=planning_progress_event,
         )
         append_ui_event(
             project,
             "plan-generated",
             f"Generated a new execution plan with {len(plan_state.steps)} step(s).",
-            {"max_steps": max_steps},
+            {
+                "flow": "planning",
+                "stage_key": "finalize",
+                "stage_index": 4,
+                "stage_count": 4,
+                "status": "completed",
+                "max_steps": max_steps,
+                "step_count": len(plan_state.steps),
+            },
         )
         if existing is None and ctx.payload.get("display_name"):
             project.metadata.display_name = str(ctx.payload.get("display_name")).strip()

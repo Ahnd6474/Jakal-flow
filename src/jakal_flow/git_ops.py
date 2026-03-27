@@ -191,6 +191,9 @@ class GitOps:
         result = self.run(["rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"], cwd=repo_dir, check=False)
         return result.returncode == 0
 
+    def merge_ff_only(self, repo_dir: Path, revision: str) -> None:
+        self.run(["merge", "--ff-only", revision], cwd=repo_dir)
+
     def conflicted_files(self, repo_dir: Path) -> list[str]:
         result = self.run(["diff", "--name-only", "--diff-filter=U"], cwd=repo_dir, check=False)
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]

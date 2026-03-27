@@ -17,7 +17,14 @@ from .status_views import effective_project_status
 from .utils import compact_text, normalize_workflow_mode, read_json, read_jsonl_tail, read_last_jsonl, read_text, write_json
 
 
-DETAIL_CACHE_VERSION = 4
+DETAIL_CACHE_VERSION = 5
+
+PLANNING_STAGE_DEFINITIONS = (
+    {"key": "context_scan", "label": "Scan repository context"},
+    {"key": "planner_a", "label": "Planner Agent A"},
+    {"key": "planner_b", "label": "Planner Agent B"},
+    {"key": "finalize", "label": "Validate and save plan"},
+)
 
 
 @dataclass(slots=True)
@@ -149,6 +156,109 @@ def _latest_entry(items: list[dict[str, Any]]) -> dict[str, Any]:
         return {}
     latest = items[-1]
     return latest if isinstance(latest, dict) else {}
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def build_planning_progress(
+    ui_events: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    event_items = ui_events or []
+    planning_events: list[dict[str, Any]] = []
+    stage_labels = {item["key"]: item["label"] for item in PLANNING_STAGE_DEFINITIONS}
+    agent_labels: dict[str, str] = {}
+    for item in event_items:
+        if not isinstance(item, dict):
+            continue
+        details = item.get("details", {})
+        if not isinstance(details, dict):
+            continue
+        if str(details.get("flow", "")).strip().lower() != "planning":
+            continue
+        stage_key = str(details.get("stage_key", "")).strip().lower()
+        if not stage_key:
+            continue
+        if str(details.get("stage_label", "")).strip():
+            stage_labels[stage_key] = str(details.get("stage_label", "")).strip()
+        if str(details.get("agent_label", "")).strip():
+            agent_labels[stage_key] = str(details.get("agent_label", "")).strip()
+        planning_events.append(item)
+    if not planning_events:
+        return {}
+
+    latest = planning_events[-1]
+    latest_details = latest.get("details", {})
+    if not isinstance(latest_details, dict):
+        latest_details = {}
+    current_stage_key = str(latest_details.get("stage_key", "")).strip().lower()
+    stage_count = _positive_int(latest_details.get("stage_count", len(PLANNING_STAGE_DEFINITIONS)), len(PLANNING_STAGE_DEFINITIONS))
+    current_stage_index = _positive_int(latest_details.get("stage_index", 1), 1)
+    current_stage_index = min(stage_count, current_stage_index)
+    current_status = str(latest_details.get("status", "running")).strip().lower() or "running"
+    if current_status not in {"running", "completed", "failed"}:
+        current_status = "running"
+
+    ordered_keys = [item["key"] for item in PLANNING_STAGE_DEFINITIONS]
+    for event in planning_events:
+        details = event.get("details", {})
+        if not isinstance(details, dict):
+            continue
+        stage_key = str(details.get("stage_key", "")).strip().lower()
+        if stage_key and stage_key not in ordered_keys:
+            ordered_keys.append(stage_key)
+
+    stages: list[dict[str, Any]] = []
+    for index, stage_key in enumerate(ordered_keys[:stage_count], start=1):
+        if index < current_stage_index:
+            stage_status = "completed"
+        elif index == current_stage_index:
+            stage_status = current_status
+        else:
+            stage_status = "pending"
+        stage_label = stage_labels.get(stage_key) or stage_key.replace("_", " ").title()
+        stage_payload = {
+            "key": stage_key,
+            "index": index,
+            "label": stage_label,
+            "status": stage_status,
+        }
+        agent_label = agent_labels.get(stage_key, "")
+        if agent_label:
+            stage_payload["agent_label"] = agent_label
+        stages.append(stage_payload)
+
+    if current_status == "completed":
+        completed_stages = current_stage_index
+        progress_units = float(current_stage_index)
+    elif current_status == "failed":
+        completed_stages = max(0, current_stage_index - 1)
+        progress_units = max(0.0, current_stage_index - 0.5)
+    else:
+        completed_stages = max(0, current_stage_index - 1)
+        progress_units = max(0.0, current_stage_index - 0.5)
+    percent = int(round((progress_units / stage_count) * 100)) if stage_count else 0
+    percent = max(0, min(100, percent))
+    current_stage = next((item for item in stages if item["index"] == current_stage_index), {})
+
+    return {
+        "stage_count": stage_count,
+        "completed_stages": completed_stages,
+        "percent": percent,
+        "current_stage_key": current_stage_key,
+        "current_stage_index": current_stage_index,
+        "current_stage_label": current_stage.get("label", ""),
+        "current_stage_status": current_status,
+        "current_agent_label": current_stage.get("agent_label", ""),
+        "message": str(latest.get("message", "")).strip(),
+        "event_type": str(latest.get("event_type", "")).strip(),
+        "stages": stages,
+    }
 
 
 def progress_caption(plan_state: ExecutionPlanState) -> str:
@@ -641,9 +751,11 @@ def _build_project_detail_base_payload(
             latest_pass=log_snapshot.latest_pass,
             blocks=_tail_slice(log_snapshot.blocks, 12),
         )
+        planning_progress = build_planning_progress(_tail_slice(log_snapshot.ui_events, 30))
         latest_block = log_snapshot.latest_block
         latest_pass = log_snapshot.latest_pass
     else:
+        ui_events = read_jsonl_tail(project.paths.ui_event_log_file, 30)
         recent_usage_payload = recent_usage(project)
         runtime_insights = build_runtime_insights(project, plan_state, recent_usage_payload)
         recent_blocks = []
@@ -664,7 +776,8 @@ def _build_project_detail_base_payload(
         }
         config = {}
         workspace_tree = []
-        activity = build_activity_lines(project, plan_state)[:8]
+        activity = build_activity_lines(project, plan_state, ui_events=ui_events)[:8]
+        planning_progress = build_planning_progress(ui_events)
         latest_block = None
         latest_pass = None
     bottom_panels = bottom_panel_payload(
@@ -715,6 +828,7 @@ def _build_project_detail_base_payload(
         "stats": project_stats(plan_state),
         "codex_status": {},
         "activity": activity,
+        "planning_progress": planning_progress,
         "runtime_insights": runtime_insights,
         "snapshot": snapshot,
         "run_control": control,

@@ -760,6 +760,68 @@ test("RunProgressPanel renders debugging state from the project status", async (
   assert.doesNotMatch(html, /Working on ST2 - Build/);
 });
 
+test("RunProgressPanel renders structured planning progress and stage chips", async () => {
+  const html = await renderBundledComponent(
+    "run-progress-panel-planning-render",
+    "./src/components/layout/RunProgressPanel.jsx",
+    "RunProgressPanel",
+    {
+      detail: {
+        project: {
+          current_status: "setup_ready",
+        },
+        activity: [
+          "2026-03-26T09:02:00Z | planner-agent-started | Planner Agent A is decomposing the work into implementation blocks.",
+        ],
+        planning_progress: {
+          stage_count: 4,
+          completed_stages: 1,
+          percent: 38,
+          current_stage_key: "planner_a",
+          current_stage_index: 2,
+          current_stage_label: "Planner Agent A",
+          current_stage_status: "running",
+          current_agent_label: "Planner Agent A",
+          message: "Planner Agent A is decomposing the work into implementation blocks.",
+          stages: [
+            { key: "context_scan", index: 1, label: "Scan repository context", status: "completed" },
+            { key: "planner_a", index: 2, label: "Planner Agent A", status: "running", agent_label: "Planner Agent A" },
+            { key: "planner_b", index: 3, label: "Planner Agent B", status: "pending" },
+            { key: "finalize", index: 4, label: "Validate and save plan", status: "pending" },
+          ],
+        },
+        plan: {
+          execution_mode: "serial",
+          closeout_status: "not_started",
+          steps: [],
+        },
+        stats: {
+          total_steps: 0,
+          completed_steps: 0,
+          failed_steps: 0,
+          running_steps: 0,
+          remaining_steps: 0,
+        },
+      },
+      planDraft: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [],
+      },
+      activeJob: {
+        status: "running",
+        command: "generate-plan",
+      },
+    },
+  );
+
+  assert.match(html, /Planner Agent A/);
+  assert.match(html, /Planning stage 2\/4/);
+  assert.match(html, /38% complete/);
+  assert.match(html, /Scan repository context/);
+  assert.match(html, /Validate and save plan/);
+});
+
 test("SidebarPane renders a filtered workspace tree without unrelated nodes", async () => {
   const html = await renderBundledComponent(
     "sidebar-pane-render",
@@ -860,6 +922,53 @@ test("SidebarPane keeps a pending checkpoint visible and marked as live", async 
   assert.match(html, /Review the merged work/);
   assert.match(html, /sidebar-item--checkpoint-live/);
   assert.match(html, /status-badge--pulse/);
+});
+
+test("SidebarPane keeps only the new project action below the project search", async () => {
+  const html = await renderBundledComponent(
+    "sidebar-pane-project-actions-render",
+    "./src/components/layout/SidebarPane.jsx",
+    "SidebarPane",
+    {
+      activeTab: "projects",
+      onChangeTab: noop,
+      projects: [
+        {
+          repo_id: "demo",
+          display_name: "Demo",
+          status: "idle",
+          detail: "Ready",
+        },
+      ],
+      historyProjects: [],
+      selectedProjectId: "demo",
+      selectedHistoryId: "",
+      loadingProjectId: "",
+      projectFilter: "",
+      workspaceFilter: "",
+      onProjectFilterChange: noop,
+      onWorkspaceFilterChange: noop,
+      onSelectProject: noop,
+      onSelectHistory: noop,
+      onNewProject: noop,
+      onArchiveProject: noop,
+      onDeleteProject: noop,
+      onDeleteHistoryEntry: noop,
+      workspaceTree: [],
+      checkpoints: { items: [] },
+      github: {
+        connected: false,
+        origin_url: "",
+        branch: "main",
+        repo_url: "",
+      },
+    },
+  );
+
+  assert.doesNotMatch(html, />Archive All</);
+  assert.doesNotMatch(html, />Delete All</);
+  assert.match(html, /placeholder="Search projects"/);
+  assert.match(html, /<label class="sidebar-search">[\s\S]*placeholder="Search projects"[\s\S]*<\/label>[\s\S]*>New<\/button>/);
 });
 
 test("DashboardView hides cards that are disabled in program settings", async () => {
@@ -1181,6 +1290,7 @@ test("AppSettingsView exposes dashboard visibility controls", async () => {
   assert.match(html, /Closeout Report/);
   assert.match(html, /Codex Spark/);
   assert.match(html, /Custom Model Slug/);
+  assert.match(html, /Planning Reasoning/);
   assert.match(html, /Memory \/ Worker \(GiB\)/);
   assert.match(html, /Codex Usage/);
   assert.doesNotMatch(html, /Billing Mode/);
@@ -1340,6 +1450,7 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
 
   assert.doesNotMatch(html, /Advanced Settings/);
   assert.doesNotMatch(html, /Custom Model Slug/);
+  assert.match(html, /Planning Reasoning/);
   assert.match(html, /Memory \/ Worker \(GiB\)/);
   assert.doesNotMatch(html, /Extra Prompt/);
   assert.match(html, />Archive Project<\/button>/);

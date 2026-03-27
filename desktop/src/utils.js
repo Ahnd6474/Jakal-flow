@@ -43,6 +43,7 @@ export const PROGRAM_RUNTIME_KEYS = [
   "provider_base_url",
   "provider_api_key_env",
   "model",
+  "planning_effort",
   "model_preset",
   "model_selection_mode",
   "model_slug_input",
@@ -90,6 +91,7 @@ const DEFAULT_PROGRAM_RUNTIME = {
   provider_base_url: "",
   provider_api_key_env: "OPENAI_API_KEY",
   model: "auto",
+  planning_effort: "medium",
   model_preset: "auto",
   model_selection_mode: "slug",
   model_slug_input: "auto",
@@ -495,6 +497,43 @@ function planProgressCounts(plan = null) {
   };
 }
 
+function normalizePlanningProgress(raw = null) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const stageCount = Math.max(0, Number.parseInt(String(raw.stage_count || 0), 10) || 0);
+  const currentStageIndex = Math.max(0, Number.parseInt(String(raw.current_stage_index || 0), 10) || 0);
+  const percent = Math.max(0, Math.min(100, Number.parseInt(String(raw.percent || 0), 10) || 0));
+  const stages = Array.isArray(raw.stages)
+    ? raw.stages
+        .filter((stage) => stage && typeof stage === "object")
+        .map((stage, index) => ({
+          key: String(stage.key || "").trim(),
+          index: Math.max(1, Number.parseInt(String(stage.index || index + 1), 10) || index + 1),
+          label: String(stage.label || "").trim(),
+          status: String(stage.status || "pending").trim().toLowerCase() || "pending",
+          agentLabel: String(stage.agent_label || "").trim(),
+        }))
+    : [];
+  const currentStage =
+    stages.find((stage) => stage.index === currentStageIndex)
+    || stages.find((stage) => stage.status === "running" || stage.status === "failed")
+    || null;
+  return {
+    stageCount,
+    completedStages: Math.max(0, Number.parseInt(String(raw.completed_stages || 0), 10) || 0),
+    percent,
+    stages,
+    currentStageIndex,
+    currentStageKey: String(raw.current_stage_key || "").trim(),
+    currentStageLabel: String(raw.current_stage_label || currentStage?.label || "").trim(),
+    currentStageStatus: String(raw.current_stage_status || currentStage?.status || "").trim().toLowerCase() || "pending",
+    currentAgentLabel: String(raw.current_agent_label || currentStage?.agentLabel || "").trim(),
+    message: String(raw.message || "").trim(),
+    eventType: String(raw.event_type || "").trim(),
+  };
+}
+
 export function deriveExecutionProgress(detail = null, planDraft = null, activeJob = null) {
   const detailPlan = detail?.plan && typeof detail.plan === "object" ? detail.plan : null;
   const fallbackPlan = planDraft && typeof planDraft === "object" ? planDraft : {};
@@ -510,6 +549,7 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
   const currentStatus = String(detail?.project?.current_status || "").trim();
   const status = currentStatus.toLowerCase();
   const debugging = isDebuggingStatus(currentStatus);
+  const planningProgress = normalizePlanningProgress(detail?.planning_progress);
   const recentActivity = (Array.isArray(detail?.activity) ? detail.activity : [])
     .map((line) => activityLineSummary(line))
     .filter(Boolean)
@@ -535,7 +575,10 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
   let visualPercent = 0;
   let indeterminate = false;
   if (isActive) {
-    if (phase === "planning" && !steps.length) {
+    if (phase === "planning" && planningProgress?.stageCount) {
+      percent = planningProgress.percent;
+      visualPercent = percent > 0 ? percent : 6;
+    } else if (phase === "planning" && !steps.length) {
       indeterminate = true;
     } else if (totalCount) {
       percent = Math.round((completedCount / totalCount) * 100);
@@ -567,8 +610,20 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     runningStep,
     nextStep,
     readyIds,
+    planningProgress,
+    planningStages: planningProgress?.stages || [],
+    planningStageCount: planningProgress?.stageCount || 0,
+    planningCurrentStage: planningProgress?.currentStageLabel
+      ? {
+          index: planningProgress.currentStageIndex,
+          key: planningProgress.currentStageKey,
+          label: planningProgress.currentStageLabel,
+          status: planningProgress.currentStageStatus,
+        }
+      : null,
+    planningCurrentAgentLabel: planningProgress?.currentAgentLabel || "",
     recentActivity,
-    headlineActivity: recentActivity[0] || "",
+    headlineActivity: planningProgress?.message || recentActivity[0] || "",
     closeoutRunning,
     percent,
     visualPercent,

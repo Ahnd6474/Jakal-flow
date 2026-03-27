@@ -262,6 +262,17 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.parallel_workers, 2)
         self.assertAlmostEqual(runtime.parallel_memory_per_worker_gib, 1.6)
 
+    def test_runtime_from_payload_defaults_planning_effort_to_execution_effort(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model": "gpt-5.4",
+                "effort": "high",
+            }
+        )
+
+        self.assertEqual(runtime.effort, "high")
+        self.assertEqual(runtime.planning_effort, "high")
+
     def test_runtime_from_payload_normalizes_legacy_auto_model_presets(self) -> None:
         runtime = runtime_from_payload(
             {
@@ -1140,6 +1151,106 @@ class UIBridgeTests(unittest.TestCase):
             self.assertTrue(any("closeout-started" in line for line in result["activity"]))
             self.assertTrue(any("closeout-finished" in line for line in result["activity"]))
 
+    def test_run_plan_routes_single_hybrid_task_batches_through_lineage_execution(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Hybrid Dispatch Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                    "execution_mode": "parallel",
+                },
+            }
+            hybrid_plan = {
+                "plan_title": "Hybrid Dispatch Demo",
+                "project_prompt": "Keep singleton hybrid steps on lineage branches.",
+                "summary": "A downstream join makes this a hybrid lineage plan.",
+                "workflow_mode": "standard",
+                "execution_mode": "parallel",
+                "default_test_command": "python -m unittest",
+                "steps": [
+                    {
+                        "step_id": "ST1",
+                        "title": "Frontend slice",
+                        "display_description": "Build the frontend slice.",
+                        "codex_description": "Implement the frontend slice.",
+                        "success_criteria": "Frontend slice is ready.",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "owned_paths": ["src/shared.py"],
+                    },
+                    {
+                        "step_id": "ST2",
+                        "title": "Backend slice",
+                        "display_description": "Build the backend slice.",
+                        "codex_description": "Implement the backend slice.",
+                        "success_criteria": "Backend slice is ready.",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "owned_paths": ["src/shared.py"],
+                    },
+                    {
+                        "step_id": "ST3",
+                        "title": "Join both slices",
+                        "display_description": "Integrate both slices.",
+                        "codex_description": "Integrate the completed slices on main.",
+                        "success_criteria": "Integrated branch passes verification.",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "depends_on": ["ST1", "ST2"],
+                        "metadata": {"step_kind": "join", "merge_from": ["ST1", "ST2"], "join_policy": "all"},
+                    },
+                ],
+            }
+
+            def fake_lineage_batch(self, project_dir, runtime, step_ids, branch="main", origin_url=""):
+                context = self.local_project(project_dir)
+                assert context is not None
+                saved = self.load_execution_plan_state(context)
+                target = next(step for step in saved.steps if step.step_id == step_ids[0])
+                target.status = "failed"
+                target.notes = "lineage dispatch sentinel"
+                saved = self.save_execution_plan_state(context, saved)
+                context.metadata.current_status = "failed"
+                self.workspace.save_project(context)
+                return context, saved, [target]
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ), mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.run_parallel_execution_batch",
+                new=fake_lineage_batch,
+            ) as _unused, mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.run_saved_execution_step",
+                side_effect=AssertionError("hybrid singleton batch should not use main-step execution"),
+            ), mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.run_join_execution_step",
+                side_effect=AssertionError("first hybrid batch should not be a join step"),
+            ):
+                result = run_command(
+                    "run-plan",
+                    workspace_root,
+                    {
+                        **payload,
+                        "plan": hybrid_plan,
+                    },
+                )
+
+            self.assertEqual(result["plan"]["steps"][0]["status"], "failed")
+            self.assertEqual(result["plan"]["steps"][0]["notes"], "lineage dispatch sentinel")
+            self.assertEqual(result["project"]["current_status"], "failed")
+
     def test_load_project_normalizes_stale_awaiting_review_without_pending_flag(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"
@@ -1518,6 +1629,88 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(loaded["workspace_tree"], [])
             self.assertEqual(loaded["checkpoints"]["items"], [])
             self.assertTrue(loaded["activity"])
+
+    def test_load_project_exposes_structured_planning_progress(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Planning Progress Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            ui_event_log_file = Path(detail["files"]["ui_event_log_file"])
+            with ui_event_log_file.open("a", encoding="utf-8") as handle:
+                for event in [
+                    {
+                        "timestamp": "2026-03-27T10:00:00Z",
+                        "event_type": "plan-started",
+                        "message": "Collecting repository context for planning.",
+                        "details": {
+                            "flow": "planning",
+                            "stage_key": "context_scan",
+                            "stage_index": 1,
+                            "stage_count": 4,
+                            "status": "running",
+                        },
+                    },
+                    {
+                        "timestamp": "2026-03-27T10:00:05Z",
+                        "event_type": "planner-agent-started",
+                        "message": "Planner Agent A is decomposing the work into implementation blocks.",
+                        "details": {
+                            "flow": "planning",
+                            "stage_key": "planner_a",
+                            "stage_index": 2,
+                            "stage_count": 4,
+                            "status": "running",
+                            "agent_label": "Planner Agent A",
+                        },
+                    },
+                ]:
+                    handle.write(json.dumps(event) + "\n")
+
+            with mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                loaded = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": False,
+                        "detail_level": "core",
+                    },
+                )
+
+            planning_progress = loaded["planning_progress"]
+            self.assertEqual(planning_progress["current_stage_key"], "planner_a")
+            self.assertEqual(planning_progress["current_stage_index"], 2)
+            self.assertEqual(planning_progress["current_stage_label"], "Planner Agent A")
+            self.assertEqual(planning_progress["current_agent_label"], "Planner Agent A")
+            self.assertEqual(planning_progress["percent"], 38)
+            self.assertEqual(
+                [item["status"] for item in planning_progress["stages"]],
+                ["completed", "running", "pending", "pending"],
+            )
 
     def test_load_project_reuses_cached_core_payload_when_state_is_unchanged(self) -> None:
         with TemporaryTestDir() as temp_dir:

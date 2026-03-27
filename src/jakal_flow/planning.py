@@ -25,6 +25,7 @@ STEP_EXECUTION_PARALLEL_PROMPT_FILENAME = "STEP_EXECUTION_PARALLEL_PROMPT.txt"
 STEP_EXECUTION_PROMPT_FILENAME = STEP_EXECUTION_PARALLEL_PROMPT_FILENAME
 DEBUGGER_PARALLEL_PROMPT_FILENAME = "DEBUGGER_PARALLEL_PROMPT.txt"
 DEBUGGER_PROMPT_FILENAME = DEBUGGER_PARALLEL_PROMPT_FILENAME
+MERGER_PARALLEL_PROMPT_FILENAME = "MERGER_PARALLEL_PROMPT.txt"
 FINALIZATION_PROMPT_FILENAME = "FINALIZATION_PROMPT.txt"
 OPTIMIZATION_PROMPT_FILENAME = "OPTIMIZATION_PROMPT.txt"
 ML_PLAN_GENERATION_PROMPT_FILENAME = "ML_PLAN_GENERATION_PROMPT.txt"
@@ -91,6 +92,15 @@ def debugger_prompt_filename(execution_mode: str | None) -> str:
 
 def load_debugger_prompt_template(execution_mode: str | None) -> str:
     return load_source_prompt_template(debugger_prompt_filename(execution_mode))
+
+
+def merger_prompt_filename(execution_mode: str | None) -> str:
+    _normalize_execution_mode(execution_mode)
+    return MERGER_PARALLEL_PROMPT_FILENAME
+
+
+def load_merger_prompt_template(execution_mode: str | None) -> str:
+    return load_source_prompt_template(merger_prompt_filename(execution_mode))
 
 
 def finalization_prompt_filename(workflow_mode: str | None = None) -> str:
@@ -841,6 +851,73 @@ def debugger_prompt(
         )
     except KeyError as exc:
         raise ValueError(f"Unknown placeholder in debugger prompt template: {exc.args[0]}") from exc
+
+
+def merger_prompt(
+    context: ProjectContext,
+    candidate: CandidateTask,
+    memory_context: str,
+    failing_command: str,
+    failing_summary: str,
+    failing_stdout: str,
+    failing_stderr: str,
+    merge_targets: list[str] | None = None,
+    execution_step: ExecutionStep | None = None,
+    template_text: str | None = None,
+) -> str:
+    plan_text = read_text(context.paths.plan_file)
+    mid_term = read_text(context.paths.mid_term_plan_file)
+    scope_guard = read_text(context.paths.scope_guard_file)
+    research_notes = read_text(context.paths.research_notes_file)
+    template = template_text or load_merger_prompt_template(getattr(context.runtime, "execution_mode", "parallel"))
+    workflow_mode = normalize_workflow_mode(getattr(context.runtime, "workflow_mode", "standard"))
+    task_title = execution_step.title if execution_step else candidate.title
+    display_description = execution_step.display_description.strip() if execution_step else ""
+    codex_description = execution_step.codex_description.strip() if execution_step else ""
+    test_command = context.runtime.test_cmd
+    if execution_step and execution_step.test_command.strip():
+        test_command = execution_step.test_command.strip()
+    if not display_description:
+        display_description = task_title
+    if not codex_description:
+        codex_description = candidate.rationale.strip() or display_description or task_title
+    success_criteria = (
+        execution_step.success_criteria.strip()
+        if execution_step and execution_step.success_criteria.strip()
+        else "The merge conflict is resolved cleanly and the integration worktree is ready for verification."
+    )
+    depends_on = ", ".join(execution_step.depends_on) if execution_step and execution_step.depends_on else "none"
+    owned_paths = "\n".join(f"- {path}" for path in execution_step.owned_paths) if execution_step and execution_step.owned_paths else "- none declared"
+    step_metadata = execution_step.metadata if execution_step and execution_step.metadata else {}
+    try:
+        return template.format(
+            repo_dir=context.paths.repo_dir,
+            docs_dir=context.paths.docs_dir,
+            workflow_mode=workflow_mode,
+            test_command=test_command,
+            task_title=task_title,
+            display_description=display_description,
+            codex_description=codex_description,
+            success_criteria=success_criteria,
+            depends_on=depends_on,
+            owned_paths=owned_paths,
+            step_metadata=json.dumps(step_metadata, indent=2, sort_keys=True) if step_metadata else "{}",
+            candidate_rationale=candidate.rationale,
+            memory_context=memory_context,
+            plan_snapshot=compact_text(plan_text, 4000),
+            mid_term_plan=compact_text(mid_term, 2500),
+            scope_guard=compact_text(scope_guard, 2500),
+            research_notes=compact_text(research_notes, 2500),
+            research_notes_file=context.paths.research_notes_file,
+            failing_command=failing_command,
+            failing_summary=compact_text(failing_summary, 1200) or "No merge summary was captured.",
+            failing_stdout=compact_text(failing_stdout, 4000) or "No stdout captured.",
+            failing_stderr=compact_text(failing_stderr, 4000) or "No stderr captured.",
+            merge_targets=", ".join(merge_targets or []) or "none declared",
+            extra_prompt=context.runtime.extra_prompt.strip() or "None.",
+        )
+    except KeyError as exc:
+        raise ValueError(f"Unknown placeholder in merger prompt template: {exc.args[0]}") from exc
 
 
 def finalization_prompt(

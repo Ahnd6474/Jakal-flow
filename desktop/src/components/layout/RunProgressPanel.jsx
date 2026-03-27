@@ -20,6 +20,15 @@ function runningStepLabels(steps = [], maxVisible = 3) {
   return `${labels.slice(0, maxVisible).join(", ")} +${labels.length - maxVisible}`;
 }
 
+function planningStageSummary(progress) {
+  const currentIndex = progress?.planningCurrentStage?.index || 0;
+  const total = progress?.planningStageCount || 0;
+  if (!currentIndex || !total) {
+    return "";
+  }
+  return `Planning stage ${currentIndex}/${total}`;
+}
+
 export function RunProgressPanel({ detail, planDraft, activeJob }) {
   const { language, t } = useI18n();
   const progress = deriveExecutionProgress(detail, planDraft, activeJob);
@@ -43,7 +52,7 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
 
   let currentWork = commandLabel(progress.command, language);
   if (progress.phase === "planning") {
-    currentWork = t("run.planGeneration");
+    currentWork = progress.planningCurrentStage?.label || t("run.planGeneration");
   } else if (progress.phase === "closeout") {
     currentWork = t("run.closeoutRunning");
   } else if (progress.phase === "debugging") {
@@ -56,7 +65,10 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
     currentWork = t("run.preparingStep", { step: stepLabel(progress.nextStep) });
   }
 
-  const progressSummary = executionProgressCaptionDisplay(progress.plan, language);
+  const progressSummary =
+    progress.phase === "planning" && progress.planningStageCount
+      ? planningStageSummary(progress)
+      : executionProgressCaptionDisplay(progress.plan, language);
   const percentLabel = progress.indeterminate ? t("status.running") : t("run.progressPercent", { percent: progress.percent ?? 0 });
   const runningStartTimes = (progress.runningStepList || [])
     .map((step) => Date.parse(String(step?.started_at || "")))
@@ -95,6 +107,7 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
 
       <div className="run-progress-banner__meta">
         <span>{progressSummary}</span>
+        {progress.phase === "planning" && progress.planningCurrentAgentLabel ? <span>{progress.planningCurrentAgentLabel}</span> : null}
         {progress.totalProgressUnits ? (
           <span>{t("run.completedStepsSummary", { completed: progress.completedProgressUnits, total: progress.totalProgressUnits })}</span>
         ) : null}
@@ -107,6 +120,19 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
         {showEstimatedCost ? <span>{t("run.estimatedCost")}: {formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</span> : null}
         <span>{percentLabel}</span>
       </div>
+
+      {progress.phase === "planning" && progress.planningStages.length ? (
+        <div className="run-progress-banner__stages" aria-label="Planning stages">
+          {progress.planningStages.map((stage) => (
+            <span
+              key={`${stage.key || "stage"}-${stage.index}`}
+              className={`run-progress-stage run-progress-stage--${stage.status || "pending"}`}
+            >
+              <strong>{stage.index}.</strong> {stage.label || stage.key}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {progress.headlineActivity ? (
         <div className="run-progress-banner__activity">

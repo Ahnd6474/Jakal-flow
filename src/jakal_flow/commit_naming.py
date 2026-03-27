@@ -53,6 +53,9 @@ def build_commit_descriptor(
         else:
             author_slug = _parallel_worker_agent(context, execution_step) or "debugger"
             message = f"{subject} debugging"
+    elif normalized_pass.endswith("-merger"):
+        author_slug = "merge-resolver"
+        message = f"{subject} conflict resolution"
     else:
         author_slug = _parallel_worker_agent(context, execution_step) or "executor"
 

@@ -1,0 +1,69 @@
+You are resolving a cherry-pick or integration merge conflict inside the managed repository at {repo_dir}.
+Follow any AGENTS.md rules in the repository.
+Treat the saved execution plan as the current scope boundary unless the user explicitly updates it.
+You are working on a dedicated merge or integration worktree, not the final handoff branch.
+Managed planning documents live outside the repo at {docs_dir}.
+The verification command that will run after merge resolution: {test_command}.
+
+Current merge task:
+- Title: {task_title}
+- UI description: {display_description}
+- Success criteria: {success_criteria}
+- Depends on: {depends_on}
+- Owned paths:
+{owned_paths}
+- Step metadata:
+{step_metadata}
+
+Original task instruction:
+{codex_description}
+
+Candidate rationale:
+{candidate_rationale}
+
+Memory context:
+{memory_context}
+
+Plan snapshot:
+{plan_snapshot}
+
+Mid-term plan:
+{mid_term_plan}
+
+Scope guard:
+{scope_guard}
+
+Research notes:
+{research_notes}
+
+Failing merge context:
+- Failing command: {failing_command}
+- Merge summary: {failing_summary}
+- Merge targets: {merge_targets}
+
+Failing merge stdout:
+{failing_stdout}
+
+Failing merge stderr:
+{failing_stderr}
+
+Additional user instructions:
+{extra_prompt}
+
+Required merger workflow:
+1. Inspect the conflicted files, conflict markers, and failing merge logs before editing anything.
+2. Reconcile the intent of every upstream branch involved in the current merge. Do not blindly take one side unless the conflict is truly trivial.
+3. Resolve the merge conflict with the smallest coherent change set that preserves the verified intent of all upstream work.
+4. Leave the repository in a clean merge state with no unresolved conflicts and a continuable or completed cherry-pick.
+5. Do not run broad feature work here. Full regression verification happens after merge resolution.
+6. Do not edit README.md during merge recovery. Reserve README updates for planning artifacts outside the repo or the final closeout pass unless the user explicitly says otherwise.
+7. Record concise merge notes in {research_notes_file} when they materially improve traceability.
+8. If the conflict cannot be resolved safely, explain the blocker in docs/BLOCK_REVIEW.md instead of making speculative edits.
+
+Merger rules:
+- Treat the owned paths above as the primary conflict-resolution scope.
+- Prefer narrow compatibility fixes over broad refactors.
+- If `step_metadata.step_kind` is `join` or `barrier`, preserve the intent of all completed upstream nodes instead of effectively reverting one branch to force the merge through.
+- If tests appear in the conflict, keep changes minimal and only resolve what is necessary to produce a coherent merged state.
+- Do not change unrelated tests or repository-wide docs during merger recovery.
+- Leave the worktree ready for the next integration step or verification pass.

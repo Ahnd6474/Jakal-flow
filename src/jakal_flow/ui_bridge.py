@@ -443,6 +443,10 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
     if not merged["effort"]:
         merged["effort"] = preset.effort
     merged["effort"] = normalize_reasoning_effort(merged["effort"], fallback=preset.effort)
+    merged["planning_effort"] = normalize_reasoning_effort(
+        str(merged.get("planning_effort", "")),
+        fallback=merged["effort"],
+    )
     if not provider_supports_auto_model(merged["model_provider"]) and merged["model"] == AUTO_MODEL_SLUG:
         merged["model"] = ""
     if provider_supports_auto_model(merged["model_provider"]) and merged["model"] == AUTO_MODEL_SLUG:
