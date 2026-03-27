@@ -33,7 +33,13 @@ If you want to run the same Codex-driven workflow across several repositories wh
 
 ## Architecture
 
+High-level surfaces and isolated workspace layout:
+
 ![jakal-flow flow chart (EN)](assets/readme-flow.svg)
+
+Backend planning, execution, verification, rollback, and reporting flow:
+
+![jakal-flow backend code generation flow (EN)](assets/backend-codegen-flow.svg)
 
 ## Quick Start
 

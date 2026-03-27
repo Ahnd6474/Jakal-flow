@@ -6,7 +6,13 @@
 
 ## 흐름
 
+전체 구조와 워크스페이스 격리 흐름:
+
 ![jakal-flow 흐름도 (KO)](assets/readme-flow-ko.svg)
+
+백엔드 계획 생성, 실행, 검증, 롤백, 리포트 흐름:
+
+![jakal-flow 백엔드 코드 생성 흐름 (KO)](assets/backend-codegen-flow-ko.svg)
 
 ## 핵심 특징
 
