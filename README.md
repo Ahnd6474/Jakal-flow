@@ -43,8 +43,16 @@ workspace_root/
 ## Install
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install -e .
 ```
+
+Linux-first development assumptions in this repository:
+
+- examples use `python3`, `source .venv/bin/activate`, and POSIX shell commands
+- the desktop app expects a Linux Tauri toolchain with Node.js 20+, Rust, and the WebKitGTK or GTK-related system packages required by Tauri on your distribution
+- if you are on Windows, translate shell steps to PowerShell or Command Prompt equivalents instead of using the commands here verbatim
 
 ## Desktop UI
 
@@ -60,8 +68,26 @@ Run the desktop shell in development:
 
 ```bash
 cd desktop
-npm.cmd install
-npm.cmd run tauri:dev
+npm install
+npm run tauri:dev
+```
+
+Build Linux desktop packages:
+
+```bash
+cd desktop
+npm install
+npm run tauri build
+```
+
+Linux bundle outputs are written under `desktop/src-tauri/target/release/bundle/`. In a typical Linux environment this produces `.deb` and `.rpm`, and may also produce an AppImage when the required host tooling is available.
+
+If you prefer running the web UI only during frontend work:
+
+```bash
+cd desktop
+npm install
+npm run dev
 ```
 
 The Tauri shell keeps the Python orchestration backend and adds:
@@ -97,6 +123,37 @@ The read-only monitoring flow supports both local-only access and external acces
 7. revoke the link in the desktop UI to deny further access
 
 The core app still keeps network exposure separate from orchestration. It starts the local share server, stores temporary share sessions, and can generate links that use either a manually supplied public base URL or an automatic temporary Cloudflare Quick Tunnel. Quick Tunnels are convenient for free ad-hoc phone access, but they still depend on your local machine being online and are not a replacement for permanent hosting.
+
+## Linux Quick Start
+
+Install the package, initialize a workspace, then start a run:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+
+jakal-flow init-repo \
+  --repo-url https://github.com/Ahnd6474/lit.git \
+  --branch main \
+  --workspace-root .jakal-flow-workspace \
+  --model gpt-5.4 \
+  --effort high \
+  --approval-mode never \
+  --sandbox-mode workspace-write \
+  --test-cmd "python -m pytest"
+
+jakal-flow run \
+  --repo-url https://github.com/Ahnd6474/lit.git \
+  --branch main \
+  --workspace-root .jakal-flow-workspace \
+  --model gpt-5.4 \
+  --effort high \
+  --approval-mode never \
+  --sandbox-mode workspace-write \
+  --test-cmd "python -m pytest" \
+  --max-blocks 2
+```
 
 ## Main Commands
 
