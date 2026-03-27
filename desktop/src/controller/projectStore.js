@@ -1,4 +1,4 @@
-import { defaultShareSettings, emptyPlanDraft, shareSettingsFromDetail } from "../controllerHelpers";
+import { defaultShareSettings, emptyPlanDraft, shareSettingsFromDetail } from "../controllerHelpers.js";
 import {
   applyProgramSettingsToForm,
   blankProjectForm,
@@ -11,13 +11,61 @@ import {
   sanitizeProjectListForJobState,
   shouldKeepUnsavedPlan,
   workspaceStatsFromProjects,
-} from "../utils";
+} from "../utils.js";
 
 export function applyListingState({ listing, runningJob = null, setProjects, setWorkspaceStats }) {
   const nextProjects = sanitizeProjectListForJobState(listing?.projects || [], runningJob);
   setProjects(nextProjects);
   setWorkspaceStats(workspaceStatsFromProjects(nextProjects));
   return nextProjects;
+}
+
+function projectListItemFromDetail(detail, fallbackProject = null) {
+  const project = detail?.project || {};
+  const branch = project.branch || fallbackProject?.branch || "";
+  return {
+    ...fallbackProject,
+    repo_id: project.repo_id || fallbackProject?.repo_id || "",
+    slug: project.slug || fallbackProject?.slug || "",
+    display_name: project.display_name || project.slug || fallbackProject?.display_name || "",
+    repo_path: project.repo_path || fallbackProject?.repo_path || "",
+    origin_url: project.origin_url || fallbackProject?.origin_url || "",
+    branch,
+    status: project.current_status || fallbackProject?.status || "",
+    detail: project.origin_url || `Branch ${branch}`,
+    created_at: project.created_at || fallbackProject?.created_at || "",
+    last_run_at: project.last_run_at || fallbackProject?.last_run_at || "",
+    summary: detail?.summary || fallbackProject?.summary || "",
+    progress: detail?.progress || fallbackProject?.progress || "",
+    stats: cloneValue(detail?.stats || fallbackProject?.stats || {}),
+    closeout_status: detail?.plan?.closeout_status || fallbackProject?.closeout_status || "",
+  };
+}
+
+export function applyProjectDetailListingState({
+  projects,
+  detail,
+  runningJob = null,
+  setProjects,
+  setWorkspaceStats,
+}) {
+  const repoId = String(detail?.project?.repo_id || "").trim();
+  if (!repoId) {
+    return null;
+  }
+  let matched = false;
+  const nextProjects = (projects || []).map((project) => {
+    if (String(project?.repo_id || "").trim() !== repoId) {
+      return project;
+    }
+    matched = true;
+    return projectListItemFromDetail(detail, project);
+  });
+  const mergedProjects = matched ? nextProjects : [projectListItemFromDetail(detail), ...(projects || [])];
+  const sanitizedProjects = sanitizeProjectListForJobState(mergedProjects, runningJob);
+  setProjects(sanitizedProjects);
+  setWorkspaceStats(workspaceStatsFromProjects(sanitizedProjects));
+  return sanitizedProjects;
 }
 
 export function applyActiveJobState({

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from types import SimpleNamespace
 from pathlib import Path
 import shutil
@@ -1652,6 +1653,45 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         log_file.write_text('{"index": 1}\nUnexpected token < in JSON\n{"index": 2}\n', encoding="utf-8")
 
         tail = read_jsonl_tail(log_file, 5)
+        last = read_last_jsonl(log_file)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        self.assertEqual([item["index"] for item in tail], [1, 2])
+        self.assertEqual(last, {"index": 2})
+
+    def test_jsonl_tail_helpers_handle_missing_trailing_newline_and_large_utf8_lines(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp_jsonl_tail_test_utf8"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        log_file = temp_dir / "events.jsonl"
+        long_message = "가나다라" * 3000
+        log_file.write_text(
+            "\n".join(
+                [
+                    json.dumps({"index": 1, "message": "first"}, ensure_ascii=False),
+                    json.dumps({"index": 2, "message": long_message}, ensure_ascii=False),
+                    json.dumps({"index": 3, "message": "last"}, ensure_ascii=False),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        tail = read_jsonl_tail(log_file, 2)
+        last = read_last_jsonl(log_file)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        self.assertEqual([item["index"] for item in tail], [2, 3])
+        self.assertEqual(tail[0]["message"], long_message)
+        self.assertEqual(last, {"index": 3, "message": "last"})
+
+    def test_jsonl_tail_helpers_skip_malformed_trailing_line_without_scanning_from_start(self) -> None:
+        temp_dir = Path(__file__).resolve().parents[1] / ".tmp_jsonl_tail_test_trailing_invalid"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        log_file = temp_dir / "events.jsonl"
+        log_file.write_text('{"index": 1}\n{"index": 2}\n{"index":', encoding="utf-8")
+
+        tail = read_jsonl_tail(log_file, 2)
         last = read_last_jsonl(log_file)
         shutil.rmtree(temp_dir, ignore_errors=True)
 

@@ -2,7 +2,7 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 import { open } from "@tauri-apps/plugin-dialog";
 import { bridgeRequest, startBridgeJob, subscribeBridgeEvents } from "../api";
 import { BRIDGE_COMMANDS } from "../bridgeProtocol";
-import { bridgeEventJob, bridgeEventProject, isJobUpdatedEvent, isProjectChangedEvent } from "../controller/bridgeEvents";
+import { bridgeEventJob, bridgeEventProject, isJobUpdatedEvent, isProjectChangedEvent, isProjectUiEvent } from "../controller/bridgeEvents";
 import { mergeRefreshRepoId, projectRefreshDebounceMs, shouldRefreshSelectedProject } from "../controller/projectRefresh";
 import {
   defaultShareSettings,
@@ -38,6 +38,7 @@ import {
   applyActiveJobState,
   applyListingState,
   applyProjectDetailState,
+  applyProjectDetailListingState,
   clearSelectedProjectState as clearProjectSelectionState,
 } from "../controller/projectStore";
 import { usePersistentState } from "./usePersistentState";
@@ -69,7 +70,9 @@ export function useDesktopController() {
   const bridgeRefreshInFlightRef = useRef(false);
   const bridgeRefreshTimerRef = useRef(null);
   const pendingBridgeRefreshRepoIdRef = useRef("");
+  const pendingBridgeRefreshListingRef = useRef(false);
   const activeJobRef = useRef(null);
+  const projectsRef = useRef([]);
 
   const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "run");
   const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
@@ -129,6 +132,10 @@ export function useDesktopController() {
     activeJobRef.current = activeJob;
   }, [activeJob]);
 
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
+
   function applyCurrentJobSnapshot(jobSnapshot) {
     return applyActiveJobState({
       jobSnapshot,
@@ -139,7 +146,7 @@ export function useDesktopController() {
   }
 
   function applyProjectDetail(detail, options = {}) {
-    return applyProjectDetailState({
+    const applied = applyProjectDetailState({
       detail,
       options,
       refs: {
@@ -148,7 +155,7 @@ export function useDesktopController() {
       state: {
         projectDetail,
         modelCatalog,
-        activeJob,
+        activeJob: activeJobRef.current,
         defaultRuntime,
         storedProgramSettings,
         planDirty,
@@ -165,6 +172,19 @@ export function useDesktopController() {
         setPlanDirty,
       },
     });
+    if (applied) {
+      const nextProjects = applyProjectDetailListingState({
+        projects: projectsRef.current,
+        detail,
+        runningJob: options.runningJob ?? activeJobRef.current,
+        setProjects,
+        setWorkspaceStats,
+      });
+      if (nextProjects) {
+        projectsRef.current = nextProjects;
+      }
+    }
+    return applied;
   }
 
   useEffect(() => {
@@ -194,6 +214,7 @@ export function useDesktopController() {
           setProjects,
           setWorkspaceStats,
         });
+        projectsRef.current = nextProjects;
         if (!nextProjects.some((item) => item.repo_id === selectedProjectId)) {
           setSelectedProjectId(nextProjects[0]?.repo_id || "");
         }
@@ -269,7 +290,9 @@ export function useDesktopController() {
       }
       bridgeRefreshInFlightRef.current = true;
       const pendingRepoId = pendingBridgeRefreshRepoIdRef.current;
+      const refreshListing = pendingBridgeRefreshListingRef.current;
       pendingBridgeRefreshRepoIdRef.current = "";
+      pendingBridgeRefreshListingRef.current = false;
       try {
         const runningJob = activeJobRef.current?.status === "running" ? activeJobRef.current : null;
         const shouldLoadDetail = shouldRefreshSelectedProject(selectedProjectId, pendingRepoId);
@@ -280,17 +303,21 @@ export function useDesktopController() {
           {
             refreshCodexStatus: false,
             detailLevel: wantsExpandedDetail ? "full" : "core",
+            refreshListing,
           },
         );
         if (cancelled) {
           return;
         }
-        applyListingState({
-          listing,
-          runningJob,
-          setProjects,
-          setWorkspaceStats,
-        });
+        if (listing) {
+          const nextProjects = applyListingState({
+            listing,
+            runningJob,
+            setProjects,
+            setWorkspaceStats,
+          });
+          projectsRef.current = nextProjects;
+        }
         if (detail && !cancelled) {
           applyProjectDetail(detail, {
             preserveSelectedStep: true,
@@ -307,8 +334,9 @@ export function useDesktopController() {
       }
     }
 
-    function scheduleBridgeRefresh(eventRepoId = "") {
+    function scheduleBridgeRefresh(eventRepoId = "", options = {}) {
       pendingBridgeRefreshRepoIdRef.current = mergeRefreshRepoId(pendingBridgeRefreshRepoIdRef.current, eventRepoId);
+      pendingBridgeRefreshListingRef.current = pendingBridgeRefreshListingRef.current || options.refreshListing !== false;
       if (bridgeRefreshTimerRef.current) {
         window.clearTimeout(bridgeRefreshTimerRef.current);
       }
@@ -341,12 +369,13 @@ export function useDesktopController() {
           if (cancelled) {
             return;
           }
-          applyListingState({
+          const nextProjects = applyListingState({
             listing,
             runningJob: null,
             setProjects,
             setWorkspaceStats,
           });
+          projectsRef.current = nextProjects;
           setMessage(
             job.status === "completed"
               ? messagePayload(
@@ -367,13 +396,19 @@ export function useDesktopController() {
         return;
       }
 
-      if (!isProjectChangedEvent(eventPayload)) {
+      if (isProjectChangedEvent(eventPayload)) {
+        const project = bridgeEventProject(eventPayload);
+        const eventRepoId = String(project?.repo_id || "").trim();
+        scheduleBridgeRefresh(eventRepoId, { refreshListing: true });
         return;
       }
-
-      const project = bridgeEventProject(eventPayload);
-      const eventRepoId = String(project?.repo_id || "").trim();
-      scheduleBridgeRefresh(eventRepoId);
+      if (isProjectUiEvent(eventPayload)) {
+        const project = bridgeEventProject(eventPayload);
+        const eventRepoId = String(project?.repo_id || "").trim();
+        if (shouldRefreshSelectedProject(selectedProjectId, eventRepoId)) {
+          scheduleBridgeRefresh(eventRepoId, { refreshListing: false });
+        }
+      }
     }
 
     let unlisten = null;
@@ -411,6 +446,7 @@ export function useDesktopController() {
       setProjects,
       setWorkspaceStats,
     });
+    projectsRef.current = nextProjects;
     if (!selectedProjectId && nextProjects.length) {
       setSelectedProjectId(nextProjects[0].repo_id);
     }
@@ -427,6 +463,7 @@ export function useDesktopController() {
         setProjects,
         setWorkspaceStats,
       });
+      projectsRef.current = nextProjects;
 
       if (selectedProjectId) {
         const detail = await fetchProjectDetail(bridgeRequest, selectedProjectId, workspaceRoot, {

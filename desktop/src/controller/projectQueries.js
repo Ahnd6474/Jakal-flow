@@ -29,7 +29,8 @@ export async function fetchProjectDetail(bridgeRequest, repoId, workspaceRoot, o
 }
 
 export async function refreshVisibleProjectState(bridgeRequest, workspaceRoot, repoId, options = {}) {
-  const listingPromise = loadProjectListing(bridgeRequest, workspaceRoot);
+  const refreshListing = options.refreshListing ?? true;
+  const listingPromise = refreshListing ? loadProjectListing(bridgeRequest, workspaceRoot) : Promise.resolve(null);
   if (!repoId) {
     return {
       listing: await listingPromise,
