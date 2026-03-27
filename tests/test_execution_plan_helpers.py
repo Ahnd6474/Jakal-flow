@@ -268,6 +268,19 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(plan.cpu_parallel_limit, 4)
         self.assertEqual(plan.recommended_workers, 4)
 
+    def test_parallel_resource_plan_auto_uses_two_workers_on_four_core_machine(self) -> None:
+        with mock.patch("jakal_flow.parallel_resources.os.cpu_count", return_value=4), mock.patch(
+            "jakal_flow.parallel_resources._detect_memory_bytes",
+            return_value=(16 * 1024**3, 12 * 1024**3),
+        ):
+            plan = build_parallel_resource_plan("auto", 0)
+
+        self.assertEqual(plan.worker_mode, "auto")
+        self.assertEqual(plan.cpu_logical_count, 4)
+        self.assertEqual(plan.cpu_parallel_limit, 2)
+        self.assertEqual(plan.memory_parallel_limit, 4)
+        self.assertEqual(plan.recommended_workers, 2)
+
     def test_parallel_resource_plan_manual_respects_resource_cap(self) -> None:
         with mock.patch("jakal_flow.parallel_resources.os.cpu_count", return_value=12), mock.patch(
             "jakal_flow.parallel_resources._detect_memory_bytes",
