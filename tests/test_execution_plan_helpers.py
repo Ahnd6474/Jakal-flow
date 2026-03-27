@@ -881,6 +881,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("after debugger recovery", test_result.summary)
         self.assertEqual(run_result.changed_files, ["src/app.py", "src/fix.py"])
         mocked_commit.assert_called_once()
+        self.assertEqual(mocked_commit.call_args.args[1], "Implement fix debugging")
+        self.assertEqual(mocked_commit.call_args.kwargs["author_name"], "Jakal-Flow-debugger")
         mocked_reset.assert_not_called()
         self.assertIn("Implement fix", debugger_prompt_text)
         self.assertIn("AssertionError: expected value", debugger_prompt_text)
@@ -1003,7 +1005,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 orchestrator.git,
                 "commit_all",
                 return_value="parallel-debug-commit",
-            ), mock.patch.object(
+            ) as mocked_commit, mock.patch.object(
                 orchestrator.git,
                 "current_revision",
                 side_effect=["merge-commit-1", "merge-commit-2"],
@@ -1043,6 +1045,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual([step.status for step in plan_state.steps], ["completed", "completed"])
         self.assertEqual(context.metadata.current_status, "plan_completed")
         self.assertEqual(context.metadata.current_safe_revision, "parallel-debug-commit")
+        mocked_commit.assert_called_once()
+        self.assertEqual(mocked_commit.call_args.args[1], "Desktop slice, Backend slice debugging")
+        self.assertEqual(mocked_commit.call_args.kwargs["author_name"], "Jakal-Flow-debugger")
         self.assertIn("Recover merged parallel batch ST1, ST2", debug_prompt_text)
         self.assertIn("integration assertion failed", debug_prompt_text)
         self.assertIn("parallel batch traceback", debug_prompt_text)
@@ -1173,11 +1178,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 return_value=True,
             ), mock.patch.object(orchestrator.git, "add_all") as mocked_add_all, mock.patch.object(
                 orchestrator.git,
-                "continue_cherry_pick",
-            ) as mocked_continue, mock.patch.object(
-                orchestrator.git,
-                "commit_all",
-                return_value="unexpected-debug-commit",
+                "commit_staged",
+                return_value="merge-recovery-commit",
             ) as mocked_commit, mock.patch.object(
                 orchestrator.git,
                 "current_revision",
@@ -1230,8 +1232,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(context.metadata.current_status, "plan_completed")
         self.assertEqual(context.metadata.current_safe_revision, "merge-recovery-commit")
         mocked_add_all.assert_called_once_with(context.paths.repo_dir)
-        mocked_continue.assert_called_once_with(context.paths.repo_dir)
-        mocked_commit.assert_not_called()
+        mocked_commit.assert_called_once()
+        self.assertEqual(mocked_commit.call_args.args[1], "Desktop slice, Backend slice conflict resolution")
+        self.assertEqual(mocked_commit.call_args.kwargs["author_name"], "Jakal-Flow-merge-resolver")
         mocked_abort.assert_not_called()
         mocked_reset.assert_not_called()
         self.assertIn("git cherry-pick worker-2-commit conflicted", debug_prompt_text)
