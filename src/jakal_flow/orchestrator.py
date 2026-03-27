@@ -13,7 +13,7 @@ from .codex_runner import CodexRunner
 from .git_ops import GitOps
 from .memory import MemoryStore
 from .model_selection import normalize_reasoning_effort
-from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, LoopState, MLExperimentRecord, MLModeState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions, TestRunResult
+from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, LineageState, LoopState, MLExperimentRecord, MLModeState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions, TestRunResult
 from .optimization import scan_optimization_candidates
 from .parallel_resources import build_parallel_resource_plan, normalize_parallel_worker_mode
 from .planning import (
