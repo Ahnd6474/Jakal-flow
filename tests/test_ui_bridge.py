@@ -390,7 +390,7 @@ class UIBridgeTests(unittest.TestCase):
             self.assertIn("Demo Project", loaded["summary"])
             self.assertEqual(loaded["stats"]["total_steps"], 0)
 
-    def test_delete_project_archives_managed_workspace_and_allows_same_repo_restart(self) -> None:
+    def test_archive_project_moves_managed_workspace_and_allows_same_repo_restart(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"
             repo_dir = temp_dir / "repo"
@@ -420,7 +420,7 @@ class UIBridgeTests(unittest.TestCase):
             self.assertTrue(managed_root.exists())
 
             archived = run_command(
-                "delete-project",
+                "archive-project",
                 workspace_root,
                 {
                     "repo_id": detail["project"]["repo_id"],
@@ -466,7 +466,103 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(len(listing["projects"]), 1)
             self.assertEqual(len(listing["history"]), 1)
 
-    def test_delete_all_projects_archives_registry_but_keeps_local_repos(self) -> None:
+    def test_delete_project_removes_managed_workspace_without_creating_history(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            (repo_dir / "README.md").write_text("demo", encoding="utf-8")
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Delete Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            managed_root = Path(detail["project"]["project_root"])
+            deleted = run_command(
+                "delete-project",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                },
+            )
+
+            self.assertEqual(deleted["deleted"]["display_name"], "Delete Demo")
+            self.assertEqual(deleted["projects"], [])
+            self.assertEqual(deleted["history"], [])
+            self.assertFalse(managed_root.exists())
+            self.assertTrue(repo_dir.exists())
+            self.assertTrue((repo_dir / "README.md").exists())
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                restarted = run_command(
+                    "save-project-setup",
+                    workspace_root,
+                    {
+                        **payload,
+                        "display_name": "Delete Demo Restarted",
+                    },
+                )
+
+            self.assertEqual(restarted["project"]["display_name"], "Delete Demo Restarted")
+
+    def test_archive_all_projects_moves_registry_but_keeps_local_repos(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_a = temp_dir / "repo-a"
+            repo_b = temp_dir / "repo-b"
+            repo_a.mkdir(parents=True, exist_ok=True)
+            repo_b.mkdir(parents=True, exist_ok=True)
+            (repo_a / "README.md").write_text("a", encoding="utf-8")
+            (repo_b / "README.md").write_text("b", encoding="utf-8")
+
+            for repo_dir, name in ((repo_a, "A"), (repo_b, "B")):
+                payload = {
+                    "project_dir": str(repo_dir),
+                    "display_name": f"Project {name}",
+                    "branch": "main",
+                    "origin_url": "",
+                    "runtime": {
+                        "model": "gpt-5.4",
+                        "effort": "high",
+                        "test_cmd": "python -m unittest",
+                        "max_blocks": 5,
+                    },
+                }
+                with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                    "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                    side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+                ):
+                    run_command("save-project-setup", workspace_root, payload)
+
+            archived = run_command("archive-all-projects", workspace_root, {})
+            self.assertTrue(archived["archived_all"])
+            self.assertEqual(archived["archived_count"], 2)
+            self.assertEqual(archived["projects"], [])
+            self.assertEqual(len(archived["history"]), 2)
+            self.assertTrue(repo_a.exists())
+            self.assertTrue(repo_b.exists())
+            self.assertTrue((repo_a / "README.md").exists())
+            self.assertTrue((repo_b / "README.md").exists())
+
+    def test_delete_all_projects_removes_managed_workspaces_without_history_entries(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"
             repo_a = temp_dir / "repo-a"
@@ -496,10 +592,10 @@ class UIBridgeTests(unittest.TestCase):
                     run_command("save-project-setup", workspace_root, payload)
 
             deleted = run_command("delete-all-projects", workspace_root, {})
-            self.assertTrue(deleted["archived_all"])
-            self.assertEqual(deleted["archived_count"], 2)
+            self.assertTrue(deleted["deleted_all"])
+            self.assertEqual(deleted["deleted_count"], 2)
             self.assertEqual(deleted["projects"], [])
-            self.assertEqual(len(deleted["history"]), 2)
+            self.assertEqual(deleted["history"], [])
             self.assertTrue(repo_a.exists())
             self.assertTrue(repo_b.exists())
             self.assertTrue((repo_a / "README.md").exists())
@@ -562,7 +658,7 @@ class UIBridgeTests(unittest.TestCase):
             ):
                 saved = run_command("save-plan", workspace_root, plan_payload)
             archived = run_command(
-                "delete-project",
+                "archive-project",
                 workspace_root,
                 {
                     "repo_id": saved["project"]["repo_id"],
@@ -581,6 +677,63 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(loaded["plan"]["project_prompt"], "Rebuild this directory from a fresh prompt.")
             self.assertEqual(loaded["plan"]["steps"][0]["title"], "Capture the archived flow")
             self.assertIn("<svg", loaded["history"]["flow_svg_text"])
+
+    def test_delete_history_entry_removes_archived_workspace(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            (repo_dir / "README.md").write_text("demo", encoding="utf-8")
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "History Delete Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            archived = run_command(
+                "archive-project",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                },
+            )
+            archived_detail = run_command(
+                "load-history-entry",
+                workspace_root,
+                {
+                    "archive_id": archived["archived"]["archive_id"],
+                    "detail_level": "core",
+                },
+            )
+            archive_root = Path(archived_detail["project"]["project_root"])
+
+            deleted = run_command(
+                "delete-history-entry",
+                workspace_root,
+                {
+                    "archive_id": archived["archived"]["archive_id"],
+                },
+            )
+
+            self.assertEqual(deleted["deleted_history"]["display_name"], "History Delete Demo")
+            self.assertEqual(deleted["projects"], [])
+            self.assertEqual(deleted["history"], [])
+            self.assertFalse(archive_root.exists())
+            self.assertTrue(repo_dir.exists())
 
     def test_save_plan_and_request_stop_persist_bridge_state(self) -> None:
         with TemporaryTestDir() as temp_dir:

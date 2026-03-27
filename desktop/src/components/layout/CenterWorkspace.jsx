@@ -90,7 +90,9 @@ export function CenterWorkspace({
   onChangeForm,
   onChangeProgramSettings,
   onChooseDirectory,
+  onArchiveProject,
   onDeleteProject,
+  onDeleteHistoryEntry,
   onGenerateShareLink,
   onCopyShareLink,
   onRevokeShareLink,
@@ -222,7 +224,7 @@ export function CenterWorkspace({
           />
         ) : null}
         {developerMode && activeTab === "reports" ? <ReportsView reports={detail?.reports} /> : null}
-        {activeTab === "history" ? <HistoryView detail={visibleHistoryDetail} /> : null}
+        {activeTab === "history" ? <HistoryView detail={visibleHistoryDetail} busy={busy} onDeleteHistoryEntry={onDeleteHistoryEntry} /> : null}
         {activeTab === "config" ? (
           <ConfigEditorView
             form={form}
@@ -231,6 +233,7 @@ export function CenterWorkspace({
             busy={busy}
             onChangeForm={onChangeForm}
             onChooseDirectory={onChooseDirectory}
+            onArchiveProject={onArchiveProject}
             onDeleteProject={onDeleteProject}
           />
         ) : null}

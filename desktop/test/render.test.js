@@ -159,7 +159,9 @@ function baseWorkspaceProps(overrides = {}) {
     onChangeForm: noop,
     onChangeProgramSettings: noop,
     onChooseDirectory: noop,
+    onArchiveProject: noop,
     onDeleteProject: noop,
+    onDeleteHistoryEntry: noop,
     onGenerateShareLink: noop,
     onCopyShareLink: noop,
     onRevokeShareLink: noop,
@@ -775,7 +777,10 @@ test("SidebarPane renders a filtered workspace tree without unrelated nodes", as
     onWorkspaceFilterChange: noop,
     onSelectProject: noop,
     onNewProject: noop,
+    onArchiveProject: noop,
     onDeleteProject: noop,
+    onDeleteHistoryEntry: noop,
+    onArchiveAllProjects: noop,
     onDeleteAllProjects: noop,
     workspaceTree: [
       {
@@ -827,7 +832,10 @@ test("SidebarPane keeps a pending checkpoint visible and marked as live", async 
       onWorkspaceFilterChange: noop,
       onSelectProject: noop,
       onNewProject: noop,
+      onArchiveProject: noop,
       onDeleteProject: noop,
+      onDeleteHistoryEntry: noop,
+      onArchiveAllProjects: noop,
       onDeleteAllProjects: noop,
       workspaceTree: [],
       checkpoints: {
@@ -1320,6 +1328,7 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
       busy: false,
       onChangeForm: noop,
       onChooseDirectory: noop,
+      onArchiveProject: noop,
       onDeleteProject: noop,
     },
   );
@@ -1327,4 +1336,37 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
   assert.doesNotMatch(html, /Advanced Settings/);
   assert.doesNotMatch(html, /Custom Model Slug/);
   assert.doesNotMatch(html, /Extra Prompt/);
+  assert.match(html, />Archive Project<\/button>/);
+  assert.match(html, />Delete Project<\/button>/);
+});
+
+test("HistoryView exposes a delete action for archived runs", async () => {
+  const html = await renderBundledComponent(
+    "history-view-render",
+    "./src/components/views/HistoryView.jsx",
+    "HistoryView",
+    {
+      detail: {
+        project: {
+          archive_id: "hist-1",
+          display_name: "Archived Demo",
+          current_status: "closed_out",
+          archived_at: "2026-03-27T00:00:00+00:00",
+        },
+        history: {
+          flow_svg_text: "<svg></svg>",
+          blocks: [],
+          ui_events: [],
+        },
+        plan: {
+          project_prompt: "Recover the archived run.",
+        },
+        summary: "Archived detail summary",
+      },
+      busy: false,
+      onDeleteHistoryEntry: noop,
+    },
+  );
+
+  assert.match(html, />Delete Archived Run<\/button>/);
 });

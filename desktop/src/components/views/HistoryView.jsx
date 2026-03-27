@@ -25,7 +25,7 @@ function FlowPreview({ svgText }) {
   return <div className="history-flow__canvas" dangerouslySetInnerHTML={{ __html: svgText }} />;
 }
 
-export function HistoryView({ detail }) {
+export function HistoryView({ detail, busy = false, onDeleteHistoryEntry = null }) {
   const { language, t } = useI18n();
   const history = detail?.history || {};
   const project = detail?.project || {};
@@ -69,6 +69,16 @@ export function HistoryView({ detail }) {
             {displayStatus(project.current_status || "idle", language)}
           </span>
           {project.archived_at ? <span>{t("history.archivedAt", { timestamp: project.archived_at })}</span> : null}
+          {project.archive_id ? (
+            <button
+              className="toolbar-button"
+              onClick={() => onDeleteHistoryEntry?.(project.archive_id)}
+              type="button"
+              disabled={busy}
+            >
+              {t("action.deleteArchivedRun")}
+            </button>
+          ) : null}
         </div>
       </div>
 

@@ -527,6 +527,7 @@ def bridge_command_handlers() -> dict[str, Any]:
         ),
         **build_project_command_handlers(
             resolve_project=resolve_project,
+            resolve_history_project=resolve_history_project,
             common_project_inputs=common_project_inputs,
             parse_plan_state=parse_plan_state,
             append_ui_event=append_ui_event,

@@ -82,6 +82,7 @@ export function ConfigEditorView({
   busy,
   onChangeForm,
   onChooseDirectory,
+  onArchiveProject,
   onDeleteProject,
 }) {
   const runtime = form.runtime || {};
@@ -119,8 +120,11 @@ export function ConfigEditorView({
           <h2>{t("tab.config")}</h2>
         </div>
         <div className="field-row">
-          <button className="toolbar-button" onClick={onDeleteProject} type="button" disabled={busy || !form.project_dir?.trim()}>
+          <button className="toolbar-button toolbar-button--ghost" onClick={onArchiveProject} type="button" disabled={busy || !form.project_dir?.trim()}>
             {t("action.archiveProject")}
+          </button>
+          <button className="toolbar-button" onClick={onDeleteProject} type="button" disabled={busy || !form.project_dir?.trim()}>
+            {t("action.deleteProject")}
           </button>
         </div>
       </div>

@@ -738,12 +738,81 @@ export function useDesktopController() {
     });
   }
 
-  async function deleteProject() {
+  function restoreProjectForm(nextForm) {
+    setProjectForm({
+      ...blankProjectForm(defaultRuntime),
+      project_dir: nextForm.project_dir,
+      display_name: nextForm.display_name,
+      branch: nextForm.branch,
+      origin_url: nextForm.origin_url,
+      github_mode: nextForm.github_mode,
+      runtime: nextForm.runtime,
+    });
+  }
+
+  async function archiveProject() {
     if (!selectedProjectId) {
       setMessage(messagePayload("error", translate(language, "message.openProjectFirst")));
       return;
     }
     if (!window.confirm(translate(language, "prompt.confirmArchiveProject"))) {
+      return;
+    }
+    const nextForm = applyProgramSettingsToForm(projectForm, storedProgramSettings);
+    await withPending("archive-project", async () => {
+      const result = await bridgeRequest(
+        BRIDGE_COMMANDS.ARCHIVE_PROJECT,
+        {
+          repo_id: selectedProjectId,
+        },
+        workspaceRoot || null,
+      );
+      setProjects(result.projects || []);
+      setHistoryProjects(result.history || []);
+      setWorkspaceStats(result.workspace || null);
+      clearSelectedProjectState(defaultRuntime);
+      restoreProjectForm(nextForm);
+      setSelectedHistoryId(result.archived?.archive_id || "");
+      setMessage(messagePayload("success", translate(language, "message.projectArchived")));
+    });
+  }
+
+  async function archiveProjectById(repoId) {
+    if (!repoId) {
+      return;
+    }
+    if (!window.confirm(translate(language, "prompt.confirmArchiveProject"))) {
+      return;
+    }
+    const nextForm = repoId === selectedProjectId ? applyProgramSettingsToForm(projectForm, storedProgramSettings) : null;
+    await withPending("archive-project", async () => {
+      const result = await bridgeRequest(
+        BRIDGE_COMMANDS.ARCHIVE_PROJECT,
+        {
+          repo_id: repoId,
+        },
+        workspaceRoot || null,
+      );
+      setProjects(result.projects || []);
+      setHistoryProjects(result.history || []);
+      setWorkspaceStats(result.workspace || null);
+      if (repoId === selectedProjectId) {
+        clearSelectedProjectState(defaultRuntime);
+        if (nextForm) {
+          restoreProjectForm(nextForm);
+        }
+      }
+      setSelectedHistoryId(result.archived?.archive_id || selectedHistoryId);
+      setMessage(messagePayload("success", translate(language, "message.projectArchived")));
+    });
+  }
+
+  async function deleteProject() {
+    if (!selectedProjectId) {
+      setMessage(messagePayload("error", translate(language, "message.openProjectFirst")));
+      return;
+    }
+    if (!window.confirm(translate(language, "prompt.confirmDeleteProject"))) {
       return;
     }
     const nextForm = applyProgramSettingsToForm(projectForm, storedProgramSettings);
@@ -759,17 +828,8 @@ export function useDesktopController() {
       setHistoryProjects(result.history || []);
       setWorkspaceStats(result.workspace || null);
       clearSelectedProjectState(defaultRuntime);
-      setProjectForm({
-        ...blankProjectForm(defaultRuntime),
-        project_dir: nextForm.project_dir,
-        display_name: nextForm.display_name,
-        branch: nextForm.branch,
-        origin_url: nextForm.origin_url,
-        github_mode: nextForm.github_mode,
-        runtime: nextForm.runtime,
-      });
-      setSelectedHistoryId(result.archived?.archive_id || "");
-      setMessage(messagePayload("success", translate(language, "message.projectArchived")));
+      restoreProjectForm(nextForm);
+      setMessage(messagePayload("success", translate(language, "message.projectDeleted")));
     });
   }
 
@@ -777,7 +837,7 @@ export function useDesktopController() {
     if (!repoId) {
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmArchiveProject"))) {
+    if (!window.confirm(translate(language, "prompt.confirmDeleteProject"))) {
       return;
     }
     const nextForm = repoId === selectedProjectId ? applyProgramSettingsToForm(projectForm, storedProgramSettings) : null;
@@ -795,19 +855,28 @@ export function useDesktopController() {
       if (repoId === selectedProjectId) {
         clearSelectedProjectState(defaultRuntime);
         if (nextForm) {
-          setProjectForm({
-            ...blankProjectForm(defaultRuntime),
-            project_dir: nextForm.project_dir,
-            display_name: nextForm.display_name,
-            branch: nextForm.branch,
-            origin_url: nextForm.origin_url,
-            github_mode: nextForm.github_mode,
-            runtime: nextForm.runtime,
-          });
+          restoreProjectForm(nextForm);
         }
       }
-      setSelectedHistoryId(result.archived?.archive_id || selectedHistoryId);
-      setMessage(messagePayload("success", translate(language, "message.projectArchived")));
+      setMessage(messagePayload("success", translate(language, "message.projectDeleted")));
+    });
+  }
+
+  async function archiveAllProjects() {
+    if (!projects.length) {
+      return;
+    }
+    if (!window.confirm(translate(language, "prompt.confirmArchiveAllProjects"))) {
+      return;
+    }
+    await withPending("archive-all-projects", async () => {
+      const result = await bridgeRequest(BRIDGE_COMMANDS.ARCHIVE_ALL_PROJECTS, {}, workspaceRoot || null);
+      setProjects(result.projects || []);
+      setHistoryProjects(result.history || []);
+      setWorkspaceStats(result.workspace || null);
+      clearSelectedProjectState(defaultRuntime);
+      setSelectedHistoryId((result.history || [])[0]?.archive_id || "");
+      setMessage(messagePayload("success", translate(language, "message.allProjectsArchived")));
     });
   }
 
@@ -815,7 +884,7 @@ export function useDesktopController() {
     if (!projects.length) {
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmArchiveAllProjects"))) {
+    if (!window.confirm(translate(language, "prompt.confirmDeleteAllProjects"))) {
       return;
     }
     await withPending("delete-all-projects", async () => {
@@ -824,8 +893,36 @@ export function useDesktopController() {
       setHistoryProjects(result.history || []);
       setWorkspaceStats(result.workspace || null);
       clearSelectedProjectState(defaultRuntime);
-      setSelectedHistoryId((result.history || [])[0]?.archive_id || "");
-      setMessage(messagePayload("success", translate(language, "message.allProjectsArchived")));
+      setMessage(messagePayload("success", translate(language, "message.allProjectsDeleted")));
+    });
+  }
+
+  async function deleteHistoryEntry(archiveId) {
+    if (!archiveId) {
+      return;
+    }
+    if (!window.confirm(translate(language, "prompt.confirmDeleteHistoryEntry"))) {
+      return;
+    }
+    await withPending("delete-history-entry", async () => {
+      const result = await bridgeRequest(
+        BRIDGE_COMMANDS.DELETE_HISTORY_ENTRY,
+        {
+          archive_id: archiveId,
+        },
+        workspaceRoot || null,
+      );
+      setProjects(result.projects || []);
+      setHistoryProjects(result.history || []);
+      setWorkspaceStats(result.workspace || null);
+      const nextHistoryId = (result.history || [])[0]?.archive_id || "";
+      if (archiveId === selectedHistoryId) {
+        setSelectedHistoryId(nextHistoryId);
+        if (!nextHistoryId) {
+          setHistoryDetail(null);
+        }
+      }
+      setMessage(messagePayload("success", translate(language, "message.historyEntryDeleted")));
     });
   }
 
@@ -1212,9 +1309,13 @@ export function useDesktopController() {
     forceRefresh,
     refreshProjects,
     loadProject,
+    archiveProject,
+    archiveProjectById,
     saveProject,
     deleteProject,
     deleteProjectById,
+    deleteHistoryEntry,
+    archiveAllProjects,
     deleteAllProjects,
     savePlan,
     resetPlan,

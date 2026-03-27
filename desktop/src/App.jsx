@@ -95,7 +95,10 @@ export default function App() {
             onSelectProject={controller.loadProject}
             onSelectHistory={controller.setSelectedHistoryId}
             onNewProject={controller.startNewProject}
+            onArchiveProject={controller.archiveProjectById}
             onDeleteProject={controller.deleteProjectById}
+            onDeleteHistoryEntry={controller.deleteHistoryEntry}
+            onArchiveAllProjects={controller.archiveAllProjects}
             onDeleteAllProjects={controller.deleteAllProjects}
             workspaceTree={detail?.workspace_tree}
             checkpoints={detail?.checkpoints}
@@ -122,7 +125,9 @@ export default function App() {
             onChangeForm={controller.setProjectForm}
             onChangeProgramSettings={controller.setProgramSettings}
             onChooseDirectory={controller.chooseDirectory}
+            onArchiveProject={controller.archiveProject}
             onDeleteProject={controller.deleteProject}
+            onDeleteHistoryEntry={controller.deleteHistoryEntry}
             onGenerateShareLink={controller.generateShareLink}
             onCopyShareLink={controller.copyShareLink}
             onRevokeShareLink={controller.revokeShareLink}

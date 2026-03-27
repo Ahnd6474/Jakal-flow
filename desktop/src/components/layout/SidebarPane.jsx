@@ -158,7 +158,10 @@ export function SidebarPane({
   onSelectProject,
   onSelectHistory,
   onNewProject,
+  onArchiveProject,
   onDeleteProject,
+  onDeleteHistoryEntry,
+  onArchiveAllProjects,
   onDeleteAllProjects,
   workspaceTree,
   checkpoints,
@@ -237,8 +240,11 @@ export function SidebarPane({
             <div className="sidebar-panel__header">
               <strong>{t("common.project")}</strong>
               <div className="action-row">
-                <button className="toolbar-button toolbar-button--ghost" onClick={onDeleteAllProjects} type="button" disabled={!projects.length}>
+                <button className="toolbar-button toolbar-button--ghost" onClick={onArchiveAllProjects} type="button" disabled={!projects.length}>
                   {t("action.archiveAllProjects")}
+                </button>
+                <button className="toolbar-button" onClick={onDeleteAllProjects} type="button" disabled={!projects.length}>
+                  {t("action.deleteAllProjects")}
                 </button>
                 <button className="toolbar-button toolbar-button--ghost" onClick={onNewProject} type="button">
                   {t("action.new")}
@@ -261,7 +267,8 @@ export function SidebarPane({
                     onContextMenu={(event) => {
                       event.preventDefault();
                       setContextMenu({
-                        repoId: project.repo_id,
+                        kind: "project",
+                        id: project.repo_id,
                         x: event.clientX,
                         y: event.clientY,
                       });
@@ -296,7 +303,7 @@ export function SidebarPane({
               <strong>{t("common.repoUrl")}</strong>
               <span>{github?.repo_url || t("common.unavailable")}</span>
             </div>
-            {contextMenu ? (
+            {contextMenu?.kind === "project" ? (
               <div
                 className="context-menu"
                 style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
@@ -305,13 +312,24 @@ export function SidebarPane({
                 <button
                   className="context-menu__item"
                   onClick={() => {
-                    const repoId = contextMenu.repoId;
+                    const repoId = contextMenu.id;
+                    setContextMenu(null);
+                    onArchiveProject(repoId);
+                  }}
+                  type="button"
+                >
+                  {t("action.archiveProject")}
+                </button>
+                <button
+                  className="context-menu__item"
+                  onClick={() => {
+                    const repoId = contextMenu.id;
                     setContextMenu(null);
                     onDeleteProject(repoId);
                   }}
                   type="button"
                 >
-                  {t("action.archiveProject")}
+                  {t("action.deleteProject")}
                 </button>
               </div>
             ) : null}
@@ -334,6 +352,16 @@ export function SidebarPane({
                     key={project.archive_id || project.repo_id}
                     className={`sidebar-project ${project.archive_id === selectedHistoryId ? "selected" : ""}`}
                     onClick={() => onSelectHistory(project.archive_id)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setContextMenu({
+                        kind: "history",
+                        id: project.archive_id,
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    }}
+                    title={t("sidebar.projectContextDelete")}
                     type="button"
                   >
                     <div className="sidebar-project__title">
@@ -348,6 +376,25 @@ export function SidebarPane({
                 <div className="empty-block">{t("history.noSavedRuns")}</div>
               )}
             </div>
+            {contextMenu?.kind === "history" ? (
+              <div
+                className="context-menu"
+                style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <button
+                  className="context-menu__item"
+                  onClick={() => {
+                    const archiveId = contextMenu.id;
+                    setContextMenu(null);
+                    onDeleteHistoryEntry(archiveId);
+                  }}
+                  type="button"
+                >
+                  {t("action.deleteArchivedRun")}
+                </button>
+              </div>
+            ) : null}
           </>
         ) : null}
 

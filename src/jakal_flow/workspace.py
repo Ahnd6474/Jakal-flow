@@ -226,6 +226,25 @@ class WorkspaceManager:
         write_json(context.paths.project_config_file, context.runtime.to_dict())
         write_json(context.paths.loop_state_file, context.loop_state.to_dict())
 
+    def _managed_root_is_within(self, project_root: Path, expected_parent: Path) -> bool:
+        resolved_root = project_root.resolve()
+        resolved_parent = expected_parent.resolve()
+        return resolved_root != resolved_parent and resolved_parent in resolved_root.parents
+
+    def _rebind_context_root(self, context: ProjectContext, project_root: Path) -> ProjectContext:
+        resolved_root = project_root.resolve()
+        context.metadata.project_root = resolved_root
+        context.paths = self.build_paths_from_root(resolved_root)
+        if context.metadata.repo_kind != "local":
+            context.metadata.repo_path = context.paths.repo_dir
+        return context
+
+    def _remove_managed_project_root(self, project_root: Path, expected_parent: Path) -> None:
+        resolved_root = project_root.resolve()
+        if not self._managed_root_is_within(resolved_root, expected_parent):
+            raise RuntimeError(f"Refusing to delete unexpected project root: {resolved_root}")
+        shutil.rmtree(resolved_root)
+
     def _active_registry_item(self, context: ProjectContext) -> dict[str, str]:
         return {
             "repo_id": context.metadata.repo_id,
@@ -413,17 +432,14 @@ class WorkspaceManager:
         archive_slug = self._archive_slug(context.metadata.slug, archived_at, context.metadata.repo_id)
         archive_root = (self.history_root / archive_slug).resolve()
 
-        if source_root != self.projects_root and self.projects_root in source_root.parents:
+        if self._managed_root_is_within(source_root, self.projects_root):
             ensure_dir(self.history_root)
             shutil.move(str(source_root), str(archive_root))
         else:
             self._write_registry(registry)
             raise RuntimeError(f"Refusing to archive unexpected project root: {source_root}")
 
-        archived_context = self.load_project_from_root(archive_root)
-        archived_context.metadata.project_root = archive_root
-        if archived_context.metadata.repo_kind != "local":
-            archived_context.metadata.repo_path = archive_root / "repo"
+        archived_context = self._rebind_context_root(context, archive_root)
         archived_context.metadata.archived = True
         archived_context.metadata.archive_id = archive_id
         archived_context.metadata.archived_at = archived_at
@@ -434,11 +450,53 @@ class WorkspaceManager:
         return archived_context
 
     def delete_project(self, repo_id: str) -> ProjectContext:
-        return self.archive_project(repo_id)
+        self.ensure_workspace()
+        registry = self._read_registry()
+        item = registry["projects"].pop(repo_id, None)
+        if not item:
+            raise KeyError(f"Unknown repository id: {repo_id}")
 
-    def delete_all_projects(self) -> list[ProjectContext]:
+        source_root = Path(str(item.get("project_root", "")).strip()).resolve()
+        if not source_root.exists():
+            self._write_registry(registry)
+            raise FileNotFoundError(f"Managed project root does not exist: {source_root}")
+
+        context = self.load_project_from_root(source_root)
+        self._remove_managed_project_root(source_root, self.projects_root)
+        self._write_registry(registry)
+        return context
+
+    def archive_all_projects(self) -> list[ProjectContext]:
         self.ensure_workspace()
         archived: list[ProjectContext] = []
         for repo_id in list(self._read_registry().get("projects", {}).keys()):
             archived.append(self.archive_project(repo_id))
         return archived
+
+    def delete_all_projects(self) -> list[ProjectContext]:
+        self.ensure_workspace()
+        deleted: list[ProjectContext] = []
+        for repo_id in list(self._read_registry().get("projects", {}).keys()):
+            deleted.append(self.delete_project(repo_id))
+        return deleted
+
+    def delete_history_entry(self, archive_id: str) -> ProjectContext:
+        self.ensure_workspace()
+        registry = self._read_registry()
+        item = registry["history"].pop(archive_id, None)
+        if not item:
+            raise KeyError(f"Unknown archive id: {archive_id}")
+
+        archive_root = Path(str(item.get("project_root", "")).strip()).resolve()
+        if not archive_root.exists():
+            self._write_registry(registry)
+            raise FileNotFoundError(f"Archived project root does not exist: {archive_root}")
+
+        context = self.load_project_from_root(archive_root)
+        context.metadata.archived = True
+        context.metadata.archive_id = archive_id
+        context.metadata.archived_at = str(item.get("archived_at", "")).strip() or context.metadata.archived_at
+        context.metadata.source_repo_id = str(item.get("source_repo_id", "")).strip() or context.metadata.source_repo_id
+        self._remove_managed_project_root(archive_root, self.history_root)
+        self._write_registry(registry)
+        return context

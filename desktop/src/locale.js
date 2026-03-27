@@ -175,7 +175,10 @@ const STRINGS = {
     "action.closeout": "Closeout",
     "action.copyLink": "Copy Link",
     "action.delete": "Delete",
+    "action.deleteAllProjects": "Delete All",
+    "action.deleteArchivedRun": "Delete Archived Run",
     "action.deleteAll": "Delete All",
+    "action.deleteProject": "Delete Project",
     "action.dismiss": "Dismiss",
     "action.down": "Down",
     "action.generate": "Generate",
@@ -306,6 +309,7 @@ const STRINGS = {
     "message.projectDeleted": "Project removed from jakal-flow.",
     "message.allProjectsDeleted": "All projects removed from jakal-flow.",
     "message.allProjectsArchived": "All active projects moved to history.",
+    "message.historyEntryDeleted": "Archived run deleted.",
     "message.programSettingsSaved": "Program settings saved.",
     "message.projectReloaded": "Project reloaded.",
     "message.projectStateRefreshed": "Project state refreshed.",
@@ -345,6 +349,7 @@ const STRINGS = {
     "prompt.confirmCloseout": "Run final closeout now? This will do final cleanup, verification, smoke checks when possible, and handoff work.",
     "prompt.confirmArchiveProject": "Move this project to history? The managed docs, logs, and state will be preserved under history, and you can start a fresh run for the same directory.",
     "prompt.confirmArchiveAllProjects": "Move all active projects to history? The managed docs, logs, and state will be preserved under history.",
+    "prompt.confirmDeleteHistoryEntry": "Delete this archived run permanently? Its managed docs, logs, reports, and state will be removed from history.",
     "prompt.confirmRegeneratePlan": "Replace the current unstarted plan with a new Codex-generated plan?",
     "prompt.confirmResetPlan": "Reset the saved prompt and remove all execution steps for this project?",
     "prompt.confirmDeleteProject": "Remove this project from jakal-flow? The managed docs, logs, and state will be deleted, but the original repository folder will stay in place.",
@@ -1009,6 +1014,13 @@ KO_HIGH_QUALITY_OVERRIDES["prompt.confirmArchiveProject"] =
   "이 프로젝트를 history로 옮길까요? 관리 중인 문서, 로그, 상태는 history 아래에 보관되고 같은 디렉토리로 새 작업을 다시 시작할 수 있습니다.";
 KO_HIGH_QUALITY_OVERRIDES["prompt.confirmArchiveAllProjects"] =
   "모든 프로젝트를 history로 옮길까요? 각 프로젝트의 문서, 로그, 상태는 보관되고 원본 작업 디렉토리는 그대로 유지됩니다.";
+
+KO_HIGH_QUALITY_OVERRIDES["action.deleteAllProjects"] = "모두 삭제";
+KO_HIGH_QUALITY_OVERRIDES["action.deleteArchivedRun"] = "보관본 삭제";
+KO_HIGH_QUALITY_OVERRIDES["action.deleteProject"] = "프로젝트 삭제";
+KO_HIGH_QUALITY_OVERRIDES["message.historyEntryDeleted"] = "보관된 실행 기록을 삭제했습니다.";
+KO_HIGH_QUALITY_OVERRIDES["prompt.confirmDeleteHistoryEntry"] =
+  "이 보관된 실행 기록을 완전히 삭제할까요? history 아래의 관리 문서, 로그, 리포트, 상태가 모두 제거됩니다.";
 
 const STATIC_LANGUAGE_PACKS = new Map(
   ["en", "ko"].map((language) => [
