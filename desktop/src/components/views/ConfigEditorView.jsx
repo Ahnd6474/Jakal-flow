@@ -11,6 +11,7 @@ import {
   providerSupportsAutoModel,
   providerSupportsCatalog,
   reasoningEffortLabel,
+  normalizeMemoryBudgetGiB,
   runtimeSummary,
   selectedConfigReasoning,
 } from "../../utils";
@@ -226,14 +227,18 @@ export function ConfigEditorView({
             <span>{t("field.parallelMemoryPerWorkerGiB")}</span>
             <input
               type="number"
-              min="1"
+              min="0.1"
+              step="0.1"
               value={runtime.parallel_memory_per_worker_gib || 3}
               onChange={(event) =>
                 onChangeForm((current) => ({
                   ...current,
                   runtime: {
                     ...current.runtime,
-                    parallel_memory_per_worker_gib: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
+                    parallel_memory_per_worker_gib: normalizeMemoryBudgetGiB(
+                      event.target.value,
+                      current.runtime?.parallel_memory_per_worker_gib || 3,
+                    ),
                   },
                 }))
               }

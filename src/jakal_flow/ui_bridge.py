@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
 import os
 from pathlib import Path
@@ -288,6 +289,18 @@ def coerce_nonnegative_float(value: Any, default: float = 0.0) -> float:
     return parsed
 
 
+def coerce_positive_tenths_float(value: Any, default: float, minimum: float = 0.1) -> float:
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
+        return default
+    quantized = parsed.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    minimum_decimal = Decimal(str(minimum))
+    if quantized < minimum_decimal:
+        quantized = minimum_decimal
+    return float(quantized)
+
+
 def coerce_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
@@ -364,9 +377,9 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         if merged["parallel_worker_mode"] == "auto"
         else coerce_positive_int(merged.get("parallel_workers", 2), default=2)
     )
-    merged["parallel_memory_per_worker_gib"] = coerce_positive_int(
+    merged["parallel_memory_per_worker_gib"] = coerce_positive_tenths_float(
         merged.get("parallel_memory_per_worker_gib", 3),
-        default=3,
+        default=3.0,
     )
     merged["ml_max_cycles"] = coerce_positive_int(
         merged.get("ml_max_cycles", 3),

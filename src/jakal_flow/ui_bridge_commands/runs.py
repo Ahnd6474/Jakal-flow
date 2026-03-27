@@ -117,11 +117,96 @@ def build_run_command_handlers(
                     append_ui_event(latest_project, "run-paused", "Paused before the next step because a stop was requested.")
                     break
                 batch = batches[0]
+                hybrid_lineages = ctx.orchestrator._plan_uses_hybrid_lineages(current_plan)
+                step_kind = ctx.orchestrator._step_kind(batch[0]) if batch else "task"
                 parallel_plan = build_parallel_resource_plan(
                     getattr(runtime, "parallel_worker_mode", "auto"),
                     getattr(runtime, "parallel_workers", 0),
                     getattr(runtime, "parallel_memory_per_worker_gib", 3),
                 )
+                if hybrid_lineages and step_kind in {"join", "barrier"}:
+                    step = batch[0]
+                    append_ui_event(
+                        latest_project,
+                        "step-started",
+                        f"Running {step.step_id}: {step.title}",
+                        {"step_id": step.step_id, "title": step.title, "step_kind": step_kind},
+                    )
+                    project, saved, result_step = ctx.orchestrator.run_join_execution_step(
+                        project_dir=project_dir,
+                        runtime=runtime,
+                        step_id=step.step_id,
+                        branch=branch,
+                        origin_url=origin_url,
+                    )
+                    append_ui_event(
+                        project,
+                        "step-finished",
+                        f"{result_step.step_id} finished with status {result_step.status}.",
+                        {
+                            "step_id": result_step.step_id,
+                            "status": result_step.status,
+                            "commit_hash": result_step.commit_hash,
+                            "step_kind": step_kind,
+                        },
+                    )
+                    if result_step.status != "completed":
+                        break
+                    continue
+                if hybrid_lineages:
+                    step_ids = [item.step_id for item in batch]
+                    if len(batch) > 1:
+                        append_ui_event(
+                            latest_project,
+                            "batch-started",
+                            f"Running lineage batch: {', '.join(step_ids)}",
+                            {
+                                "step_ids": step_ids,
+                                "execution_mode": "parallel",
+                                "parallel_workers": parallel_plan.recommended_workers,
+                                "parallel_worker_mode": parallel_plan.worker_mode,
+                                "hybrid_lineages": True,
+                            },
+                        )
+                    for step in batch:
+                        append_ui_event(
+                            latest_project,
+                            "step-started",
+                            f"Running {step.step_id}: {step.title}",
+                            {"step_id": step.step_id, "title": step.title, "execution_mode": "parallel", "hybrid_lineages": True},
+                        )
+                    project, saved, result_steps = ctx.orchestrator.run_parallel_execution_batch(
+                        project_dir=project_dir,
+                        runtime=runtime,
+                        step_ids=step_ids,
+                        branch=branch,
+                        origin_url=origin_url,
+                    )
+                    for result_step in result_steps:
+                        append_ui_event(
+                            project,
+                            "step-finished",
+                            f"{result_step.step_id} finished with status {result_step.status}.",
+                            {
+                                "step_id": result_step.step_id,
+                                "status": result_step.status,
+                                "commit_hash": result_step.commit_hash,
+                            },
+                        )
+                    if len(batch) > 1:
+                        append_ui_event(
+                            project,
+                            "batch-finished",
+                            f"Lineage batch finished for {', '.join(step_ids)}.",
+                            {
+                                "step_ids": step_ids,
+                                "statuses": {item.step_id: item.status for item in result_steps},
+                                "hybrid_lineages": True,
+                            },
+                        )
+                    if any(item.status != "completed" for item in result_steps):
+                        break
+                    continue
                 if (
                     len(batch) > 1
                     and str(current_plan.execution_mode).strip().lower() == "parallel"

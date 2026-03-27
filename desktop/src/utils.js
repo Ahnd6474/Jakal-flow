@@ -204,6 +204,16 @@ export function applyProgramSettingsToForm(form, programSettings) {
   };
 }
 
+export function normalizeMemoryBudgetGiB(value, fallback = 3) {
+  const parsed = Number.parseFloat(String(value ?? "").trim());
+  const fallbackValue = Number.parseFloat(String(fallback ?? "").trim());
+  const normalizedFallback = Number.isFinite(fallbackValue) ? Math.max(0.1, Math.round(fallbackValue * 10) / 10) : 0.1;
+  if (!Number.isFinite(parsed)) {
+    return normalizedFallback;
+  }
+  return Math.max(0.1, Math.round(parsed * 10) / 10);
+}
+
 export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nextLocalProvider = null) {
   const provider = MODEL_PROVIDER_OPTIONS.includes(String(nextProvider || "").trim().toLowerCase())
     ? String(nextProvider || "").trim().toLowerCase()

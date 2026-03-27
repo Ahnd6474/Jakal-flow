@@ -2,19 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import ctypes
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import os
 from typing import Any
 
 
-DEFAULT_MEMORY_BUDGET_PER_WORKER_GIB = 3
-DEFAULT_MEMORY_BUDGET_PER_WORKER_BYTES = DEFAULT_MEMORY_BUDGET_PER_WORKER_GIB * 1024 * 1024 * 1024
+GIB_BYTES = 1024 * 1024 * 1024
+DEFAULT_MEMORY_BUDGET_PER_WORKER_GIB = 3.0
+DEFAULT_MEMORY_BUDGET_PER_WORKER_TENTHS = 30
+DEFAULT_MEMORY_BUDGET_PER_WORKER_BYTES = (DEFAULT_MEMORY_BUDGET_PER_WORKER_TENTHS * GIB_BYTES + 9) // 10
 
 
 @dataclass(slots=True)
 class ParallelResourcePlan:
     worker_mode: str
     requested_workers: int
-    memory_budget_per_worker_gib: int
+    memory_budget_per_worker_gib: float
     cpu_logical_count: int
     cpu_parallel_limit: int
     memory_total_bytes: int | None
@@ -48,6 +51,16 @@ def _positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed
+
+
+def _positive_tenths(value: Any, default: int) -> int:
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
+        return default
+    quantized = parsed.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    tenths = int((quantized * 10).to_integral_value(rounding=ROUND_HALF_UP))
+    return max(1, tenths)
 
 
 def _detect_memory_bytes() -> tuple[int | None, int | None]:
@@ -90,8 +103,9 @@ def build_parallel_resource_plan(
     cpu_parallel_limit = max(1, cpu_logical_count // 4)
     if cpu_logical_count >= 4:
         cpu_parallel_limit = max(2, cpu_parallel_limit)
-    memory_budget_per_worker_gib = _positive_int(memory_per_worker_gib, DEFAULT_MEMORY_BUDGET_PER_WORKER_GIB)
-    memory_budget_per_worker_bytes = max(1, memory_budget_per_worker_gib * 1024 * 1024 * 1024)
+    memory_budget_per_worker_tenths = _positive_tenths(memory_per_worker_gib, DEFAULT_MEMORY_BUDGET_PER_WORKER_TENTHS)
+    memory_budget_per_worker_gib = memory_budget_per_worker_tenths / 10.0
+    memory_budget_per_worker_bytes = max(1, (memory_budget_per_worker_tenths * GIB_BYTES + 9) // 10)
     memory_total_bytes, memory_available_bytes = _detect_memory_bytes()
     memory_parallel_limit: int | None = None
     if memory_available_bytes is not None and memory_available_bytes > 0:
