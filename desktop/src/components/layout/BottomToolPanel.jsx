@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { codexUsageBuckets, formatUsd, rateLimitRemainingLabel, rateLimitWindowSummary, statusTone } from "../../utils";
+import { codexUsageBuckets, formatUsd, rateLimitRemainingLabel, rateLimitWindowSummary, shouldShowEstimatedCost, statusTone } from "../../utils";
 
 function ToolTab({ value, activeTab, onChange, label }) {
   return (
@@ -22,6 +22,7 @@ export function BottomToolPanel({ activeTab, onChangeTab, data }) {
   const serializedEventJson = useMemo(() => JSON.stringify(data?.event_json || {}, null, 2), [data?.event_json]);
   const { language, t } = useI18n();
   const usageBuckets = codexUsageBuckets(codexStatus, language);
+  const showEstimatedCost = shouldShowEstimatedCost(data?.runtime || {}, costEstimate);
 
   return (
     <section className="tool-window">
@@ -55,18 +56,22 @@ export function BottomToolPanel({ activeTab, onChangeTab, data }) {
               <span>{t("common.total")}</span>
               <strong>{tokenUsage.total_tokens ?? 0}</strong>
             </div>
-            <div className="metric-card">
-              <span>{t("tool.estimatedCost")}</span>
-              <strong>{formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</strong>
-            </div>
+            {showEstimatedCost ? (
+              <div className="metric-card">
+                <span>{t("tool.estimatedCost")}</span>
+                <strong>{formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</strong>
+              </div>
+            ) : null}
             <div className="metric-card">
               <span>{language === "ko" ? "요금제" : "Plan"}</span>
               <strong>{account.plan_type || t("common.unavailable")}</strong>
             </div>
-            <div className="dense-row">
-              <strong>{t("dashboard.actualCost")}</strong>
-              <span>{formatUsd(costEstimate?.recent?.estimated_cost_usd ?? 0, language)}</span>
-            </div>
+            {showEstimatedCost ? (
+              <div className="dense-row">
+                <strong>{t("dashboard.actualCost")}</strong>
+                <span>{formatUsd(costEstimate?.recent?.estimated_cost_usd ?? 0, language)}</span>
+              </div>
+            ) : null}
             {usageBuckets.map((bucket) => (
               <div className="metric-card" key={bucket.key}>
                 <span>{bucket.label}</span>

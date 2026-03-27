@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { commandLabel, deriveExecutionProgress, executionProgressCaption, formatDurationCompact, formatUsd } from "../../utils";
+import { commandLabel, deriveExecutionProgress, executionProgressCaption, formatDurationCompact, formatUsd, shouldShowEstimatedCost } from "../../utils";
 
 function stepLabel(step) {
   return [step?.step_id, step?.title].filter(Boolean).join(" - ");
@@ -26,6 +26,7 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
   const runtimeInsights = detail?.runtime_insights || {};
   const executionEstimate = runtimeInsights?.execution || {};
   const costEstimate = runtimeInsights?.cost || {};
+  const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
   const [nowTick, setNowTick] = useState(Date.now());
 
   useEffect(() => {
@@ -103,7 +104,7 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
         ) : null}
         <span>{t("run.currentElapsed")}: {formatDurationCompact(runningStepElapsedSeconds, language)}</span>
         <span>{t("run.currentRemaining")}: {formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language)}</span>
-        <span>{t("run.estimatedCost")}: {formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</span>
+        {showEstimatedCost ? <span>{t("run.estimatedCost")}: {formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</span> : null}
         <span>{percentLabel}</span>
       </div>
 

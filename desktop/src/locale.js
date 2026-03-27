@@ -759,6 +759,11 @@ STRINGS.en["run.stepProgress"] = "Step Progress";
 STRINGS.en["run.debugging"] = "Debugging";
 STRINGS.en["run.workingOnStep"] = "Working on {step}";
 STRINGS.en["run.workingOnSteps"] = "Working on {steps}";
+STRINGS.en["run.parallelLimit"] = "Parallel Limit";
+STRINGS.en["run.parallelLimitMemoryCap"] = "Memory cap {memoryCap}, CPU cap {cpuCap}, free {freeMemory}";
+STRINGS.en["run.parallelLimitCpuCap"] = "CPU cap {cpuCap}, logical CPUs {logicalCpuCount}";
+STRINGS.en["run.parallelLimitRequestedCap"] = "Requested {requested}, capped to {recommended} by CPU {cpuCap} and memory {memoryCap}";
+STRINGS.en["run.parallelLimitAutoCap"] = "CPU cap {cpuCap}, memory cap {memoryCap}";
 STRINGS.en["prompt.confirmDeleteAllProjects"] =
   "Remove all projects from jakal-flow? The managed docs, logs, and state will be deleted, but the original repository folders will stay in place.";
 STRINGS.en["sidebar.projectContextDelete"] = "Right-click to open project actions";
@@ -906,6 +911,11 @@ const KO_HIGH_QUALITY_OVERRIDES = {
   "run.reasoning": "추론 {effort}",
   "run.selectStep": "단계를 선택하세요.",
   "run.selectedStep": "선택한 단계",
+  "run.parallelLimit": "병렬 제한",
+  "run.parallelLimitMemoryCap": "메모리 한도 {memoryCap}, CPU 한도 {cpuCap}, 가용 메모리 {freeMemory}",
+  "run.parallelLimitCpuCap": "CPU 한도 {cpuCap}, 논리 프로세서 {logicalCpuCount}",
+  "run.parallelLimitRequestedCap": "요청 {requested}, CPU {cpuCap} 및 메모리 {memoryCap} 한도로 {recommended}까지 제한",
+  "run.parallelLimitAutoCap": "CPU 한도 {cpuCap}, 메모리 한도 {memoryCap}",
   "run.stopAfterStep": "이 단계 후 중지",
   "runtime.modelSummary": "{model} | 추론 {effort}",
   "runtime.modelSummaryGeneric": "{model} | 추론 {effort}",

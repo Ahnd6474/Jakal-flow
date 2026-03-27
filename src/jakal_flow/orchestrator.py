@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
+from .commit_naming import build_commit_descriptor, build_initial_commit_descriptor
 from .environment import ensure_gitignore, ensure_virtualenv
 from .codex_runner import CodexRunner
 from .git_ops import GitOps
@@ -110,9 +111,11 @@ class Orchestrator:
         self._ensure_project_documents(context)
 
         if created_repo or not self.git.has_commits(context.paths.repo_dir):
+            initial_commit = build_initial_commit_descriptor(context)
             safe_revision = self.git.create_initial_commit(
                 context.paths.repo_dir,
-                "chore: initialize jakal-flow workspace",
+                initial_commit.message,
+                author_name=initial_commit.author_name,
             )
         else:
             safe_revision = self.git.current_revision(context.paths.repo_dir)
@@ -1567,9 +1570,11 @@ class Orchestrator:
                 notes = f"{task_name} verification failed and changes were rolled back."
             else:
                 if self.git.has_changes(context.paths.repo_dir):
+                    commit_descriptor = build_commit_descriptor(context, pass_type, task_name)
                     commit_hash = self.git.commit_all(
                         context.paths.repo_dir,
-                        self._commit_message(block_index, pass_type, task_name),
+                        commit_descriptor.message,
+                        author_name=commit_descriptor.author_name,
                     )
                 if commit_hash:
                     context.metadata.current_safe_revision = commit_hash
@@ -2793,17 +2798,29 @@ class Orchestrator:
             reporter.save_test_result(block_index, debug_pass_name, test_result)
             commit_hash: str | None = None
             if test_result.returncode == 0:
+                commit_descriptor = build_commit_descriptor(
+                    context,
+                    debug_pass_name,
+                    candidate.title,
+                    execution_step=execution_step,
+                )
                 if post_success_strategy == "commit_if_changes":
                     if self.git.has_changes(context.paths.repo_dir):
                         commit_hash = self.git.commit_all(
                             context.paths.repo_dir,
-                            self._commit_message(block_index, debug_pass_name, candidate.title),
+                            commit_descriptor.message,
+                            author_name=commit_descriptor.author_name,
                         )
                 elif post_success_strategy == "continue_cherry_pick":
                     if self.git.cherry_pick_in_progress(context.paths.repo_dir):
                         self.git.add_all(context.paths.repo_dir)
-                        self.git.continue_cherry_pick(context.paths.repo_dir)
-                    commit_hash = self.git.current_revision(context.paths.repo_dir)
+                        commit_hash = self.git.commit_staged(
+                            context.paths.repo_dir,
+                            commit_descriptor.message,
+                            author_name=commit_descriptor.author_name,
+                        )
+                    else:
+                        commit_hash = self.git.current_revision(context.paths.repo_dir)
                 else:
                     raise ValueError(f"Unsupported debugger success strategy: {post_success_strategy}")
             return debug_pass_name, run_result, test_result, commit_hash
@@ -2821,6 +2838,7 @@ class Orchestrator:
     ) -> ExecutionStep:
         step_ids = [step.step_id for step in steps if step.step_id.strip()]
         titles = ", ".join(step_ids) if step_ids else "parallel batch"
+        parallel_step_titles = [step.title.strip() for step in steps if step.title.strip()]
         ordered_paths: list[str] = []
         seen_paths: set[str] = set()
         for step in steps:
@@ -2843,6 +2861,7 @@ class Orchestrator:
             reasoning_effort="high",
             depends_on=step_ids,
             owned_paths=ordered_paths,
+            metadata={"parallel_step_titles": parallel_step_titles},
         )
 
     def _execute_pass(
@@ -2956,9 +2975,16 @@ class Orchestrator:
             )
             return run_result, debug_test_result, debug_commit_hash
         elif self.git.has_changes(context.paths.repo_dir):
+            commit_descriptor = build_commit_descriptor(
+                context,
+                pass_name,
+                candidate.title,
+                execution_step=execution_step,
+            )
             commit_hash = self.git.commit_all(
                 context.paths.repo_dir,
-                self._commit_message(block_index, pass_name, candidate.title),
+                commit_descriptor.message,
+                author_name=commit_descriptor.author_name,
             )
         self._log_pass_result(
             context=context,
@@ -2981,10 +3007,6 @@ class Orchestrator:
             label=label,
             command=context.runtime.test_cmd,
         )
-
-    def _commit_message(self, block_index: int, pass_name: str, task: str) -> str:
-        safe_task = " ".join(task.split())[:72]
-        return f"jakal-flow(block {block_index} {pass_name}): {safe_task}"
 
     def _stop_reason(self, context: ProjectContext) -> str | None:
         counters = context.loop_state.counters

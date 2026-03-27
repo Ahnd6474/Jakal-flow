@@ -1,8 +1,10 @@
-import { reasoningEffortLabel, runtimeSummary, statusTone } from "../../utils";
+import { displayStatus } from "../../locale";
+import { effectiveStepStatus, reasoningEffortLabel, runtimeSummary, statusTone } from "../../utils";
 
 export function DetailsPane({ detail, planDraft, selectedStepId, modelPresets }) {
   const selectedStep = (planDraft?.steps || []).find((step) => step.step_id === selectedStepId) || null;
   const pendingCheckpoint = detail?.checkpoints?.pending || null;
+  const selectedStepStatus = effectiveStepStatus(selectedStep, detail?.project?.current_status || "");
 
   return (
     <aside className="details-pane">
@@ -38,7 +40,7 @@ export function DetailsPane({ detail, planDraft, selectedStepId, modelPresets })
       <section className="details-card">
         <div className="details-card__header">
           <strong>Selected Step</strong>
-          <span className={`status-badge status-badge--${statusTone(selectedStep?.status)}`}>{selectedStep?.status || "none"}</span>
+          <span className={`status-badge status-badge--${statusTone(selectedStepStatus)}`}>{selectedStep ? displayStatus(selectedStepStatus, "en") : "none"}</span>
         </div>
         {selectedStep ? (
           <div className="details-text">

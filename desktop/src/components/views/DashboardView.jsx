@@ -7,9 +7,12 @@ import {
   formatUsd,
   isDebuggingStatus,
   normalizeDashboardVisibility,
+  parallelLimitDescription,
+  parallelWorkerLabel,
   rateLimitRemainingLabel,
   rateLimitWindowSummary,
   runtimeSummary,
+  shouldShowEstimatedCost,
   statusTone,
 } from "../../utils";
 
@@ -36,6 +39,9 @@ export function DashboardView({ detail, planDraft, form, busy, modelPresets, mod
   const livePlan = activeJob?.status === "running" && detail?.plan ? detail.plan : planDraft;
   const pendingSteps = (livePlan?.steps || []).filter((step) => step.status !== "completed");
   const projectStatus = detail?.project?.current_status || "idle";
+  const parallelLimitValue = parallelWorkerLabel(parallelInsight.recommended_workers ?? 1, language);
+  const parallelLimitDetails = parallelLimitDescription(parallelInsight, language);
+  const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
   const activeStatus =
     activeJob?.status === "running" && !isDebuggingStatus(projectStatus)
       ? displayStatus(`running:${commandLabel(activeJob.command, language)}`, language)
@@ -57,8 +63,12 @@ export function DashboardView({ detail, planDraft, form, busy, modelPresets, mod
       value: formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language),
       tone: "info",
     },
-    { key: "estimated_cost", label: t("dashboard.estimatedCost"), value: formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language) },
-    { key: "actual_cost", label: t("dashboard.actualCost"), value: formatUsd(costEstimate?.recent?.estimated_cost_usd ?? 0, language) },
+    ...(showEstimatedCost
+      ? [
+          { key: "estimated_cost", label: t("dashboard.estimatedCost"), value: formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language) },
+          { key: "actual_cost", label: t("dashboard.actualCost"), value: formatUsd(costEstimate?.recent?.estimated_cost_usd ?? 0, language) },
+        ]
+      : []),
     { key: "codex_plan", label: t("dashboard.codexPlan"), value: account.plan_type || t("common.unavailable"), tone: "neutral" },
     ...usageBuckets.map((bucket) => ({
       key: `rate_limit_${bucket.key}`,
@@ -93,9 +103,8 @@ export function DashboardView({ detail, planDraft, form, busy, modelPresets, mod
                 <strong>{t("dashboard.runtime")}</strong>
               </div>
               <p>{runtimeSummary(detail?.runtime || {}, modelPresets, language, modelCatalog)}</p>
-              <p>
-                {t("field.parallelWorkers")}: {parallelInsight.recommended_workers ?? 1} / {parallelInsight.cpu_parallel_limit ?? 1}
-              </p>
+              <p>{t("field.parallelWorkers")}: {parallelLimitValue}</p>
+              <p>{t("run.parallelLimit")}: {parallelLimitDetails}</p>
               <p>{t("run.estimatedTotal")}: {formatDurationCompact(executionEstimate.estimated_total_seconds ?? 0, language)}</p>
               <p>{t("common.branch")}: {detail?.project?.branch || t("common.unknown")}</p>
               <p>{t("dashboard.origin")}: {detail?.project?.origin_url || t("common.localOnly")}</p>

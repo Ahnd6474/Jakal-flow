@@ -17,7 +17,12 @@ class GitOpsTests(unittest.TestCase):
         git = GitOps()
         calls: list[list[str]] = []
 
-        def fake_run(args: list[str], cwd: Path, check: bool = True) -> CommandResult:
+        def fake_run(
+            args: list[str],
+            cwd: Path,
+            check: bool = True,
+            env: dict[str, str] | None = None,
+        ) -> CommandResult:
             calls.append(args)
             if args == ["init"]:
                 return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
@@ -34,6 +39,73 @@ class GitOpsTests(unittest.TestCase):
 
         self.assertTrue(created)
         self.assertEqual(calls, [["init"], ["branch", "--show-current"]])
+
+    def test_commit_all_uses_custom_author_name(self) -> None:
+        repo_dir = Path(__file__).resolve().parents[1]
+        git = GitOps()
+        calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+        def fake_run(
+            args: list[str],
+            cwd: Path,
+            check: bool = True,
+            env: dict[str, str] | None = None,
+        ) -> CommandResult:
+            calls.append((args, env))
+            if args == ["rev-parse", "HEAD"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="abc123\n", stderr="")
+            return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(git, "run", side_effect=fake_run):
+            revision = git.commit_all(repo_dir, "Desktop slice", author_name="Jakal-Flow-node-a")
+
+        self.assertEqual(revision, "abc123")
+        self.assertEqual(calls[0], (["add", "-A"], None))
+        self.assertEqual(
+            calls[1],
+            (
+                ["commit", "-m", "Desktop slice"],
+                {
+                    "GIT_AUTHOR_NAME": "Jakal-Flow-node-a",
+                    "GIT_COMMITTER_NAME": "Jakal-Flow-node-a",
+                },
+            ),
+        )
+
+    def test_commit_staged_uses_custom_author_name(self) -> None:
+        repo_dir = Path(__file__).resolve().parents[1]
+        git = GitOps()
+        calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+        def fake_run(
+            args: list[str],
+            cwd: Path,
+            check: bool = True,
+            env: dict[str, str] | None = None,
+        ) -> CommandResult:
+            calls.append((args, env))
+            if args == ["rev-parse", "HEAD"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="merge123\n", stderr="")
+            return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(git, "run", side_effect=fake_run):
+            revision = git.commit_staged(
+                repo_dir,
+                "Desktop slice, Backend slice conflict resolution",
+                author_name="Jakal-Flow-merge-resolver",
+            )
+
+        self.assertEqual(revision, "merge123")
+        self.assertEqual(
+            calls[0],
+            (
+                ["commit", "-m", "Desktop slice, Backend slice conflict resolution"],
+                {
+                    "GIT_AUTHOR_NAME": "Jakal-Flow-merge-resolver",
+                    "GIT_COMMITTER_NAME": "Jakal-Flow-merge-resolver",
+                },
+            ),
+        )
 
 
 if __name__ == "__main__":
