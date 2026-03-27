@@ -24,6 +24,26 @@ export function emptyPlanDraft() {
   };
 }
 
+export function shouldPreserveProjectPrompt(plan) {
+  const prompt = String(plan?.project_prompt || "").trim();
+  if (!prompt) {
+    return false;
+  }
+  return String(plan?.closeout_status || "not_started").trim().toLowerCase() !== "completed";
+}
+
+export function carryProjectPromptDraft(plan) {
+  if (!shouldPreserveProjectPrompt(plan)) {
+    return emptyPlanDraft();
+  }
+  const workflowMode = String(plan?.workflow_mode || "standard").trim().toLowerCase() || "standard";
+  return {
+    ...emptyPlanDraft(),
+    project_prompt: String(plan?.project_prompt || ""),
+    workflow_mode: workflowMode === "ml" ? "ml" : "standard",
+  };
+}
+
 export async function resolveConfirmation(requestConfirmation, fallbackConfirmation, message) {
   if (typeof requestConfirmation === "function") {
     try {

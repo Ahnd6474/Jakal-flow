@@ -13,7 +13,7 @@ from .codex_runner import CodexRunner
 from .git_ops import GitOps
 from .memory import MemoryStore
 from .model_selection import normalize_reasoning_effort
-from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, LoopState, MLExperimentRecord, MLModeState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions, TestRunResult
+from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, LineageState, LoopState, MLExperimentRecord, MLModeState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions, TestRunResult
 from .optimization import scan_optimization_candidates
 from .parallel_resources import build_parallel_resource_plan, normalize_parallel_worker_mode
 from .planning import (
@@ -504,6 +504,587 @@ class Orchestrator:
             seen.add(normalized)
             ordered.append(normalized)
         return ordered
+
+    def _plan_uses_hybrid_lineages(self, plan_state: ExecutionPlanState) -> bool:
+        return any(self._step_kind(step) in {"join", "barrier"} for step in plan_state.steps)
+
+    def _load_lineage_states(self, context: ProjectContext) -> dict[str, LineageState]:
+        payload = read_json(context.paths.lineage_state_file, default={"lineages": []})
+        items = payload.get("lineages", []) if isinstance(payload, dict) else []
+        lineages: dict[str, LineageState] = {}
+        if not isinstance(items, list):
+            return lineages
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            lineage = LineageState.from_dict(item)
+            if lineage.lineage_id:
+                lineages[lineage.lineage_id] = lineage
+        return lineages
+
+    def _save_lineage_states(self, context: ProjectContext, lineages: dict[str, LineageState]) -> None:
+        write_json(
+            context.paths.lineage_state_file,
+            {
+                "lineages": [
+                    lineage.to_dict()
+                    for lineage in sorted(
+                        lineages.values(),
+                        key=lambda item: (item.created_at, item.lineage_id),
+                    )
+                ]
+            },
+        )
+
+    def _next_lineage_id(self, lineages: dict[str, LineageState]) -> str:
+        next_index = 1
+        for lineage_id in lineages:
+            if lineage_id.startswith("LN") and lineage_id[2:].isdigit():
+                next_index = max(next_index, int(lineage_id[2:]) + 1)
+        while f"LN{next_index}" in lineages:
+            next_index += 1
+        return f"LN{next_index}"
+
+    def _lineage_branch_name(self, lineage_id: str) -> str:
+        return f"jakal-flow-lineage-{lineage_id.strip().lower()}"
+
+    def _lineage_root(self, context: ProjectContext, lineage_id: str) -> Path:
+        return context.paths.project_root / ".lineages" / lineage_id.strip().lower()
+
+    def _build_lineage_paths(
+        self,
+        context: ProjectContext,
+        lineage_id: str,
+        worktree_dir: Path,
+    ) -> ProjectPaths:
+        lineage_root = self._lineage_root(context, lineage_id)
+        docs_dir = lineage_root / "docs"
+        memory_dir = lineage_root / "memory"
+        logs_dir = lineage_root / "logs"
+        reports_dir = lineage_root / "reports"
+        state_dir = lineage_root / "state"
+        for directory in [lineage_root, docs_dir, memory_dir, logs_dir, reports_dir, state_dir]:
+            ensure_dir(directory)
+        return ProjectPaths(
+            workspace_root=context.paths.workspace_root,
+            projects_root=context.paths.projects_root,
+            project_root=lineage_root,
+            repo_dir=worktree_dir,
+            docs_dir=docs_dir,
+            memory_dir=memory_dir,
+            logs_dir=logs_dir,
+            reports_dir=reports_dir,
+            state_dir=state_dir,
+            metadata_file=lineage_root / "metadata.json",
+            project_config_file=lineage_root / "project_config.json",
+            loop_state_file=state_dir / "LOOP_STATE.json",
+            plan_file=docs_dir / "PLAN.md",
+            mid_term_plan_file=docs_dir / "MID_TERM_PLAN.md",
+            scope_guard_file=docs_dir / "SCOPE_GUARD.md",
+            active_task_file=docs_dir / "ACTIVE_TASK.md",
+            block_review_file=docs_dir / "BLOCK_REVIEW.md",
+            checkpoint_timeline_file=docs_dir / "CHECKPOINT_TIMELINE.md",
+            research_notes_file=docs_dir / "RESEARCH_NOTES.md",
+            attempt_history_file=docs_dir / "attempt_history.md",
+            success_patterns_file=memory_dir / "success_patterns.jsonl",
+            failure_patterns_file=memory_dir / "failure_patterns.jsonl",
+            task_summaries_file=memory_dir / "task_summaries.jsonl",
+            pass_log_file=logs_dir / "passes.jsonl",
+            block_log_file=logs_dir / "blocks.jsonl",
+            checkpoint_state_file=state_dir / "CHECKPOINTS.json",
+            execution_plan_file=state_dir / "EXECUTION_PLAN.json",
+            lineage_state_file=state_dir / "LINEAGES.json",
+            ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
+            ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
+            ml_experiment_reports_dir=state_dir / "ml_experiments",
+            ui_control_file=state_dir / "UI_RUN_CONTROL.json",
+            ui_event_log_file=logs_dir / "ui_events.jsonl",
+            execution_flow_svg_file=docs_dir / "EXECUTION_FLOW.svg",
+            closeout_report_file=docs_dir / "CLOSEOUT_REPORT.md",
+            closeout_report_docx_file=reports_dir / "CLOSEOUT_REPORT.docx",
+            ml_experiment_report_file=docs_dir / "ML_EXPERIMENT_REPORT.md",
+            ml_experiment_results_svg_file=docs_dir / "ML_EXPERIMENT_RESULTS.svg",
+        )
+
+    def _sync_lineage_support_files(self, context: ProjectContext, lineage_paths: ProjectPaths) -> None:
+        for source_dir, target_dir in [
+            (context.paths.docs_dir, lineage_paths.docs_dir),
+            (context.paths.memory_dir, lineage_paths.memory_dir),
+        ]:
+            ensure_dir(target_dir)
+            if source_dir.exists():
+                shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+        for source_path, target_path in [
+            (context.paths.execution_plan_file, lineage_paths.execution_plan_file),
+            (context.paths.checkpoint_state_file, lineage_paths.checkpoint_state_file),
+            (context.paths.ml_mode_state_file, lineage_paths.ml_mode_state_file),
+            (context.paths.ui_control_file, lineage_paths.ui_control_file),
+        ]:
+            if not source_path.exists():
+                continue
+            ensure_dir(target_path.parent)
+            shutil.copy2(source_path, target_path)
+
+    def _persist_context_files(self, context: ProjectContext) -> None:
+        write_json(context.paths.metadata_file, context.metadata.to_dict())
+        write_json(context.paths.project_config_file, context.runtime.to_dict())
+        write_json(context.paths.loop_state_file, context.loop_state.to_dict())
+
+    def _normal_task_child_counts(self, plan_state: ExecutionPlanState) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for step in plan_state.steps:
+            if self._step_kind(step) != "task":
+                continue
+            for dependency in step.depends_on:
+                counts[dependency] = counts.get(dependency, 0) + 1
+        return counts
+
+    def _create_lineage_state(
+        self,
+        context: ProjectContext,
+        lineages: dict[str, LineageState],
+        *,
+        source_revision: str,
+        parent_lineage_id: str | None = None,
+        source_step_id: str | None = None,
+    ) -> LineageState:
+        lineage_id = self._next_lineage_id(lineages)
+        lineage_root = self._lineage_root(context, lineage_id)
+        worktree_dir = lineage_root / "repo"
+        branch_name = self._lineage_branch_name(lineage_id)
+        self.git.add_worktree(context.paths.repo_dir, worktree_dir, branch_name, source_revision)
+        created_at = now_utc_iso()
+        lineage = LineageState(
+            lineage_id=lineage_id,
+            branch_name=branch_name,
+            worktree_dir=worktree_dir,
+            project_root=lineage_root,
+            created_at=created_at,
+            updated_at=created_at,
+            head_commit=source_revision,
+            safe_revision=source_revision,
+            status="active",
+            parent_lineage_id=parent_lineage_id,
+            source_step_id=source_step_id,
+        )
+        lineages[lineage_id] = lineage
+        return lineage
+
+    def _build_lineage_context(
+        self,
+        context: ProjectContext,
+        runtime: RuntimeOptions,
+        step: ExecutionStep,
+        lineage: LineageState,
+    ) -> ProjectContext:
+        source_revision = lineage.head_commit or lineage.safe_revision or context.metadata.current_safe_revision or self.git.current_revision(
+            context.paths.repo_dir
+        )
+        if not lineage.worktree_dir.exists():
+            self.git.add_worktree(context.paths.repo_dir, lineage.worktree_dir, lineage.branch_name, source_revision)
+        lineage_paths = self._build_lineage_paths(context, lineage.lineage_id, lineage.worktree_dir)
+        self._sync_lineage_support_files(context, lineage_paths)
+        lineage_runtime = self._build_parallel_worker_runtime(runtime, step)
+        lineage_metadata = RepoMetadata(
+            repo_id=f"{context.metadata.repo_id}:{lineage.lineage_id.lower()}",
+            slug=f"{context.metadata.slug}-{lineage.lineage_id.lower()}",
+            repo_url=context.metadata.repo_url,
+            branch=lineage.branch_name,
+            project_root=lineage_paths.project_root,
+            repo_path=lineage.worktree_dir,
+            created_at=lineage.created_at,
+            last_run_at=lineage.updated_at,
+            current_status="lineage_ready",
+            current_safe_revision=lineage.safe_revision or source_revision,
+            repo_kind=context.metadata.repo_kind,
+            display_name=f"{context.metadata.display_name or context.metadata.slug} [{lineage.lineage_id}]",
+            origin_url=context.metadata.origin_url,
+        )
+        lineage_loop_state = LoopState(
+            repo_id=lineage_metadata.repo_id,
+            repo_slug=lineage_metadata.slug,
+            current_safe_revision=lineage.safe_revision or source_revision,
+        )
+        lineage_context = ProjectContext(
+            metadata=lineage_metadata,
+            runtime=lineage_runtime,
+            paths=lineage_paths,
+            loop_state=lineage_loop_state,
+        )
+        self._ensure_project_documents(lineage_context)
+        self._persist_context_files(lineage_context)
+        return lineage_context
+
+    def _allocate_lineage_for_step(
+        self,
+        context: ProjectContext,
+        plan_state: ExecutionPlanState,
+        step: ExecutionStep,
+        lineages: dict[str, LineageState],
+        child_counts: dict[str, int],
+    ) -> LineageState:
+        metadata = deepcopy(step.metadata) if isinstance(step.metadata, dict) else {}
+        existing_lineage_id = str(metadata.get("lineage_id", "")).strip()
+        if existing_lineage_id and existing_lineage_id in lineages:
+            return lineages[existing_lineage_id]
+
+        step_by_id = {item.step_id: item for item in plan_state.steps}
+        dependencies = [step_by_id[dependency] for dependency in step.depends_on if dependency in step_by_id]
+        main_safe_revision = context.metadata.current_safe_revision or self.git.current_revision(context.paths.repo_dir)
+        if not dependencies:
+            lineage = self._create_lineage_state(context, lineages, source_revision=main_safe_revision)
+        elif len(dependencies) > 1:
+            raise RuntimeError(f"{step.step_id} requires an explicit join or barrier before continuing from multiple dependencies.")
+        else:
+            parent_step = dependencies[0]
+            if self._step_kind(parent_step) in {"join", "barrier"}:
+                lineage = self._create_lineage_state(
+                    context,
+                    lineages,
+                    source_revision=main_safe_revision,
+                    source_step_id=parent_step.step_id,
+                )
+            else:
+                parent_lineage_id = str((parent_step.metadata or {}).get("lineage_id", "")).strip()
+                if not parent_lineage_id or parent_lineage_id not in lineages:
+                    raise RuntimeError(f"{step.step_id} depends on {parent_step.step_id}, but that lineage is unavailable.")
+                parent_lineage = lineages[parent_lineage_id]
+                parent_head = parent_lineage.head_commit or parent_lineage.safe_revision
+                if child_counts.get(parent_step.step_id, 0) > 1:
+                    parent_lineage.status = "branched"
+                    parent_lineage.updated_at = now_utc_iso()
+                    lineage = self._create_lineage_state(
+                        context,
+                        lineages,
+                        source_revision=parent_head,
+                        parent_lineage_id=parent_lineage.lineage_id,
+                        source_step_id=parent_step.step_id,
+                    )
+                else:
+                    lineage = parent_lineage
+        metadata["lineage_id"] = lineage.lineage_id
+        step.metadata = metadata
+        return lineage
+
+    def _run_lineage_step_worker(
+        self,
+        lineage_context: ProjectContext,
+        step: ExecutionStep,
+    ) -> dict[str, object]:
+        lineage_result: dict[str, object] = {
+            "step_id": step.step_id,
+            "status": "failed",
+            "notes": "Lineage worker did not complete.",
+            "commit_hash": None,
+            "changed_files": [],
+            "pass_log": {},
+            "block_log": {},
+            "test_summary": "",
+            "ml_report_payload": {},
+            "head_commit": lineage_context.metadata.current_safe_revision,
+        }
+        try:
+            candidate = CandidateTask(
+                candidate_id=step.step_id,
+                title=step.title,
+                rationale=self._execution_step_rationale(step, lineage_context.runtime.test_cmd),
+                plan_refs=[step.step_id],
+                score=1.0,
+            )
+            runner = CodexRunner(lineage_context.runtime.codex_path)
+            memory = MemoryStore(lineage_context.paths)
+            reporter = Reporter(lineage_context)
+            latest_block, _attempt_count = self._run_execution_step_attempts(
+                context=lineage_context,
+                runner=runner,
+                memory=memory,
+                reporter=reporter,
+                candidate=candidate,
+                execution_step=deepcopy(step),
+                final_failure_reports=False,
+            )
+            latest_block = latest_block or {}
+            latest_pass = read_last_jsonl(lineage_context.paths.pass_log_file) or {}
+            changed_files = latest_block.get("changed_files", latest_pass.get("changed_files", []))
+            commit_hashes = latest_block.get("commit_hashes", [])
+            commit_hash = None
+            if isinstance(commit_hashes, list) and commit_hashes:
+                commit_hash = str(commit_hashes[-1]).strip() or None
+            head_commit = (
+                str(lineage_context.metadata.current_safe_revision or "").strip()
+                or (self.git.current_revision(lineage_context.paths.repo_dir) if lineage_context.paths.repo_dir.exists() else "")
+            )
+            lineage_result.update(
+                {
+                    "status": "completed" if latest_block.get("status") == "completed" else "failed",
+                    "notes": str(latest_block.get("test_summary") or "").strip() or "Lineage worker finished.",
+                    "commit_hash": commit_hash,
+                    "changed_files": [str(item).strip() for item in changed_files if str(item).strip()] if isinstance(changed_files, list) else [],
+                    "pass_log": latest_pass,
+                    "block_log": latest_block,
+                    "test_summary": str(latest_block.get("test_summary") or "").strip(),
+                    "ml_report_payload": read_json(lineage_context.paths.ml_step_report_file, default={}),
+                    "head_commit": head_commit,
+                }
+            )
+        except Exception as exc:
+            lineage_result["status"] = "failed"
+            lineage_result["notes"] = str(exc).strip() or "Lineage worker failed."
+        finally:
+            self._persist_context_files(lineage_context)
+        return lineage_result
+
+    def _cleanup_lineage_worktree(self, repo_dir: Path, lineage: LineageState) -> None:
+        if lineage.worktree_dir.exists():
+            self.git.remove_worktree(repo_dir, lineage.worktree_dir, force=True)
+        if lineage.branch_name:
+            self.git.delete_branch(repo_dir, lineage.branch_name, force=True)
+
+    def _run_lineage_execution_batch(
+        self,
+        context: ProjectContext,
+        plan_state: ExecutionPlanState,
+        runtime: RuntimeOptions,
+        ordered_targets: list[ExecutionStep],
+    ) -> tuple[ProjectContext, ExecutionPlanState, list[ExecutionStep]]:
+        if not ordered_targets:
+            raise RuntimeError("No hybrid lineage steps were selected for execution.")
+        if any(self._step_kind(step) != "task" for step in ordered_targets):
+            raise RuntimeError("Hybrid lineage batches can only run normal task steps.")
+
+        batch_label = ", ".join(step.step_id for step in ordered_targets)
+        batch_started_at = now_utc_iso()
+        requested = {step.step_id for step in ordered_targets}
+        lineages = self._load_lineage_states(context)
+        child_counts = self._normal_task_child_counts(plan_state)
+
+        for step in plan_state.steps:
+            if step.step_id in requested:
+                step.status = "running"
+                step.started_at = step.started_at or batch_started_at
+                step.notes = ""
+                self._allocate_lineage_for_step(context, plan_state, step, lineages, child_counts)
+            elif step.status == "running":
+                step.status = "paused"
+
+        plan_state.default_test_command = runtime.test_cmd
+        plan_state.execution_mode = "parallel"
+        plan_state = self.save_execution_plan_state(context, plan_state)
+        self._save_lineage_states(context, lineages)
+        refreshed_targets = {step.step_id: step for step in plan_state.steps}
+        ordered_targets = [refreshed_targets[step.step_id] for step in ordered_targets]
+        lineages = self._load_lineage_states(context)
+
+        previous_runtime = context.runtime
+        context.runtime = RuntimeOptions(
+            **{
+                **previous_runtime.to_dict(),
+                "execution_mode": "parallel",
+                "parallel_worker_mode": normalize_parallel_worker_mode(getattr(runtime, "parallel_worker_mode", "auto")),
+                "parallel_workers": max(0, int(getattr(runtime, "parallel_workers", 0) or 0)),
+                "allow_push": True,
+                "approval_mode": runtime.approval_mode,
+                "sandbox_mode": runtime.sandbox_mode,
+                "require_checkpoint_approval": False,
+                "checkpoint_interval_blocks": 1,
+            }
+        )
+        context.metadata.current_status = "running:lineages"
+        context.metadata.last_run_at = batch_started_at
+        resolved_worker_count = max(1, self._parallel_worker_count(context.runtime))
+        context.loop_state.current_task = f"Lineage batch {batch_label} (workers {resolved_worker_count})"
+        self.save_execution_plan_state(context, plan_state)
+        self.workspace.save_project(context)
+
+        reporter = Reporter(context)
+        worker_results: list[dict[str, object]] = []
+        final_status = "completed"
+        batch_summary = ""
+
+        try:
+            worker_contexts: dict[str, ProjectContext] = {}
+            for step in ordered_targets:
+                lineage_id = str((step.metadata or {}).get("lineage_id", "")).strip()
+                lineage = lineages.get(lineage_id)
+                if lineage is None:
+                    raise RuntimeError(f"{step.step_id} could not resolve an active lineage.")
+                worker_contexts[step.step_id] = self._build_lineage_context(context, runtime, step, lineage)
+
+            worker_limit = max(1, min(len(ordered_targets), self._parallel_worker_count(context.runtime)))
+            if worker_limit == 1:
+                worker_results = [
+                    self._run_lineage_step_worker(worker_contexts[step.step_id], step)
+                    for step in ordered_targets
+                ]
+            else:
+                with ThreadPoolExecutor(max_workers=worker_limit) as executor:
+                    future_map = {
+                        executor.submit(
+                            self._run_lineage_step_worker,
+                            worker_contexts[step.step_id],
+                            step,
+                        ): step.step_id
+                        for step in ordered_targets
+                    }
+                    by_step_id: dict[str, dict[str, object]] = {}
+                    for future in as_completed(future_map):
+                        result = future.result()
+                        by_step_id[str(result["step_id"])] = result
+                    worker_results = [by_step_id[step.step_id] for step in ordered_targets]
+
+            completion_time = now_utc_iso()
+            for index, step in enumerate(ordered_targets):
+                worker_result = worker_results[index] if index < len(worker_results) else {}
+                lineage_id = str((step.metadata or {}).get("lineage_id", "")).strip()
+                lineage = lineages.get(lineage_id)
+                if lineage is None:
+                    raise RuntimeError(f"{step.step_id} lost its lineage state during execution.")
+
+                lineage.updated_at = completion_time
+                lineage.last_step_id = step.step_id
+                if step.step_id not in lineage.step_ids:
+                    lineage.step_ids.append(step.step_id)
+
+                if str(worker_result.get("status") or "").strip() == "completed":
+                    head_commit = str(
+                        worker_result.get("head_commit")
+                        or worker_result.get("commit_hash")
+                        or lineage.head_commit
+                        or lineage.safe_revision
+                        or ""
+                    ).strip()
+                    if head_commit:
+                        lineage.head_commit = head_commit
+                        lineage.safe_revision = head_commit
+                    lineage.status = "active"
+                    lineage.notes = str(worker_result.get("test_summary") or worker_result.get("notes") or "").strip()
+
+                    step.status = "completed"
+                    step.completed_at = completion_time
+                    step.commit_hash = str(worker_result.get("commit_hash") or "").strip() or (lineage.head_commit or None)
+                    step.notes = lineage.notes or "Lineage step completed successfully."
+                else:
+                    final_status = "failed"
+                    failure_notes = str(worker_result.get("notes") or "Lineage step failed.").strip()
+                    if not batch_summary:
+                        batch_summary = failure_notes
+                    lineage.status = "failed"
+                    lineage.notes = failure_notes
+                    step.status = "failed"
+                    step.commit_hash = None
+                    step.notes = failure_notes
+
+            if final_status == "completed":
+                batch_summary = "Lineage batch completed successfully."
+                context.metadata.current_status = self._status_from_plan_state(plan_state)
+            else:
+                context.metadata.current_status = "failed"
+
+            self._save_lineage_states(context, lineages)
+
+            next_block_index = context.loop_state.block_index
+            combined_changed_files: list[str] = []
+            for index, step in enumerate(ordered_targets):
+                next_block_index += 1
+                worker_result = worker_results[index] if index < len(worker_results) else {}
+                pass_entry = deepcopy(worker_result.get("pass_log") or {})
+                block_entry = deepcopy(worker_result.get("block_log") or {})
+                changed_files = sorted(set(str(item) for item in worker_result.get("changed_files", []) if str(item).strip()))
+                combined_changed_files.extend(changed_files)
+                rollback_status = "not_needed" if step.status == "completed" else "lineage_rolled_back_to_safe_revision"
+                pass_entry.update(
+                    {
+                        "repository_id": context.metadata.repo_id,
+                        "repository_slug": context.metadata.slug,
+                        "block_index": next_block_index,
+                        "selected_task": step.title,
+                        "commit_hash": step.commit_hash if step.status == "completed" else None,
+                        "rollback_status": rollback_status,
+                        "changed_files": changed_files,
+                        "test_results": pass_entry.get("test_results"),
+                    }
+                )
+                block_entry.update(
+                    {
+                        "repository_id": context.metadata.repo_id,
+                        "repository_slug": context.metadata.slug,
+                        "block_index": next_block_index,
+                        "status": "completed" if step.status == "completed" else "failed",
+                        "selected_task": step.title,
+                        "changed_files": changed_files,
+                        "test_summary": step.notes or batch_summary,
+                        "commit_hashes": [step.commit_hash] if step.commit_hash else [],
+                        "rollback_status": rollback_status,
+                    }
+                )
+                reporter.log_pass(pass_entry)
+                reporter.log_block(block_entry)
+                reporter.append_attempt_history(
+                    attempt_history_entry(
+                        next_block_index,
+                        step.title,
+                        "completed" if step.status == "completed" else "lineage step failed",
+                        [step.commit_hash] if step.commit_hash else [],
+                    )
+                )
+                self._collect_ml_step_report(
+                    context,
+                    step,
+                    report_payload=worker_result.get("ml_report_payload") if isinstance(worker_result.get("ml_report_payload"), dict) else {},
+                )
+
+            context.loop_state.block_index = next_block_index
+            context.loop_state.last_block_completed_at = completion_time
+            reporter.write_block_review(
+                reflection_markdown(
+                    f"Lineage batch {batch_label}",
+                    batch_summary or "Lineage batch finished.",
+                    sorted(set(combined_changed_files)),
+                    [step.commit_hash for step in ordered_targets if step.commit_hash],
+                )
+            )
+            if final_status != "completed":
+                self._report_failure(
+                    context,
+                    reporter,
+                    failure_type="lineage_batch_failed",
+                    summary=batch_summary or "Lineage batch failed.",
+                    block_index=context.loop_state.block_index,
+                    selected_task=f"Lineage batch {batch_label}",
+                )
+            saved = self.save_execution_plan_state(context, plan_state)
+            return context, saved, ordered_targets
+        finally:
+            context.runtime = previous_runtime
+            context.metadata.last_run_at = now_utc_iso()
+            self.workspace.save_project(context)
+
+    def _lineages_for_join_step(
+        self,
+        plan_state: ExecutionPlanState,
+        step: ExecutionStep,
+        lineages: dict[str, LineageState],
+    ) -> list[LineageState]:
+        metadata = step.metadata if isinstance(step.metadata, dict) else {}
+        merge_refs = self._coerce_string_list(metadata.get("merge_from", [])) or list(step.depends_on)
+        step_by_id = {item.step_id: item for item in plan_state.steps}
+        selected: list[LineageState] = []
+        seen_lineages: set[str] = set()
+        for ref in merge_refs:
+            source_step = step_by_id.get(ref)
+            if source_step is None:
+                raise RuntimeError(f"{step.step_id} references unknown upstream step {ref}.")
+            lineage_id = str((source_step.metadata or {}).get("lineage_id", "")).strip()
+            if not lineage_id:
+                continue
+            if lineage_id in seen_lineages:
+                continue
+            lineage = lineages.get(lineage_id)
+            if lineage is None:
+                raise RuntimeError(f"{step.step_id} references lineage {lineage_id}, but that lineage is unavailable.")
+            seen_lineages.add(lineage_id)
+            selected.append(lineage)
+        return selected
 
     def _normalize_hybrid_step_kind(self, value: object) -> str:
         normalized = str(value or "").strip().lower()
@@ -997,7 +1578,10 @@ class Orchestrator:
         plan_state = self.load_execution_plan_state(context)
         if not plan_state.steps:
             raise RuntimeError("No saved execution plan exists for this project.")
-        if len(step_ids) < 2:
+        if not [step_id.strip() for step_id in step_ids if step_id.strip()]:
+            raise RuntimeError("No execution step ids were provided.")
+        hybrid_lineages = self._plan_uses_hybrid_lineages(plan_state)
+        if not hybrid_lineages and len(step_ids) < 2:
             raise ValueError("Parallel execution batch requires at least two step ids.")
 
         ordered_targets: list[ExecutionStep] = []
@@ -1007,16 +1591,31 @@ class Orchestrator:
                 if step.status == "completed":
                     raise RuntimeError(f"{step.step_id} is already completed.")
                 ordered_targets.append(step)
-        if len(ordered_targets) < 2:
+        if not ordered_targets:
             raise RuntimeError("No remaining parallel batch steps were found.")
         allowed_batches = [
             [item.step_id for item in batch]
             for batch in self.pending_execution_batches(plan_state)
-            if len(batch) > 1
+            if hybrid_lineages or len(batch) > 1
         ]
         requested_signature = [step.step_id for step in ordered_targets]
         if requested_signature not in allowed_batches:
             raise RuntimeError("Requested parallel batch is not currently ready in the execution DAG.")
+        if hybrid_lineages:
+            if any(self._step_kind(step) in {"join", "barrier"} for step in ordered_targets):
+                if len(ordered_targets) != 1:
+                    raise RuntimeError("Join and barrier steps must run as singleton batches.")
+                project, saved, result_step = self.run_join_execution_step(
+                    project_dir=project_dir,
+                    runtime=runtime,
+                    step_id=ordered_targets[0].step_id,
+                    branch=branch,
+                    origin_url=origin_url,
+                )
+                return project, saved, [result_step]
+            return self._run_lineage_execution_batch(context, plan_state, runtime, ordered_targets)
+        if len(ordered_targets) < 2:
+            raise ValueError("Parallel execution batch requires at least two ready task steps.")
 
         batch_label = ", ".join(step.step_id for step in ordered_targets)
         batch_started_at = now_utc_iso()
@@ -1344,6 +1943,109 @@ class Orchestrator:
             self.workspace.save_project(context)
             for result in worker_results:
                 self._cleanup_parallel_worker(context.paths.repo_dir, result)
+
+    def run_join_execution_step(
+        self,
+        project_dir: Path,
+        runtime: RuntimeOptions,
+        step_id: str,
+        branch: str = "main",
+        origin_url: str = "",
+    ) -> tuple[ProjectContext, ExecutionPlanState, ExecutionStep]:
+        context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
+        plan_state = self.load_execution_plan_state(context)
+        if not plan_state.steps:
+            raise RuntimeError("No saved execution plan exists for this project.")
+
+        ready_step_ids = {item.step_id for batch in self.pending_execution_batches(plan_state) for item in batch}
+        target_step = next(
+            (
+                step
+                for step in plan_state.steps
+                if step.step_id == step_id.strip()
+                and step.status != "completed"
+                and step.step_id in ready_step_ids
+            ),
+            None,
+        )
+        if target_step is None:
+            raise RuntimeError(f"{step_id} is not dependency-ready yet.")
+        if self._step_kind(target_step) not in {"join", "barrier"}:
+            raise RuntimeError(f"{target_step.step_id} is not a join or barrier step.")
+
+        lineages = self._load_lineage_states(context)
+        merge_lineages = self._lineages_for_join_step(plan_state, target_step, lineages)
+        pre_join_safe_revision = context.metadata.current_safe_revision or self.git.current_revision(context.paths.repo_dir)
+        context.metadata.current_safe_revision = pre_join_safe_revision
+        context.loop_state.current_safe_revision = pre_join_safe_revision
+        context.metadata.last_run_at = now_utc_iso()
+        self.workspace.save_project(context)
+
+        try:
+            for lineage in merge_lineages:
+                source_commit = str(lineage.head_commit or lineage.safe_revision or "").strip()
+                if not source_commit:
+                    raise RuntimeError(f"{target_step.step_id} could not find a mergeable commit for lineage {lineage.lineage_id}.")
+                merge_result = self.git.try_cherry_pick(context.paths.repo_dir, source_commit)
+                if merge_result.returncode == 0:
+                    continue
+                conflicted_files = self.git.conflicted_files(context.paths.repo_dir)
+                self.git.abort_cherry_pick(context.paths.repo_dir)
+                self.git.hard_reset(context.paths.repo_dir, pre_join_safe_revision)
+                target_step.status = "failed"
+                target_step.notes = (
+                    f"{target_step.step_id} failed while merging {lineage.lineage_id}: "
+                    f"{', '.join(conflicted_files) or merge_result.stderr.strip() or 'unknown conflict'}"
+                )
+                context.metadata.current_status = "failed"
+                self.save_execution_plan_state(context, plan_state)
+                self.workspace.save_project(context)
+                return context, plan_state, target_step
+
+            project, saved, result_step = self.run_saved_execution_step(
+                project_dir=project_dir,
+                runtime=runtime,
+                step_id=target_step.step_id,
+                branch=branch,
+                origin_url=origin_url,
+            )
+        except Exception:
+            self.git.abort_cherry_pick(context.paths.repo_dir)
+            self.git.hard_reset(context.paths.repo_dir, pre_join_safe_revision)
+            context.metadata.current_safe_revision = pre_join_safe_revision
+            context.loop_state.current_safe_revision = pre_join_safe_revision
+            self.workspace.save_project(context)
+            raise
+
+        if result_step.status != "completed":
+            self.git.abort_cherry_pick(project.paths.repo_dir)
+            self.git.hard_reset(project.paths.repo_dir, pre_join_safe_revision)
+            project.metadata.current_safe_revision = pre_join_safe_revision
+            project.loop_state.current_safe_revision = pre_join_safe_revision
+            self.workspace.save_project(project)
+            return project, saved, result_step
+
+        integrated_revision = self.git.current_revision(project.paths.repo_dir)
+        project.metadata.current_safe_revision = integrated_revision
+        project.loop_state.current_safe_revision = integrated_revision
+        project.loop_state.last_commit_hash = integrated_revision
+
+        refreshed = self.load_execution_plan_state(project)
+        refreshed_step = next((step for step in refreshed.steps if step.step_id == result_step.step_id), result_step)
+        refreshed_step.commit_hash = integrated_revision
+        refreshed_step.notes = refreshed_step.notes or "Join step completed successfully."
+        saved = self.save_execution_plan_state(project, refreshed)
+
+        merged_at = now_utc_iso()
+        for lineage in merge_lineages:
+            lineage.status = "merged"
+            lineage.merged_by_step_id = refreshed_step.step_id
+            lineage.updated_at = merged_at
+            lineage.notes = refreshed_step.notes
+            self._cleanup_lineage_worktree(project.paths.repo_dir, lineage)
+        self._save_lineage_states(project, lineages)
+        self.workspace.save_project(project)
+        return project, saved, refreshed_step
 
     def _normalize_execution_mode(self, value: str | None) -> str:
         return "parallel"

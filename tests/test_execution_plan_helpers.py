@@ -22,7 +22,7 @@ from jakal_flow.model_selection import (
     model_selection_from_runtime,
     normalize_model_preset_id,
 )
-from jakal_flow.models import CandidateTask, CodexRunResult, CommandResult, ExecutionPlanState, ExecutionStep, MLExperimentRecord, RuntimeOptions, TestRunResult
+from jakal_flow.models import CandidateTask, CodexRunResult, CommandResult, ExecutionPlanState, ExecutionStep, LineageState, MLExperimentRecord, RuntimeOptions, TestRunResult
 from jakal_flow.orchestrator import Orchestrator
 from jakal_flow.parallel_resources import build_parallel_resource_plan
 from jakal_flow.planning import (
@@ -325,6 +325,17 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(plan.memory_parallel_limit, 2)
         self.assertEqual(plan.recommended_workers, 2)
 
+    def test_parallel_resource_plan_accepts_tenth_gib_memory_budget(self) -> None:
+        with mock.patch("jakal_flow.parallel_resources.os.cpu_count", return_value=16), mock.patch(
+            "jakal_flow.parallel_resources._detect_memory_bytes",
+            return_value=(64 * 1024**3, 4 * 1024**3),
+        ):
+            plan = build_parallel_resource_plan("auto", 0, 1.5)
+
+        self.assertAlmostEqual(plan.memory_budget_per_worker_gib, 1.5)
+        self.assertEqual(plan.memory_parallel_limit, 2)
+        self.assertEqual(plan.recommended_workers, 2)
+
     def test_pending_execution_batches_keeps_parent_child_owned_paths_together(self) -> None:
         orchestrator = Orchestrator(Path.cwd() / ".tmp_pending_batches_workspace")
         plan_state = ExecutionPlanState(
@@ -518,6 +529,350 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 )
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
+
+    def test_run_parallel_execution_batch_persists_lineages_for_hybrid_tasks(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_hybrid_lineage_batch_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            test_cmd="python -m pytest",
+            execution_mode="parallel",
+            parallel_workers=1,
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            context.metadata.current_safe_revision = "safe-main"
+            context.loop_state.current_safe_revision = "safe-main"
+            orchestrator.workspace.save_project(context)
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Hybrid Lineage Demo",
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(step_id="ST1", title="Frontend slice", owned_paths=["desktop/src"]),
+                        ExecutionStep(step_id="ST2", title="Backend slice", owned_paths=["src/jakal_flow"]),
+                        ExecutionStep(
+                            step_id="ST3",
+                            title="Join slices",
+                            depends_on=["ST1", "ST2"],
+                            metadata={"step_kind": "join", "merge_from": ["ST1", "ST2"], "join_policy": "all"},
+                        ),
+                    ],
+                ),
+            )
+            worker_results = [
+                {
+                    "step_id": "ST1",
+                    "status": "completed",
+                    "notes": "frontend lineage ok",
+                    "commit_hash": "ln1-step",
+                    "changed_files": ["desktop/src/App.jsx"],
+                    "pass_log": {"pass_type": "block-search-pass"},
+                    "block_log": {"status": "completed"},
+                    "test_summary": "frontend lineage ok",
+                    "head_commit": "ln1-head",
+                    "ml_report_payload": {},
+                },
+                {
+                    "step_id": "ST2",
+                    "status": "completed",
+                    "notes": "backend lineage ok",
+                    "commit_hash": "ln2-step",
+                    "changed_files": ["src/jakal_flow/orchestrator.py"],
+                    "pass_log": {"pass_type": "block-search-pass"},
+                    "block_log": {"status": "completed"},
+                    "test_summary": "backend lineage ok",
+                    "head_commit": "ln2-head",
+                    "ml_report_payload": {},
+                },
+            ]
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch.object(
+                orchestrator.git,
+                "add_worktree",
+            ) as mocked_add_worktree, mock.patch.object(
+                orchestrator,
+                "_parallel_worker_count",
+                return_value=1,
+            ), mock.patch.object(
+                orchestrator,
+                "_build_lineage_context",
+                side_effect=[mock.Mock(name="lineage-1"), mock.Mock(name="lineage-2")],
+            ), mock.patch.object(
+                orchestrator,
+                "_run_lineage_step_worker",
+                side_effect=worker_results,
+            ):
+                context, plan_state, steps = orchestrator.run_parallel_execution_batch(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_ids=["ST1", "ST2"],
+                )
+                lineage_state = read_json(context.paths.lineage_state_file, default={})
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual([step.status for step in steps], ["completed", "completed"])
+        self.assertEqual(context.metadata.current_safe_revision, "safe-main")
+        mocked_add_worktree.assert_called()
+        self.assertEqual(
+            [step.metadata.get("lineage_id") for step in plan_state.steps[:2]],
+            ["LN1", "LN2"],
+        )
+        self.assertEqual(
+            {item["lineage_id"]: item["status"] for item in lineage_state["lineages"]},
+            {"LN1": "active", "LN2": "active"},
+        )
+        self.assertEqual(
+            {item["lineage_id"]: item["head_commit"] for item in lineage_state["lineages"]},
+            {"LN1": "ln1-head", "LN2": "ln2-head"},
+        )
+
+    def test_run_join_execution_step_selectively_merges_requested_lineages(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_selective_join_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            test_cmd="python -m pytest",
+            execution_mode="parallel",
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            context.metadata.current_safe_revision = "safe-main"
+            context.loop_state.current_safe_revision = "safe-main"
+            orchestrator.workspace.save_project(context)
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Selective Join Demo",
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(step_id="ST1", title="Frontend", status="completed", metadata={"lineage_id": "LN1"}),
+                        ExecutionStep(step_id="ST2", title="Backend", status="completed", metadata={"lineage_id": "LN2"}),
+                        ExecutionStep(step_id="ST3", title="Docs", status="completed", metadata={"lineage_id": "LN3"}),
+                        ExecutionStep(
+                            step_id="ST4",
+                            title="Join selected branches",
+                            depends_on=["ST1", "ST2", "ST3"],
+                            metadata={"step_kind": "join", "merge_from": ["ST1", "ST3"], "join_policy": "all"},
+                        ),
+                    ],
+                ),
+            )
+            orchestrator._save_lineage_states(
+                context,
+                {
+                    "LN1": LineageState(
+                        lineage_id="LN1",
+                        branch_name="jakal-flow-lineage-ln1",
+                        worktree_dir=temp_root / "ln1" / "repo",
+                        project_root=temp_root / "ln1",
+                        created_at="2026-03-27T00:00:00+00:00",
+                        updated_at="2026-03-27T00:00:00+00:00",
+                        head_commit="ln1-head",
+                        safe_revision="ln1-head",
+                    ),
+                    "LN2": LineageState(
+                        lineage_id="LN2",
+                        branch_name="jakal-flow-lineage-ln2",
+                        worktree_dir=temp_root / "ln2" / "repo",
+                        project_root=temp_root / "ln2",
+                        created_at="2026-03-27T00:00:00+00:00",
+                        updated_at="2026-03-27T00:00:00+00:00",
+                        head_commit="ln2-head",
+                        safe_revision="ln2-head",
+                    ),
+                    "LN3": LineageState(
+                        lineage_id="LN3",
+                        branch_name="jakal-flow-lineage-ln3",
+                        worktree_dir=temp_root / "ln3" / "repo",
+                        project_root=temp_root / "ln3",
+                        created_at="2026-03-27T00:00:00+00:00",
+                        updated_at="2026-03-27T00:00:00+00:00",
+                        head_commit="ln3-head",
+                        safe_revision="ln3-head",
+                    ),
+                },
+            )
+
+            def fake_run_saved_execution_step(*args, **kwargs):
+                current = orchestrator.load_execution_plan_state(context)
+                join_step = next(step for step in current.steps if step.step_id == "ST4")
+                join_step.status = "completed"
+                join_step.completed_at = "2026-03-27T01:00:00+00:00"
+                join_step.notes = "Integrated selected branches."
+                join_step.commit_hash = None
+                saved = orchestrator.save_execution_plan_state(context, current)
+                context.metadata.current_status = orchestrator._status_from_plan_state(saved)
+                orchestrator.workspace.save_project(context)
+                return context, saved, next(step for step in saved.steps if step.step_id == "ST4")
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch.object(
+                orchestrator.git,
+                "try_cherry_pick",
+                return_value=CommandResult(command=["git", "cherry-pick"], returncode=0, stdout="", stderr=""),
+            ) as mocked_cherry_pick, mock.patch.object(
+                orchestrator,
+                "run_saved_execution_step",
+                side_effect=fake_run_saved_execution_step,
+            ), mock.patch.object(
+                orchestrator.git,
+                "current_revision",
+                return_value="main-integrated",
+            ), mock.patch.object(
+                orchestrator,
+                "_cleanup_lineage_worktree",
+            ) as mocked_cleanup:
+                project, saved, step = orchestrator.run_join_execution_step(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_id="ST4",
+                )
+                lineage_state = read_json(project.paths.lineage_state_file, default={})
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(step.status, "completed")
+        self.assertEqual(step.commit_hash, "main-integrated")
+        self.assertEqual(project.metadata.current_safe_revision, "main-integrated")
+        self.assertEqual([call.args[1] for call in mocked_cherry_pick.call_args_list], ["ln1-head", "ln3-head"])
+        self.assertEqual(mocked_cleanup.call_count, 2)
+        self.assertEqual(
+            {item["lineage_id"]: item["status"] for item in lineage_state["lineages"]},
+            {"LN1": "merged", "LN2": "active", "LN3": "merged"},
+        )
+        self.assertEqual(
+            {item["lineage_id"]: item["merged_by_step_id"] for item in lineage_state["lineages"]},
+            {"LN1": "ST4", "LN2": None, "LN3": "ST4"},
+        )
+
+    def test_run_join_execution_step_rolls_back_main_when_selective_merge_fails(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_join_merge_failure_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            test_cmd="python -m pytest",
+            execution_mode="parallel",
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            context.metadata.current_safe_revision = "safe-main"
+            context.loop_state.current_safe_revision = "safe-main"
+            orchestrator.workspace.save_project(context)
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Join Failure Demo",
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(step_id="ST1", title="Frontend", status="completed", metadata={"lineage_id": "LN1"}),
+                        ExecutionStep(step_id="ST2", title="Backend", status="completed", metadata={"lineage_id": "LN2"}),
+                        ExecutionStep(
+                            step_id="ST3",
+                            title="Join branches",
+                            depends_on=["ST1", "ST2"],
+                            metadata={"step_kind": "join", "merge_from": ["ST1", "ST2"], "join_policy": "all"},
+                        ),
+                    ],
+                ),
+            )
+            orchestrator._save_lineage_states(
+                context,
+                {
+                    "LN1": LineageState(
+                        lineage_id="LN1",
+                        branch_name="jakal-flow-lineage-ln1",
+                        worktree_dir=temp_root / "ln1" / "repo",
+                        project_root=temp_root / "ln1",
+                        created_at="2026-03-27T00:00:00+00:00",
+                        updated_at="2026-03-27T00:00:00+00:00",
+                        head_commit="ln1-head",
+                        safe_revision="ln1-head",
+                    ),
+                    "LN2": LineageState(
+                        lineage_id="LN2",
+                        branch_name="jakal-flow-lineage-ln2",
+                        worktree_dir=temp_root / "ln2" / "repo",
+                        project_root=temp_root / "ln2",
+                        created_at="2026-03-27T00:00:00+00:00",
+                        updated_at="2026-03-27T00:00:00+00:00",
+                        head_commit="ln2-head",
+                        safe_revision="ln2-head",
+                    ),
+                },
+            )
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch.object(
+                orchestrator.git,
+                "try_cherry_pick",
+                return_value=CommandResult(command=["git", "cherry-pick"], returncode=1, stdout="", stderr="merge conflict"),
+            ), mock.patch.object(
+                orchestrator.git,
+                "conflicted_files",
+                return_value=["src/conflict.py"],
+            ), mock.patch.object(
+                orchestrator.git,
+                "abort_cherry_pick",
+            ) as mocked_abort, mock.patch.object(
+                orchestrator.git,
+                "hard_reset",
+            ) as mocked_reset, mock.patch.object(
+                orchestrator,
+                "run_saved_execution_step",
+            ) as mocked_join_step:
+                project, saved, step = orchestrator.run_join_execution_step(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_id="ST3",
+                )
+                lineage_state = read_json(project.paths.lineage_state_file, default={})
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(step.status, "failed")
+        self.assertIn("src/conflict.py", step.notes)
+        mocked_abort.assert_called_once_with(context.paths.repo_dir)
+        mocked_reset.assert_called_once_with(context.paths.repo_dir, "safe-main")
+        mocked_join_step.assert_not_called()
+        self.assertEqual(project.metadata.current_status, "failed")
+        self.assertEqual(
+            {item["lineage_id"]: item["status"] for item in lineage_state["lineages"]},
+            {"LN1": "active", "LN2": "active"},
+        )
 
     def test_save_execution_plan_state_keeps_running_checkpoint_status_in_sync(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_running_checkpoint_sync_test"

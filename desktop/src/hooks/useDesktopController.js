@@ -5,11 +5,13 @@ import { BRIDGE_COMMANDS } from "../bridgeProtocol";
 import { bridgeEventJob, bridgeEventProject, isJobUpdatedEvent, isProjectChangedEvent, isProjectUiEvent } from "../controller/bridgeEvents";
 import { mergeRefreshRepoId, projectRefreshDebounceMs, shouldRefreshSelectedProject } from "../controller/projectRefresh";
 import {
+  carryProjectPromptDraft,
   defaultShareSettings,
   emptyPlanDraft,
   messagePayload,
   needsExpandedProjectDetail,
   shareSettingsFromDetail,
+  shouldPreserveProjectPrompt,
 } from "../controllerHelpers";
 import { useI18n } from "../i18n";
 import { translate } from "../locale";
@@ -694,6 +696,7 @@ export function useDesktopController() {
   async function saveProject(options = {}) {
     const { formOverride = null, silent = false } = options;
     const formToSave = cloneValue(formOverride || projectForm);
+    const preserveLocalPlan = Boolean(planDirty);
     await withPending("save-project-setup", async () => {
       const detail = await bridgeRequest(
         BRIDGE_COMMANDS.SAVE_PROJECT_SETUP,
@@ -706,9 +709,13 @@ export function useDesktopController() {
       setShareSettings(shareSettingsFromDetail(detail));
       setSelectedProjectId(detail.project.repo_id);
       setProjectForm(projectFormFromDetail(detail, defaultRuntime));
-      setPlanDraft(cloneValue(detail.plan));
-      setSelectedStepId(firstSelectableStepId(detail.plan));
-      setPlanDirty(false);
+      if (preserveLocalPlan) {
+        setPlanDraft(cloneValue(planDraft));
+      } else {
+        setPlanDraft(cloneValue(detail.plan));
+        setSelectedStepId(firstSelectableStepId(detail.plan));
+      }
+      setPlanDirty(preserveLocalPlan);
       await refreshProjects();
       if (!silent) {
         setMessage(messagePayload("success", translate(language, "message.projectConfigurationSaved")));
@@ -742,6 +749,15 @@ export function useDesktopController() {
     setProjectForm(inheritProjectIdentityForm(nextForm, defaultRuntime));
   }
 
+  function restoreProjectPrompt(nextPlan) {
+    if (!shouldPreserveProjectPrompt(nextPlan)) {
+      return;
+    }
+    setPlanDraft(carryProjectPromptDraft(nextPlan));
+    setSelectedStepId("");
+    setPlanDirty(true);
+  }
+
   async function archiveProject() {
     if (!selectedProjectId) {
       setMessage(messagePayload("error", translate(language, "message.openProjectFirst")));
@@ -764,6 +780,7 @@ export function useDesktopController() {
       setWorkspaceStats(result.workspace || null);
       clearSelectedProjectState(defaultRuntime);
       restoreProjectForm(nextForm);
+      restoreProjectPrompt(planDraft);
       setSelectedHistoryId(result.archived?.archive_id || "");
       setMessage(messagePayload("success", translate(language, "message.projectArchived")));
     });
@@ -792,6 +809,7 @@ export function useDesktopController() {
         clearSelectedProjectState(defaultRuntime);
         if (nextForm) {
           restoreProjectForm(nextForm);
+          restoreProjectPrompt(planDraft);
         }
       }
       setSelectedHistoryId(result.archived?.archive_id || selectedHistoryId);
@@ -821,6 +839,7 @@ export function useDesktopController() {
       setWorkspaceStats(result.workspace || null);
       clearSelectedProjectState(defaultRuntime);
       restoreProjectForm(nextForm);
+      restoreProjectPrompt(planDraft);
       setMessage(messagePayload("success", translate(language, "message.projectDeleted")));
     });
   }
@@ -848,6 +867,7 @@ export function useDesktopController() {
         clearSelectedProjectState(defaultRuntime);
         if (nextForm) {
           restoreProjectForm(nextForm);
+          restoreProjectPrompt(planDraft);
         }
       }
       setMessage(messagePayload("success", translate(language, "message.projectDeleted")));

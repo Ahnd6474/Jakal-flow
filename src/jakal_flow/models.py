@@ -86,7 +86,7 @@ class RuntimeOptions:
     execution_mode: str = "parallel"
     parallel_worker_mode: str = "auto"
     parallel_workers: int = 0
-    parallel_memory_per_worker_gib: int = 3
+    parallel_memory_per_worker_gib: float = 3.0
     extra_prompt: str = ""
     init_plan_prompt: str = ""
     approval_mode: str = "never"
@@ -193,6 +193,7 @@ class ProjectPaths:
     block_log_file: Path
     checkpoint_state_file: Path
     execution_plan_file: Path
+    lineage_state_file: Path
     ml_mode_state_file: Path
     ml_step_report_file: Path
     ml_experiment_reports_dir: Path
@@ -214,6 +215,48 @@ class ProjectContext:
     runtime: RuntimeOptions
     paths: ProjectPaths
     loop_state: LoopState
+
+
+@dataclass(slots=True)
+class LineageState:
+    lineage_id: str
+    branch_name: str
+    worktree_dir: Path
+    project_root: Path
+    created_at: str
+    updated_at: str
+    head_commit: str = ""
+    safe_revision: str = ""
+    status: str = "active"
+    parent_lineage_id: str | None = None
+    source_step_id: str | None = None
+    last_step_id: str | None = None
+    merged_by_step_id: str | None = None
+    step_ids: list[str] = field(default_factory=list)
+    notes: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return _normalize(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LineageState":
+        return cls(
+            lineage_id=str(data.get("lineage_id", "")).strip(),
+            branch_name=str(data.get("branch_name", "")).strip(),
+            worktree_dir=Path(str(data.get("worktree_dir", "")).strip()),
+            project_root=Path(str(data.get("project_root", "")).strip()),
+            created_at=str(data.get("created_at", "")).strip(),
+            updated_at=str(data.get("updated_at", "")).strip(),
+            head_commit=str(data.get("head_commit", "")).strip(),
+            safe_revision=str(data.get("safe_revision", "")).strip(),
+            status=str(data.get("status", "active")).strip() or "active",
+            parent_lineage_id=str(data.get("parent_lineage_id", "")).strip() or None,
+            source_step_id=str(data.get("source_step_id", "")).strip() or None,
+            last_step_id=str(data.get("last_step_id", "")).strip() or None,
+            merged_by_step_id=str(data.get("merged_by_step_id", "")).strip() or None,
+            step_ids=_string_list(data.get("step_ids", [])),
+            notes=str(data.get("notes", "")).strip(),
+        )
 
 
 @dataclass(slots=True)

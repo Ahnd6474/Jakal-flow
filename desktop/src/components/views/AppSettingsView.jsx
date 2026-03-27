@@ -4,6 +4,7 @@ import {
   defaultCodexPath,
   defaultProviderApiKeyEnv,
   defaultProviderBaseUrl,
+  normalizeMemoryBudgetGiB,
   normalizeDashboardVisibility,
 } from "../../utils";
 
@@ -282,12 +283,16 @@ export function AppSettingsView({
                 <span>{t("field.parallelMemoryPerWorkerGiB")}</span>
                 <input
                   type="number"
-                  min="1"
+                  min="0.1"
+                  step="0.1"
                   value={settings.parallel_memory_per_worker_gib || 3}
                   onChange={(event) =>
                     onChangeSettings((current) => ({
                       ...current,
-                      parallel_memory_per_worker_gib: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
+                      parallel_memory_per_worker_gib: normalizeMemoryBudgetGiB(
+                        event.target.value,
+                        current.parallel_memory_per_worker_gib || 3,
+                      ),
                     }))
                   }
                   disabled={runtimeBusy}

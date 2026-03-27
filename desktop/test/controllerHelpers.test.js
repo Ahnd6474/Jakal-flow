@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveConfirmation } from "../src/controllerHelpers.js";
+import { carryProjectPromptDraft, resolveConfirmation, shouldPreserveProjectPrompt } from "../src/controllerHelpers.js";
 
 test("resolveConfirmation accepts an explicit native confirmation", async () => {
   const confirmed = await resolveConfirmation(async () => true, () => false, "Delete project?");
@@ -31,4 +31,61 @@ test("resolveConfirmation falls back when the native dialog throws", async () =>
   );
 
   assert.equal(confirmed, true);
+});
+
+test("shouldPreserveProjectPrompt keeps prompts until closeout completes", () => {
+  assert.equal(
+    shouldPreserveProjectPrompt({
+      project_prompt: "Ship the desktop app.",
+      closeout_status: "not_started",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldPreserveProjectPrompt({
+      project_prompt: "Ship the desktop app.",
+      closeout_status: "completed",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldPreserveProjectPrompt({
+      project_prompt: "",
+      closeout_status: "running",
+    }),
+    false,
+  );
+});
+
+test("carryProjectPromptDraft preserves only the prompt for unfinished work", () => {
+  assert.deepEqual(
+    carryProjectPromptDraft({
+      project_prompt: "Ship the desktop app.",
+      workflow_mode: "ml",
+      closeout_status: "failed",
+      steps: [{ step_id: "ST1", status: "completed" }],
+    }),
+    {
+      steps: [],
+      project_prompt: "Ship the desktop app.",
+      workflow_mode: "ml",
+      execution_mode: "parallel",
+      closeout_status: "not_started",
+    },
+  );
+  assert.deepEqual(
+    carryProjectPromptDraft({
+      project_prompt: "Already done.",
+      workflow_mode: "standard",
+      closeout_status: "completed",
+      steps: [{ step_id: "ST1", status: "completed" }],
+    }),
+    {
+      steps: [],
+      project_prompt: "",
+      workflow_mode: "standard",
+      execution_mode: "parallel",
+      closeout_status: "not_started",
+    },
+  );
 });

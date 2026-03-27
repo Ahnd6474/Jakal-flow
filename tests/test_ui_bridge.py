@@ -248,6 +248,21 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.parallel_workers, 3)
         self.assertEqual(runtime.parallel_memory_per_worker_gib, 5)
 
+    def test_runtime_from_payload_accepts_tenth_gib_memory_budget(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "execution_mode": "parallel",
+                "parallel_worker_mode": "manual",
+                "parallel_workers": "2",
+                "parallel_memory_per_worker_gib": "1.55",
+            }
+        )
+
+        self.assertEqual(runtime.execution_mode, "parallel")
+        self.assertEqual(runtime.parallel_worker_mode, "manual")
+        self.assertEqual(runtime.parallel_workers, 2)
+        self.assertAlmostEqual(runtime.parallel_memory_per_worker_gib, 1.6)
+
     def test_runtime_from_payload_normalizes_legacy_auto_model_presets(self) -> None:
         runtime = runtime_from_payload(
             {

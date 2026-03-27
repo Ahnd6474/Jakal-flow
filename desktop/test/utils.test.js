@@ -28,6 +28,7 @@ import {
   firstSelectableStepId,
   inheritProjectIdentityForm,
   mergeProjectDetailCodexStatus,
+  normalizeMemoryBudgetGiB,
   normalizeInterruptedPlan,
   progressCaption,
   programSettingsFromRuntime,
@@ -267,6 +268,13 @@ test("applyProviderDefaults drops the auto sentinel for providers without auto r
   assert.equal(runtime.model, "");
   assert.equal(runtime.model_slug_input, "");
   assert.equal(runtime.model_preset, "");
+});
+
+test("normalizeMemoryBudgetGiB keeps one decimal place for UI memory budgets", () => {
+  assert.equal(normalizeMemoryBudgetGiB("1.54", 3), 1.5);
+  assert.equal(normalizeMemoryBudgetGiB("1.55", 3), 1.6);
+  assert.equal(normalizeMemoryBudgetGiB("0", 3), 0.1);
+  assert.equal(normalizeMemoryBudgetGiB("bogus", 1.5), 1.5);
 });
 
 test("projectFormFromDetail merges persisted runtime and derives GitHub mode", () => {
