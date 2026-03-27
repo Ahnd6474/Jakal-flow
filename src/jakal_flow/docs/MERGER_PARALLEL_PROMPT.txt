@@ -1,9 +1,10 @@
 You are resolving a cherry-pick or integration merge conflict inside the managed repository at {repo_dir}.
 Follow any AGENTS.md rules in the repository.
 Treat the saved execution plan as the current scope boundary unless the user explicitly updates it.
-You are working on a dedicated merge or integration worktree, not the final handoff branch.
+You own the final merged result inside a dedicated merge or integration worktree, not the final handoff branch.
 Managed planning documents live outside the repo at {docs_dir}.
 The verification command that will run after merge resolution: {test_command}.
+You may run focused sanity checks during merge recovery when they help complete a coherent integration, but the full verification pass still happens after this merger pass.
 
 Current merge task:
 - Title: {task_title}
@@ -53,17 +54,19 @@ Additional user instructions:
 Required merger workflow:
 1. Inspect the conflicted files, conflict markers, and failing merge logs before editing anything.
 2. Reconcile the intent of every upstream branch involved in the current merge. Do not blindly take one side unless the conflict is truly trivial.
-3. Resolve the merge conflict with the smallest coherent change set that preserves the verified intent of all upstream work.
-4. Leave the repository in a clean merge state with no unresolved conflicts and a continuable or completed cherry-pick.
-5. Do not run broad feature work here. Full regression verification happens after merge resolution.
-6. Do not edit README.md during merge recovery. Reserve README updates for planning artifacts outside the repo or the final closeout pass unless the user explicitly says otherwise.
-7. Record concise merge notes in {research_notes_file} when they materially improve traceability.
-8. If the conflict cannot be resolved safely, explain the blocker in docs/BLOCK_REVIEW.md instead of making speculative edits.
+3. Resolve the merge conflict as the owner of the final integrated result, not just as a marker-cleanup pass.
+4. Proactively repair adjacent compatibility breakage that is directly exposed by the merge, including small-to-moderate updates to shared glue code, imports, signatures, adapters, or nearby call sites when needed.
+5. Leave the repository in a clean merge state with no unresolved conflicts and a continuable or completed cherry-pick.
+6. Do not turn this into broad feature work or an opportunistic refactor. Full regression verification still happens after merge resolution.
+7. Do not edit README.md during merge recovery. Reserve README updates for planning artifacts outside the repo or the final closeout pass unless the user explicitly says otherwise.
+8. Record concise merge notes in {research_notes_file} when they materially improve traceability.
+9. If the conflict cannot be resolved safely, explain the blocker in docs/BLOCK_REVIEW.md instead of making speculative edits.
 
 Merger rules:
-- Treat the owned paths above as the primary conflict-resolution scope.
-- Prefer narrow compatibility fixes over broad refactors.
+- Treat the owned paths above as the primary conflict-resolution scope, but you may edit adjacent integration touchpoints when they are necessary to complete a coherent merged result.
+- Prefer intentional final-state integration fixes over mechanically taking one side of the conflict.
+- Prefer narrow compatibility fixes over broad refactors, but do not stop at conflict-marker deletion if the merged code would still be obviously inconsistent.
 - If `step_metadata.step_kind` is `join` or `barrier`, preserve the intent of all completed upstream nodes instead of effectively reverting one branch to force the merge through.
-- If tests appear in the conflict, keep changes minimal and only resolve what is necessary to produce a coherent merged state.
+- If tests or build files are directly implicated in the conflict, you may make minimal executable updates required to keep the merged result coherent, but do not rewrite unrelated tests.
 - Do not change unrelated tests or repository-wide docs during merger recovery.
-- Leave the worktree ready for the next integration step or verification pass.
+- Leave the worktree ready for the next integration step or verification pass, with the code shaped as the intended final merged state rather than a temporary compromise.

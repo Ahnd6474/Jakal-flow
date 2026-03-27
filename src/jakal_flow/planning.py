@@ -884,7 +884,10 @@ def merger_prompt(
     success_criteria = (
         execution_step.success_criteria.strip()
         if execution_step and execution_step.success_criteria.strip()
-        else "The merge conflict is resolved cleanly and the integration worktree is ready for verification."
+        else (
+            "The merge conflict is resolved cleanly, targeted integration fixes are applied where needed, and the "
+            "integration worktree is ready for verification."
+        )
     )
     depends_on = ", ".join(execution_step.depends_on) if execution_step and execution_step.depends_on else "none"
     owned_paths = "\n".join(f"- {path}" for path in execution_step.owned_paths) if execution_step and execution_step.owned_paths else "- none declared"
@@ -1179,6 +1182,12 @@ def _execution_graph_levels(steps: list[ExecutionStep]) -> list[list[ExecutionSt
 
 
 def execution_plan_svg(title: str, steps: list[ExecutionStep], execution_mode: str = "parallel") -> str:
+    def _orthogonal_path(start_x: float, start_y: float, end_x: float, end_y: float) -> str:
+        if abs(start_y - end_y) < 0.01:
+            return f"M {start_x} {start_y} H {end_x}"
+        middle_x = round(start_x + (end_x - start_x) / 2, 1)
+        return f"M {start_x} {start_y} H {middle_x} V {end_y} H {end_x}"
+
     font_family = "Segoe UI, Malgun Gothic, sans-serif"
     width = 1180
     box_width = 220
@@ -1206,22 +1215,32 @@ def execution_plan_svg(title: str, steps: list[ExecutionStep], execution_mode: s
     if uses_dag:
         levels = _execution_graph_levels(steps)
         dag_margin_x = 48
-        dag_margin_y = 68
+        dag_margin_y = 72
         dag_box_width = 220
         dag_box_height = 136
-        dag_gap_x = 92
-        dag_gap_y = 28
+        dag_gap_x = 120
+        dag_gap_y = 30
+        split_gap = 44
+        merge_gap = 38
+        max_rows = max((len(level) for level in levels), default=1)
         dag_width = max(
             width,
             dag_margin_x * 2 + len(levels) * dag_box_width + max(0, len(levels) - 1) * dag_gap_x,
         )
         dag_height = max(
             height,
-            dag_margin_y * 2 + max((len(level) for level in levels), default=1) * dag_box_height + max(0, max((len(level) for level in levels), default=1) - 1) * dag_gap_y + 40,
+            dag_margin_y * 2 + max_rows * dag_box_height + max(0, max_rows - 1) * dag_gap_y + 32,
         )
         parts = [
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{dag_width}" height="{dag_height}" viewBox="0 0 {dag_width} {dag_height}" role="img">',
             '<rect width="100%" height="100%" fill="#f8fafc" />',
+            (
+                '<defs>'
+                '<marker id="flow-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">'
+                '<path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />'
+                "</marker>"
+                "</defs>"
+            ),
             svg_text_element(dag_margin_x, 34, wrap_svg_text(title, 70, max_lines=2), fill="#0f172a", font_size=24, font_family=font_family, font_weight="700", line_height=28),
         ]
         positions: dict[str, tuple[float, float]] = {}
@@ -1233,25 +1252,59 @@ def execution_plan_svg(title: str, steps: list[ExecutionStep], execution_mode: s
             for row_index, step in enumerate(level):
                 y = dag_margin_y + row_index * (dag_box_height + dag_gap_y)
                 positions[step.step_id] = (x, y)
+        incoming: dict[str, list[str]] = {step.step_id: [] for step in steps}
+        outgoing: dict[str, list[str]] = {step.step_id: [] for step in steps}
+        for step in steps:
+            for dependency in step.depends_on:
+                if dependency not in positions or step.step_id not in positions:
+                    continue
+                incoming.setdefault(step.step_id, []).append(dependency)
+                outgoing.setdefault(dependency, []).append(step.step_id)
+        split_points: dict[str, tuple[float, float]] = {}
+        merge_points: dict[str, tuple[float, float]] = {}
         for step in steps:
             if step.step_id not in positions:
                 continue
-            target_x, target_y = positions[step.step_id]
-            for dependency in step.depends_on:
-                if dependency not in positions:
+            x, y = positions[step.step_id]
+            center_y = y + dag_box_height / 2
+            if len(outgoing.get(step.step_id, [])) > 1:
+                split_points[step.step_id] = (x + dag_box_width + split_gap, center_y)
+            if len(incoming.get(step.step_id, [])) > 1:
+                merge_points[step.step_id] = (x - merge_gap, center_y)
+        for step_id, (junction_x, junction_y) in split_points.items():
+            node_x, node_y = positions[step_id]
+            parts.append(
+                f'<path d="M {node_x + dag_box_width} {node_y + dag_box_height / 2} H {junction_x}" stroke="#94a3b8" stroke-width="3" fill="none" stroke-linecap="round" />'
+            )
+        for source_step_id, targets in outgoing.items():
+            if source_step_id not in positions:
+                continue
+            source_x, source_y = positions[source_step_id]
+            start_x, start_y = split_points.get(
+                source_step_id,
+                (source_x + dag_box_width, source_y + dag_box_height / 2),
+            )
+            for target_step_id in targets:
+                if target_step_id not in positions:
                     continue
-                source_x, source_y = positions[dependency]
-                start_x = source_x + dag_box_width
-                start_y = source_y + dag_box_height / 2
-                end_x = target_x
-                end_y = target_y + dag_box_height / 2
-                control_x = start_x + (end_x - start_x) / 2
-                parts.extend(
-                    [
-                        f'<path d="M {start_x} {start_y} C {control_x} {start_y}, {control_x} {end_y}, {end_x - 12} {end_y}" stroke="#94a3b8" stroke-width="3" fill="none" stroke-linecap="round" />',
-                        f'<polygon points="{end_x - 20},{end_y - 7} {end_x - 4},{end_y} {end_x - 20},{end_y + 7}" fill="#94a3b8" />',
-                    ]
+                target_x, target_y = positions[target_step_id]
+                end_x, end_y = merge_points.get(
+                    target_step_id,
+                    (target_x, target_y + dag_box_height / 2),
                 )
+                marker = ' marker-end="url(#flow-arrow)"' if target_step_id not in merge_points else ""
+                parts.append(
+                    f'<path d="{_orthogonal_path(start_x, start_y, end_x, end_y)}" stroke="#94a3b8" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"{marker} />'
+                )
+        for step_id, (junction_x, junction_y) in merge_points.items():
+            node_x, _node_y = positions[step_id]
+            parts.append(
+                f'<path d="M {junction_x} {junction_y} H {node_x}" stroke="#94a3b8" stroke-width="3" fill="none" stroke-linecap="round" marker-end="url(#flow-arrow)" />'
+            )
+        for junction_x, junction_y in split_points.values():
+            parts.append(f'<circle cx="{junction_x}" cy="{junction_y}" r="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" />')
+        for junction_x, junction_y in merge_points.values():
+            parts.append(f'<circle cx="{junction_x}" cy="{junction_y}" r="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" />')
         for step in steps:
             if step.step_id not in positions:
                 continue

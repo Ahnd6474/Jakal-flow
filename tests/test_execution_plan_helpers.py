@@ -1869,6 +1869,22 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("execution step title", svg)
         self.assertIn("description that should s...", svg)
 
+    def test_execution_plan_svg_routes_merge_edges_through_shared_junctions(self) -> None:
+        svg = execution_plan_svg(
+            "merge flow",
+            [
+                ExecutionStep(step_id="ST1", title="Frontend", status="completed"),
+                ExecutionStep(step_id="ST2", title="Backend", status="completed"),
+                ExecutionStep(step_id="ST3", title="Integrate", depends_on=["ST1", "ST2"], status="pending"),
+                ExecutionStep(step_id="ST4", title="Verify", depends_on=["ST3"], status="pending"),
+            ],
+            execution_mode="parallel",
+        )
+
+        self.assertIn('marker id="flow-arrow"', svg)
+        self.assertIn("<circle", svg)
+        self.assertEqual(svg.count('marker-end="url(#flow-arrow)"'), 2)
+
     def test_ml_results_svg_wraps_long_labels(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_ml_results_svg_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -2031,6 +2047,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("{merge_targets}", parallel_merger_template)
         self.assertIn("integration worktree", parallel_merger_template)
         self.assertIn("Failing merge context", parallel_merger_template)
+        self.assertIn("adjacent compatibility breakage", parallel_merger_template)
+        self.assertIn("adjacent integration touchpoints", parallel_merger_template)
         self.assertIn("Do not edit README.md during merge recovery.", parallel_merger_template)
         self.assertEqual(load_plan_decomposition_prompt_template("serial"), parallel_decomposition_template)
         self.assertEqual(load_plan_decomposition_prompt_template("parallel"), parallel_decomposition_template)

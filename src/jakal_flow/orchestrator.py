@@ -1350,10 +1350,14 @@ class Orchestrator:
             display_description=f"Resolve merge conflicts while integrating {', '.join(merge_targets) or step.step_id}.",
             codex_description=(
                 "Resolve the current cherry-pick conflict inside the integration worktree, preserve the intent of all "
-                "upstream branches, and leave the worktree ready for the remaining merges or verification."
+                "upstream branches, and proactively repair adjacent compatibility issues exposed by the merge so the "
+                "worktree is ready for the remaining merges or verification."
             ),
             test_command=step.test_command,
-            success_criteria="The merge conflict is resolved cleanly and the integration worktree can continue.",
+            success_criteria=(
+                "The merge conflict is resolved cleanly, targeted integration fixes are applied where needed, and the "
+                "integration worktree can continue."
+            ),
             reasoning_effort="high",
             depends_on=merge_targets,
             owned_paths=ordered_paths,
@@ -1383,10 +1387,14 @@ class Orchestrator:
             display_description=f"Resolve cherry-pick conflicts while merging {titles}.",
             codex_description=(
                 "Resolve the current cherry-pick conflict for the merged parallel batch, preserve the intent of all "
-                "completed worker branches, and leave the repository ready for verification."
+                "completed worker branches, and proactively repair adjacent compatibility issues exposed by the merge "
+                "so the repository is ready for verification."
             ),
             test_command=test_command,
-            success_criteria="The merged parallel batch cherry-pick conflict is resolved cleanly.",
+            success_criteria=(
+                "The merged parallel batch cherry-pick conflict is resolved cleanly and any directly exposed "
+                "integration inconsistencies are repaired."
+            ),
             reasoning_effort="high",
             depends_on=step_ids,
             owned_paths=ordered_paths,

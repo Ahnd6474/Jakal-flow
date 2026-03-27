@@ -192,13 +192,15 @@ test("CenterWorkspace upgrades legacy serial plans into the parallel execution t
     baseWorkspaceProps(),
   );
 
-  assert.match(html, /Execution Tree/);
+  assert.match(html, /Execution Flow/);
+  assert.match(html, /Flow Chart/);
+  assert.match(html, /<svg/);
   assert.match(html, /CO1/);
   assert.doesNotMatch(html, />Closeout<\/button>/);
   assert.doesNotMatch(html, /Serial/);
 });
 
-test("CenterWorkspace renders the parallel execution tree for parallel plans", async () => {
+test("CenterWorkspace renders the parallel execution flow chart for parallel plans", async () => {
   const html = await renderBundledComponent(
     "parallel-workspace-render",
     "./src/components/layout/CenterWorkspace.jsx",
@@ -271,7 +273,9 @@ test("CenterWorkspace renders the parallel execution tree for parallel plans", a
     }),
   );
 
-  assert.match(html, /Execution Tree/);
+  assert.match(html, /Execution Flow/);
+  assert.match(html, /Flow Chart/);
+  assert.match(html, /<svg/);
   assert.match(html, /Ready Nodes/);
   assert.match(html, /Depends On/);
   assert.match(html, /Owned Paths/);
@@ -282,7 +286,7 @@ test("CenterWorkspace renders the parallel execution tree for parallel plans", a
   assert.doesNotMatch(html, /src\/jakal_flow/);
   assert.match(html, /CO1/);
   assert.doesNotMatch(html, />Closeout<\/button>/);
-  assert.doesNotMatch(html, /Flow Chart/);
+  assert.doesNotMatch(html, /Layer 1/);
 });
 
 test("CenterWorkspace shows estimated cost only for paid configured runtimes", async () => {
@@ -403,10 +407,10 @@ test("CenterWorkspace prefers the live detail plan while a run is active", async
     }),
   );
 
-  const runningBadgeMatches = html.match(/status-badge--info">Running<\/span>/g) || [];
+  const runningNodeMatches = html.match(/execution-flow-chart__node--info/g) || [];
   assert.match(html, /Running: Parallel/);
   assert.match(html, /Ship the live UI/);
-  assert.equal(runningBadgeMatches.length, 3);
+  assert.equal(runningNodeMatches.length, 2);
 });
 
 test("CenterWorkspace shows debugging badges in yellow while debugger recovery is active", async () => {
@@ -455,7 +459,7 @@ test("CenterWorkspace shows debugging badges in yellow while debugger recovery i
 
   assert.match(html, /Debugging/);
   assert.match(html, /status-badge--warning">Debugging<\/span>/);
-  assert.match(html, /run-node--warning/);
+  assert.match(html, /execution-flow-chart__node--warning/);
 });
 
 test("IdeToolbar renders the active command and DAG-ready progress text", async () => {

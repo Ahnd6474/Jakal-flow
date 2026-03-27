@@ -647,6 +647,20 @@ pre {
   height: auto;
 }
 
+.execution-flow-chart__node rect {
+  transition:
+    stroke 140ms ease,
+    transform 140ms ease,
+    opacity 140ms ease;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.execution-flow-chart__node:hover rect {
+  opacity: 0.96;
+  transform: translateY(-1px);
+}
+
 .metric-card strong {
   display: block;
   margin-top: 8px;

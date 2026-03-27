@@ -1,5 +1,6 @@
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
+import { ExecutionFlowChart } from "../common/ExecutionFlowChart";
 import {
   canEditStep,
   effectiveStepStatus,
@@ -30,44 +31,10 @@ function normalizeListText(value) {
     });
 }
 
-function buildDagLayers(steps) {
-  const orderedSteps = Array.isArray(steps) ? steps : [];
-  const stepById = new Map(orderedSteps.map((step) => [step.step_id, step]));
-  const visited = new Set();
-  const layers = [];
-  while (visited.size < orderedSteps.length) {
-    const ready = orderedSteps.filter(
-      (step) =>
-        !visited.has(step.step_id) &&
-        (step.depends_on || []).every((dependency) => visited.has(dependency) || !stepById.has(dependency)),
-    );
-    const layer = ready.length ? ready : orderedSteps.filter((step) => !visited.has(step.step_id)).slice(0, 1);
-    layers.push(layer);
-    layer.forEach((step) => visited.add(step.step_id));
-  }
-  return layers;
-}
-
 function readyPendingSteps(steps) {
   const completed = new Set((steps || []).filter((step) => step.status === "completed").map((step) => step.step_id));
   return (steps || []).filter(
     (step) => step.status !== "completed" && (step.depends_on || []).every((dependency) => completed.has(dependency)),
-  );
-}
-
-function DagNode({ step, projectStatus, selected, onSelect, language, t }) {
-  const stepStatus = effectiveStepStatus(step, projectStatus);
-  const tone = statusTone(stepStatus);
-  const summary = step.display_description || step.success_criteria || t("run.noSummary");
-  return (
-    <button className={`run-node run-node--${tone} ${selected ? "selected" : ""}`} onClick={() => onSelect(step.step_id)} type="button">
-      <div className="run-node__meta">
-        <span className="run-node__id">{step.step_id}</span>
-        <span className={`status-badge status-badge--${tone}`}>{displayStatus(stepStatus, language)}</span>
-      </div>
-      <strong>{step.title}</strong>
-      <p>{summary}</p>
-    </button>
   );
 }
 
@@ -96,7 +63,6 @@ export function ParallelRunControlView({
     description: t("reports.closeoutReport"),
     successCriteria: t("reports.closeoutReport"),
   });
-  const layers = buildDagLayers(steps);
   const readyNodes = readyPendingSteps(steps);
   const selectedStep = steps.find((step) => step.step_id === selectedStepId) || null;
   const runtimeInsights = detail?.runtime_insights || {};
@@ -121,7 +87,7 @@ export function ParallelRunControlView({
       <div className="view-header">
         <div>
           <span className="eyebrow">{t("run.flow")}</span>
-          <h2>{t("run.executionTree")}</h2>
+          <h2>{t("run.executionFlow")}</h2>
         </div>
       </div>
 
@@ -163,7 +129,7 @@ export function ParallelRunControlView({
 
       <div className="content-card content-card--flow">
         <div className="content-card__header">
-          <strong>{t("run.executionTree")}</strong>
+          <strong>{t("run.flowChart")}</strong>
           <div className="action-row">
             <button className="toolbar-button" onClick={onGeneratePlan} type="button" disabled={busy}>
               {t("action.generate")}
@@ -182,32 +148,14 @@ export function ParallelRunControlView({
             </button>
           </div>
         </div>
-        {layers.length ? (
-          <div className="form-layout">
-            {layers.map((layer, index) => (
-              <div className="form-section" key={`layer-${index + 1}`}>
-                <div className="subsection">
-                  <div className="subsection__header">
-                    <strong>{t("run.dagLayer", { index: index + 1 })}</strong>
-                    <span>{layer.length} node(s)</span>
-                  </div>
-                  <div className="choice-grid">
-                    {layer.map((step) => (
-                      <DagNode
-                        key={step.step_id}
-                        step={step}
-                        projectStatus={projectStatus}
-                        selected={step.step_id === selectedStepId}
-                        onSelect={onSelectStep}
-                        language={language}
-                        t={t}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+        {steps.length ? (
+          <ExecutionFlowChart
+            steps={steps}
+            projectStatus={projectStatus}
+            language={language}
+            selectedStepId={selectedStepId}
+            onSelectStep={onSelectStep}
+          />
         ) : (
           <div className="empty-block">{t("run.noSteps")}</div>
         )}

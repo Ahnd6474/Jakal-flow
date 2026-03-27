@@ -115,9 +115,9 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
         {(!progress.runningStepList || progress.runningStepList.length <= 1) && progress.readyIds.length > 1 ? (
           <span>{t("run.readyNodeSummary", { count: progress.readyIds.length })}</span>
         ) : null}
-        <span>{t("run.currentElapsed")}: {formatDurationCompact(runningStepElapsedSeconds, language)}</span>
-        <span>{t("run.currentRemaining")}: {formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language)}</span>
-        {showEstimatedCost ? <span>{t("run.estimatedCost")}: {formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</span> : null}
+        {progress.phase !== "planning" ? <span>{t("run.currentElapsed")}: {formatDurationCompact(runningStepElapsedSeconds, language)}</span> : null}
+        {progress.phase !== "planning" ? <span>{t("run.currentRemaining")}: {formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language)}</span> : null}
+        {progress.phase !== "planning" && showEstimatedCost ? <span>{t("run.estimatedCost")}: {formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</span> : null}
         <span>{percentLabel}</span>
       </div>
 

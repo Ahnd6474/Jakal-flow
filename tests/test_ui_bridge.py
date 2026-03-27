@@ -24,14 +24,14 @@ from jakal_flow.ui_bridge import default_workspace_root, progress_caption, run_c
 
 
 def local_temp_root() -> Path:
-    root = Path(__file__).resolve().parents[1] / ".tmp_ui_bridge_tests"
+    root = Path(__file__).resolve().parents[1] / ".tub"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
 class TemporaryTestDir:
     def __enter__(self) -> Path:
-        self.path = local_temp_root() / f"case_{uuid.uuid4().hex}"
+        self.path = local_temp_root() / f"c{uuid.uuid4().hex[:8]}"
         self.path.mkdir(parents=True, exist_ok=True)
         return self.path
 
@@ -589,9 +589,6 @@ class UIBridgeTests(unittest.TestCase):
                 / "demo-batch"
                 / "02-st3"
                 / "repo"
-                / ".local"
-                / "targets"
-                / "sample-seed"
                 / ".git"
                 / "objects"
                 / "22"
