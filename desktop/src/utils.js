@@ -57,6 +57,7 @@ export const PROGRAM_RUNTIME_KEYS = [
   "execution_mode",
   "parallel_worker_mode",
   "parallel_workers",
+  "parallel_memory_per_worker_gib",
 ];
 export const DEFAULT_DASHBOARD_VISIBILITY = Object.freeze({
   status: true,
@@ -103,6 +104,7 @@ const DEFAULT_PROGRAM_RUNTIME = {
   execution_mode: "parallel",
   parallel_worker_mode: "auto",
   parallel_workers: 0,
+  parallel_memory_per_worker_gib: 3,
 };
 const DEFAULT_PROGRAM_UI = {
   ui_theme: "dark",

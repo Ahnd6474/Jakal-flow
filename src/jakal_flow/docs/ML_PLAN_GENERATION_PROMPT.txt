@@ -36,6 +36,7 @@ Planning goals:
 - Prefer experiment-specific config files, output directories, run manifests, or leaf source directories over broad shared roots so more experiments can run concurrently.
 - Keep exact-path ownership exclusive across the same ready wave.
 - If several experiments need one small coordination node first, isolate that prerequisite instead of serializing the entire cycle.
+- If the source inventory or Planner Agent A shows that the relevant implementation already exists, fold scaffold-only bootstrap work into the concrete experiment step or reduce it to the smallest guardrail-tightening edit.
 - If a task needs broad repo-wide refactors or shared-file churn, isolate it instead of pretending it is parallel-safe.
 - Do not include the final aggregation/closeout sweep inside the normal task list. The app runs a separate closeout block after the planned tasks finish.
 
@@ -91,7 +92,7 @@ Field requirements:
 - `primary_metric` and `metric_direction` must be explicit whenever a quantitative target exists.
 - `codex_description` should tell the executor to use the repo's existing ML tooling first.
 - Preserve `candidate_block_id`, carry `parallelizable_after`, keep non-skeleton notes in `implementation_notes`, and use `skeleton_contract_docstring` only for the bootstrap/skeleton contract step.
-- If the step is the bootstrap/skeleton contract step, make `codex_description` explicitly tell the executor to write the skeleton code with the provided docstring.
+- If the step is the bootstrap/skeleton contract step, make `codex_description` explicitly tell the executor to update existing code in place when that surface already exists and create only the smallest necessary skeleton otherwise.
 - When parallel execution is plausible, avoid broad shared ownership like the entire training package or the whole configs directory unless that node truly must run alone.
 - Do not include markdown fences or commentary outside the JSON.
 
@@ -107,6 +108,9 @@ Reference notes (src/jakal_flow/docs/REFERENCE_GUIDE.md):
 
 Docs:
 {docs}
+
+Source inventory:
+{source}
 
 Planner Agent A decomposition artifact:
 {planner_outline}

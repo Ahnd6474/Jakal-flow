@@ -180,6 +180,7 @@ class UIBridgeTests(unittest.TestCase):
                 "require_checkpoint_approval": "true",
                 "execution_mode": "PARALLEL",
                 "parallel_workers": "bogus",
+                "parallel_memory_per_worker_gib": "bogus",
                 "no_progress_limit": "-3",
                 "regression_limit": "bogus",
                 "empty_cycle_limit": 0,
@@ -200,6 +201,7 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.execution_mode, "parallel")
         self.assertEqual(runtime.parallel_worker_mode, "manual")
         self.assertEqual(runtime.parallel_workers, 2)
+        self.assertEqual(runtime.parallel_memory_per_worker_gib, 3)
         self.assertEqual(runtime.no_progress_limit, 1)
         self.assertEqual(runtime.regression_limit, 3)
         self.assertEqual(runtime.empty_cycle_limit, 1)
@@ -216,6 +218,7 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.execution_mode, "parallel")
         self.assertEqual(runtime.parallel_worker_mode, "auto")
         self.assertEqual(runtime.parallel_workers, 0)
+        self.assertEqual(runtime.parallel_memory_per_worker_gib, 3)
 
     def test_runtime_from_payload_uses_platform_default_codex_path_when_missing(self) -> None:
         with mock.patch("jakal_flow.ui_bridge.default_codex_path", return_value="codex"):
@@ -235,12 +238,14 @@ class UIBridgeTests(unittest.TestCase):
                 "execution_mode": "parallel",
                 "parallel_worker_mode": "manual",
                 "parallel_workers": "3",
+                "parallel_memory_per_worker_gib": "5",
             }
         )
 
         self.assertEqual(runtime.execution_mode, "parallel")
         self.assertEqual(runtime.parallel_worker_mode, "manual")
         self.assertEqual(runtime.parallel_workers, 3)
+        self.assertEqual(runtime.parallel_memory_per_worker_gib, 5)
 
     def test_runtime_from_payload_normalizes_legacy_auto_model_presets(self) -> None:
         runtime = runtime_from_payload(

@@ -12,8 +12,8 @@ Execution mode:
 
 Required planning workflow:
 1. Decompose the request into the smallest meaningful ML planning ideas.
-2. Identify the evaluation contract, split policy, leakage guardrails, and any experiment-tracking or reporting skeletons that should be fixed early.
-3. Decide whether a narrow guardrail/bootstrap step is needed before experiment fan-out.
+2. Identify the evaluation contract, split policy, leakage guardrails, and any experiment-tracking or reporting skeletons that are genuinely missing or that must be tightened in existing code.
+3. Decide whether a narrow guardrail/bootstrap step is needed before experiment fan-out, and shrink or omit it when the relevant implementation already exists.
 4. Group the remaining work into candidate experiment blocks. Each candidate block should represent one locally judgeable experiment or one prerequisite guardrail outcome.
 5. Mark which candidate experiments can run in parallel later and which ones share too much state or ownership.
 6. Leave final task ids, final DAG edges, final resource annotations, and final reasoning effort choices to Planner Agent B.
@@ -22,6 +22,7 @@ Hard ML rules:
 - Prevent data leakage. Never blur train/validation/test boundaries.
 - Treat split definitions, preprocessing fit scope, temporal ordering, and group boundaries as first-class constraints.
 - Prefer existing ML tooling in the repository whenever it is reliable enough.
+- If the source inventory already shows relevant training, evaluation, or reporting code, prefer editing or extending it and avoid scaffold-only bootstrap work.
 - Keep experiments traceable and reproducible.
 - Do not tune on the test set.
 
@@ -83,6 +84,9 @@ Reference notes (src/jakal_flow/docs/REFERENCE_GUIDE.md):
 
 Docs:
 {docs}
+
+Source inventory:
+{source}
 
 User request:
 {user_prompt}

@@ -86,6 +86,7 @@ class RuntimeOptions:
     execution_mode: str = "parallel"
     parallel_worker_mode: str = "auto"
     parallel_workers: int = 0
+    parallel_memory_per_worker_gib: int = 3
     extra_prompt: str = ""
     init_plan_prompt: str = ""
     approval_mode: str = "never"

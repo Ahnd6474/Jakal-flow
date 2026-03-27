@@ -12,8 +12,8 @@ Workflow mode:
 
 Required planning workflow:
 1. Decompose the request into the smallest meaningful implementation ideas.
-2. Identify any shared contracts, schemas, interfaces, entrypoints, or file skeletons that should be fixed before broad fan-out work starts.
-3. Decide whether a narrow skeleton/bootstrap step is needed. Only recommend one if it reduces downstream merge risk or unlocks safe parallel waves.
+2. Identify any shared contracts, schemas, interfaces, entrypoints, or file skeletons that are genuinely missing or that must be tightened in existing code before broad fan-out work starts.
+3. Decide whether a narrow skeleton/bootstrap step is needed. Only recommend one if it reduces downstream merge risk or unlocks safe parallel waves, and shrink or omit it when the relevant implementation already exists.
 4. Group the implementation ideas into candidate testable blocks. Each candidate block must represent one locally judgeable outcome that Codex can realistically finish in one focused pass.
 5. Mark likely parallel tracks and call out any broad shared roots that should be avoided.
 6. Leave final task ids, final DAG edges, final owned_paths, and final reasoning effort choices to Planner Agent B.
@@ -23,6 +23,7 @@ Parallel decomposition rules:
 - Prefer candidate blocks with narrow ownership boundaries.
 - Prefer exact files or leaf directories over broad package roots.
 - If a small contract-freezing or skeleton step can unlock a wide safe fan-out, recommend it explicitly.
+- If the source inventory already shows relevant implementation, prefer editing or extending that code and avoid scaffold-only bootstrap work.
 - Do not fake parallelism for risky, same-file, or shared-contract heavy work.
 
 Return exactly one JSON object in this shape:
@@ -71,6 +72,9 @@ Reference notes (src/jakal_flow/docs/REFERENCE_GUIDE.md):
 
 Docs:
 {docs}
+
+Source inventory:
+{source}
 
 User request:
 {user_prompt}

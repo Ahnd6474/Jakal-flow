@@ -1151,6 +1151,7 @@ test("AppSettingsView exposes dashboard visibility controls", async () => {
         checkpoint_interval_blocks: 1,
         execution_mode: "serial",
         parallel_workers: 2,
+        parallel_memory_per_worker_gib: 3,
         codex_path: "codex.cmd",
         allow_push: true,
         require_checkpoint_approval: false,
@@ -1180,6 +1181,7 @@ test("AppSettingsView exposes dashboard visibility controls", async () => {
   assert.match(html, /Closeout Report/);
   assert.match(html, /Codex Spark/);
   assert.match(html, /Custom Model Slug/);
+  assert.match(html, /Memory \/ Worker \(GiB\)/);
   assert.match(html, /Codex Usage/);
   assert.doesNotMatch(html, /Billing Mode/);
   assert.doesNotMatch(html, /Input \$ \/ 1M/);
@@ -1204,6 +1206,7 @@ test("AppSettingsView remote monitor fixes sharing to 0.0.0.0 and share link onl
         checkpoint_interval_blocks: 1,
         execution_mode: "serial",
         parallel_workers: 2,
+        parallel_memory_per_worker_gib: 3,
         codex_path: "codex.cmd",
         allow_push: true,
         require_checkpoint_approval: false,
@@ -1258,6 +1261,7 @@ test("AppSettingsView keeps share actions enabled while a run is active", async 
         checkpoint_interval_blocks: 1,
         execution_mode: "serial",
         parallel_workers: 2,
+        parallel_memory_per_worker_gib: 3,
         codex_path: "codex.cmd",
         allow_push: true,
         require_checkpoint_approval: false,
@@ -1311,6 +1315,7 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
           workflow_mode: "standard",
           execution_mode: "serial",
           parallel_workers: 2,
+          parallel_memory_per_worker_gib: 3,
           ml_max_cycles: 3,
           max_blocks: 5,
         },
@@ -1335,6 +1340,7 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
 
   assert.doesNotMatch(html, /Advanced Settings/);
   assert.doesNotMatch(html, /Custom Model Slug/);
+  assert.match(html, /Memory \/ Worker \(GiB\)/);
   assert.doesNotMatch(html, /Extra Prompt/);
   assert.match(html, />Archive Project<\/button>/);
   assert.match(html, />Delete Project<\/button>/);

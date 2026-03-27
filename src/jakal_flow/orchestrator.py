@@ -471,7 +471,8 @@ class Orchestrator:
         if normalized_docstring.lower() in base.lower():
             return base
         instruction = (
-            f'Write the skeleton code with this contract docstring in the appropriate module, class, or function: '
+            f'If the relevant module, class, or function already exists, update it in place; otherwise create only the '
+            f'smallest necessary skeleton with this contract docstring: '
             f'"""{normalized_docstring}"""'
         )
         return f"{base} {instruction}".strip()
@@ -1283,6 +1284,7 @@ class Orchestrator:
         return build_parallel_resource_plan(
             getattr(runtime, "parallel_worker_mode", "auto"),
             getattr(runtime, "parallel_workers", 0),
+            getattr(runtime, "parallel_memory_per_worker_gib", 3),
         )
 
     def _parallel_worker_count(self, runtime: RuntimeOptions) -> int:

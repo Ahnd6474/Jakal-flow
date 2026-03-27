@@ -120,6 +120,7 @@ def build_run_command_handlers(
                 parallel_plan = build_parallel_resource_plan(
                     getattr(runtime, "parallel_worker_mode", "auto"),
                     getattr(runtime, "parallel_workers", 0),
+                    getattr(runtime, "parallel_memory_per_worker_gib", 3),
                 )
                 if (
                     len(batch) > 1

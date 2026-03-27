@@ -6,13 +6,15 @@ import os
 from typing import Any
 
 
-DEFAULT_MEMORY_BUDGET_PER_WORKER_BYTES = 3 * 1024 * 1024 * 1024
+DEFAULT_MEMORY_BUDGET_PER_WORKER_GIB = 3
+DEFAULT_MEMORY_BUDGET_PER_WORKER_BYTES = DEFAULT_MEMORY_BUDGET_PER_WORKER_GIB * 1024 * 1024 * 1024
 
 
 @dataclass(slots=True)
 class ParallelResourcePlan:
     worker_mode: str
     requested_workers: int
+    memory_budget_per_worker_gib: int
     cpu_logical_count: int
     cpu_parallel_limit: int
     memory_total_bytes: int | None
@@ -25,6 +27,7 @@ class ParallelResourcePlan:
         return {
             "worker_mode": self.worker_mode,
             "requested_workers": self.requested_workers,
+            "memory_budget_per_worker_gib": self.memory_budget_per_worker_gib,
             "cpu_logical_count": self.cpu_logical_count,
             "cpu_parallel_limit": self.cpu_parallel_limit,
             "memory_total_bytes": self.memory_total_bytes,
@@ -80,16 +83,19 @@ def _detect_memory_bytes() -> tuple[int | None, int | None]:
 def build_parallel_resource_plan(
     worker_mode: str | None,
     requested_workers: Any,
+    memory_per_worker_gib: Any = DEFAULT_MEMORY_BUDGET_PER_WORKER_GIB,
 ) -> ParallelResourcePlan:
     normalized_mode = normalize_parallel_worker_mode(worker_mode)
     cpu_logical_count = max(1, int(os.cpu_count() or 1))
     cpu_parallel_limit = max(1, cpu_logical_count // 4)
     if cpu_logical_count >= 4:
         cpu_parallel_limit = max(2, cpu_parallel_limit)
+    memory_budget_per_worker_gib = _positive_int(memory_per_worker_gib, DEFAULT_MEMORY_BUDGET_PER_WORKER_GIB)
+    memory_budget_per_worker_bytes = max(1, memory_budget_per_worker_gib * 1024 * 1024 * 1024)
     memory_total_bytes, memory_available_bytes = _detect_memory_bytes()
     memory_parallel_limit: int | None = None
     if memory_available_bytes is not None and memory_available_bytes > 0:
-        memory_parallel_limit = max(1, memory_available_bytes // DEFAULT_MEMORY_BUDGET_PER_WORKER_BYTES)
+        memory_parallel_limit = max(1, memory_available_bytes // memory_budget_per_worker_bytes)
 
     hard_limit = cpu_parallel_limit
     if memory_parallel_limit is not None:
@@ -108,6 +114,7 @@ def build_parallel_resource_plan(
     return ParallelResourcePlan(
         worker_mode=normalized_mode,
         requested_workers=requested,
+        memory_budget_per_worker_gib=memory_budget_per_worker_gib,
         cpu_logical_count=cpu_logical_count,
         cpu_parallel_limit=cpu_parallel_limit,
         memory_total_bytes=memory_total_bytes,

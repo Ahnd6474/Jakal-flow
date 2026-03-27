@@ -17,18 +17,14 @@ class PlanItem:
     text: str
 
 
-PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME = "PLAN_DECOMPOSITION_SERIAL_PROMPT.txt"
 PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME = "PLAN_DECOMPOSITION_PARALLEL_PROMPT.txt"
 ML_PLAN_DECOMPOSITION_PROMPT_FILENAME = "ML_PLAN_DECOMPOSITION_PROMPT.txt"
-PLAN_GENERATION_SERIAL_PROMPT_FILENAME = "PLAN_GENERATION_SERIAL_PROMPT.txt"
 PLAN_GENERATION_PARALLEL_PROMPT_FILENAME = "PLAN_GENERATION_PARALLEL_PROMPT.txt"
-PLAN_GENERATION_PROMPT_FILENAME = PLAN_GENERATION_SERIAL_PROMPT_FILENAME
-STEP_EXECUTION_SERIAL_PROMPT_FILENAME = "STEP_EXECUTION_SERIAL_PROMPT.txt"
+PLAN_GENERATION_PROMPT_FILENAME = PLAN_GENERATION_PARALLEL_PROMPT_FILENAME
 STEP_EXECUTION_PARALLEL_PROMPT_FILENAME = "STEP_EXECUTION_PARALLEL_PROMPT.txt"
-STEP_EXECUTION_PROMPT_FILENAME = STEP_EXECUTION_SERIAL_PROMPT_FILENAME
-DEBUGGER_SERIAL_PROMPT_FILENAME = "DEBUGGER_SERIAL_PROMPT.txt"
+STEP_EXECUTION_PROMPT_FILENAME = STEP_EXECUTION_PARALLEL_PROMPT_FILENAME
 DEBUGGER_PARALLEL_PROMPT_FILENAME = "DEBUGGER_PARALLEL_PROMPT.txt"
-DEBUGGER_PROMPT_FILENAME = DEBUGGER_SERIAL_PROMPT_FILENAME
+DEBUGGER_PROMPT_FILENAME = DEBUGGER_PARALLEL_PROMPT_FILENAME
 FINALIZATION_PROMPT_FILENAME = "FINALIZATION_PROMPT.txt"
 OPTIMIZATION_PROMPT_FILENAME = "OPTIMIZATION_PROMPT.txt"
 ML_PLAN_GENERATION_PROMPT_FILENAME = "ML_PLAN_GENERATION_PROMPT.txt"
@@ -58,25 +54,22 @@ def _normalize_execution_mode(value: str | None) -> str:
 def plan_generation_prompt_filename(execution_mode: str | None, workflow_mode: str | None = None) -> str:
     if normalize_workflow_mode(workflow_mode) == "ml":
         return ML_PLAN_GENERATION_PROMPT_FILENAME
-    if _normalize_execution_mode(execution_mode) == "parallel":
-        return PLAN_GENERATION_PARALLEL_PROMPT_FILENAME
-    return PLAN_GENERATION_SERIAL_PROMPT_FILENAME
+    _normalize_execution_mode(execution_mode)
+    return PLAN_GENERATION_PARALLEL_PROMPT_FILENAME
 
 
 def plan_decomposition_prompt_filename(execution_mode: str | None, workflow_mode: str | None = None) -> str:
     if normalize_workflow_mode(workflow_mode) == "ml":
         return ML_PLAN_DECOMPOSITION_PROMPT_FILENAME
-    if _normalize_execution_mode(execution_mode) == "parallel":
-        return PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME
-    return PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME
+    _normalize_execution_mode(execution_mode)
+    return PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME
 
 
 def step_execution_prompt_filename(execution_mode: str | None, workflow_mode: str | None = None) -> str:
     if normalize_workflow_mode(workflow_mode) == "ml":
         return ML_STEP_EXECUTION_PROMPT_FILENAME
-    if _normalize_execution_mode(execution_mode) == "parallel":
-        return STEP_EXECUTION_PARALLEL_PROMPT_FILENAME
-    return STEP_EXECUTION_SERIAL_PROMPT_FILENAME
+    _normalize_execution_mode(execution_mode)
+    return STEP_EXECUTION_PARALLEL_PROMPT_FILENAME
 
 
 def load_plan_generation_prompt_template(execution_mode: str | None, workflow_mode: str | None = None) -> str:
@@ -92,9 +85,8 @@ def load_step_execution_prompt_template(execution_mode: str | None, workflow_mod
 
 
 def debugger_prompt_filename(execution_mode: str | None) -> str:
-    if _normalize_execution_mode(execution_mode) == "parallel":
-        return DEBUGGER_PARALLEL_PROMPT_FILENAME
-    return DEBUGGER_SERIAL_PROMPT_FILENAME
+    _normalize_execution_mode(execution_mode)
+    return DEBUGGER_PARALLEL_PROMPT_FILENAME
 
 
 def load_debugger_prompt_template(execution_mode: str | None) -> str:
@@ -120,6 +112,86 @@ def load_reference_guide_text() -> str:
     return compact_text(text, 2200) or f"{REFERENCE_GUIDE_DISPLAY_PATH} not found."
 
 
+def _summarize_source_inventory(repo_dir: Path, limit: int = 12) -> str:
+    roots = [
+        repo_dir / "src",
+        repo_dir / "app",
+        repo_dir / "lib",
+        repo_dir / "desktop" / "src",
+    ]
+    allowed_suffixes = {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cs",
+        ".go",
+        ".h",
+        ".hpp",
+        ".java",
+        ".js",
+        ".jsx",
+        ".kt",
+        ".m",
+        ".mm",
+        ".php",
+        ".py",
+        ".rb",
+        ".rs",
+        ".scala",
+        ".sh",
+        ".swift",
+        ".ts",
+        ".tsx",
+    }
+    excluded_parts = {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".venv",
+        "__pycache__",
+        "build",
+        "coverage",
+        "dist",
+        "node_modules",
+        "target",
+        "venv",
+    }
+    samples: list[str] = []
+    seen: set[str] = set()
+    total = 0
+
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in allowed_suffixes:
+                continue
+            if any(part in excluded_parts for part in path.parts):
+                continue
+            relative = str(path.relative_to(repo_dir)).replace("\\", "/")
+            if relative in seen:
+                continue
+            seen.add(relative)
+            total += 1
+            if len(samples) < limit:
+                samples.append(relative)
+
+    if not total:
+        return (
+            "No obvious implementation files detected under src/, app/, lib/, or desktop/src. "
+            "A narrow skeleton/bootstrap step is acceptable only if it establishes the first real contract, "
+            "entrypoint, or module."
+        )
+
+    suffix = "" if total <= limit else f", plus {total - limit} more"
+    return (
+        "Existing implementation files detected. Prefer extending or editing these paths instead of adding "
+        f"scaffold-only skeleton steps unless a genuinely new boundary is required: {', '.join(samples)}{suffix}."
+    )
+
+
 def scan_repository_inputs(repo_dir: Path) -> dict[str, str]:
     readme = read_text(repo_dir / "README.md")
     agents = read_text(repo_dir / "AGENTS.md")
@@ -132,6 +204,7 @@ def scan_repository_inputs(repo_dir: Path) -> dict[str, str]:
         "readme": compact_text(readme, 2000) or "README.md not found.",
         "agents": compact_text(agents, 1500) or "AGENTS.md not found.",
         "docs": "\n\n".join(docs_summaries) if docs_summaries else "No markdown files under repo/docs.",
+        "source": _summarize_source_inventory(repo_dir),
     }
 
 
@@ -144,8 +217,8 @@ def assess_repository_maturity(repo_dir: Path, repo_inputs: dict[str, str]) -> t
     if "no markdown files under repo/docs" not in repo_inputs["docs"].lower():
         score += 1
         details["docs"] = 1
-    source_matches = list(repo_dir.glob("src")) + list(repo_dir.glob("app")) + list(repo_dir.glob("package.json")) + list(repo_dir.glob("pyproject.toml"))
-    if source_matches:
+    source_summary = repo_inputs.get("source", "")
+    if source_summary and "no obvious implementation files detected" not in source_summary.lower():
         score += 1
         details["source"] = 1
     tests_dir = repo_dir / "tests"
@@ -173,6 +246,9 @@ def generate_project_plan(context: ProjectContext, repo_inputs: dict[str, str]) 
         "",
         "### AGENTS",
         repo_inputs["agents"],
+        "",
+        "### Source Inventory",
+        repo_inputs.get("source", "Source inventory unavailable."),
         "",
         "### Reference Notes",
         reference_notes,
@@ -210,6 +286,7 @@ def is_plan_markdown(text: str) -> bool:
 
 def bootstrap_plan_prompt(context: ProjectContext, repo_inputs: dict[str, str], user_prompt: str) -> str:
     reference_notes = load_reference_guide_text()
+    source_summary = repo_inputs.get("source", "Source inventory unavailable.")
     return "\n".join(
         [
             "Draft a project plan in markdown and write it to the managed planning file outside the repo.",
@@ -234,6 +311,8 @@ def bootstrap_plan_prompt(context: ProjectContext, repo_inputs: dict[str, str], 
             f"README:\n{repo_inputs['readme']}",
             "",
             f"AGENTS:\n{repo_inputs['agents']}",
+            "",
+            f"Source inventory:\n{source_summary}",
             "",
             f"{REFERENCE_GUIDE_DISPLAY_PATH}:\n{reference_notes}",
             "",
@@ -452,6 +531,7 @@ def prompt_to_execution_plan_prompt(
             agents=repo_inputs["agents"],
             reference_notes=load_reference_guide_text(),
             docs=repo_inputs["docs"],
+            source=repo_inputs.get("source", "Source inventory unavailable."),
             user_prompt=user_prompt.strip(),
             planner_outline=compact_text(planner_outline.strip(), 8000) or "Planner Agent A output unavailable.",
         )
@@ -480,6 +560,7 @@ def prompt_to_plan_decomposition_prompt(
             agents=repo_inputs["agents"],
             reference_notes=load_reference_guide_text(),
             docs=repo_inputs["docs"],
+            source=repo_inputs.get("source", "Source inventory unavailable."),
             user_prompt=user_prompt.strip(),
         )
     except KeyError as exc:

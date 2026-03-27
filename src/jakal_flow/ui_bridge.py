@@ -364,6 +364,10 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         if merged["parallel_worker_mode"] == "auto"
         else coerce_positive_int(merged.get("parallel_workers", 2), default=2)
     )
+    merged["parallel_memory_per_worker_gib"] = coerce_positive_int(
+        merged.get("parallel_memory_per_worker_gib", 3),
+        default=3,
+    )
     merged["ml_max_cycles"] = coerce_positive_int(
         merged.get("ml_max_cycles", 3),
         default=3,

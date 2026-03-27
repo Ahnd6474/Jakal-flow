@@ -28,7 +28,6 @@ from jakal_flow.parallel_resources import build_parallel_resource_plan
 from jakal_flow.planning import (
     DEBUGGER_PARALLEL_PROMPT_FILENAME,
     DEBUGGER_PROMPT_FILENAME,
-    DEBUGGER_SERIAL_PROMPT_FILENAME,
     FINALIZATION_PROMPT_FILENAME,
     ML_PLAN_DECOMPOSITION_PROMPT_FILENAME,
     OPTIMIZATION_PROMPT_FILENAME,
@@ -36,15 +35,12 @@ from jakal_flow.planning import (
     ML_PLAN_GENERATION_PROMPT_FILENAME,
     ML_STEP_EXECUTION_PROMPT_FILENAME,
     PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME,
-    PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME,
     PLAN_GENERATION_PARALLEL_PROMPT_FILENAME,
     PLAN_GENERATION_PROMPT_FILENAME,
-    PLAN_GENERATION_SERIAL_PROMPT_FILENAME,
     REFERENCE_GUIDE_FILENAME,
     SCOPE_GUARD_TEMPLATE_FILENAME,
     STEP_EXECUTION_PARALLEL_PROMPT_FILENAME,
     STEP_EXECUTION_PROMPT_FILENAME,
-    STEP_EXECUTION_SERIAL_PROMPT_FILENAME,
     bootstrap_plan_prompt,
     execution_plan_svg,
     load_debugger_prompt_template,
@@ -288,6 +284,17 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(plan.worker_mode, "manual")
         self.assertEqual(plan.cpu_parallel_limit, 3)
         self.assertEqual(plan.recommended_workers, 3)
+
+    def test_parallel_resource_plan_uses_configured_memory_budget_per_worker(self) -> None:
+        with mock.patch("jakal_flow.parallel_resources.os.cpu_count", return_value=16), mock.patch(
+            "jakal_flow.parallel_resources._detect_memory_bytes",
+            return_value=(64 * 1024**3, 10 * 1024**3),
+        ):
+            plan = build_parallel_resource_plan("auto", 0, 5)
+
+        self.assertEqual(plan.memory_budget_per_worker_gib, 5)
+        self.assertEqual(plan.memory_parallel_limit, 2)
+        self.assertEqual(plan.recommended_workers, 2)
 
     def test_pending_execution_batches_keeps_parent_child_owned_paths_together(self) -> None:
         orchestrator = Orchestrator(Path.cwd() / ".tmp_pending_batches_workspace")
@@ -1357,23 +1364,18 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(preset.effort, "medium")
 
     def test_source_prompt_templates_exist_and_keep_expected_placeholders(self) -> None:
-        serial_decomposition_template = load_source_prompt_template(PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME)
         parallel_decomposition_template = load_source_prompt_template(PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME)
         ml_decomposition_template = load_source_prompt_template(ML_PLAN_DECOMPOSITION_PROMPT_FILENAME)
-        serial_plan_template = load_source_prompt_template(PLAN_GENERATION_SERIAL_PROMPT_FILENAME)
         parallel_plan_template = load_source_prompt_template(PLAN_GENERATION_PARALLEL_PROMPT_FILENAME)
         ml_plan_template = load_source_prompt_template(ML_PLAN_GENERATION_PROMPT_FILENAME)
-        serial_step_template = load_source_prompt_template(STEP_EXECUTION_SERIAL_PROMPT_FILENAME)
         parallel_step_template = load_source_prompt_template(STEP_EXECUTION_PARALLEL_PROMPT_FILENAME)
         ml_step_template = load_source_prompt_template(ML_STEP_EXECUTION_PROMPT_FILENAME)
-        serial_debugger_template = load_source_prompt_template(DEBUGGER_SERIAL_PROMPT_FILENAME)
         parallel_debugger_template = load_source_prompt_template(DEBUGGER_PARALLEL_PROMPT_FILENAME)
         final_template = load_source_prompt_template(FINALIZATION_PROMPT_FILENAME)
         optimization_template = load_source_prompt_template(OPTIMIZATION_PROMPT_FILENAME)
         ml_final_template = load_source_prompt_template(ML_FINALIZATION_PROMPT_FILENAME)
         scope_template = load_source_prompt_template(SCOPE_GUARD_TEMPLATE_FILENAME)
 
-        self.assertTrue(source_prompt_template_path(PLAN_DECOMPOSITION_SERIAL_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(PLAN_DECOMPOSITION_PARALLEL_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(PLAN_GENERATION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(PLAN_GENERATION_PARALLEL_PROMPT_FILENAME).exists())
@@ -1388,21 +1390,12 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertTrue(source_prompt_template_path(ML_FINALIZATION_PROMPT_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(SCOPE_GUARD_TEMPLATE_FILENAME).exists())
         self.assertTrue(source_prompt_template_path(REFERENCE_GUIDE_FILENAME).exists())
-        self.assertIn("Planner Agent A", serial_decomposition_template)
-        self.assertIn('"candidate_blocks": [', serial_decomposition_template)
-        self.assertIn('"contract_docstring"', serial_decomposition_template)
         self.assertIn("Planner Agent A", parallel_decomposition_template)
         self.assertIn('"candidate_blocks": [', parallel_decomposition_template)
         self.assertIn('"contract_docstring"', parallel_decomposition_template)
         self.assertIn("candidate_experiments", ml_decomposition_template)
         self.assertIn('"contract_docstring"', ml_decomposition_template)
-        self.assertIn("{repo_dir}", serial_plan_template)
-        self.assertIn("{user_prompt}", serial_plan_template)
-        self.assertIn("{max_steps}", serial_plan_template)
-        self.assertIn("{execution_mode}", serial_plan_template)
-        self.assertIn("{planner_outline}", serial_plan_template)
-        self.assertIn('"step_id": "stable id like ST1"', serial_plan_template)
-        self.assertIn("strict sequential checkpoint list", serial_plan_template)
+        self.assertEqual(PLAN_GENERATION_PROMPT_FILENAME, PLAN_GENERATION_PARALLEL_PROMPT_FILENAME)
         self.assertIn("{planner_outline}", parallel_plan_template)
         self.assertIn('"step_id": "stable id like ST1"', parallel_plan_template)
         self.assertIn('"depends_on": ["step ids that must complete first"]', parallel_plan_template)
@@ -1423,24 +1416,14 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("small coordination node", ml_plan_template)
         self.assertIn("{planner_outline}", ml_plan_template)
         self.assertIn("{workflow_mode}", ml_plan_template)
-        self.assertIn("{task_title}", serial_step_template)
-        self.assertIn("{display_description}", serial_step_template)
-        self.assertIn("{codex_description}", serial_step_template)
-        self.assertIn("{success_criteria}", serial_step_template)
-        self.assertIn("{depends_on}", serial_step_template)
-        self.assertIn("{owned_paths}", serial_step_template)
-        self.assertIn("{plan_snapshot}", serial_step_template)
-        self.assertIn("Do not edit README.md during normal execution steps.", serial_step_template)
+        self.assertEqual(STEP_EXECUTION_PROMPT_FILENAME, STEP_EXECUTION_PARALLEL_PROMPT_FILENAME)
         self.assertIn("saved DAG execution tree", parallel_step_template)
         self.assertIn("primary write scope", parallel_step_template)
         self.assertIn("Do not edit README.md during normal execution steps.", parallel_step_template)
         self.assertIn("{ml_step_report_file}", ml_step_template)
         self.assertIn("Step metadata", ml_step_template)
         self.assertIn("Do not edit README.md during normal execution steps.", ml_step_template)
-        self.assertIn("{failing_test_summary}", serial_debugger_template)
-        self.assertIn("{failing_test_stdout}", serial_debugger_template)
-        self.assertIn("Do not modify tests unless", serial_debugger_template)
-        self.assertIn("Do not edit README.md during debugger recovery.", serial_debugger_template)
+        self.assertEqual(DEBUGGER_PROMPT_FILENAME, DEBUGGER_PARALLEL_PROMPT_FILENAME)
         self.assertIn("{owned_paths}", parallel_debugger_template)
         self.assertIn("merged parallel batch", parallel_debugger_template)
         self.assertIn("cherry-pick conflict", parallel_debugger_template)
@@ -1476,13 +1459,17 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         shutil.rmtree(temp_root, ignore_errors=True)
         repo_dir = temp_root / "repo"
         (repo_dir / "docs").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "src").mkdir(parents=True, exist_ok=True)
         (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
         (repo_dir / "AGENTS.md").write_text("AGENTS summary", encoding="utf-8")
         (repo_dir / "docs" / "notes.md").write_text("docs summary", encoding="utf-8")
+        (repo_dir / "src" / "main.py").write_text("def run() -> None:\n    pass\n", encoding="utf-8")
 
         try:
             repo_inputs = scan_repository_inputs(repo_dir)
             self.assertIn("notes.md", repo_inputs["docs"])
+            self.assertIn("Existing implementation files detected.", repo_inputs["source"])
+            self.assertIn("src/main.py", repo_inputs["source"])
             reference_notes = load_reference_guide_text()
             self.assertIn("React + Tauri", reference_notes)
 
@@ -1510,11 +1497,15 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertIn("Planner Agent A", decomposition_prompt)
         self.assertIn("candidate_blocks", decomposition_prompt)
+        self.assertIn("Source inventory:", decomposition_prompt)
+        self.assertIn("prefer editing or extending that code", decomposition_prompt)
         self.assertIn("Use the following priority order while planning:", plan_prompt)
         self.assertIn("Requested execution mode:", plan_prompt)
         self.assertIn("parallel", plan_prompt)
         self.assertIn("Planner Agent A decomposition artifact:", plan_prompt)
         self.assertIn("Planner Agent A output unavailable.", plan_prompt)
+        self.assertIn("Source inventory:", plan_prompt)
+        self.assertIn("fold scaffold-only bootstrap work into the concrete implementation step", plan_prompt)
         self.assertIn('"block_id":"B1"', packed_plan_prompt)
         self.assertIn("step_id", plan_prompt)
         self.assertIn("depends_on", plan_prompt)
@@ -1537,6 +1528,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         repo_dir.mkdir(parents=True, exist_ok=True)
         (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
         (repo_dir / "AGENTS.md").write_text("AGENTS summary", encoding="utf-8")
+        (repo_dir / "src").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "src" / "contracts.py").write_text("class StepSchema:\n    pass\n", encoding="utf-8")
         orchestrator = Orchestrator(workspace_root)
         runtime = RuntimeOptions(model="gpt-5.4", effort="high", execution_mode="parallel", test_cmd="python -m pytest")
 
@@ -1551,6 +1544,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 "needed": true,
                 "task_title": "Freeze the contract",
                 "purpose": "Unblock safe downstream fan-out.",
+                "contract_docstring": "Keep the shared step schema stable for downstream executors.",
                 "candidate_owned_paths": ["src/contracts.py"],
                 "success_criteria": "The shared contract exists."
               },
@@ -1644,6 +1638,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn('"block_id": "B1"', second_prompt)
         self.assertEqual(plan_state.plan_title, "Dual planner demo")
         self.assertEqual([step.step_id for step in plan_state.steps], ["ST1", "ST2"])
+        self.assertIn("If the relevant module, class, or function already exists, update it in place", plan_state.steps[0].codex_description)
 
     def test_ensure_gitignore_adds_missing_entries_once(self) -> None:
         project_dir = Path(__file__).resolve().parents[1] / ".tmp_gitignore_test"
