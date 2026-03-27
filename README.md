@@ -448,4 +448,16 @@ Key generated artifacts can include:
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Ahnd6474/Jakal-flow&type=Date&legend=top-left)](https://www.star-history.com/#Ahnd6474/Jakal-flow&Date)
+<p align="center">
+  <a href="https://www.star-history.com/#Ahnd6474/Jakal-flow&type=date&legend=top-left">
+    <img
+      src="https://api.star-history.com/svg?repos=Ahnd6474/Jakal-flow&type=date&legend=top-left"
+      alt="Star History Chart for Jakal-flow"
+    />
+  </a>
+</p>
+
+<p align="center">
+  If the chart does not render in your GitHub view, open it directly:
+  <a href="https://www.star-history.com/#Ahnd6474/Jakal-flow&type=date&legend=top-left">Star History</a>
+</p>
