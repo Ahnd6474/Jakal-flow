@@ -33,7 +33,8 @@ export function DashboardView({ detail, planDraft, form, busy, modelPresets, mod
   const account = codexStatus.account || {};
   const usageBuckets = codexUsageBuckets(codexStatus, language);
   const dashboardVisibility = normalizeDashboardVisibility(programSettings?.dashboard_visibility);
-  const pendingSteps = (planDraft?.steps || []).filter((step) => step.status !== "completed");
+  const livePlan = activeJob?.status === "running" && detail?.plan ? detail.plan : planDraft;
+  const pendingSteps = (livePlan?.steps || []).filter((step) => step.status !== "completed");
   const projectStatus = detail?.project?.current_status || "idle";
   const activeStatus =
     activeJob?.status === "running" && !isDebuggingStatus(projectStatus)

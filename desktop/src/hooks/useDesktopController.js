@@ -794,8 +794,10 @@ export function useDesktopController() {
           }),
         ),
       );
+      return job;
     } catch (error) {
       setMessage(messagePayload("error", String(error)));
+      return null;
     }
   }
 
@@ -828,7 +830,10 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.createStepBeforeRun")));
       return;
     }
-    await startJob(BRIDGE_COMMANDS.RUN_PLAN, buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
+    const job = await startJob(BRIDGE_COMMANDS.RUN_PLAN, buildProjectPayload(applyProgramSettingsToForm(projectForm, storedProgramSettings), planDraft));
+    if (job) {
+      setPlanDirty(false);
+    }
   }
 
   async function requestStop() {

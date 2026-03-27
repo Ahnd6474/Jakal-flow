@@ -60,6 +60,7 @@ function DagNode({ step, selected, onSelect, language, t }) {
 export function ParallelRunControlView({
   detail,
   planDraft,
+  activeJob,
   selectedStepId,
   busy,
   onPromptChange,
@@ -75,7 +76,8 @@ export function ParallelRunControlView({
   onDeleteStep,
 }) {
   const { language, t } = useI18n();
-  const steps = planStepsWithCloseout(planDraft, {
+  const livePlan = activeJob?.status === "running" && detail?.plan ? detail.plan : planDraft;
+  const steps = planStepsWithCloseout(livePlan, {
     title: t("run.closeout"),
     description: t("reports.closeoutReport"),
     successCriteria: t("reports.closeoutReport"),
@@ -119,7 +121,7 @@ export function ParallelRunControlView({
         </div>
         <div className={`metric-card metric-card--${statusTone(planDraft?.closeout_status)}`}>
           <span>{t("run.closeout")}</span>
-          <strong>{displayStatus(planDraft?.closeout_status || "not_started", language)}</strong>
+          <strong>{displayStatus(livePlan?.closeout_status || "not_started", language)}</strong>
         </div>
         <div className="metric-card">
           <span>{t("run.estimatedCost")}</span>
@@ -176,7 +178,7 @@ export function ParallelRunControlView({
           <div className="content-card__header">
             <strong>{t("field.prompt")}</strong>
           </div>
-          <textarea className="editor-textarea editor-textarea--prompt" value={planDraft?.project_prompt || ""} onChange={(event) => onPromptChange(event.target.value)} disabled={busy} />
+          <textarea className="editor-textarea editor-textarea--prompt" value={livePlan?.project_prompt || ""} onChange={(event) => onPromptChange(event.target.value)} disabled={busy} />
         </div>
 
         <div className="content-card">

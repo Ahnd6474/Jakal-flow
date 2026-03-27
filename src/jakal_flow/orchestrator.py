@@ -36,7 +36,6 @@ from .planning import (
     implementation_prompt,
     is_plan_markdown,
     load_debugger_prompt_template,
-    load_optimization_prompt_template,
     load_plan_decomposition_prompt_template,
     load_plan_generation_prompt_template,
     parse_execution_plan_response,
