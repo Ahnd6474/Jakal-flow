@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 
+from .failure_logs import write_runtime_failure_log
 from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER, VALID_MODEL_PROVIDERS
 from .models import RuntimeOptions
 from .orchestrator import Orchestrator
@@ -12,7 +13,7 @@ from .status_views import effective_project_status
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Multi-repository Codex CLI orchestrator")
+    parser = argparse.ArgumentParser(description="Multi-repository AI CLI orchestrator")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add_shared_arguments(target: argparse.ArgumentParser, include_repo: bool = True) -> None:
@@ -28,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--model-provider",
             default=DEFAULT_MODEL_PROVIDER,
             choices=sorted(VALID_MODEL_PROVIDERS),
-            help="Codex/OpenAI-compatible provider preset to use for this project",
+            help="Provider preset to use for this project",
         )
         target.add_argument(
             "--local-model-provider",
@@ -36,8 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
             choices=[DEFAULT_LOCAL_MODEL_PROVIDER, "lmstudio"],
             help="Local provider to use when --model-provider oss is selected",
         )
-        target.add_argument("--model", default="auto", help="Model slug passed to Codex CLI, or auto to use Codex defaults")
-        target.add_argument("--provider-base-url", default="", help="Override the OpenAI-compatible base URL used for non-default providers")
+        target.add_argument("--model", default="auto", help="Model slug passed to the selected CLI, or auto when the provider supports it")
+        target.add_argument("--provider-base-url", default="", help="Override the provider base URL used for compatible non-default providers")
         target.add_argument("--provider-api-key-env", default="", help="Environment variable name that stores the provider API key")
         target.add_argument("--billing-mode", default="", help="Cost estimate mode: included, token, or per_pass")
         target.add_argument("--input-cost-per-million-usd", type=float, default=0.0, help="Estimated USD per 1M input tokens")
@@ -171,6 +172,14 @@ def _list_repo_status(orchestrator: Orchestrator, project) -> str:
     return effective_project_status(raw_status, plan_state, project.loop_state)
 
 
+def _best_effort_project(orchestrator: Orchestrator, args: argparse.Namespace):
+    repo_url = str(getattr(args, "repo_url", "") or "").strip()
+    branch = str(getattr(args, "branch", "") or "").strip() or "main"
+    if repo_url:
+        return orchestrator.workspace.find_project(repo_url, branch)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -234,5 +243,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"Unsupported command: {args.command}")
         return 2
     except Exception as exc:
+        write_runtime_failure_log(
+            Path(args.workspace_root).expanduser().resolve(),
+            source="cli",
+            command=str(getattr(args, "command", "") or "unknown"),
+            exc=exc,
+            payload=vars(args),
+            project=_best_effort_project(orchestrator, args),
+        )
         print(f"error: {exc}", file=sys.stderr)
         return 1

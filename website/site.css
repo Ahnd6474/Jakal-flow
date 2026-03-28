@@ -745,10 +745,13 @@ h1 {
     width: min(100% - 20px, 1240px);
   }
 
-  .topbar,
+  .topbar {
+    flex-wrap: wrap;
+    border-radius: 28px;
+  }
+
   .contact-card,
-  .footer,
-  .topbar-side {
+  .footer {
     flex-direction: column;
     align-items: flex-start;
     border-radius: 28px;
@@ -767,5 +770,184 @@ h1 {
 
   .hero-meta {
     flex-direction: column;
+  }
+}
+
+/* ─── UX Enhancements ─────────────────────────────────────── */
+
+/* Scroll progress bar */
+.scroll-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  z-index: 100;
+  width: 0%;
+  transition: width 80ms linear;
+  pointer-events: none;
+}
+
+/* Nav link hover & active state */
+.nav a {
+  position: relative;
+  transition: color 200ms ease;
+}
+
+.nav a:hover,
+.nav a.active {
+  color: var(--text);
+}
+
+.nav a::after {
+  content: '';
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  width: 100%;
+  height: 1.5px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 220ms ease;
+}
+
+.nav a:hover::after,
+.nav a.active::after {
+  transform: scaleX(1);
+}
+
+/* Card hover lift */
+.callout-grid article,
+.workflow-card,
+.showcase-card,
+.release-card,
+.block-card {
+  transition: transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.callout-grid article:hover,
+.workflow-card:hover,
+.showcase-card:hover,
+.release-card:hover,
+.block-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(134, 241, 198, 0.22);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.32);
+}
+
+/* Live pill pulsing dot */
+.live-pill {
+  position: relative;
+  padding-left: 28px;
+}
+
+.live-pill::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: dot-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(134, 241, 198, 0.5); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 6px rgba(134, 241, 198, 0); }
+}
+
+/* Scroll reveal animation */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 540ms ease, transform 540ms ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Button focus ring */
+.button:focus-visible,
+.contact-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Mobile hamburger menu */
+.menu-toggle {
+  display: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.menu-toggle span {
+  display: block;
+  width: 18px;
+  height: 1.5px;
+  background: var(--text);
+  border-radius: 2px;
+  transition: transform 200ms ease, opacity 200ms ease;
+}
+
+.menu-toggle[aria-expanded="true"] span:nth-child(1) {
+  transform: translateY(6.5px) rotate(45deg);
+}
+
+.menu-toggle[aria-expanded="true"] span:nth-child(2) {
+  opacity: 0;
+}
+
+.menu-toggle[aria-expanded="true"] span:nth-child(3) {
+  transform: translateY(-6.5px) rotate(-45deg);
+}
+
+@media (max-width: 760px) {
+  .menu-toggle {
+    display: flex;
+    margin-left: auto;
+  }
+
+  .topbar-side {
+    display: none;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    padding-top: 14px;
+    margin-top: 6px;
+    border-top: 1px solid var(--line);
+  }
+
+  .topbar-side.open {
+    display: flex;
+  }
+
+  .nav {
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .lang-switcher {
+    width: 100%;
+  }
+
+  .lang-select {
+    flex: 1;
   }
 }

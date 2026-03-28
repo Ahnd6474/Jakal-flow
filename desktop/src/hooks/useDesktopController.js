@@ -3,7 +3,12 @@ import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
 import { bridgeRequest, cancelBridgeJob, configureBridgeScheduler, startBridgeJob, subscribeBridgeEvents } from "../api";
 import { BRIDGE_COMMANDS } from "../bridgeProtocol";
 import { bridgeEventJob, bridgeEventProject, isJobUpdatedEvent, isProjectChangedEvent, isProjectUiEvent } from "../controller/bridgeEvents";
-import { mergeRefreshRepoId, projectRefreshDebounceMs, shouldRefreshSelectedProject } from "../controller/projectRefresh";
+import {
+  mergeRefreshRepoId,
+  projectRefreshDebounceMs,
+  shouldRefreshListingForProjectEvent,
+  shouldRefreshSelectedProject,
+} from "../controller/projectRefresh";
 import {
   carryProjectPromptDraft,
   defaultShareSettings,
@@ -40,10 +45,15 @@ import {
 } from "../utils";
 import {
   fetchHistoryDetail,
+  fetchProjectCheckpoints,
   fetchProjectDetail,
   fetchProjectDetailBySelector,
+  fetchProjectHistory,
+  fetchProjectReports,
+  fetchProjectWorkspace,
   loadInitialDesktopState,
   loadProjectListing,
+  loadWorkspaceShareDetail,
   refreshVisibleProjectState,
   syncRunningJobSnapshot,
 } from "../controller/projectQueries";
@@ -52,6 +62,7 @@ import {
   applyProjectDetailState,
   applyProjectDetailListingState,
   clearSelectedProjectState as clearProjectSelectionState,
+  mergeProjectDetailSupplement,
 } from "../controller/projectStore";
 import { usePersistentState } from "./usePersistentState";
 
@@ -101,6 +112,9 @@ export function useDesktopController() {
   const [sidebarTab, setSidebarTab] = usePersistentState("jakal-flow:sidebar-tab", "projects");
   const [bottomCollapsed, setBottomCollapsed] = usePersistentState("jakal-flow:bottom-collapsed", false);
   const [bottomHeight, setBottomHeight] = usePersistentState("jakal-flow:bottom-height", 250);
+  const [rightCollapsed, setRightCollapsed] = usePersistentState("jakal-flow:right-collapsed", true);
+  const [rightWidth, setRightWidth] = usePersistentState("jakal-flow:right-width", 280);
+  const [sidebarWidth, setSidebarWidth] = usePersistentState("jakal-flow:sidebar-width", 312);
   const [projectFilter, setProjectFilter] = usePersistentState("jakal-flow:project-filter", "");
   const [workspaceFilter, setWorkspaceFilter] = usePersistentState("jakal-flow:workspace-filter", "");
   const deferredProjectFilter = useDeferredValue(projectFilter);
@@ -282,7 +296,7 @@ export function useDesktopController() {
   }
 
   function applyProjectDetail(detail, options = {}) {
-    const applied = applyProjectDetailState({
+    const normalizedDetail = applyProjectDetailState({
       detail,
       options,
       refs: {
@@ -310,10 +324,10 @@ export function useDesktopController() {
     if (detail?.share) {
       setWorkspaceShareDetail(detail.share);
     }
-    if (applied) {
+    if (normalizedDetail) {
       const nextProjects = applyProjectDetailListingState({
         projects: projectsRef.current,
-        detail,
+        detail: normalizedDetail,
         runningJob: options.runningJob ?? jobsRef.current,
         setProjects,
         setWorkspaceStats,
@@ -322,7 +336,38 @@ export function useDesktopController() {
         projectsRef.current = nextProjects;
       }
     }
-    return applied;
+    return normalizedDetail;
+  }
+
+  function mergeSelectedProjectSupplement(repoId, supplement) {
+    if (!repoId || !supplement) {
+      return;
+    }
+    startTransition(() => {
+      setProjectDetail((current) => {
+        if (String(current?.project?.repo_id || "").trim() !== String(repoId || "").trim()) {
+          return current;
+        }
+        return mergeProjectDetailSupplement(current, supplement);
+      });
+    });
+  }
+
+  function projectSectionLoaded(sectionKey) {
+    return Boolean(projectDetail?.loaded_sections?.[sectionKey]);
+  }
+
+  async function ensureWorkspaceShareLoaded(options = {}) {
+    const force = options.force === true;
+    if (!workspaceRoot) {
+      return null;
+    }
+    if (!force && workspaceShareDetail) {
+      return workspaceShareDetail;
+    }
+    const shareDetail = await loadWorkspaceShareDetail(bridgeRequest, workspaceRoot);
+    setWorkspaceShareDetail(shareDetail?.share || null);
+    return shareDetail?.share || null;
   }
 
   useEffect(() => {
@@ -335,11 +380,6 @@ export function useDesktopController() {
           return;
         }
         setWorkspaceRoot(bootstrap.workspace_root);
-        const workspaceShare = await bridgeRequest(BRIDGE_COMMANDS.LOAD_WORKSPACE_SHARE, {}, bootstrap.workspace_root);
-        if (cancelled) {
-          return;
-        }
-        setWorkspaceShareDetail(workspaceShare?.share || null);
         setBaseRuntime(bootstrap.default_runtime);
         setModelPresets(bootstrap.model_presets || []);
         setModelCatalog(bootstrap.model_catalog || []);
@@ -469,6 +509,105 @@ export function useDesktopController() {
     wantsExpandedDetail,
     workspaceRoot,
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProjectSupplements() {
+      const repoId = String(selectedProjectId || "").trim();
+      if (!repoId || !workspaceRoot || pendingAction || loadingProjectId) {
+        return;
+      }
+      if (String(projectDetail?.project?.repo_id || "").trim() !== repoId) {
+        return;
+      }
+      const supplementRequests = [];
+      if (Boolean(programSettings?.developer_mode) && centerTab === "reports" && !projectSectionLoaded("reports")) {
+        supplementRequests.push(fetchProjectReports(bridgeRequest, repoId, workspaceRoot));
+      }
+      if (sidebarTab === "workspace" && !projectSectionLoaded("workspace")) {
+        supplementRequests.push(fetchProjectWorkspace(bridgeRequest, repoId, workspaceRoot));
+      }
+      if (sidebarTab === "plans" && !projectSectionLoaded("checkpoints")) {
+        supplementRequests.push(fetchProjectCheckpoints(bridgeRequest, repoId, workspaceRoot));
+      }
+      if (centerTab === "history" && !selectedHistoryId && !projectSectionLoaded("history")) {
+        supplementRequests.push(fetchProjectHistory(bridgeRequest, repoId, workspaceRoot));
+      }
+      if (!supplementRequests.length) {
+        return;
+      }
+      try {
+        const supplements = await Promise.all(supplementRequests);
+        if (cancelled) {
+          return;
+        }
+        const mergedSupplement = supplements.reduce(
+          (combined, supplement) => ({
+            ...combined,
+            ...supplement,
+            loaded_sections: {
+              ...(combined?.loaded_sections || {}),
+              ...(supplement?.loaded_sections || {}),
+            },
+          }),
+          {},
+        );
+        mergeSelectedProjectSupplement(repoId, mergedSupplement);
+      } catch (error) {
+        if (!cancelled && !pendingAction) {
+          setMessage(messagePayload("error", String(error)));
+        }
+      }
+    }
+
+    void loadProjectSupplements();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    centerTab,
+    loadingProjectId,
+    pendingAction,
+    programSettings?.developer_mode,
+    projectDetail?.loaded_sections?.checkpoints,
+    projectDetail?.loaded_sections?.history,
+    projectDetail?.loaded_sections?.reports,
+    projectDetail?.loaded_sections?.workspace,
+    projectDetail?.project?.repo_id,
+    selectedHistoryId,
+    selectedProjectId,
+    sidebarTab,
+    workspaceRoot,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWorkspaceShare() {
+      if (!workspaceRoot || pendingAction) {
+        return;
+      }
+      if (centerTab !== "app-settings" || workspaceShareDetail) {
+        return;
+      }
+      try {
+        const shareDetail = await ensureWorkspaceShareLoaded();
+        if (cancelled || !shareDetail) {
+          return;
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(messagePayload("error", String(error)));
+        }
+      }
+    }
+
+    void loadWorkspaceShare();
+    return () => {
+      cancelled = true;
+    };
+  }, [centerTab, pendingAction, workspaceRoot, workspaceShareDetail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -609,7 +748,9 @@ export function useDesktopController() {
       if (isProjectChangedEvent(eventPayload)) {
         const project = bridgeEventProject(eventPayload);
         const eventRepoId = String(project?.repo_id || "").trim();
-        scheduleBridgeRefresh(eventRepoId, { refreshListing: true });
+        scheduleBridgeRefresh(eventRepoId, {
+          refreshListing: shouldRefreshListingForProjectEvent(selectedProjectId, eventRepoId),
+        });
         return;
       }
       if (isProjectUiEvent(eventPayload)) {
@@ -1343,7 +1484,8 @@ export function useDesktopController() {
   }
 
   async function copyShareLink() {
-    const shareUrl = workspaceShareDetail?.active_session?.share_url || "";
+    const detail = workspaceShareDetail || (await ensureWorkspaceShareLoaded());
+    const shareUrl = detail?.active_session?.share_url || "";
     if (!shareUrl) {
       setMessage(messagePayload("error", translate(language, "message.noShareLinkAvailable")));
       return;
@@ -1385,7 +1527,8 @@ export function useDesktopController() {
   }
 
   async function revokeShareLink() {
-    const sessionId = workspaceShareDetail?.active_session?.session_id || "";
+    const detail = workspaceShareDetail || (await ensureWorkspaceShareLoaded());
+    const sessionId = detail?.active_session?.session_id || "";
     if (!sessionId) {
       setMessage(messagePayload("error", translate(language, "message.noShareLinkAvailable")));
       return;
@@ -1564,6 +1707,9 @@ export function useDesktopController() {
     sidebarTab,
     bottomCollapsed,
     bottomHeight,
+    rightCollapsed,
+    rightWidth,
+    sidebarWidth,
     projectFilter,
     workspaceFilter,
     planDirty,
@@ -1578,6 +1724,9 @@ export function useDesktopController() {
     setSidebarTab,
     setBottomCollapsed,
     setBottomHeight,
+    setRightCollapsed,
+    setRightWidth,
+    setSidebarWidth,
     setProjectFilter,
     setWorkspaceFilter,
     setShareSettings,

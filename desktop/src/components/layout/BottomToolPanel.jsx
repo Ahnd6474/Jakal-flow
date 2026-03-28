@@ -11,7 +11,7 @@ function ToolTab({ value, activeTab, onChange, label }) {
   );
 }
 
-export function BottomToolPanel({ activeTab, onChangeTab, data }) {
+export function BottomToolPanel({ activeTab, onChangeTab, data, onHide }) {
   const tokenUsage = data?.token_usage || {};
   const codexStatus = data?.codex_status || {};
   const runtimeInsights = data?.runtime_insights || {};
@@ -33,6 +33,22 @@ export function BottomToolPanel({ activeTab, onChangeTab, data }) {
           <ToolTab value="tests" activeTab={activeTab} onChange={onChangeTab} label={t("test.result")} />
           <ToolTab value="git" activeTab={activeTab} onChange={onChangeTab} label={t("tool.gitStatus")} />
         </div>
+        {onHide ? (
+          <div className="tool-window__header-actions">
+            <button
+              className="tool-window__header-btn"
+              onClick={onHide}
+              type="button"
+              title={t("action.dismiss")}
+              aria-label="Hide panel"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {activeTab === "json" ? (

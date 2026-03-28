@@ -336,6 +336,7 @@ const STRINGS = {
     "option.generateWordReport": "Word Report Creation",
     "option.localProviderLmStudio": "LM Studio",
     "option.localProviderOllama": "Ollama",
+    "option.providerEnsemble": "GPT + Gemini + Claude Ensemble",
     "option.providerOpenAI": "OpenAI / Codex Cloud",
     "option.providerOpenRouter": "OpenRouter",
     "option.providerOpenCDK": "OpenCDK",
@@ -451,6 +452,7 @@ const STRINGS = {
     "sidebar.searchProjects": "Search projects",
     "sidebar.selectedSummary": "Selected summary",
     "sidebar.targetBlock": "Target block {block}",
+    "status.awaiting_checkpoint_approval": "Awaiting checkpoint approval",
     "status.awaiting_review": "Awaiting review",
     "status.cancelled": "Cancelled",
     "status.closeout_failed": "Closeout failed",
@@ -458,6 +460,8 @@ const STRINGS = {
     "status.completed": "Completed",
     "status.failed": "Failed",
     "status.idle": "Idle",
+    "status.integrating": "Integrating",
+    "status.merging": "Merging",
     "status.not_started": "Not started",
     "status.paused_for_review": "Paused for review",
     "status.pending": "Pending",
@@ -634,6 +638,7 @@ const STRINGS = {
     "option.executionSerial": "직렬",
     "option.localProviderLmStudio": "LM Studio",
     "option.localProviderOllama": "Ollama",
+    "option.providerEnsemble": "GPT + Gemini + Claude 앙상블",
     "option.providerOpenAI": "OpenAI / Codex 클라우드",
     "option.providerOpenRouter": "OpenRouter",
     "option.providerOpenCDK": "OpenCDK",
@@ -772,6 +777,7 @@ STRINGS.en["message.allProjectsDeleted"] = "All projects removed from jakal-flow
 STRINGS.en["option.generateWordReport"] = "Word Report Creation";
 STRINGS.en["option.lightMode"] = "Light Mode";
 STRINGS.en["option.developerMode"] = "Developer Mode";
+STRINGS.en["option.saveProjectLogs"] = "Save Project Activity Logs";
 STRINGS.en["dashboard.codexPlan"] = "Codex Plan";
 STRINGS.en["dashboard.codexUsage"] = "Codex Usage";
 STRINGS.en["common.auth"] = "Auth";
@@ -785,12 +791,16 @@ STRINGS.en["progress.closeoutRunning"] = "Completed {completed}/{total} steps, c
 STRINGS.en["progress.closeoutFailed"] = "Completed {completed}/{total} steps, closeout failed";
 STRINGS.en["progress.closeoutPending"] = "Completed {completed}/{total} steps, closeout pending";
 STRINGS.en["progress.runningIds"] = "Completed {completed}/{total} steps, running: {ids}";
+STRINGS.en["progress.integratingIds"] = "Completed {completed}/{total} steps, integrating: {ids}";
+STRINGS.en["progress.runningAndIntegratingIds"] = "Completed {completed}/{total} steps, running: {runningIds}; integrating: {integratingIds}";
 STRINGS.en["progress.readyIds"] = "Completed {completed}/{total} steps, ready: {ids}";
 STRINGS.en["action.backgroundJob"] = "Background Job";
 STRINGS.en["run.closeoutRunning"] = "Running closeout";
 STRINGS.en["run.completedStepsSummary"] = "{completed}/{total} steps completed";
 STRINGS.en["run.liveRun"] = "Live Run";
 STRINGS.en["run.planGeneration"] = "Generating execution plan";
+STRINGS.en["run.planningStage"] = "Planning stage {current}/{total}";
+STRINGS.en["run.planningStageWithStatus"] = "Planning stage {current}/{total}, {status}";
 STRINGS.en["run.preparingStep"] = "Preparing {step}";
 STRINGS.en["run.progressPercent"] = "{percent}% complete";
 STRINGS.en["run.readyNodeSummary"] = "{count} ready node(s)";
@@ -819,6 +829,7 @@ STRINGS.ko["message.allProjectsDeleted"] = "모든 프로젝트를 제거했습�
 STRINGS.ko["option.generateWordReport"] = "Word 보고서 제작";
 STRINGS.ko["option.lightMode"] = "밝은 모드";
 STRINGS.ko["option.developerMode"] = "개발자 모드";
+STRINGS.ko["option.saveProjectLogs"] = "프로젝트 작업 로그 저장";
 STRINGS.ko["dashboard.codexPlan"] = "Codex 요금제";
 STRINGS.ko["dashboard.codexUsage"] = "Codex 사용량";
 STRINGS.ko["common.auth"] = "인증 방식";
@@ -930,6 +941,7 @@ const KO_HIGH_QUALITY_OVERRIDES = {
   "message.runStateRefreshed": "실행 상태를 새로고침했습니다.",
   "option.allowPushAfterSafeRuns": "안전 검증 후 push 허용",
   "option.developerMode": "개발자 모드",
+  "option.saveProjectLogs": "프로젝트 작업 로그 저장",
   "option.executionParallel": "병렬",
   "option.executionSerial": "직렬",
   "option.generateWordReport": "Word 보고서 생성",
@@ -1027,6 +1039,8 @@ KO_HIGH_QUALITY_OVERRIDES["run.autoRunAfterPlan"] = "계획 생성 후 바로 �
 KO_HIGH_QUALITY_OVERRIDES["run.completedStepsSummary"] = "{completed}/{total}단계 완료";
 KO_HIGH_QUALITY_OVERRIDES["run.liveRun"] = "실행 중인 작업";
 KO_HIGH_QUALITY_OVERRIDES["run.planGeneration"] = "계획 생성 중";
+KO_HIGH_QUALITY_OVERRIDES["run.planningStage"] = "계획 단계 {current}/{total}";
+KO_HIGH_QUALITY_OVERRIDES["run.planningStageWithStatus"] = "계획 단계 {current}/{total}, {status}";
 KO_HIGH_QUALITY_OVERRIDES["run.preparingStep"] = "{step} 준비 중";
 KO_HIGH_QUALITY_OVERRIDES["run.progressPercent"] = "{percent}% 완료";
 KO_HIGH_QUALITY_OVERRIDES["run.readyNodeSummary"] = "실행 가능 노드 {count}개";
@@ -1041,7 +1055,12 @@ KO_HIGH_QUALITY_OVERRIDES["field.backgroundQueuePriority"] = "예약 우선순�
 KO_HIGH_QUALITY_OVERRIDES["run.queuePriority"] = "우선순위 {priority}";
 
 KO_HIGH_QUALITY_OVERRIDES["progress.runningIds"] = "{completed}/{total}\ub2e8\uacc4 \uc644\ub8cc, \uc2e4\ud589 \uc911: {ids}";
+KO_HIGH_QUALITY_OVERRIDES["progress.integratingIds"] = "{completed}/{total}\ub2e8\uacc4 \uc644\ub8cc, \ubcd1\ud569 \uc911: {ids}";
+KO_HIGH_QUALITY_OVERRIDES["progress.runningAndIntegratingIds"] = "{completed}/{total}\ub2e8\uacc4 \uc644\ub8cc, \uc2e4\ud589 \uc911: {runningIds}; \ubcd1\ud569 \uc911: {integratingIds}";
 KO_HIGH_QUALITY_OVERRIDES["progress.readyIds"] = "{completed}/{total}\ub2e8\uacc4 \uc644\ub8cc, \uc2e4\ud589 \uac00\ub2a5: {ids}";
+KO_HIGH_QUALITY_OVERRIDES["status.awaiting_checkpoint_approval"] = "\uccb4\ud06c\ud3ec\uc778\ud2b8 \uc2b9\uc778 \ub300\uae30";
+KO_HIGH_QUALITY_OVERRIDES["status.integrating"] = "\ubcd1\ud569 \uc911";
+KO_HIGH_QUALITY_OVERRIDES["status.merging"] = "\ubcd1\ud569 \uc911";
 KO_HIGH_QUALITY_OVERRIDES["action.archiveAllProjects"] = "모두 보관";
 KO_HIGH_QUALITY_OVERRIDES["action.archiveProject"] = "프로젝트 보관";
 KO_HIGH_QUALITY_OVERRIDES["history.noFlowChart"] = "저장된 플로우 차트가 없습니다.";
@@ -1226,6 +1245,12 @@ export function displayStatus(status, language) {
   }
   if (normalized === "debugging" || normalized === "running:debugging" || normalized === "running:parallel-debugging") {
     return translate(normalizedLanguage, "run.debugging");
+  }
+  if (normalized === "running:merging") {
+    return translate(normalizedLanguage, "status.merging");
+  }
+  if (normalized === "running:closeout") {
+    return translate(normalizedLanguage, "run.closeoutRunning");
   }
   if (normalized === "queued") {
     return translate(normalizedLanguage, "status.queued");

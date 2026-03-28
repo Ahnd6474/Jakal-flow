@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,7 +11,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jakal_flow.github_api import parse_github_repository_url
+from jakal_flow.github_api import GitHubAPIError, parse_github_repository_url
 from jakal_flow.orchestrator import Orchestrator
 from jakal_flow.reporting import Reporter
 from jakal_flow.ui_bridge import run_command
@@ -112,6 +113,12 @@ class FailureReportingTests(unittest.TestCase):
                     "summary": "pytest exited with 1",
                 },
             )
+            block_dir = project.paths.logs_dir / "block_0001"
+            block_dir.mkdir(parents=True, exist_ok=True)
+            stderr_log = block_dir / "block-search-pass.test.stderr.log"
+            prompt_log = block_dir / "block-search-pass.prompt.md"
+            stderr_log.write_text("Traceback: detailed failure\nAssertionError: boom\n", encoding="utf-8")
+            prompt_log.write_text("Investigate the failure and recover safely.\n", encoding="utf-8")
 
             reporter.write_status_report()
             bundle = reporter.write_failure_bundle(
@@ -124,9 +131,15 @@ class FailureReportingTests(unittest.TestCase):
 
             self.assertTrue(Path(bundle["report_json_file"]).exists())
             self.assertTrue(Path(bundle["report_markdown_file"]).exists())
+            self.assertIn(str(stderr_log), bundle["artifact_files"])
+            self.assertTrue(any(item["path"] == str(stderr_log) and "Traceback: detailed failure" in item["preview"] for item in bundle["artifacts"]))
             markdown = Path(bundle["report_markdown_file"]).read_text(encoding="utf-8")
             self.assertIn("jakal-flow failure report", markdown)
             self.assertIn("Conflict Policy", markdown)
+            self.assertIn("Failure Artifacts", markdown)
+            report_json = json.loads(Path(bundle["report_json_file"]).read_text(encoding="utf-8"))
+            self.assertEqual(report_json["report_markdown_file"], bundle["report_markdown_file"])
+            self.assertIn(str(prompt_log), report_json["artifact_files"])
 
             with mock.patch.dict(os.environ, {}, clear=True):
                 result = reporter.post_pr_failure_report(bundle)
@@ -182,6 +195,87 @@ class FailureReportingTests(unittest.TestCase):
 
         self.assertFalse(result["created"])
         self.assertEqual(result["reason"], "head_matches_base")
+
+    def test_reporter_ensure_pull_request_enables_auto_merge_when_requested(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            _detail, _orchestrator, project = create_project(workspace_root, repo_dir)
+            reporter = Reporter(project)
+
+            with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "demo-token"}, clear=True), mock.patch(
+                "jakal_flow.reporting.GitHubClient.get_repository",
+                return_value=mock.Mock(default_branch="main"),
+            ), mock.patch(
+                "jakal_flow.reporting.GitHubClient.find_open_pull_request_for_branch",
+                return_value=None,
+            ), mock.patch(
+                "jakal_flow.reporting.GitHubClient.create_pull_request",
+                return_value={"number": 34, "html_url": "https://github.com/example/failure-demo/pull/34"},
+            ), mock.patch(
+                "jakal_flow.reporting.GitHubClient.enable_pull_request_auto_merge",
+                return_value={"pullRequest": {"number": 34}},
+            ) as mocked_auto_merge, mock.patch(
+                "jakal_flow.reporting.GitHubClient.merge_pull_request",
+            ) as mocked_merge:
+                result = reporter.ensure_pull_request(
+                    head_branch="jakal-flow-closeout",
+                    base_branch="main",
+                    title="Closeout",
+                    auto_merge=True,
+                )
+
+        self.assertTrue(result["created"])
+        self.assertTrue(result["auto_merge_requested"])
+        self.assertTrue(result["auto_merge_enabled"])
+        self.assertFalse(result["merged"])
+        mocked_auto_merge.assert_called_once_with("example", "failure-demo", 34, merge_method="SQUASH")
+        mocked_merge.assert_not_called()
+
+    def test_reporter_ensure_pull_request_falls_back_to_direct_merge_when_auto_merge_fails(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            _detail, _orchestrator, project = create_project(workspace_root, repo_dir)
+            reporter = Reporter(project)
+
+            with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "demo-token"}, clear=True), mock.patch(
+                "jakal_flow.reporting.GitHubClient.get_repository",
+                return_value=mock.Mock(default_branch="main"),
+            ), mock.patch(
+                "jakal_flow.reporting.GitHubClient.find_open_pull_request_for_branch",
+                return_value={"number": 56, "html_url": "https://github.com/example/failure-demo/pull/56"},
+            ), mock.patch(
+                "jakal_flow.reporting.GitHubClient.enable_pull_request_auto_merge",
+                side_effect=GitHubAPIError("auto-merge disabled"),
+            ) as mocked_auto_merge, mock.patch(
+                "jakal_flow.reporting.GitHubClient.merge_pull_request",
+                return_value={"merged": True, "sha": "abc123", "message": "Pull Request successfully merged"},
+            ) as mocked_merge:
+                result = reporter.ensure_pull_request(
+                    head_branch="jakal-flow-closeout",
+                    base_branch="main",
+                    title="Closeout",
+                    auto_merge=True,
+                )
+
+        self.assertFalse(result["created"])
+        self.assertEqual(result["reason"], "already_exists")
+        self.assertTrue(result["auto_merge_requested"])
+        self.assertFalse(result["auto_merge_enabled"])
+        self.assertTrue(result["merged"])
+        self.assertEqual(result["merge_method"], "squash")
+        self.assertEqual(result["auto_merge_error"], "auto-merge disabled")
+        mocked_auto_merge.assert_called_once_with("example", "failure-demo", 56, merge_method="SQUASH")
+        mocked_merge.assert_called_once_with(
+            "example",
+            "failure-demo",
+            56,
+            merge_method="squash",
+            commit_title="Closeout",
+        )
 
 
 if __name__ == "__main__":

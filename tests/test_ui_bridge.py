@@ -16,13 +16,26 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jakal_flow.cli import main as cli_main
+from jakal_flow.bridge_events import bridge_event_context
+from jakal_flow.execution_control import ImmediateStopRequested
 import jakal_flow.ui_bridge as ui_bridge
 import jakal_flow.ui_bridge_payloads as ui_bridge_payloads
 from jakal_flow.models import ExecutionPlanState, ExecutionStep
 from jakal_flow.share import share_server_status_payload
 from jakal_flow.status_views import effective_project_status
 from jakal_flow.ui_bridge import default_workspace_root, progress_caption, run_command, runtime_from_payload
-from jakal_flow.step_models import GEMINI_DEFAULT_MODEL
+from jakal_flow.step_models import (
+    CLAUDE_DEFAULT_MODEL,
+    DEEPSEEK_DEFAULT_MODEL,
+    GEMINI_DEFAULT_MODEL,
+    GLM_DEFAULT_MODEL,
+    KIMI_DEFAULT_MODEL,
+    MINIMAX_DEFAULT_MODEL,
+    QWEN_CODE_DEFAULT_MODEL,
+    provider_statuses_payload,
+)
+from jakal_flow.utils import read_jsonl
+from jakal_flow.workspace import WorkspaceManager
 
 
 def local_temp_root() -> Path:
@@ -98,6 +111,56 @@ def fake_codex_snapshot() -> mock.Mock:
 
 
 class UIBridgeTests(unittest.TestCase):
+    def test_workspace_save_project_emits_bridge_ui_event_for_running_state(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            project_dir = temp_dir / "repo"
+            workspace = WorkspaceManager(workspace_root)
+            context = workspace.initialize_local_project(project_dir, "main", runtime_from_payload({}), display_name="Demo")
+            context.metadata.current_status = "running:st1"
+            context.metadata.last_run_at = "2026-03-28T10:00:00+00:00"
+            context.loop_state.current_task = "Execute ST1"
+
+            events: list[tuple[str, dict]] = []
+
+            class Sink:
+                def emit(self, event: str, payload: dict | None = None) -> None:
+                    events.append((event, payload or {}))
+
+            with bridge_event_context(Sink()):
+                workspace.save_project(context)
+
+            self.assertEqual(len(events), 1)
+            event_name, payload = events[0]
+            self.assertEqual(event_name, "project.ui_event")
+            self.assertEqual(payload["repo_id"], context.metadata.repo_id)
+            self.assertEqual(payload["project_dir"], str(context.metadata.repo_path))
+            self.assertEqual(payload["project_status"], "running:st1")
+            self.assertEqual(payload["event"]["event_type"], "project-state-synced")
+            self.assertEqual(payload["event"]["details"]["current_task"], "Execute ST1")
+            self.assertTrue(payload["event"]["details"]["last_run_at"])
+
+    def test_workspace_save_project_skips_bridge_ui_event_for_idle_state(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            project_dir = temp_dir / "repo"
+            workspace = WorkspaceManager(workspace_root)
+            context = workspace.initialize_local_project(project_dir, "main", runtime_from_payload({}), display_name="Demo")
+            context.metadata.current_status = "plan_ready"
+            context.loop_state.current_task = None
+            context.loop_state.pending_checkpoint_approval = False
+
+            events: list[tuple[str, dict]] = []
+
+            class Sink:
+                def emit(self, event: str, payload: dict | None = None) -> None:
+                    events.append((event, payload or {}))
+
+            with bridge_event_context(Sink()):
+                workspace.save_project(context)
+
+            self.assertEqual(events, [])
+
     def test_start_share_server_process_replaces_stale_state_file(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"
@@ -218,6 +281,22 @@ class UIBridgeTests(unittest.TestCase):
 
         self.assertEqual(status, "running:parallel")
 
+    def test_effective_project_status_preserves_explicit_merge_phase(self) -> None:
+        status = effective_project_status(
+            "running:merging",
+            ExecutionPlanState(
+                execution_mode="parallel",
+                steps=[
+                    ExecutionStep(step_id="ST1", title="Root", status="completed"),
+                    ExecutionStep(step_id="ST2", title="Frontend", depends_on=["ST1"], owned_paths=["desktop/src"], status="integrating"),
+                    ExecutionStep(step_id="ST3", title="Backend", depends_on=["ST1"], owned_paths=["src/jakal_flow"], status="running"),
+                ],
+            ),
+            mock.Mock(pending_checkpoint_approval=False),
+        )
+
+        self.assertEqual(status, "running:merging")
+
     def test_effective_project_status_clears_stale_running_step_when_plan_is_idle(self) -> None:
         status = effective_project_status(
             "running:st1",
@@ -262,6 +341,7 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.model_preset, "")
         self.assertEqual(runtime.max_blocks, 5)
         self.assertFalse(runtime.allow_push)
+        self.assertTrue(runtime.auto_merge_pull_request)
         self.assertTrue(runtime.require_checkpoint_approval)
         self.assertEqual(runtime.execution_mode, "parallel")
         self.assertEqual(runtime.parallel_worker_mode, "manual")
@@ -340,6 +420,91 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.effort, "high")
         self.assertEqual(runtime.planning_effort, "high")
 
+    def test_provider_statuses_payload_requires_all_three_installed_backends_for_ensemble(self) -> None:
+        fake_snapshot = mock.Mock(
+            to_dict=mock.Mock(
+                return_value={
+                    "available": True,
+                    "account": {"authenticated": True},
+                    "error": "",
+                }
+            )
+        )
+        with mock.patch("jakal_flow.step_models.fetch_codex_backend_snapshot", return_value=fake_snapshot), mock.patch(
+            "jakal_flow.step_models._command_available",
+            side_effect=lambda command: str(command).strip().lower() in {"codex.cmd", "gemini.cmd"},
+        ), mock.patch("jakal_flow.step_models._openai_auth_env_configured", return_value=True), mock.patch(
+            "jakal_flow.step_models._claude_auth_env_configured",
+            return_value=False,
+        ), mock.patch("jakal_flow.step_models._gemini_auth_env_configured", return_value=True), mock.patch(
+            "jakal_flow.step_models._gemini_settings_file_configured",
+            return_value=False,
+        ), mock.patch("jakal_flow.step_models.discover_local_model_catalog", return_value=[]):
+            statuses = provider_statuses_payload()
+
+        self.assertTrue(statuses["openai"]["available"])
+        self.assertFalse(statuses["claude"]["available"])
+        self.assertTrue(statuses["gemini"]["available"])
+        self.assertFalse(statuses["ensemble"]["available"])
+        self.assertIn("missing claude", statuses["ensemble"]["reason"].lower())
+        self.assertFalse(statuses["deepseek"]["available"])
+        self.assertTrue(statuses["openrouter"]["available"])
+
+    def test_provider_statuses_payload_accepts_windows_claude_executable_without_cmd_shim(self) -> None:
+        fake_snapshot = mock.Mock(
+            to_dict=mock.Mock(
+                return_value={
+                    "available": True,
+                    "account": {"authenticated": True},
+                    "error": "",
+                }
+            )
+        )
+        with mock.patch("jakal_flow.step_models.resolve_codex_path",
+            side_effect=lambda command: r"C:\Users\alber\.local\bin\claude.exe" if str(command).strip().lower() == "claude.cmd" else command,
+        ), mock.patch(
+            "jakal_flow.step_models._openai_auth_env_configured",
+            return_value=True,
+        ), mock.patch(
+            "jakal_flow.step_models._claude_auth_env_configured",
+            return_value=False,
+        ), mock.patch(
+            "jakal_flow.step_models._gemini_auth_env_configured",
+            return_value=True,
+        ), mock.patch(
+            "jakal_flow.step_models._gemini_settings_file_configured",
+            return_value=False,
+        ), mock.patch(
+            "jakal_flow.step_models.discover_local_model_catalog",
+            return_value=[],
+        ), mock.patch(
+            "jakal_flow.step_models.Path.exists",
+            autospec=True,
+            side_effect=lambda path: str(path).lower() == r"c:\users\alber\.local\bin\claude.exe",
+        ), mock.patch(
+            "jakal_flow.step_models.shutil.which",
+            side_effect=lambda command: {"codex.cmd": r"C:\tools\codex.cmd", "gemini.cmd": r"C:\tools\gemini.cmd"}.get(str(command).strip().lower()),
+        ):
+            statuses = provider_statuses_payload(fetch_snapshot=lambda _command: fake_snapshot)
+
+        self.assertTrue(statuses["claude"]["available"])
+        self.assertTrue(statuses["claude"]["usable"])
+        self.assertTrue(statuses["deepseek"]["available"])
+        self.assertTrue(statuses["ensemble"]["available"])
+
+    def test_bootstrap_payload_includes_provider_statuses(self) -> None:
+        with TemporaryTestDir() as temp_dir, mock.patch(
+            "jakal_flow.ui_bridge._codex_snapshot_service",
+            new=mock.Mock(get_snapshot=mock.Mock(return_value=fake_codex_snapshot())),
+        ), mock.patch(
+            "jakal_flow.ui_bridge.provider_statuses_payload",
+            return_value={"openai": {"available": True}},
+        ):
+            payload = ui_bridge.bootstrap_payload(temp_dir / "workspace")
+
+        self.assertIn("provider_statuses", payload["codex_status"])
+        self.assertEqual(payload["codex_status"]["provider_statuses"]["openai"]["available"], True)
+
     def test_runtime_from_payload_normalizes_legacy_auto_model_presets(self) -> None:
         runtime = runtime_from_payload(
             {
@@ -374,6 +539,17 @@ class UIBridgeTests(unittest.TestCase):
 
         self.assertEqual(runtime.model, "gpt-5.4")
         self.assertTrue(runtime.generate_word_report)
+
+    def test_runtime_from_payload_coerces_save_project_logs_flag(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model": "gpt-5.4",
+                "save_project_logs": "true",
+            }
+        )
+
+        self.assertEqual(runtime.model, "gpt-5.4")
+        self.assertTrue(runtime.save_project_logs)
 
     def test_runtime_from_payload_normalizes_local_model_provider(self) -> None:
         runtime = runtime_from_payload(
@@ -432,6 +608,123 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.model, GEMINI_DEFAULT_MODEL)
         self.assertEqual(runtime.model_slug_input, GEMINI_DEFAULT_MODEL)
 
+    def test_runtime_from_payload_applies_claude_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "claude",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "claude")
+        self.assertEqual(runtime.provider_api_key_env, "ANTHROPIC_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "")
+        self.assertEqual(runtime.codex_path, "claude.cmd" if os.name == "nt" else "claude")
+        self.assertEqual(runtime.model, CLAUDE_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, CLAUDE_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_qwen_code_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "qwen_code",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "qwen_code")
+        self.assertEqual(runtime.provider_api_key_env, "DASHSCOPE_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        self.assertEqual(runtime.codex_path, "qwen.cmd" if os.name == "nt" else "qwen")
+        self.assertEqual(runtime.model, QWEN_CODE_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, QWEN_CODE_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_deepseek_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "deepseek",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "deepseek")
+        self.assertEqual(runtime.provider_api_key_env, "DEEPSEEK_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://api.deepseek.com/anthropic")
+        self.assertEqual(runtime.codex_path, "claude.cmd" if os.name == "nt" else "claude")
+        self.assertEqual(runtime.model, DEEPSEEK_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, DEEPSEEK_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_kimi_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "kimi",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "kimi")
+        self.assertEqual(runtime.provider_api_key_env, "MOONSHOT_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://api.moonshot.cn/v1")
+        self.assertEqual(runtime.codex_path, "codex.cmd" if os.name == "nt" else "codex")
+        self.assertEqual(runtime.model, KIMI_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, KIMI_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_minimax_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "minimax",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "minimax")
+        self.assertEqual(runtime.provider_api_key_env, "MINIMAX_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://api.minimax.io/anthropic/v1")
+        self.assertEqual(runtime.codex_path, "claude.cmd" if os.name == "nt" else "claude")
+        self.assertEqual(runtime.model, MINIMAX_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, MINIMAX_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_glm_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "glm",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "glm")
+        self.assertEqual(runtime.provider_api_key_env, "ZHIPUAI_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://open.bigmodel.cn/api/anthropic")
+        self.assertEqual(runtime.codex_path, "claude.cmd" if os.name == "nt" else "claude")
+        self.assertEqual(runtime.model, GLM_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, GLM_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_ensemble_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "ensemble",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "ensemble")
+        self.assertEqual(runtime.provider_api_key_env, "OPENAI_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "")
+        self.assertEqual(runtime.codex_path, "codex.cmd" if os.name == "nt" else "codex")
+        self.assertEqual(runtime.model, "gpt-5.4")
+        self.assertEqual(runtime.model_slug_input, "gpt-5.4")
+        self.assertEqual(runtime.ensemble_openai_model, "gpt-5.4")
+        self.assertEqual(runtime.ensemble_gemini_model, GEMINI_DEFAULT_MODEL)
+        self.assertEqual(runtime.ensemble_claude_model, CLAUDE_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_preserves_custom_ensemble_models(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "ensemble",
+                "ensemble_openai_model": "gpt-5.4-mini",
+                "ensemble_gemini_model": "gemini-2.5-pro",
+                "ensemble_claude_model": "claude-3.7-sonnet",
+            }
+        )
+
+        self.assertEqual(runtime.model, "gpt-5.4-mini")
+        self.assertEqual(runtime.model_slug_input, "gpt-5.4-mini")
+        self.assertEqual(runtime.ensemble_openai_model, "gpt-5.4-mini")
+        self.assertEqual(runtime.ensemble_gemini_model, "gemini-2.5-pro")
+        self.assertEqual(runtime.ensemble_claude_model, "claude-3.7-sonnet")
+
     def test_bootstrap_exposes_workspace_and_model_presets(self) -> None:
         with TemporaryTestDir() as temp_dir:
             with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
@@ -445,8 +738,44 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(payload["default_runtime"]["model_preset"], "")
         self.assertEqual(payload["default_runtime"]["model_slug_input"], "gpt-5.4")
         self.assertTrue(payload["default_runtime"]["generate_word_report"])
+        self.assertFalse(payload["default_runtime"]["save_project_logs"])
         self.assertEqual(payload["default_runtime"]["sandbox_mode"], "danger-full-access")
         self.assertEqual(payload["default_runtime"]["optimization_mode"], "light")
+
+    def test_append_ui_event_saves_project_activity_log_when_enabled(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Log Capture Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "save_project_logs": True,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                run_command("save-project-setup", workspace_root, payload)
+
+            project = ui_bridge.orchestrator_for(workspace_root).local_project(repo_dir)
+            self.assertIsNotNone(project)
+            assert project is not None
+
+            ui_bridge.append_ui_event(project, "unit-test", "captured", {"scope": "test"})
+
+            activity_log = project.paths.logs_dir / "project_activity.jsonl"
+            self.assertTrue(activity_log.exists())
+            entries = [json.loads(line) for line in activity_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(entries[-1]["event_type"], "unit-test")
+            self.assertEqual(entries[-1]["message"], "captured")
 
     def test_project_setup_and_load_round_trip(self) -> None:
         with TemporaryTestDir() as temp_dir:
@@ -1053,6 +1382,149 @@ class UIBridgeTests(unittest.TestCase):
             self.assertTrue(control_path.exists())
             control_payload = json.loads(control_path.read_text(encoding="utf-8"))
             self.assertEqual(control_payload["request_source"], "unit-test")
+
+    def test_generate_plan_handles_immediate_stop_during_planning(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Planning Stop Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            with mock.patch.object(
+                ui_bridge.EXECUTION_STOP_REGISTRY,
+                "clear",
+                wraps=ui_bridge.EXECUTION_STOP_REGISTRY.clear,
+            ) as clear_mock, mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.generate_execution_plan",
+                side_effect=ImmediateStopRequested("Planning stopped by user."),
+            ), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                stopped = run_command(
+                    "generate-plan",
+                    workspace_root,
+                    {
+                        "project_dir": str(repo_dir),
+                        "branch": "main",
+                        "origin_url": "",
+                        "runtime": detail["runtime"],
+                        "prompt": "Create a plan and then stop.",
+                        "max_steps": 5,
+                    },
+                )
+
+            self.assertEqual(stopped["project"]["current_status"], "setup_ready")
+            self.assertEqual(stopped["run_control"]["stop_immediately"], False)
+            self.assertEqual(stopped["run_control"]["stop_after_current_step"], False)
+            self.assertEqual(clear_mock.call_count, 2)
+            self.assertTrue(any("plan-stopped" in item for item in stopped["activity"]))
+
+    def test_reset_plan_requests_stop_and_clears_planning_state(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            setup_payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Planning Reset Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m pytest",
+                    "max_blocks": 4,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, setup_payload)
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                saved = run_command(
+                    "save-plan",
+                    workspace_root,
+                    {
+                        "project_dir": str(repo_dir),
+                        "branch": "main",
+                        "origin_url": "",
+                        "runtime": detail["runtime"],
+                        "plan": {
+                            "plan_title": "Temporary plan",
+                            "project_prompt": "This should be reset.",
+                            "summary": "Temporary summary.",
+                            "default_test_command": "python -m pytest",
+                            "steps": [
+                                {
+                                    "step_id": "ST1",
+                                    "title": "Temporary step",
+                                    "display_description": "Will be removed.",
+                                    "codex_description": "Will be removed.",
+                                    "test_command": "python -m pytest",
+                                    "success_criteria": "N/A",
+                                }
+                            ],
+                        },
+                    },
+                )
+
+            orchestrator = ui_bridge.orchestrator_for(workspace_root)
+            project = orchestrator.workspace.load_project_by_id(saved["project"]["repo_id"])
+            project.metadata.current_status = "running:generate-plan"
+            orchestrator.workspace.save_project(project)
+
+            with mock.patch.object(
+                ui_bridge.EXECUTION_STOP_REGISTRY,
+                "request_stop",
+                wraps=ui_bridge.EXECUTION_STOP_REGISTRY.request_stop,
+            ) as request_stop_mock, mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                reset = run_command(
+                    "reset-plan",
+                    workspace_root,
+                    {
+                        "project_dir": str(repo_dir),
+                        "branch": "main",
+                        "origin_url": "",
+                        "runtime": detail["runtime"],
+                    },
+                )
+
+            self.assertEqual(reset["plan"]["project_prompt"], "")
+            self.assertEqual(reset["plan"]["steps"], [])
+            self.assertEqual(reset["run_control"]["stop_immediately"], False)
+            self.assertEqual(request_stop_mock.call_count, 1)
+            self.assertTrue(any("plan-reset" in item for item in reset["activity"]))
 
     def test_load_project_tolerates_malformed_ui_state_files(self) -> None:
         with TemporaryTestDir() as temp_dir:
@@ -1879,6 +2351,99 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(listed[0]["status"], "setup_ready")
             self.assertEqual(stderr.getvalue(), "")
 
+    def test_run_command_writes_project_crash_log_on_bridge_failure(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Bridge Crash Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            def explode(_ctx):
+                raise RuntimeError("bridge exploded")
+
+            with mock.patch("jakal_flow.ui_bridge.bridge_command_handlers", return_value={"explode": explode}):
+                with self.assertRaisesRegex(RuntimeError, "bridge exploded"):
+                    run_command("explode", workspace_root, {"project_dir": str(repo_dir)})
+
+            reports_dir = Path(detail["project"]["project_root"]) / "reports"
+            crash_logs = sorted(reports_dir.glob("*_ui-bridge_explode.crash.log"))
+            self.assertTrue(crash_logs)
+            crash_text = crash_logs[-1].read_text(encoding="utf-8")
+            self.assertIn("exception_message: bridge exploded", crash_text)
+            self.assertIn("Traceback", crash_text)
+
+    def test_cli_main_writes_project_crash_log_on_failure(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "CLI Crash Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch(
+                "jakal_flow.cli.Orchestrator.status",
+                side_effect=RuntimeError("cli exploded"),
+            ), redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = cli_main(
+                    [
+                        "status",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--repo-url",
+                        str(repo_dir.resolve()),
+                        "--branch",
+                        "main",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("error: cli exploded", stderr.getvalue())
+            reports_dir = Path(detail["project"]["project_root"]) / "reports"
+            crash_logs = sorted(reports_dir.glob("*_cli_status.crash.log"))
+            self.assertTrue(crash_logs)
+            crash_text = crash_logs[-1].read_text(encoding="utf-8")
+            self.assertIn("exception_message: cli exploded", crash_text)
+            self.assertIn("\"repo_url\":", crash_text)
+
     def test_save_project_setup_clears_stale_pending_checkpoint_when_approval_is_disabled(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"
@@ -1992,8 +2557,9 @@ class UIBridgeTests(unittest.TestCase):
 
             self.assertEqual(loaded["project"]["display_name"], "Fast Load Demo")
             self.assertEqual(loaded["detail_level"], "core")
-            self.assertEqual(loaded["codex_status"], {})
-            self.assertEqual(loaded["bottom_panels"]["codex_status"], {})
+            self.assertIn("provider_statuses", loaded["codex_status"])
+            self.assertFalse(loaded["codex_status"].get("model_catalog"))
+            self.assertIn("provider_statuses", loaded["bottom_panels"]["codex_status"])
             self.assertEqual(loaded["history"]["blocks"], [])
             self.assertEqual(loaded["workspace_tree"], [])
             self.assertEqual(loaded["checkpoints"]["items"], [])
@@ -2144,6 +2710,173 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(second["detail_signature"], first["detail_signature"])
             self.assertIn("content_signature", second)
             self.assertIn("detail_signature", second)
+
+    def test_load_project_writes_bridge_and_detail_performance_logs(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Perf Log Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+                run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": False,
+                        "detail_level": "core",
+                    },
+                )
+
+            bridge_perf_entries = read_jsonl(workspace_root / "bridge_perf.jsonl")
+            self.assertTrue(bridge_perf_entries)
+            latest_bridge = bridge_perf_entries[-1]
+            self.assertEqual(latest_bridge["command"], "load-project")
+            self.assertEqual(latest_bridge["detail_level"], "core")
+            self.assertIn("duration_ms", latest_bridge)
+            self.assertIn("result_size_bytes", latest_bridge)
+
+            project_root = Path(detail["project"]["project_root"])
+            detail_perf_entries = read_jsonl(project_root / "logs" / "ui_bridge_perf.jsonl")
+            self.assertTrue(detail_perf_entries)
+            latest_detail = detail_perf_entries[-1]
+            self.assertEqual(latest_detail["event_type"], "project-detail-built")
+            self.assertEqual(latest_detail["details"]["detail_level"], "core")
+            self.assertIn("total_ms", latest_detail["details"])
+            self.assertIn("content_signature_ms", latest_detail["details"])
+            self.assertIn("cache_hit", latest_detail["details"])
+
+    def test_load_project_core_detail_reads_each_log_tail_once_on_cache_miss(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Core Detail Tail Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            project_root = Path(detail["project"]["project_root"])
+            core_cache = project_root / "state" / "PROJECT_DETAIL_CACHE_CORE.json"
+            if core_cache.exists():
+                core_cache.unlink()
+
+            tail_calls: list[str] = []
+            last_calls: list[str] = []
+            original_tail = ui_bridge_payloads.read_jsonl_tail
+            original_last = ui_bridge_payloads.read_last_jsonl
+
+            def counting_tail(path, *args, **kwargs):
+                tail_calls.append(Path(path).name)
+                return original_tail(path, *args, **kwargs)
+
+            def counting_last(path, *args, **kwargs):
+                last_calls.append(Path(path).name)
+                return original_last(path, *args, **kwargs)
+
+            with mock.patch("jakal_flow.ui_bridge_payloads.read_jsonl_tail", side_effect=counting_tail), mock.patch(
+                "jakal_flow.ui_bridge_payloads.read_last_jsonl",
+                side_effect=counting_last,
+            ), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                loaded = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": False,
+                        "detail_level": "core",
+                    },
+                )
+
+            counts = Counter(tail_calls)
+            self.assertFalse(loaded["payload_cache_hit"])
+            self.assertEqual(counts["ui_events.jsonl"], 1)
+            self.assertEqual(counts["passes.jsonl"], 1)
+            self.assertEqual(counts["test_runs.jsonl"], 1)
+            self.assertNotIn("passes.jsonl", last_calls)
+
+    def test_load_project_core_detail_uses_lightweight_share_payload(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Core Share Payload Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            with mock.patch(
+                "jakal_flow.ui_bridge_payloads.project_share_payload",
+                side_effect=AssertionError("core detail should not build the heavy share payload"),
+            ):
+                loaded = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": False,
+                        "detail_level": "core",
+                    },
+                )
+
+            self.assertEqual(loaded["detail_level"], "core")
+            self.assertIn("share", loaded)
+            self.assertEqual(loaded["share"]["sessions"], [])
+            self.assertIsNone(loaded["share"]["active_session"])
+            self.assertEqual(loaded["share"]["server"]["config"]["bind_host"], "0.0.0.0")
 
     def test_load_project_full_detail_reads_each_log_tail_once_on_cache_miss(self) -> None:
         with TemporaryTestDir() as temp_dir:

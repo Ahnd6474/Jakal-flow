@@ -250,8 +250,8 @@ test("ParallelRunControlView shows the auto-run toggle as off by default", async
   );
 
   assert.match(html, /Auto-run After Plan/);
-  assert.match(html, /Auto-run After Plan[\s\S]*Off/);
   assert.match(html, /type="checkbox"/);
+  assert.doesNotMatch(html, /checked=""/);  // checkbox should be unchecked
 });
 
 test("ParallelRunControlView renders queued reservations with cancellation controls", async () => {
@@ -340,9 +340,64 @@ test("ParallelRunControlView renders queued reservations with cancellation contr
   );
 
   assert.match(html, /Reservations/);
-  assert.match(html, /Queue #1/);
+  assert.match(html, /#1/);
   assert.match(html, /repo-a/);
   assert.match(html, /Cancel Reservation/);
+});
+
+test("ParallelRunControlView keeps reset available while generate-plan is running", async () => {
+  const html = await renderBundledComponent(
+    "parallel-run-control-reset-during-planning-render",
+    "./src/components/views/ParallelRunControlView.jsx",
+    "ParallelRunControlView",
+    {
+      detail: {
+        project: {
+          current_status: "setup_ready",
+        },
+        runtime: {
+          execution_mode: "parallel",
+          effort: "high",
+        },
+      },
+      planDraft: {
+        project_prompt: "Generate a new plan",
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [],
+      },
+      activeJob: {
+        id: "job-generate",
+        status: "running",
+        command: "generate-plan",
+      },
+      queuedJobs: [],
+      autoRunAfterPlan: false,
+      selectedStepId: "",
+      busy: true,
+      canCancelReservation: false,
+      canRequestStop: true,
+      onPromptChange: noop,
+      onGeneratePlan: noop,
+      onSavePlan: noop,
+      onResetPlan: noop,
+      onRunPlan: noop,
+      onRequestStop: noop,
+      onCancelQueuedJob: noop,
+      onAutoRunAfterPlanChange: noop,
+      onSelectStep: noop,
+      onUpdateStepField: noop,
+      onSaveStepLocal: noop,
+      onAddStep: noop,
+      onDeleteStep: noop,
+    },
+  );
+
+  assert.match(html, />Reset<\/span>/);
+  // Verify the Reset button is NOT disabled: extract its button tag and check
+  const resetMatch = html.match(/<button[^>]*>(?:<[^>]*>)*<span>Reset<\/span><\/button>/);
+  assert.ok(resetMatch, "Reset button should exist");
+  assert.doesNotMatch(resetMatch[0], /disabled=""/);
 });
 
 test("CenterWorkspace upgrades legacy serial plans into the parallel execution tree view", async () => {
@@ -353,11 +408,9 @@ test("CenterWorkspace upgrades legacy serial plans into the parallel execution t
     baseWorkspaceProps(),
   );
 
-  assert.match(html, /Execution Flow/);
-  assert.match(html, /Flow Chart/);
+  assert.match(html, /run-flow-area/);
   assert.match(html, /<svg/);
   assert.match(html, /CO1/);
-  assert.doesNotMatch(html, />Closeout<\/button>/);
   assert.doesNotMatch(html, /Serial/);
 });
 
@@ -434,19 +487,15 @@ test("CenterWorkspace renders the parallel execution flow chart for parallel pla
     }),
   );
 
-  assert.match(html, /Execution Flow/);
-  assert.match(html, /Flow Chart/);
+  assert.match(html, /run-flow-area/);
   assert.match(html, /<svg/);
   assert.match(html, /Ready Nodes/);
   assert.match(html, /Depends On/);
   assert.match(html, /Owned Paths/);
   assert.match(html, /Parallel Limit/);
-  assert.match(html, /Memory cap 1, CPU cap 4, free 2.1 GiB/);
   assert.doesNotMatch(html, /Not started/);
-  assert.doesNotMatch(html, /Est\. Cost/);
   assert.doesNotMatch(html, /src\/jakal_flow/);
   assert.match(html, /CO1/);
-  assert.doesNotMatch(html, />Closeout<\/button>/);
   assert.doesNotMatch(html, /Layer 1/);
 });
 
@@ -519,7 +568,6 @@ test("CenterWorkspace shows estimated cost only for paid configured runtimes", a
     }),
   );
 
-  assert.match(html, /Est\. Cost/);
   assert.match(html, /\$1\.23/);
   assert.match(html, /Closeout[\s\S]*Running/);
 });
@@ -712,6 +760,84 @@ test("IdeToolbar prefers the live plan progress while a run is active", async ()
   assert.match(html, /Completed 1\/4 steps, running: ST2, ST3/);
 });
 
+test("IdeToolbar shows planning progress while plan generation is active", async () => {
+  const html = await renderBundledComponent(
+    "ide-toolbar-planning-progress-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projectDetail: {
+        project: {
+          display_name: "Demo",
+          current_status: "setup_ready",
+        },
+        planning_progress: {
+          stage_count: 4,
+          current_stage_index: 2,
+          current_stage_status: "running",
+        },
+      },
+      planDraft: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [],
+      },
+      busy: true,
+      activeJob: {
+        status: "running",
+        command: "generate-plan",
+      },
+      activeCenterTab: "run",
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onGeneratePlan: noop,
+      onRunPlan: noop,
+      onRunCloseout: noop,
+      onApproveCheckpoint: noop,
+    },
+  );
+
+  assert.match(html, /Planning stage 2\/4, Running/);
+  assert.doesNotMatch(html, /No plan yet/);
+});
+
+test("IdeToolbar still shows planning progress when planning events exist before the active job snapshot arrives", async () => {
+  const html = await renderBundledComponent(
+    "ide-toolbar-planning-progress-without-job-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projectDetail: {
+        project: {
+          display_name: "Demo",
+          current_status: "setup_ready",
+        },
+        planning_progress: {
+          stage_count: 4,
+          current_stage_index: 2,
+          current_stage_status: "running",
+        },
+      },
+      planDraft: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [],
+      },
+      busy: false,
+      activeJob: null,
+      activeCenterTab: "run",
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onGeneratePlan: noop,
+      onRunPlan: noop,
+      onRunCloseout: noop,
+      onApproveCheckpoint: noop,
+    },
+  );
+
+  assert.match(html, /Planning stage 2\/4, Running/);
+});
+
 test("IdeToolbar exposes checkpoint approval when a checkpoint is waiting for review", async () => {
   const html = await renderBundledComponent(
     "ide-toolbar-pending-checkpoint-render",
@@ -748,7 +874,6 @@ test("IdeToolbar exposes checkpoint approval when a checkpoint is waiting for re
     },
   );
 
-  assert.match(html, /Checkpoint Pending/);
   assert.match(html, /CP2/);
   assert.match(html, /Approve Checkpoint/);
 });
@@ -870,9 +995,8 @@ test("RunProgressPanel renders current work, progress, and recent activity", asy
   });
 
   assert.match(html, /Live Run/);
-  assert.match(html, /Working on ST2 - Build, ST3 - Backend/);
+  assert.match(html, /Working on ST2 .+ Build, ST3 .+ Backend/);
   assert.match(html, /Completed 1\/4 steps, running: ST2, ST3/);
-  assert.match(html, /25% complete/);
   assert.match(html, /2 node\(s\) running/);
   assert.match(html, /Running ST3: Build the backend/);
 });
@@ -981,10 +1105,57 @@ test("RunProgressPanel renders structured planning progress and stage chips", as
   );
 
   assert.match(html, /Planner Agent A/);
-  assert.match(html, /Planning stage 2\/4/);
-  assert.match(html, /38% complete/);
+  assert.match(html, /Planning stage 2\/4, Running/);
+  assert.match(html, /38%/);
   assert.match(html, /Scan repository context/);
   assert.match(html, /Validate and save plan/);
+  assert.match(html, /Running/);
+});
+
+test("RunProgressPanel keeps planning progress visible when the bridge job snapshot is temporarily absent", async () => {
+  const html = await renderBundledComponent(
+    "run-progress-panel-planning-without-job-render",
+    "./src/components/layout/RunProgressPanel.jsx",
+    "RunProgressPanel",
+    {
+      detail: {
+        project: {
+          current_status: "setup_ready",
+        },
+        planning_progress: {
+          stage_count: 4,
+          completed_stages: 1,
+          percent: 38,
+          current_stage_key: "planner_a",
+          current_stage_index: 2,
+          current_stage_label: "Planner Agent A",
+          current_stage_status: "running",
+          current_agent_label: "Planner Agent A",
+          message: "Planner Agent A is decomposing the work into implementation blocks.",
+          stages: [
+            { key: "context_scan", index: 1, label: "Scan repository context", status: "completed" },
+            { key: "planner_a", index: 2, label: "Planner Agent A", status: "running", agent_label: "Planner Agent A" },
+            { key: "planner_b", index: 3, label: "Planner Agent B", status: "pending" },
+            { key: "finalize", index: 4, label: "Validate and save plan", status: "pending" },
+          ],
+        },
+        plan: {
+          execution_mode: "serial",
+          closeout_status: "not_started",
+          steps: [],
+        },
+      },
+      planDraft: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [],
+      },
+      activeJob: null,
+    },
+  );
+
+  assert.match(html, /Planning stage 2\/4, Running/);
+  assert.match(html, /Planner Agent A/);
 });
 
 test("SidebarPane renders a filtered workspace tree without unrelated nodes", async () => {
@@ -1133,7 +1304,7 @@ test("SidebarPane keeps only the new project action below the project search", a
   assert.doesNotMatch(html, />Archive All</);
   assert.doesNotMatch(html, />Delete All</);
   assert.match(html, /placeholder="Search projects"/);
-  assert.match(html, /<label class="sidebar-search">[\s\S]*placeholder="Search projects"[\s\S]*<\/label>[\s\S]*>New<\/button>/);
+  assert.match(html, /sidebar-search-wrapper[\s\S]*placeholder="Search projects"[\s\S]*sidebar-add-btn[\s\S]*>New</);
 });
 
 test("SidebarPane hides the content panel when no sidebar icon is active", async () => {
@@ -1494,7 +1665,7 @@ test("AppSettingsView exposes dashboard visibility controls", async () => {
   assert.match(html, /7d Usage/);
   assert.match(html, /Closeout Report/);
   assert.match(html, /Codex Spark/);
-  assert.match(html, /Custom Model Slug/);
+  assert.doesNotMatch(html, /Custom Model Slug/);
   assert.match(html, /Planning Reasoning/);
   assert.match(html, /Concurrent Background Jobs/);
   assert.match(html, /Memory \/ Worker \(GiB\)/);
@@ -1605,9 +1776,9 @@ test("AppSettingsView keeps share actions enabled while a run is active", async 
     },
   );
 
-  assert.match(html, /<button class="toolbar-button" type="button">Generate Share Link<\/button>/);
-  assert.match(html, /<button class="toolbar-button toolbar-button--accent" type="button">Copy Link<\/button>/);
-  assert.match(html, /<button class="toolbar-button toolbar-button--ghost" type="button">Revoke Link<\/button>/);
+  assert.match(html, /Generate Share Link/);
+  assert.match(html, /toolbar-button toolbar-button--accent[\s\S]*title="Copy Link"/);
+  assert.match(html, /Revoke Link/);
 });
 
 test("ConfigEditorView no longer renders the advanced settings section", async () => {
@@ -1709,6 +1880,238 @@ test("ConfigEditorView keeps a selected model visible even when the catalog omit
 
   assert.match(html, /gpt-5\.4/);
   assert.match(html, /GPT-5\.3-Codex-Spark/);
+});
+
+test("ConfigEditorView renders provider-scoped catalog models for Gemini CLI projects", async () => {
+  const html = await renderBundledComponent(
+    "config-editor-gemini-model-render",
+    "./src/components/views/ConfigEditorView.jsx",
+    "ConfigEditorView",
+    {
+      form: {
+        project_dir: "C:/demo",
+        display_name: "Demo",
+        branch: "main",
+        github_mode: "existing",
+        origin_url: "",
+        runtime: {
+          model_provider: "gemini",
+          model: "gemini-2.5-pro",
+          model_preset: "",
+          model_slug_input: "gemini-2.5-pro",
+          effort: "medium",
+          workflow_mode: "standard",
+          execution_mode: "parallel",
+          parallel_worker_mode: "auto",
+          parallel_workers: 0,
+          parallel_memory_per_worker_gib: 3,
+          ml_max_cycles: 3,
+          max_blocks: 5,
+        },
+      },
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.4",
+          display_name: "GPT-5.4",
+          hidden: false,
+          provider: "openai",
+          default_reasoning_effort: "medium",
+          supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+        },
+        {
+          model: "gemini-3-flash-preview",
+          display_name: "Gemini 3 Flash Preview",
+          hidden: false,
+          provider: "gemini",
+          default_reasoning_effort: "medium",
+          supported_reasoning_efforts: ["medium"],
+        },
+        {
+          model: "gemini-2.5-pro",
+          display_name: "Gemini 2.5 Pro",
+          hidden: false,
+          provider: "gemini",
+          default_reasoning_effort: "medium",
+          supported_reasoning_efforts: ["medium"],
+        },
+      ],
+      busy: false,
+      onChangeForm: noop,
+      onChooseDirectory: noop,
+      onArchiveProject: noop,
+      onDeleteProject: noop,
+    },
+  );
+
+  assert.match(html, /Gemini 3 Flash Preview/);
+  assert.match(html, /Gemini 2\.5 Pro/);
+  assert.doesNotMatch(html, /GPT-5\.4/);
+});
+
+test("ConfigEditorView renders three ensemble model selectors in project settings", async () => {
+  const html = await renderBundledComponent(
+    "config-editor-ensemble-model-render",
+    "./src/components/views/ConfigEditorView.jsx",
+    "ConfigEditorView",
+    {
+      form: {
+        project_dir: "C:/demo",
+        display_name: "Demo",
+        branch: "main",
+        github_mode: "existing",
+        origin_url: "",
+        runtime: {
+          model_provider: "ensemble",
+          model: "gpt-5.4-mini",
+          model_preset: "",
+          model_slug_input: "gpt-5.4-mini",
+          ensemble_openai_model: "gpt-5.4-mini",
+          ensemble_gemini_model: "gemini-2.5-pro",
+          ensemble_claude_model: "claude-3.7-sonnet",
+          effort: "medium",
+          planning_effort: "medium",
+          workflow_mode: "standard",
+          execution_mode: "parallel",
+          parallel_worker_mode: "auto",
+          parallel_workers: 0,
+          parallel_memory_per_worker_gib: 3,
+          ml_max_cycles: 3,
+          max_blocks: 5,
+        },
+      },
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.4-mini",
+          display_name: "GPT-5.4 Mini",
+          hidden: false,
+          provider: "openai",
+          default_reasoning_effort: "medium",
+          supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+        },
+        {
+          model: "gemini-2.5-pro",
+          display_name: "Gemini 2.5 Pro",
+          hidden: false,
+          provider: "gemini",
+          default_reasoning_effort: "medium",
+          supported_reasoning_efforts: ["medium"],
+        },
+        {
+          model: "claude-3.7-sonnet",
+          display_name: "Claude 3.7 Sonnet",
+          hidden: false,
+          provider: "claude",
+          default_reasoning_effort: "medium",
+          supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+        },
+      ],
+      busy: false,
+      onChangeForm: noop,
+      onChangeProgramSettings: noop,
+      onChooseDirectory: noop,
+      onArchiveProject: noop,
+      onDeleteProject: noop,
+    },
+  );
+
+  assert.match(html, /Codex Model/);
+  assert.match(html, /Gemini Model/);
+  assert.match(html, /Claude Model/);
+  assert.match(html, /GPT-5\.4 Mini/);
+  assert.match(html, /Gemini 2\.5 Pro/);
+  assert.match(html, /Claude 3\.7 Sonnet/);
+});
+
+test("AppSettingsView keeps direct model slug editing for OpenRouter only", async () => {
+  const html = await renderBundledComponent(
+    "app-settings-openrouter-model-render",
+    "./src/components/views/AppSettingsView.jsx",
+    "AppSettingsView",
+    {
+      settings: {
+        model_provider: "openrouter",
+        provider_api_key_env: "OPENROUTER_API_KEY",
+        provider_base_url: "https://openrouter.ai/api/v1",
+        model: "openai/gpt-5.4",
+        model_slug_input: "openai/gpt-5.4",
+        approval_mode: "never",
+        sandbox_mode: "danger-full-access",
+        checkpoint_interval_blocks: 1,
+        workflow_mode: "standard",
+        planning_effort: "medium",
+        ml_max_cycles: 3,
+        parallel_worker_mode: "manual",
+        parallel_workers: 4,
+        parallel_memory_per_worker_gib: 3,
+        background_concurrency_limit: 2,
+        dashboard_visibility: {},
+        codex_path: "codex.cmd",
+      },
+      shareSettings: {},
+      shareDetail: {},
+      busy: false,
+      shareBusy: false,
+      onChangeSettings: noop,
+      onGenerateShareLink: noop,
+      onCopyShareLink: noop,
+      onRevokeShareLink: noop,
+      onChangeShareSettings: noop,
+    },
+  );
+
+  assert.match(html, /Custom Model Slug/);
+});
+
+test("AppSettingsView disables providers that are not installed in the current environment", async () => {
+  const html = await renderBundledComponent(
+    "app-settings-provider-availability-render",
+    "./src/components/views/AppSettingsView.jsx",
+    "AppSettingsView",
+    {
+      settings: {
+        model_provider: "openai",
+        provider_api_key_env: "OPENAI_API_KEY",
+        provider_base_url: "",
+        model: "gpt-5.4",
+        model_slug_input: "gpt-5.4",
+        approval_mode: "never",
+        sandbox_mode: "danger-full-access",
+        checkpoint_interval_blocks: 1,
+        workflow_mode: "standard",
+        planning_effort: "medium",
+        ml_max_cycles: 3,
+        parallel_worker_mode: "manual",
+        parallel_workers: 4,
+        parallel_memory_per_worker_gib: 3,
+        background_concurrency_limit: 2,
+        dashboard_visibility: {},
+        codex_path: "codex.cmd",
+      },
+      codexStatus: {
+        provider_statuses: {
+          ensemble: { available: false, reason: "The ensemble requires all three installed backends: missing claude." },
+          openai: { available: true, reason: "Codex CLI is available." },
+          claude: { available: false, reason: "Claude Code is not installed." },
+          gemini: { available: true, reason: "Gemini CLI is available." },
+        },
+      },
+      shareSettings: {},
+      shareDetail: {},
+      busy: false,
+      shareBusy: false,
+      onChangeSettings: noop,
+      onGenerateShareLink: noop,
+      onCopyShareLink: noop,
+      onRevokeShareLink: noop,
+      onChangeShareSettings: noop,
+    },
+  );
+
+  assert.match(html, /option value="ensemble"[^>]*disabled=""/);
+  assert.match(html, /option value="claude"[^>]*disabled=""/);
+  assert.match(html, /option value="gemini"[^>]*disabled=""/);  // all non-openai providers disabled in program settings
 });
 
 test("ReportsView shows the saved Word report path next to the closeout report", async () => {

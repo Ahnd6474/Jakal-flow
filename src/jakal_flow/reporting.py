@@ -5,6 +5,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 import zipfile
 
+from .failure_logs import collect_failure_artifacts
 from .github_api import GitHubAPIError, GitHubClient, parse_github_repository_url
 from .models import ProjectContext, TestRunResult
 from .utils import append_jsonl, append_text, compact_text, now_utc_iso, read_json, read_jsonl_tail, read_text, write_json, write_text
@@ -13,6 +14,65 @@ from .utils import append_jsonl, append_text, compact_text, now_utc_iso, read_js
 class Reporter:
     def __init__(self, context: ProjectContext) -> None:
         self.context = context
+
+    @staticmethod
+    def _normalize_merge_method(value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in {"merge", "rebase", "squash"}:
+            return normalized
+        return "squash"
+
+    def _attempt_pull_request_merge(
+        self,
+        client: GitHubClient,
+        *,
+        owner: str,
+        repo: str,
+        pull_request: int,
+        title: str,
+        merge_method: str,
+    ) -> dict:
+        normalized_method = self._normalize_merge_method(merge_method)
+        try:
+            auto_merge_result = client.enable_pull_request_auto_merge(
+                owner,
+                repo,
+                pull_request,
+                merge_method=normalized_method.upper(),
+            )
+            return {
+                "auto_merge_requested": True,
+                "auto_merge_enabled": True,
+                "merged": False,
+                "merge_method": normalized_method,
+                "auto_merge_result": auto_merge_result,
+            }
+        except GitHubAPIError as auto_merge_exc:
+            try:
+                merge_result = client.merge_pull_request(
+                    owner,
+                    repo,
+                    pull_request,
+                    merge_method=normalized_method,
+                    commit_title=title,
+                )
+                return {
+                    "auto_merge_requested": True,
+                    "auto_merge_enabled": False,
+                    "merged": True,
+                    "merge_method": normalized_method,
+                    "auto_merge_error": str(auto_merge_exc),
+                    "merge_result": merge_result,
+                }
+            except GitHubAPIError as merge_exc:
+                return {
+                    "auto_merge_requested": True,
+                    "auto_merge_enabled": False,
+                    "merged": False,
+                    "merge_method": normalized_method,
+                    "auto_merge_error": str(auto_merge_exc),
+                    "merge_error": str(merge_exc),
+                }
 
     def log_pass(self, data: dict) -> None:
         append_jsonl(self.context.paths.pass_log_file, data)
@@ -118,11 +178,23 @@ class Reporter:
         recent_passes = read_jsonl_tail(self.context.paths.pass_log_file, 5)
         recent_blocks = read_jsonl_tail(self.context.paths.block_log_file, 5)
         recent_tests = read_jsonl_tail(self.context.paths.logs_dir / "test_runs.jsonl", 5)
+        extra_payload = dict(extra) if isinstance(extra, dict) else {}
+        artifact_candidates = extra_payload.get("artifact_paths", [])
+        artifact_paths = artifact_candidates if isinstance(artifact_candidates, list) else []
+        if artifact_paths:
+            extra_payload["artifact_paths"] = [str(item).strip() for item in artifact_paths if str(item).strip()]
+        artifacts = collect_failure_artifacts(
+            self.context,
+            block_index=block_index,
+            extra_paths=[Path(str(item)) for item in artifact_paths if str(item).strip()],
+        )
         generated_at = now_utc_iso()
         safe_name = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in failure_type.strip().lower())
         safe_name = (safe_name.strip("-") or "failure")[:16]
         timestamp_token = "".join(char for char in generated_at if char.isdigit())[:14] or "00000000000000"
         stem = f"{timestamp_token}_{safe_name}"
+        json_path = self.context.paths.reports_dir / f"{stem}.prfail.json"
+        md_path = self.context.paths.reports_dir / f"{stem}.prfail.md"
         payload = {
             "generated_at": generated_at,
             "failure_type": failure_type,
@@ -135,14 +207,14 @@ class Reporter:
             "recent_passes": recent_passes,
             "recent_test_runs": recent_tests,
             "latest_report": latest_report if isinstance(latest_report, dict) else {},
-            "extra": extra or {},
+            "extra": extra_payload,
+            "artifacts": artifacts,
+            "artifact_files": [item["path"] for item in artifacts],
+            "report_json_file": str(json_path),
+            "report_markdown_file": str(md_path),
         }
-        json_path = self.context.paths.reports_dir / f"{stem}.prfail.json"
-        md_path = self.context.paths.reports_dir / f"{stem}.prfail.md"
         write_json(json_path, payload)
         write_text(md_path, self.format_pr_failure_report(payload))
-        payload["report_json_file"] = str(json_path)
-        payload["report_markdown_file"] = str(md_path)
         return payload
 
     def format_pr_failure_report(self, bundle: dict) -> str:
@@ -190,6 +262,13 @@ class Reporter:
                 f"- block={item.get('block_index')} pass={item.get('pass_type')} code={item.get('codex_return_code')} rollback={item.get('rollback_status')}"
             )
         if not (bundle.get("recent_passes") or []):
+            lines.append("- none")
+        lines.extend(["", "### Failure Artifacts", ""])
+        for item in bundle.get("artifacts", []) or []:
+            lines.append(
+                f"- {item.get('kind') or 'file'}: `{item.get('path') or ''}`"
+            )
+        if not (bundle.get("artifacts") or []):
             lines.append("- none")
         lines.extend(
             [
@@ -247,6 +326,8 @@ class Reporter:
         title: str,
         body: str = "",
         draft: bool = False,
+        auto_merge: bool = False,
+        merge_method: str = "squash",
     ) -> dict:
         token = self.github_token()
         repo_url = self.context.metadata.origin_url or self.context.metadata.repo_url
@@ -280,7 +361,7 @@ class Reporter:
                 }
             existing = client.find_open_pull_request_for_branch(owner, repo, head, base=resolved_base)
             if existing:
-                return {
+                result = {
                     "created": False,
                     "reason": "already_exists",
                     "owner": owner,
@@ -290,23 +371,37 @@ class Reporter:
                     "pull_request": int(existing.get("number", 0) or 0),
                     "html_url": str(existing.get("html_url", "")).strip(),
                 }
-            created = client.create_pull_request(
-                owner,
-                repo,
-                title=title,
-                head=head,
-                base=resolved_base,
-                body=body,
-                draft=draft,
-            )
-            return {
-                "created": True,
-                "owner": owner,
-                "repo": repo,
-                "head": head,
-                "base": resolved_base,
-                "pull_request": int(created.get("number", 0) or 0),
-                "html_url": str(created.get("html_url", "")).strip(),
-            }
+            else:
+                created = client.create_pull_request(
+                    owner,
+                    repo,
+                    title=title,
+                    head=head,
+                    base=resolved_base,
+                    body=body,
+                    draft=draft,
+                )
+                result = {
+                    "created": True,
+                    "owner": owner,
+                    "repo": repo,
+                    "head": head,
+                    "base": resolved_base,
+                    "pull_request": int(created.get("number", 0) or 0),
+                    "html_url": str(created.get("html_url", "")).strip(),
+                }
+            pull_request_number = int(result.get("pull_request", 0) or 0)
+            if auto_merge and pull_request_number > 0:
+                result.update(
+                    self._attempt_pull_request_merge(
+                        client,
+                        owner=owner,
+                        repo=repo,
+                        pull_request=pull_request_number,
+                        title=title,
+                        merge_method=merge_method,
+                    )
+                )
+            return result
         except GitHubAPIError as exc:
             return {"created": False, "reason": "github_api_error", "error": str(exc)}

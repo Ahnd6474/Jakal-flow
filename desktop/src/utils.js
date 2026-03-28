@@ -1,7 +1,18 @@
-import { normalizeLanguage, translate } from "./locale.js";
+import { displayStatus, normalizeLanguage, translate } from "./locale.js";
 
 export function defaultCodexPath(provider = "openai") {
   const normalizedProvider = String(provider || "").trim().toLowerCase();
+  if (normalizedProvider === "claude" || normalizedProvider === "deepseek" || normalizedProvider === "minimax" || normalizedProvider === "glm") {
+    const platform = String(globalThis.process?.platform || "").trim().toLowerCase();
+    if (platform === "win32") {
+      return "claude.cmd";
+    }
+    const userAgent = String(globalThis.navigator?.userAgent || "").toLowerCase();
+    if (userAgent.includes("windows")) {
+      return "claude.cmd";
+    }
+    return "claude";
+  }
   if (normalizedProvider === "gemini") {
     const platform = String(globalThis.process?.platform || "").trim().toLowerCase();
     if (platform === "win32") {
@@ -12,6 +23,17 @@ export function defaultCodexPath(provider = "openai") {
       return "gemini.cmd";
     }
     return "gemini";
+  }
+  if (normalizedProvider === "qwen_code") {
+    const platform = String(globalThis.process?.platform || "").trim().toLowerCase();
+    if (platform === "win32") {
+      return "qwen.cmd";
+    }
+    const userAgent = String(globalThis.navigator?.userAgent || "").toLowerCase();
+    if (userAgent.includes("windows")) {
+      return "qwen.cmd";
+    }
+    return "qwen";
   }
   const platform = String(globalThis.process?.platform || "").trim().toLowerCase();
   if (platform === "win32") {
@@ -125,12 +147,15 @@ export function detailApplySignature(detail = null, runningJob = null) {
 export const AUTO_REASONING_OPTION = "auto";
 export const REASONING_OPTIONS = ["low", "medium", "high", "xhigh"];
 export const MODEL_REASONING_OPTIONS = [AUTO_REASONING_OPTION, ...REASONING_OPTIONS];
-export const MODEL_PROVIDER_OPTIONS = ["openai", "gemini", "openrouter", "opencdk", "local_openai", "oss"];
+export const MODEL_PROVIDER_OPTIONS = ["openai", "ensemble", "claude", "gemini", "qwen_code", "deepseek", "kimi", "minimax", "glm", "openrouter", "opencdk", "local_openai", "oss"];
 export const PROGRAM_RUNTIME_KEYS = [
   "model_provider",
   "local_model_provider",
   "provider_base_url",
   "provider_api_key_env",
+  "ensemble_openai_model",
+  "ensemble_gemini_model",
+  "ensemble_claude_model",
   "model",
   "planning_effort",
   "model_preset",
@@ -148,6 +173,7 @@ export const PROGRAM_RUNTIME_KEYS = [
   "parallel_worker_mode",
   "parallel_workers",
   "parallel_memory_per_worker_gib",
+  "save_project_logs",
 ];
 export const DEFAULT_DASHBOARD_VISIBILITY = Object.freeze({
   status: true,
@@ -167,7 +193,13 @@ export const DEFAULT_DASHBOARD_VISIBILITY = Object.freeze({
   word_report_card: true,
 });
 export const PROGRAM_UI_KEYS = ["ui_theme", "developer_mode", "dashboard_visibility", "background_concurrency_limit"];
-export const GEMINI_DEFAULT_MODEL = "gemini-3-flash";
+export const CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6";
+export const GEMINI_DEFAULT_MODEL = "gemini-3-flash-preview";
+export const QWEN_CODE_DEFAULT_MODEL = "qwen3-coder-plus";
+export const DEEPSEEK_DEFAULT_MODEL = "deepseek-chat";
+export const KIMI_DEFAULT_MODEL = "kimi-k2.5";
+export const MINIMAX_DEFAULT_MODEL = "MiniMax-M2.5";
+export const GLM_DEFAULT_MODEL = "glm-4.7";
 
 const LEGACY_DASHBOARD_VISIBILITY_ALIASES = Object.freeze({
   rate_limit_window_5h: "rate_limits",
@@ -180,6 +212,9 @@ const DEFAULT_PROGRAM_RUNTIME = {
   local_model_provider: "ollama",
   provider_base_url: "",
   provider_api_key_env: "OPENAI_API_KEY",
+  ensemble_openai_model: "gpt-5.4",
+  ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+  ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
   model: "gpt-5.4",
   planning_effort: "medium",
   model_preset: "",
@@ -197,6 +232,7 @@ const DEFAULT_PROGRAM_RUNTIME = {
   parallel_worker_mode: "auto",
   parallel_workers: 0,
   parallel_memory_per_worker_gib: 3,
+  save_project_logs: false,
 };
 const DEFAULT_PROGRAM_UI = {
   ui_theme: "dark",
@@ -204,6 +240,24 @@ const DEFAULT_PROGRAM_UI = {
   dashboard_visibility: DEFAULT_DASHBOARD_VISIBILITY,
   background_concurrency_limit: 2,
 };
+
+function normalizeProgramSettingsProviderSelection(settings = {}) {
+  const normalized = applyProviderDefaults(settings, "openai");
+  return {
+    ...normalized,
+    model_provider: "openai",
+    local_model_provider: "ollama",
+    provider_base_url: defaultProviderBaseUrl("openai"),
+    provider_api_key_env: defaultProviderApiKeyEnv("openai"),
+    ensemble_openai_model: "gpt-5.4",
+    ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+    ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
+    model: "gpt-5.4",
+    model_preset: "",
+    model_selection_mode: "slug",
+    model_slug_input: "gpt-5.4",
+  };
+}
 
 export function normalizeDashboardVisibility(value) {
   const source = value && typeof value === "object" ? value : {};
@@ -270,6 +324,8 @@ export function programSettingsFromRuntime(runtime) {
       settings[key] = source[key];
     }
   });
+  const normalizedSettings = normalizeProgramSettingsProviderSelection(settings);
+  Object.assign(settings, normalizedSettings);
   settings.execution_mode = "parallel";
   settings.dashboard_visibility = normalizeDashboardVisibility(settings.dashboard_visibility);
   settings.background_concurrency_limit = Math.max(1, Number.parseInt(String(settings.background_concurrency_limit || 2), 10) || 2);
@@ -305,6 +361,22 @@ export function applyProgramSettingsToForm(form, programSettings) {
   };
 }
 
+export function syncProgramSettingsModel(programSettings = {}, runtime = {}) {
+  const base = programSettingsFromRuntime(cloneValue(programSettings) || {});
+  return {
+    ...base,
+    model_provider: runtime?.model_provider ?? programSettings?.model_provider ?? base.model_provider,
+    local_model_provider: runtime?.local_model_provider ?? programSettings?.local_model_provider ?? base.local_model_provider,
+    ensemble_openai_model: runtime?.ensemble_openai_model ?? programSettings?.ensemble_openai_model ?? base.ensemble_openai_model,
+    ensemble_gemini_model: runtime?.ensemble_gemini_model ?? programSettings?.ensemble_gemini_model ?? base.ensemble_gemini_model,
+    ensemble_claude_model: runtime?.ensemble_claude_model ?? programSettings?.ensemble_claude_model ?? base.ensemble_claude_model,
+    model: runtime?.model ?? programSettings?.model ?? base.model,
+    model_preset: runtime?.model_preset ?? programSettings?.model_preset ?? base.model_preset,
+    model_selection_mode: runtime?.model_selection_mode ?? programSettings?.model_selection_mode ?? base.model_selection_mode,
+    model_slug_input: runtime?.model_slug_input ?? programSettings?.model_slug_input ?? base.model_slug_input,
+  };
+}
+
 export function normalizeMemoryBudgetGiB(value, fallback = 3) {
   const parsed = Number.parseFloat(String(value ?? "").trim());
   const fallbackValue = Number.parseFloat(String(fallback ?? "").trim());
@@ -315,14 +387,86 @@ export function normalizeMemoryBudgetGiB(value, fallback = 3) {
   return Math.max(0.1, Math.round(parsed * 10) / 10);
 }
 
+function looksLikeClaudeModel(model = "") {
+  const normalized = String(model || "").trim().toLowerCase();
+  return normalized === "sonnet" || normalized === "opus" || normalized === "haiku" || normalized.startsWith("claude");
+}
+
+function providerDefaultModelSlug(provider = "openai") {
+  switch (String(provider || "").trim().toLowerCase()) {
+    case "qwen_code":
+      return QWEN_CODE_DEFAULT_MODEL;
+    case "deepseek":
+      return DEEPSEEK_DEFAULT_MODEL;
+    case "kimi":
+      return KIMI_DEFAULT_MODEL;
+    case "minimax":
+      return MINIMAX_DEFAULT_MODEL;
+    case "glm":
+      return GLM_DEFAULT_MODEL;
+    default:
+      return "";
+  }
+}
+
+function currentModelMatchesProvider(provider = "openai", model = "") {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedModel = String(model || "").trim().toLowerCase();
+  if (!normalizedModel) {
+    return false;
+  }
+  if (normalizedProvider === "qwen_code") {
+    return normalizedModel.startsWith("qwen");
+  }
+  if (normalizedProvider === "deepseek") {
+    return normalizedModel.startsWith("deepseek");
+  }
+  if (normalizedProvider === "kimi") {
+    return normalizedModel.startsWith("kimi");
+  }
+  if (normalizedProvider === "minimax") {
+    return normalizedModel.includes("minimax");
+  }
+  if (normalizedProvider === "glm") {
+    return normalizedModel.startsWith("glm");
+  }
+  return false;
+}
+
 export function defaultModelForProvider(provider = "openai", runtime = {}) {
   const normalizedProvider = String(provider || "").trim().toLowerCase();
   const currentModel = String(runtime?.model || runtime?.model_slug_input || "").trim().toLowerCase();
+  if (normalizedProvider === "claude") {
+    const ensembleClaudeModel = String(runtime?.ensemble_claude_model || "").trim().toLowerCase();
+    if (normalizedModelProvider(runtime) === "ensemble" && ensembleClaudeModel) {
+      return ensembleClaudeModel;
+    }
+    return looksLikeClaudeModel(currentModel) ? currentModel : CLAUDE_DEFAULT_MODEL;
+  }
   if (normalizedProvider === "gemini") {
+    const ensembleGeminiModel = String(runtime?.ensemble_gemini_model || "").trim().toLowerCase();
+    if (normalizedModelProvider(runtime) === "ensemble" && ensembleGeminiModel) {
+      return ensembleGeminiModel;
+    }
     return currentModel.startsWith("gemini") ? currentModel : GEMINI_DEFAULT_MODEL;
   }
-  if (normalizedProvider === "openai") {
-    return currentModel || "gpt-5.4";
+  if (providerDefaultModelSlug(normalizedProvider)) {
+    return currentModelMatchesProvider(normalizedProvider, currentModel)
+      ? currentModel
+      : providerDefaultModelSlug(normalizedProvider);
+  }
+  if (normalizedProvider === "ensemble" || normalizedProvider === "openai") {
+    const ensembleOpenAiModel = String(runtime?.ensemble_openai_model || "").trim().toLowerCase();
+    if (normalizedModelProvider(runtime) === "ensemble" && ensembleOpenAiModel) {
+      return ensembleOpenAiModel;
+    }
+    if (!currentModel) {
+      return "gpt-5.4";
+    }
+    if (currentModel === "auto") {
+      return "auto";
+    }
+    return looksLikeClaudeModel(currentModel) || currentModel.startsWith("gemini") ? "gpt-5.4" : currentModel;
   }
   if (normalizedProvider === "oss") {
     return currentModel;
@@ -335,13 +479,34 @@ export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nex
     ? String(nextProvider || "").trim().toLowerCase()
     : "openai";
   const previousProvider = normalizedModelProvider(runtime);
+  const previousModel = String(runtime?.model_slug_input || runtime?.model || "").trim().toLowerCase();
+  const nextEnsembleOpenAiModel =
+    String(runtime?.ensemble_openai_model || "").trim().toLowerCase()
+      || (previousProvider === "openai" && previousModel && previousModel !== "auto" ? previousModel : "gpt-5.4");
+  const nextEnsembleGeminiModel =
+    String(runtime?.ensemble_gemini_model || "").trim().toLowerCase()
+      || (previousProvider === "gemini" && previousModel ? previousModel : GEMINI_DEFAULT_MODEL);
+  const nextEnsembleClaudeModel =
+    String(runtime?.ensemble_claude_model || "").trim().toLowerCase()
+      || (previousProvider === "claude" && previousModel ? previousModel : CLAUDE_DEFAULT_MODEL);
   const localProvider = provider === "oss" ? (String(nextLocalProvider || runtime?.local_model_provider || "ollama").trim().toLowerCase() === "lmstudio" ? "lmstudio" : "ollama") : "";
   const supportsAuto = providerSupportsAutoModel(provider);
   const currentModel = String(runtime?.model_slug_input || runtime?.model || "").trim().toLowerCase();
+  const autoModelBase =
+    previousProvider === provider
+      ? (currentModel || "auto")
+      : defaultModelForProvider(provider, { ...runtime, model: "", model_slug_input: "" });
+  const ensembleDefaultModel = nextEnsembleOpenAiModel || "gpt-5.4";
   const nextModel = supportsAuto
-    ? (currentModel || "auto")
+    ? autoModelBase
+    : provider === "ensemble"
+      ? ensembleDefaultModel
+    : provider === "claude" && !looksLikeClaudeModel(currentModel)
+      ? CLAUDE_DEFAULT_MODEL
     : provider === "gemini" && !currentModel.startsWith("gemini")
       ? GEMINI_DEFAULT_MODEL
+    : providerDefaultModelSlug(provider) && !currentModelMatchesProvider(provider, currentModel)
+      ? providerDefaultModelSlug(provider)
       : currentModel === "auto"
         ? ""
         : currentModel || defaultModelForProvider(provider, runtime);
@@ -349,6 +514,9 @@ export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nex
     ...(cloneValue(runtime) || {}),
     model_provider: provider,
     local_model_provider: localProvider,
+    ensemble_openai_model: nextEnsembleOpenAiModel,
+    ensemble_gemini_model: nextEnsembleGeminiModel,
+    ensemble_claude_model: nextEnsembleClaudeModel,
     provider_base_url:
       previousProvider === provider
         ? String(runtime?.provider_base_url || "").trim() || defaultProviderBaseUrl(provider)
@@ -506,7 +674,7 @@ export function computePlanStats(plan = {}) {
   const steps = Array.isArray(plan?.steps) ? plan.steps : [];
   const completed = steps.filter((step) => step.status === "completed").length;
   const failed = steps.filter((step) => step.status === "failed").length;
-  const running = steps.filter((step) => step.status === "running").length;
+  const running = steps.filter((step) => ["running", "integrating"].includes(String(step?.status || "").trim().toLowerCase())).length;
   return {
     total_steps: steps.length,
     completed_steps: completed,
@@ -617,9 +785,49 @@ function readyExecutionNodeIds(plan = {}) {
     .map((step) => step.step_id);
 }
 
-function runningExecutionSteps(plan = {}) {
+function executionStepsByStatus(plan = {}, statuses = []) {
+  const allowed = new Set(statuses.map((status) => String(status || "").trim().toLowerCase()));
   const steps = Array.isArray(plan?.steps) ? plan.steps : [];
-  return steps.filter((step) => step?.status === "running");
+  return steps.filter((step) => allowed.has(String(step?.status || "").trim().toLowerCase()));
+}
+
+function runningExecutionSteps(plan = {}) {
+  return executionStepsByStatus(plan, ["running", "integrating"]);
+}
+
+function activeExecutionStepIds(plan = {}) {
+  return {
+    runningIds: summarizeStepIds(executionStepsByStatus(plan, ["running"])),
+    integratingIds: summarizeStepIds(executionStepsByStatus(plan, ["integrating"])),
+  };
+}
+
+function progressActiveStatusCaption(plan, language = "en", completed = 0, total = 0) {
+  const locale = normalizeLanguage(language);
+  const { runningIds, integratingIds } = activeExecutionStepIds(plan);
+  if (runningIds && integratingIds) {
+    return translate(locale, "progress.runningAndIntegratingIds", {
+      completed,
+      total,
+      runningIds,
+      integratingIds,
+    });
+  }
+  if (runningIds) {
+    return translate(locale, "progress.runningIds", {
+      completed,
+      total,
+      ids: runningIds,
+    });
+  }
+  if (integratingIds) {
+    return translate(locale, "progress.integratingIds", {
+      completed,
+      total,
+      ids: integratingIds,
+    });
+  }
+  return "";
 }
 
 export function planDependencyValidationMessage(plan = {}) {
@@ -793,6 +1001,70 @@ function normalizePlanningProgress(raw = null) {
   };
 }
 
+function planningProgressStatusValue(progress = null) {
+  if (!progress || typeof progress !== "object") {
+    return "";
+  }
+  return String(progress?.currentStageStatus ?? progress?.current_stage_status ?? "").trim().toLowerCase();
+}
+
+export function isPlanningProgressRunning(progress = null) {
+  return planningProgressStatusValue(progress) === "running";
+}
+
+function planningProgressSummary(progress = null) {
+  if (!progress || typeof progress !== "object") {
+    return {
+      currentStageIndex: 0,
+      currentStageStatus: "",
+      stageCount: 0,
+    };
+  }
+  const currentStage = progress?.planningCurrentStage && typeof progress.planningCurrentStage === "object"
+    ? progress.planningCurrentStage
+    : null;
+  return {
+    currentStageIndex: Math.max(
+      0,
+      Number.parseInt(
+        String(currentStage?.index ?? progress?.currentStageIndex ?? progress?.current_stage_index ?? 0),
+        10,
+      ) || 0,
+    ),
+    currentStageStatus: String(
+      currentStage?.status ?? progress?.currentStageStatus ?? progress?.current_stage_status ?? "",
+    )
+      .trim()
+      .toLowerCase(),
+    stageCount: Math.max(
+      0,
+      Number.parseInt(
+        String(progress?.planningStageCount ?? progress?.stageCount ?? progress?.stage_count ?? 0),
+        10,
+      ) || 0,
+    ),
+  };
+}
+
+export function planningProgressCaptionDisplay(progress = null, language = "en") {
+  const locale = normalizeLanguage(language);
+  const summary = planningProgressSummary(progress);
+  if (summary.currentStageIndex && summary.stageCount) {
+    if (summary.currentStageStatus) {
+      return translate(locale, "run.planningStageWithStatus", {
+        current: summary.currentStageIndex,
+        status: displayStatus(summary.currentStageStatus, locale),
+        total: summary.stageCount,
+      });
+    }
+    return translate(locale, "run.planningStage", {
+      current: summary.currentStageIndex,
+      total: summary.stageCount,
+    });
+  }
+  return translate(locale, "run.planGeneration");
+}
+
 export function deriveExecutionProgress(detail = null, planDraft = null, activeJob = null) {
   const detailPlan = detail?.plan && typeof detail.plan === "object" ? detail.plan : null;
   const fallbackPlan = planDraft && typeof planDraft === "object" ? planDraft : {};
@@ -809,6 +1081,7 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
   const status = currentStatus.toLowerCase();
   const debugging = isDebuggingStatus(currentStatus);
   const planningProgress = normalizePlanningProgress(detail?.planning_progress);
+  const planningRunning = isPlanningProgressRunning(planningProgress);
   const recentActivity = (Array.isArray(detail?.activity) ? detail.activity : [])
     .map((line) => activityLineSummary(line))
     .filter(Boolean)
@@ -817,10 +1090,11 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     activeJob?.status === "running" ||
     runningStepList.length > 0 ||
     closeoutRunning ||
-    status.startsWith("running:");
+    status.startsWith("running:") ||
+    planningRunning;
 
   let phase = "idle";
-  if (command === "generate-plan") {
+  if (command === "generate-plan" || planningRunning) {
     phase = "planning";
   } else if (command === "run-closeout" || closeoutRunning) {
     phase = "closeout";
@@ -942,7 +1216,7 @@ export function normalizeInterruptedPlan(plan = null) {
   const nextPlan = cloneValue(plan) || {};
   const rawSteps = Array.isArray(nextPlan.steps) ? nextPlan.steps : [];
   nextPlan.steps = rawSteps.map((step) =>
-    step?.status === "running"
+    ["running", "integrating"].includes(String(step?.status || "").trim().toLowerCase())
       ? {
           ...step,
           status: "pending",
@@ -1008,14 +1282,56 @@ export function sanitizeProjectDetailForJobState(detail, activeJob = null, optio
     return detail;
   }
   const currentStatus = String(detail?.project?.current_status || "").trim();
-  const planHasRunningStep = (detail?.plan?.steps || []).some((step) => step.status === "running");
-  const closeoutRunning = String(detail?.plan?.closeout_status || "").trim().toLowerCase() === "running";
+  if (isPlanningProgressRunning(detail?.planning_progress) && !currentStatus.toLowerCase().startsWith("running:")) {
+    const nextStatus = "running:generate-plan";
+    return {
+      ...detail,
+      project: detail?.project
+        ? {
+            ...detail.project,
+            current_status: nextStatus,
+          }
+        : detail?.project,
+      snapshot: detail?.snapshot
+        ? {
+            ...detail.snapshot,
+            project: detail.snapshot.project
+              ? {
+                  ...detail.snapshot.project,
+                  current_status: nextStatus,
+                }
+              : detail.snapshot.project,
+          }
+        : detail?.snapshot,
+      bottom_panels: detail?.bottom_panels
+        ? {
+            ...detail.bottom_panels,
+            git_status: detail.bottom_panels.git_status
+              ? {
+                  ...detail.bottom_panels.git_status,
+                  current_status: nextStatus,
+                }
+              : detail.bottom_panels.git_status,
+          }
+        : detail?.bottom_panels,
+    };
+  }
+  const planSteps = Array.isArray(detail?.plan?.steps) ? detail.plan.steps : [];
+  const planHasRunningStep = planSteps.some((step) => step.status === "running");
+  const closeoutStatus = String(detail?.plan?.closeout_status || "").trim().toLowerCase();
+  const closeoutRunning = closeoutStatus === "running";
+  const terminalPlanState =
+    closeoutStatus === "completed"
+    || closeoutStatus === "failed"
+    || planSteps.some((step) => String(step?.status || "").trim().toLowerCase() === "failed")
+    || (planSteps.length > 0 && planSteps.every((step) => String(step?.status || "").trim().toLowerCase() === "completed"));
   if (!currentStatus.toLowerCase().startsWith("running:") && !planHasRunningStep && !closeoutRunning) {
     return detail;
   }
   const nowMs = Number.isFinite(options?.nowMs) ? options.nowMs : Date.now();
   if (
-    shouldPreserveRecentRunningState({
+    !terminalPlanState
+    && shouldPreserveRecentRunningState({
       plan: detail?.plan,
       activity: detail?.activity,
       pendingCheckpoint:
@@ -1108,6 +1424,16 @@ export function findModelCatalogEntry(modelCatalog = [], model = "") {
 
 export function defaultProviderBaseUrl(provider = "openai") {
   switch (String(provider || "").trim().toLowerCase()) {
+    case "deepseek":
+      return "https://api.deepseek.com/anthropic";
+    case "kimi":
+      return "https://api.moonshot.cn/v1";
+    case "minimax":
+      return "https://api.minimax.io/anthropic/v1";
+    case "glm":
+      return "https://open.bigmodel.cn/api/anthropic";
+    case "qwen_code":
+      return "https://dashscope.aliyuncs.com/compatible-mode/v1";
     case "openrouter":
       return "https://openrouter.ai/api/v1";
     case "local_openai":
@@ -1119,8 +1445,22 @@ export function defaultProviderBaseUrl(provider = "openai") {
 
 export function defaultProviderApiKeyEnv(provider = "openai") {
   switch (String(provider || "").trim().toLowerCase()) {
+    case "ensemble":
+      return "OPENAI_API_KEY";
+    case "claude":
+      return "ANTHROPIC_API_KEY";
     case "gemini":
       return "GEMINI_API_KEY";
+    case "qwen_code":
+      return "DASHSCOPE_API_KEY";
+    case "deepseek":
+      return "DEEPSEEK_API_KEY";
+    case "kimi":
+      return "MOONSHOT_API_KEY";
+    case "minimax":
+      return "MINIMAX_API_KEY";
+    case "glm":
+      return "ZHIPUAI_API_KEY";
     case "openrouter":
       return "OPENROUTER_API_KEY";
     case "opencdk":
@@ -1134,6 +1474,11 @@ export function defaultProviderApiKeyEnv(provider = "openai") {
 
 export function defaultBillingMode(provider = "openai") {
   switch (String(provider || "").trim().toLowerCase()) {
+    case "deepseek":
+    case "kimi":
+    case "minimax":
+    case "glm":
+    case "qwen_code":
     case "openrouter":
     case "opencdk":
       return "token";
@@ -1145,18 +1490,82 @@ export function defaultBillingMode(provider = "openai") {
 }
 
 export function providerSupportsAutoModel(provider = "openai") {
-  return String(provider || "").trim().toLowerCase() === "openai";
+  const normalized = String(provider || "").trim().toLowerCase();
+  return normalized === "openai" || normalized === "ensemble";
 }
 
 export function providerSupportsCatalog(provider = "openai") {
   const normalized = String(provider || "").trim().toLowerCase();
-  return normalized === "openai" || normalized === "oss";
+  return [
+    "openai",
+    "ensemble",
+    "claude",
+    "gemini",
+    "qwen_code",
+    "deepseek",
+    "kimi",
+    "minimax",
+    "glm",
+    "oss",
+  ].includes(normalized);
+}
+
+export function providerStatusMap(codexStatus = {}) {
+  const providerStatuses = codexStatus?.provider_statuses;
+  return providerStatuses && typeof providerStatuses === "object" ? providerStatuses : {};
+}
+
+export function providerAvailable(provider = "openai", codexStatus = {}) {
+  const status = providerStatusMap(codexStatus)[String(provider || "").trim().toLowerCase()];
+  if (!status) {
+    return true;
+  }
+  return Boolean(status.available);
+}
+
+export function providerUsable(provider = "openai", codexStatus = {}) {
+  const status = providerStatusMap(codexStatus)[String(provider || "").trim().toLowerCase()];
+  if (!status) {
+    return true;
+  }
+  return Boolean(status.usable);
+}
+
+export function providerStatusReason(provider = "openai", codexStatus = {}) {
+  const status = providerStatusMap(codexStatus)[String(provider || "").trim().toLowerCase()];
+  return String(status?.reason || "").trim();
+}
+
+export function programSettingsAllowsModelSlugInput(provider = "openai") {
+  const normalized = String(provider || "").trim().toLowerCase();
+  return normalized === "openrouter" || normalized === "opencdk";
 }
 
 export function providerDisplayName(provider = "openai", localProvider = "") {
   const normalized = String(provider || "").trim().toLowerCase();
+  if (normalized === "ensemble") {
+    return "GPT+Gemini+Claude Ensemble";
+  }
+  if (normalized === "claude") {
+    return "Claude Code";
+  }
   if (normalized === "gemini") {
     return "Gemini CLI";
+  }
+  if (normalized === "qwen_code") {
+    return "Qwen Code";
+  }
+  if (normalized === "deepseek") {
+    return "DeepSeek via Claude Code";
+  }
+  if (normalized === "kimi") {
+    return "Kimi";
+  }
+  if (normalized === "minimax") {
+    return "MiniMax via Claude Code";
+  }
+  if (normalized === "glm") {
+    return "GLM via Claude Code";
   }
   if (normalized === "oss") {
     const local = String(localProvider || "").trim().toLowerCase();
@@ -1213,7 +1622,8 @@ export function filterModelCatalogByProvider(modelCatalog = [], runtime = {}) {
   }
   return (modelCatalog || []).filter((item) => {
     const itemProvider = String(item?.provider || "openai").trim().toLowerCase() || "openai";
-    if (itemProvider !== provider) {
+    const matchesProvider = provider === "ensemble" ? itemProvider === "openai" : itemProvider === provider;
+    if (!matchesProvider) {
       return false;
     }
     if (provider !== "oss") {
@@ -1252,6 +1662,36 @@ export function defaultReasoningOption(modelCatalog = [], model = "", fallback =
   const preferred = String(entry?.default_reasoning_effort || fallback || "medium").trim().toLowerCase();
   const options = supportedReasoningOptions(modelCatalog, model, preferred);
   return options.includes(preferred) ? preferred : options[0] || "medium";
+}
+
+export function clampReasoningEffort(modelCatalog = [], model = "", requestedEffort = "", fallback = "medium") {
+  const normalizedRequested = String(requestedEffort || "").trim().toLowerCase();
+  const options = supportedReasoningOptions(modelCatalog, model, fallback);
+  if (options.includes(normalizedRequested)) {
+    return normalizedRequested;
+  }
+  return defaultReasoningOption(modelCatalog, model, fallback);
+}
+
+export function applyConfigRuntimeModelSelection(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null) {
+  const providerAllowsAuto = providerSupportsAutoModel(currentRuntime?.model_provider || "openai");
+  const model = String(nextModel || "").trim() || (providerAllowsAuto ? "auto" : "");
+  const normalizedModel = model.toLowerCase();
+  const supported = configReasoningOptions(modelCatalog, model, currentRuntime?.effort || "medium");
+  const preferred = nextEffort || selectedConfigReasoning(modelCatalog, { ...currentRuntime, model });
+  const selection = supported.includes(preferred) ? preferred : supported[0] || "medium";
+  const effort = selection === AUTO_REASONING_OPTION ? defaultReasoningOption(modelCatalog, model, currentRuntime?.effort || "medium") : selection;
+  const planningEffort = clampReasoningEffort(modelCatalog, model, currentRuntime?.planning_effort || effort, effort);
+  return {
+    ...currentRuntime,
+    model,
+    effort,
+    planning_effort: planningEffort,
+    effort_selection_mode: selection === AUTO_REASONING_OPTION ? AUTO_REASONING_OPTION : "explicit",
+    model_preset: normalizedModel === "auto" ? (selection === AUTO_REASONING_OPTION ? "auto" : selection) : "",
+    model_selection_mode: "slug",
+    model_slug_input: model,
+  };
 }
 
 export function configReasoningOptions(modelCatalog = [], model = "", fallback = "medium") {
@@ -1599,11 +2039,9 @@ export function executionProgressCaption(plan, language = "en") {
   }
   const usesDag = steps.some((step) => (step?.depends_on || []).length || (step?.owned_paths || []).length);
   if (usesDag) {
-    const runningIds = summarizeStepIds(runningExecutionSteps(plan));
-    if (runningIds) {
-      return locale === "ko"
-        ? `${completed}/${total}단계 완료, 실행 중: ${runningIds}`
-        : `Completed ${completed}/${total} steps, running: ${runningIds}`;
+    const activeCaption = progressActiveStatusCaption(plan, language, completed, total);
+    if (activeCaption) {
+      return activeCaption;
     }
     const completedIds = new Set(steps.filter((step) => step.status === "completed").map((step) => step.step_id));
     const readyIds = steps
@@ -1646,9 +2084,9 @@ export function toolbarProgressCaption(plan) {
   }
   const usesDag = steps.some((step) => (step?.depends_on || []).length || (step?.owned_paths || []).length);
   if (usesDag) {
-    const runningIds = summarizeStepIds(runningExecutionSteps(plan));
-    if (runningIds) {
-      return `Completed ${completed}/${total} steps, running: ${runningIds}`;
+    const activeCaption = progressActiveStatusCaption(plan, "en", completed, total);
+    if (activeCaption) {
+      return activeCaption;
     }
     const completedIds = new Set(steps.filter((step) => step.status === "completed").map((step) => step.step_id));
     const readyIds = steps
@@ -1683,9 +2121,9 @@ function progressDisplayCaption(plan, language = "en", dagAware = false) {
     return translate(locale, "progress.closeoutPending", { completed: completedCount, total: totalCount });
   }
   if (dagAware) {
-    const runningIds = summarizeStepIds(runningExecutionSteps(plan));
-    if (runningIds) {
-      return translate(locale, "progress.runningIds", { completed: completedCount, total: totalCount, ids: runningIds });
+    const activeCaption = progressActiveStatusCaption(plan, locale, completedCount, totalCount);
+    if (activeCaption) {
+      return activeCaption;
     }
     const completedIds = new Set(steps.filter((step) => step.status === "completed").map((step) => step.step_id));
     const readyIds = steps
@@ -1717,7 +2155,12 @@ export function executionProgressCaptionDisplay(plan, language = "en") {
   return progressDisplayCaption(plan, language, true);
 }
 
-export function toolbarProgressCaptionDisplay(plan, language = "en") {
+export function toolbarProgressCaptionDisplay(plan, language = "en", options = {}) {
+  const command = String(options?.activeJob?.command || "").trim().toLowerCase();
+  const jobStatus = String(options?.activeJob?.status || "").trim().toLowerCase();
+  if ((jobStatus === "running" && command === "generate-plan") || isPlanningProgressRunning(options?.planningProgress)) {
+    return planningProgressCaptionDisplay(options?.planningProgress, language);
+  }
   return progressDisplayCaption(plan, language, true);
 }
 
@@ -1742,6 +2185,9 @@ export function statusTone(status) {
   if (isDebuggingStatus(status)) {
     return "warning";
   }
+  if (normalized === "awaiting_review" || normalized === "awaiting_checkpoint_approval") {
+    return "warning";
+  }
   if (normalized.startsWith("queued")) {
     return "info";
   }
@@ -1750,6 +2196,9 @@ export function statusTone(status) {
   }
   if (normalized.includes("failed")) {
     return "danger";
+  }
+  if (normalized === "integrating") {
+    return "info";
   }
   if (normalized.includes("running")) {
     return "info";

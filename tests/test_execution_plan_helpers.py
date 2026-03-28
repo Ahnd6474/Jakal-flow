@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jakal_flow.environment import ensure_gitignore
 from jakal_flow.execution_control import ImmediateStopRequested
+from jakal_flow.memory import MemoryStore
 from jakal_flow.model_selection import (
     DEFAULT_MODEL_PRESET_ID,
     MODEL_MODE_CODEX,
@@ -63,7 +64,7 @@ from jakal_flow.planning import (
     source_prompt_template_path,
 )
 from jakal_flow.reporting import Reporter
-from jakal_flow.step_models import GEMINI_DEFAULT_MODEL, resolve_step_model_choice
+from jakal_flow.step_models import CLAUDE_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL, resolve_step_model_choice
 from jakal_flow.utils import append_jsonl, read_json, read_jsonl_tail, read_last_jsonl, write_json
 
 
@@ -253,12 +254,12 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 "step_id": "ST1",
                 "title": "UI pass",
                 "model_provider": "gemini",
-                "model": "gemini-3-flash",
+                "model": GEMINI_DEFAULT_MODEL,
             }
         )
 
         self.assertEqual(step.model_provider, "gemini")
-        self.assertEqual(step.model, "gemini-3-flash")
+        self.assertEqual(step.model, GEMINI_DEFAULT_MODEL)
 
     def test_resolve_step_model_choice_prefers_gemini_for_ui_steps(self) -> None:
         runtime = RuntimeOptions(model="gpt-5.4", model_provider="openai")
@@ -322,6 +323,26 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(choice.provider, "openai")
         self.assertEqual(choice.model, "gpt-5.4")
         self.assertEqual(choice.source, "auto")
+
+    def test_resolve_step_model_choice_prefers_claude_for_ensemble_ui_steps(self) -> None:
+        runtime = RuntimeOptions(model="gpt-5.4", model_provider="ensemble")
+        step = ExecutionStep(
+            step_id="ST1",
+            title="Refresh desktop settings panel",
+            display_description="Update the UI layout for the settings screen.",
+            owned_paths=["desktop/src/components/views/AppSettingsView.jsx"],
+        )
+
+        with mock.patch("jakal_flow.step_models.claude_available_for_auto_selection", return_value=True), mock.patch(
+            "jakal_flow.step_models.gemini_available_for_auto_selection",
+            return_value=False,
+        ):
+            choice = resolve_step_model_choice(step, runtime)
+
+        self.assertEqual(choice.provider, "claude")
+        self.assertEqual(choice.model, CLAUDE_DEFAULT_MODEL)
+        self.assertEqual(choice.source, "auto")
+        self.assertIn("Ensemble UI preference", choice.reason)
 
     def test_execution_plan_state_reads_closeout_fields(self) -> None:
         state = ExecutionPlanState.from_dict(
@@ -642,6 +663,42 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(plan_state.steps[0].depends_on, ["ST2"])
         self.assertEqual(plan_state.steps[1].depends_on, [])
 
+    def test_save_execution_plan_state_prunes_transitive_dag_dependencies(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_transitive_dependency_plan_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", execution_mode="parallel")
+
+        try:
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"):
+                _context, plan_state = orchestrator.update_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    plan_state=ExecutionPlanState(
+                        execution_mode="parallel",
+                        default_test_command="python -m pytest",
+                        steps=[
+                            ExecutionStep(step_id="NODE-A", title="Bootstrap", owned_paths=["src/bootstrap"]),
+                            ExecutionStep(step_id="NODE-B", title="Backend", depends_on=["NODE-A"], owned_paths=["src/backend"]),
+                            ExecutionStep(step_id="NODE-C", title="API", depends_on=["NODE-B"], owned_paths=["src/api"]),
+                            ExecutionStep(
+                                step_id="NODE-D",
+                                title="Docs",
+                                depends_on=["NODE-A", "NODE-C"],
+                                owned_paths=["docs"],
+                            ),
+                        ],
+                    ),
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(plan_state.steps[3].step_id, "ST4")
+        self.assertEqual(plan_state.steps[3].depends_on, ["ST3"])
+
     def test_save_execution_plan_state_normalizes_join_metadata(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_join_plan_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -902,6 +959,139 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(mocked_push.call_count, 2)
         self.assertEqual(mocked_pr.call_count, 2)
 
+    def test_run_parallel_execution_batch_promotes_single_leaf_lineage_immediately(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_hybrid_lineage_single_promote_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            test_cmd="python -m pytest",
+            execution_mode="parallel",
+            parallel_workers=1,
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            context.metadata.current_safe_revision = "safe-main"
+            context.loop_state.current_safe_revision = "safe-main"
+            orchestrator.workspace.save_project(context)
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Hybrid Singleton Promotion Demo",
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(step_id="ST1", title="Frontend slice", owned_paths=["desktop/src"]),
+                        ExecutionStep(step_id="ST2", title="Backend slice", status="completed", metadata={"lineage_id": "LN2"}),
+                        ExecutionStep(
+                            step_id="ST3",
+                            title="Join slices",
+                            depends_on=["ST1", "ST2"],
+                            metadata={"step_kind": "join", "merge_from": ["ST1", "ST2"], "join_policy": "all"},
+                        ),
+                    ],
+                ),
+            )
+            orchestrator._save_lineage_states(
+                context,
+                {
+                    "LN2": LineageState(
+                        lineage_id="LN2",
+                        branch_name="jakal-flow-lineage-ln2",
+                        worktree_dir=temp_root / "ln2" / "repo",
+                        project_root=temp_root / "ln2",
+                        created_at="2026-03-27T00:00:00+00:00",
+                        updated_at="2026-03-27T00:00:00+00:00",
+                        head_commit="ln2-head",
+                        safe_revision="ln2-head",
+                        status="merged",
+                        merged_by_step_id="ST0",
+                    ),
+                },
+            )
+            worker_result = {
+                "step_id": "ST1",
+                "status": "completed",
+                "notes": "frontend lineage ok",
+                "commit_hash": "ln1-step",
+                "changed_files": ["desktop/src/App.jsx"],
+                "pass_log": {"pass_type": "block-search-pass"},
+                "block_log": {"status": "completed"},
+                "test_summary": "frontend lineage ok",
+                "head_commit": "ln1-head",
+                "ml_report_payload": {},
+            }
+
+            def fake_promote(promotion_context, lineage):
+                promotion_context.metadata.current_safe_revision = "main-promoted"
+                promotion_context.loop_state.current_safe_revision = "main-promoted"
+                promotion_context.loop_state.last_commit_hash = "main-promoted"
+                return True, "pushed", "main-promoted"
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch.object(
+                orchestrator.git,
+                "add_worktree",
+            ), mock.patch.object(
+                orchestrator,
+                "_parallel_worker_count",
+                return_value=1,
+            ), mock.patch.object(
+                orchestrator,
+                "_build_lineage_context",
+                return_value=mock.Mock(name="lineage-1"),
+            ), mock.patch.object(
+                orchestrator,
+                "_run_lineage_step_worker",
+                return_value=worker_result,
+            ), mock.patch.object(
+                orchestrator,
+                "_promote_lineage_to_target_branch",
+                side_effect=fake_promote,
+            ) as mocked_promote, mock.patch.object(
+                orchestrator,
+                "_push_if_ready",
+            ) as mocked_push, mock.patch.object(
+                orchestrator,
+                "_maybe_open_pull_request",
+            ) as mocked_pr, mock.patch.object(
+                orchestrator,
+                "_cleanup_lineage_worktree",
+            ) as mocked_cleanup:
+                context, plan_state, steps = orchestrator.run_parallel_execution_batch(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_ids=["ST1"],
+                )
+                lineage_state = read_json(context.paths.lineage_state_file, default={})
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual([step.step_id for step in steps], ["ST1"])
+        self.assertEqual([step.status for step in steps], ["completed"])
+        self.assertEqual(steps[0].commit_hash, "main-promoted")
+        self.assertEqual(context.metadata.current_safe_revision, "main-promoted")
+        mocked_promote.assert_called_once()
+        mocked_push.assert_not_called()
+        mocked_pr.assert_not_called()
+        mocked_cleanup.assert_called_once()
+        self.assertEqual(
+            {item["lineage_id"]: item["status"] for item in lineage_state["lineages"]},
+            {"LN2": "merged", "LN3": "merged"},
+        )
+        self.assertEqual(
+            {item["lineage_id"]: item["merged_by_step_id"] for item in lineage_state["lineages"]},
+            {"LN2": "ST0", "LN3": "ST1"},
+        )
+
     def test_run_parallel_execution_batch_keeps_completed_lineages_when_one_worker_errors(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_hybrid_lineage_partial_failure_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -1133,7 +1323,11 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                     orchestrator,
                     "_push_if_ready",
                     return_value=(True, "pushed"),
-                ) as mocked_push_if_ready:
+                ) as mocked_push_if_ready, mock.patch.object(
+                    orchestrator,
+                    "_delete_remote_branch_if_present",
+                    return_value=(True, "deleted"),
+                ) as mocked_delete_remote:
                     project, saved, step = orchestrator.run_join_execution_step(
                         project_dir=repo_dir,
                         runtime=runtime,
@@ -1154,6 +1348,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             project.metadata.branch,
             commit_hash="main-integrated",
         )
+        self.assertEqual(mocked_delete_remote.call_count, 3)
         self.assertEqual(mocked_cleanup.call_count, 2)
         mocked_cleanup_integration.assert_called_once()
         self.assertEqual(
@@ -1164,6 +1359,68 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             {item["lineage_id"]: item["merged_by_step_id"] for item in lineage_state["lineages"]},
             {"LN1": "ST4", "LN2": None, "LN3": "ST4"},
         )
+
+    def test_lineages_for_join_step_skips_already_merged_lineages(self) -> None:
+        orchestrator = Orchestrator(Path.cwd() / ".tmp_join_lineage_filter_workspace")
+        plan_state = ExecutionPlanState(
+            execution_mode="parallel",
+            steps=[
+                ExecutionStep(step_id="ST1", title="Frontend", status="completed", metadata={"lineage_id": "LN1"}),
+                ExecutionStep(step_id="ST2", title="Backend", status="completed", metadata={"lineage_id": "LN2"}),
+                ExecutionStep(
+                    step_id="ST3",
+                    title="Join frontend and backend",
+                    status="completed",
+                    depends_on=["ST1", "ST2"],
+                    metadata={"step_kind": "join", "merge_from": ["ST1", "ST2"], "join_policy": "all"},
+                ),
+                ExecutionStep(step_id="ST4", title="Docs", status="completed", metadata={"lineage_id": "LN4"}),
+                ExecutionStep(
+                    step_id="ST5",
+                    title="Reconcile final flow",
+                    depends_on=["ST1", "ST3", "ST4"],
+                    metadata={"step_kind": "join", "merge_from": ["ST1", "ST3", "ST4"], "join_policy": "all"},
+                ),
+            ],
+        )
+        lineages = {
+            "LN1": LineageState(
+                lineage_id="LN1",
+                branch_name="jakal-flow-lineage-ln1",
+                worktree_dir=Path.cwd() / ".tmp_join_lineage_filter_workspace" / "ln1",
+                project_root=Path.cwd() / ".tmp_join_lineage_filter_workspace" / "ln1-project",
+                created_at="2026-03-27T00:00:00+00:00",
+                updated_at="2026-03-27T00:00:00+00:00",
+                head_commit="ln1-head",
+                safe_revision="ln1-head",
+                status="merged",
+                merged_by_step_id="ST3",
+            ),
+            "LN2": LineageState(
+                lineage_id="LN2",
+                branch_name="jakal-flow-lineage-ln2",
+                worktree_dir=Path.cwd() / ".tmp_join_lineage_filter_workspace" / "ln2",
+                project_root=Path.cwd() / ".tmp_join_lineage_filter_workspace" / "ln2-project",
+                created_at="2026-03-27T00:00:00+00:00",
+                updated_at="2026-03-27T00:00:00+00:00",
+                head_commit="ln2-head",
+                safe_revision="ln2-head",
+            ),
+            "LN4": LineageState(
+                lineage_id="LN4",
+                branch_name="jakal-flow-lineage-ln4",
+                worktree_dir=Path.cwd() / ".tmp_join_lineage_filter_workspace" / "ln4",
+                project_root=Path.cwd() / ".tmp_join_lineage_filter_workspace" / "ln4-project",
+                created_at="2026-03-27T00:00:00+00:00",
+                updated_at="2026-03-27T00:00:00+00:00",
+                head_commit="ln4-head",
+                safe_revision="ln4-head",
+            ),
+        }
+
+        selected = orchestrator._lineages_for_join_step(plan_state, plan_state.steps[4], lineages)
+
+        self.assertEqual([lineage.lineage_id for lineage in selected], ["LN4"])
 
     def test_run_join_execution_step_rolls_back_main_when_selective_merge_fails(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_join_merge_failure_test"
@@ -2059,6 +2316,81 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(logged_test["failure_reason"], "AssertionError: experiment2 failed")
         mocked_reset.assert_called_once_with(repo_dir, "safe-revision")
 
+    def test_run_single_block_records_search_execution_failures_without_regression_label(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_search_execution_failure_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest", regression_limit=3)
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            context.metadata.current_safe_revision = "safe-revision"
+            context.loop_state.current_safe_revision = "safe-revision"
+            orchestrator.workspace.save_project(context)
+            reporter = Reporter(context)
+            memory = MemoryStore(context.paths)
+            runner = mock.Mock()
+            candidate = CandidateTask(
+                candidate_id="ST1",
+                title="Canonicalize root layout",
+                rationale="Normalize the root layout safely.",
+                plan_refs=["ST1"],
+                score=1.0,
+            )
+            search_run_result = CodexRunResult(
+                pass_type="block-search-pass",
+                prompt_file=context.paths.logs_dir / "search.prompt.md",
+                output_file=context.paths.logs_dir / "search.last_message.txt",
+                event_file=context.paths.logs_dir / "search.events.jsonl",
+                returncode=41,
+                search_enabled=True,
+                changed_files=[],
+                usage={},
+                last_message="",
+                diagnostics={
+                    "attempts": [
+                        {
+                            "attempt": 1,
+                            "returncode": 41,
+                            "stderr_excerpt": "Please set an Auth method in C:/Users/alber/.gemini/settings.json before running.",
+                        }
+                    ]
+                },
+            )
+
+            with mock.patch.object(
+                orchestrator,
+                "_execute_pass",
+                return_value=(search_run_result, None, None),
+            ), mock.patch.object(orchestrator, "_report_failure") as mocked_report_failure:
+                orchestrator._run_single_block(
+                    context=context,
+                    runner=runner,
+                    memory=memory,
+                    reporter=reporter,
+                    candidate_override=candidate,
+                    suppress_failure_reporting=False,
+                )
+
+            block_entry = read_last_jsonl(context.paths.block_log_file)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertIsNotNone(block_entry)
+        self.assertEqual(context.loop_state.counters.regression_failures, 0)
+        self.assertEqual(block_entry["status"], "rolled_back")
+        self.assertIn("Codex pass failed and changes were rolled back", block_entry["test_summary"])
+        self.assertIn("Please set an Auth method", block_entry["test_summary"])
+        mocked_report_failure.assert_called_once()
+        self.assertIn("Please set an Auth method", mocked_report_failure.call_args.kwargs["summary"])
+
     def test_execute_pass_invokes_debugger_with_failure_logs_and_recovers(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_debugger_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -2645,6 +2977,36 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertFalse(background_error, str(background_error[0]) if background_error else "")
         self.assertEqual(synced_statuses, ["integrating", "running"])
 
+    def test_build_parallel_worker_paths_includes_lineage_state_file(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_worker_paths_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            execution_mode="parallel",
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            worker_paths = orchestrator._build_parallel_worker_paths(
+                context,
+                batch_token="batch-demo",
+                worker_slug="01-st1",
+                worktree_dir=repo_dir,
+            )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(worker_paths.lineage_state_file, worker_paths.state_dir / "LINEAGES.json")
+
     def test_parallel_batch_merge_conflict_invokes_merger_and_continues(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_merge_debugger_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -3122,6 +3484,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("prefer editing or extending that code", decomposition_prompt)
         self.assertIn("Use the following priority order while planning:", plan_prompt)
         self.assertIn("Requested execution mode:", plan_prompt)
+        self.assertIn("Model routing guidance for this run:", plan_prompt)
+        self.assertIn("Default routing for this run:", plan_prompt)
         self.assertIn("parallel", plan_prompt)
         self.assertIn("Planner Agent A decomposition artifact:", plan_prompt)
         self.assertIn("Planner Agent A output unavailable.", plan_prompt)
@@ -3129,6 +3493,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("fold scaffold-only bootstrap work into the concrete implementation step", plan_prompt)
         self.assertIn('"block_id":"B1"', packed_plan_prompt)
         self.assertIn("step_id", plan_prompt)
+        self.assertIn("model_provider", plan_prompt)
+        self.assertIn('"model"', plan_prompt)
         self.assertIn("depends_on", plan_prompt)
         self.assertIn("owned_paths", plan_prompt)
         self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", plan_prompt)
@@ -3399,6 +3765,230 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(plan_state.plan_title, "Fast planner demo")
         self.assertEqual([step.step_id for step in plan_state.steps], ["ST1"])
 
+    def test_generate_execution_plan_uses_selected_planning_model_and_downgrades_gpt_54_effort(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_planning_model_effort_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model_provider="openai",
+            model="gpt-5.4",
+            planning_effort="high",
+            effort="high",
+            execution_mode="parallel",
+            use_fast_mode=True,
+            test_cmd="python -m pytest",
+        )
+        final_plan_json = """
+        {
+          "title": "Planner model demo",
+          "summary": "Keep the configured planner model.",
+          "tasks": [
+            {
+              "step_id": "ST1",
+              "task_title": "Implement the requested change",
+              "display_description": "Apply the change safely.",
+              "codex_description": "Use the configured planner model and preserve the runtime choice.",
+              "reasoning_effort": "medium",
+              "depends_on": [],
+              "owned_paths": ["src/demo.py"],
+              "success_criteria": "The change is saved."
+            }
+          ]
+        }
+        """
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            run_result = CodexRunResult(
+                pass_type="plan-agent-b-packing",
+                prompt_file=context.paths.logs_dir / "b.prompt.md",
+                output_file=context.paths.logs_dir / "b.last_message.txt",
+                event_file=context.paths.logs_dir / "b.events.jsonl",
+                returncode=0,
+                search_enabled=False,
+                changed_files=[],
+                usage={"input_tokens": 12},
+                last_message=final_plan_json,
+            )
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch(
+                "jakal_flow.orchestrator.CodexRunner.run_pass",
+                return_value=run_result,
+            ) as mocked_run_pass:
+                orchestrator.generate_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    project_prompt="Use the selected planning model.",
+                    max_steps=3,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(mocked_run_pass.call_count, 1)
+        self.assertEqual(mocked_run_pass.call_args.kwargs["context"].runtime.model, "gpt-5.4")
+        self.assertEqual(mocked_run_pass.call_args.kwargs["reasoning_effort"], "medium")
+
+    def test_generate_execution_plan_keeps_non_gpt_54_planning_effort(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_planning_model_keep_effort_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model_provider="gemini",
+            model="gemini-2.5-pro",
+            planning_effort="medium",
+            effort="medium",
+            execution_mode="parallel",
+            test_cmd="python -m pytest",
+        )
+        final_plan_json = """
+        {
+          "title": "Planner model demo",
+          "summary": "Keep the configured planner model.",
+          "tasks": [
+            {
+              "step_id": "ST1",
+              "task_title": "Implement the requested change",
+              "display_description": "Apply the change safely.",
+              "codex_description": "Use the configured planner model and preserve the runtime choice.",
+              "reasoning_effort": "medium",
+              "depends_on": [],
+              "owned_paths": ["src/demo.py"],
+              "success_criteria": "The change is saved."
+            }
+          ]
+        }
+        """
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            run_result = CodexRunResult(
+                pass_type="plan-agent-b-packing",
+                prompt_file=context.paths.logs_dir / "b.prompt.md",
+                output_file=context.paths.logs_dir / "b.last_message.txt",
+                event_file=context.paths.logs_dir / "b.events.jsonl",
+                returncode=0,
+                search_enabled=False,
+                changed_files=[],
+                usage={"input_tokens": 12},
+                last_message=final_plan_json,
+            )
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch(
+                "jakal_flow.orchestrator.CodexRunner.run_pass",
+                return_value=run_result,
+            ) as mocked_run_pass:
+                orchestrator.generate_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    project_prompt="Use the selected planning model.",
+                    max_steps=3,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(mocked_run_pass.call_args.kwargs["context"].runtime.model, "gemini-2.5-pro")
+        self.assertEqual(mocked_run_pass.call_args.kwargs["reasoning_effort"], "medium")
+
+    def test_generate_execution_plan_materializes_ensemble_step_models(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_ensemble_planner_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
+        (repo_dir / "desktop").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "desktop" / "ui.jsx").write_text("export default function Demo() { return null; }\n", encoding="utf-8")
+        (repo_dir / "src").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "src" / "planner.py").write_text("def run() -> None:\n    pass\n", encoding="utf-8")
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            planning_effort="medium",
+            execution_mode="parallel",
+            model_provider="ensemble",
+            ensemble_openai_model="gpt-5.4-mini",
+            ensemble_gemini_model="gemini-2.5-pro",
+            ensemble_claude_model="claude-3.7-sonnet",
+            use_fast_mode=True,
+            test_cmd="python -m pytest",
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            final_plan_json = """
+            {
+              "title": "Ensemble planner demo",
+              "summary": "Route UI work to Claude and backend work to Codex.",
+              "tasks": [
+                {
+                  "step_id": "ST1",
+                  "task_title": "Polish the desktop UI",
+                  "display_description": "Update the desktop layout and visual polish.",
+                  "codex_description": "Adjust the desktop UI and keep the Tauri entrypoint intact.",
+                  "reasoning_effort": "medium",
+                  "depends_on": [],
+                  "owned_paths": ["desktop/src/components/views/AppSettingsView.jsx"],
+                  "success_criteria": "The desktop UI reflects the new model routing controls."
+                },
+                {
+                  "step_id": "ST2",
+                  "task_title": "Update orchestrator routing",
+                  "display_description": "Wire ensemble routing into planning and execution.",
+                  "codex_description": "Update the orchestrator to preserve traceable backend routing.",
+                  "reasoning_effort": "medium",
+                  "depends_on": ["ST1"],
+                  "owned_paths": ["src/jakal_flow/orchestrator.py"],
+                  "success_criteria": "The planner and orchestrator share the same routing policy."
+                }
+              ]
+            }
+            """
+            run_result = CodexRunResult(
+                pass_type="plan-agent-b-packing",
+                prompt_file=context.paths.logs_dir / "b.prompt.md",
+                output_file=context.paths.logs_dir / "b.last_message.txt",
+                event_file=context.paths.logs_dir / "b.events.jsonl",
+                returncode=0,
+                search_enabled=False,
+                changed_files=[],
+                usage={"input_tokens": 12},
+                last_message=final_plan_json,
+            )
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch(
+                "jakal_flow.orchestrator.CodexRunner.run_pass",
+                return_value=run_result,
+            ), mock.patch("jakal_flow.step_models.claude_available_for_auto_selection", return_value=True), mock.patch(
+                "jakal_flow.step_models.gemini_available_for_auto_selection",
+                return_value=False,
+            ):
+                _context, plan_state = orchestrator.generate_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    project_prompt="Route frontend work to Claude and backend work to Codex.",
+                    max_steps=4,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(plan_state.plan_title, "Ensemble planner demo")
+        self.assertEqual(plan_state.steps[0].model_provider, "claude")
+        self.assertEqual(plan_state.steps[0].model, "claude-3.7-sonnet")
+        self.assertEqual(plan_state.steps[0].metadata["model_selection_source"], "auto")
+        self.assertIn("Ensemble UI preference", plan_state.steps[0].metadata["model_selection_reason"])
+        self.assertEqual(plan_state.steps[1].model_provider, "openai")
+        self.assertEqual(plan_state.steps[1].model, "gpt-5.4-mini")
+        self.assertEqual(plan_state.steps[1].metadata["model_selection_source"], "auto")
+
     def test_ensure_gitignore_adds_missing_entries_once(self) -> None:
         project_dir = Path(__file__).resolve().parents[1] / ".tmp_gitignore_test"
         shutil.rmtree(project_dir, ignore_errors=True)
@@ -3406,13 +3996,14 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         gitignore = project_dir / ".gitignore"
         gitignore.write_text("node_modules/\n", encoding="utf-8")
 
-        changed_first = ensure_gitignore(project_dir, entries=[".venv/", "__pycache__/"])
-        changed_second = ensure_gitignore(project_dir, entries=[".venv/", "__pycache__/"])
+        changed_first = ensure_gitignore(project_dir, entries=["_tmp_*/", ".venv/", "__pycache__/"])
+        changed_second = ensure_gitignore(project_dir, entries=["_tmp_*/", ".venv/", "__pycache__/"])
         content = gitignore.read_text(encoding="utf-8")
         shutil.rmtree(project_dir, ignore_errors=True)
 
         self.assertTrue(changed_first)
         self.assertFalse(changed_second)
+        self.assertIn("_tmp_*/", content)
         self.assertIn(".venv/", content)
         self.assertIn("__pycache__/", content)
 

@@ -71,9 +71,19 @@ class _FakeSession:
 
 class CodexAppServerTests(unittest.TestCase):
     def test_resolve_codex_path_uses_platform_default_when_blank(self) -> None:
-        with mock.patch("jakal_flow.codex_app_server.default_codex_path", return_value="codex"):
+        with mock.patch("jakal_flow.codex_app_server.default_codex_path", return_value="codex"), mock.patch(
+            "jakal_flow.codex_app_server.shutil.which",
+            return_value=None,
+        ):
             self.assertEqual(resolve_codex_path(""), "codex")
             self.assertEqual(resolve_codex_path("   "), "codex")
+
+    def test_resolve_codex_path_falls_back_to_windows_executable_when_cmd_shim_is_missing(self) -> None:
+        with mock.patch("jakal_flow.codex_app_server.os.name", "nt"), mock.patch(
+            "jakal_flow.codex_app_server.shutil.which",
+            side_effect=lambda command: r"C:\Users\alber\.local\bin\claude.exe" if command == "claude" else None,
+        ):
+            self.assertEqual(resolve_codex_path("claude.cmd"), r"C:\Users\alber\.local\bin\claude.exe")
 
     def test_fetch_codex_backend_snapshot_formats_models_and_rate_limits(self) -> None:
         with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", _FakeSession), mock.patch(
@@ -89,6 +99,7 @@ class CodexAppServerTests(unittest.TestCase):
         self.assertEqual(snapshot.model_catalog[0]["model"], "auto")
         self.assertEqual(snapshot.model_catalog[1]["model"], "gpt-5.3-codex-spark")
         self.assertEqual(snapshot.model_catalog[1]["supported_reasoning_efforts"], ["low", "high"])
+        self.assertIn("gemini-2.5-pro", [item["model"] for item in snapshot.model_catalog if item.get("provider") == "gemini"])
 
     def test_fetch_codex_backend_snapshot_returns_fallback_when_app_server_fails(self) -> None:
         with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", side_effect=RuntimeError("boom")), mock.patch(
@@ -144,7 +155,7 @@ class CodexAppServerTests(unittest.TestCase):
             snapshot = fetch_codex_backend_snapshot("codex.cmd")
 
         self.assertTrue(snapshot.available)
-        self.assertEqual(snapshot.model_catalog[1]["model"], "qwen2.5-coder:0.5b")
+        self.assertIn("qwen2.5-coder:0.5b", [item["model"] for item in snapshot.model_catalog if item.get("provider") == "oss"])
         self.assertIn("boom", snapshot.error)
 
     def test_fetch_codex_backend_snapshot_supports_gemini_cli(self) -> None:
@@ -157,7 +168,45 @@ class CodexAppServerTests(unittest.TestCase):
         self.assertTrue(snapshot.available)
         self.assertEqual(snapshot.account["type"], "gemini-cli")
         self.assertEqual(snapshot.account["version"], "0.1.0")
-        self.assertEqual(snapshot.model_catalog, [])
+        self.assertIn("gemini-3-flash-preview", [item["model"] for item in snapshot.model_catalog if item.get("provider") == "gemini"])
+        self.assertEqual(snapshot.error, "")
+
+    def test_fetch_codex_backend_snapshot_supports_claude_code(self) -> None:
+        def fake_run(command, **_kwargs):
+            if command[-1] == "--version":
+                return subprocess.CompletedProcess(command, 0, stdout="1.2.3\n", stderr="")
+            if command[-2:] == ["auth", "status"]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout='{"authenticated": true, "email": "demo@example.com", "planType": "pro"}',
+                    stderr="",
+                )
+            raise AssertionError(f"Unexpected command: {command}")
+
+        with mock.patch("jakal_flow.codex_app_server.subprocess.run", side_effect=fake_run):
+            snapshot = fetch_codex_backend_snapshot("claude")
+
+        self.assertTrue(snapshot.available)
+        self.assertEqual(snapshot.account["authenticated"], True)
+        self.assertEqual(snapshot.account["email"], "demo@example.com")
+        self.assertEqual(snapshot.account["plan_type"], "pro")
+        self.assertEqual(snapshot.account["type"], "claude-code")
+        self.assertEqual(snapshot.account["version"], "1.2.3")
+        self.assertIn("claude-sonnet-4-6", [item["model"] for item in snapshot.model_catalog if item.get("provider") == "claude"])
+        self.assertEqual(snapshot.error, "")
+
+    def test_fetch_codex_backend_snapshot_supports_qwen_code(self) -> None:
+        with mock.patch(
+            "jakal_flow.codex_app_server.subprocess.run",
+            return_value=subprocess.CompletedProcess(["qwen", "--version"], 0, stdout="0.13.1\n", stderr=""),
+        ):
+            snapshot = fetch_codex_backend_snapshot("qwen")
+
+        self.assertTrue(snapshot.available)
+        self.assertEqual(snapshot.account["type"], "qwen-code")
+        self.assertEqual(snapshot.account["version"], "0.13.1")
+        self.assertIn("qwen3-coder-plus", [item["model"] for item in snapshot.model_catalog if item.get("provider") == "qwen_code"])
         self.assertEqual(snapshot.error, "")
 
 

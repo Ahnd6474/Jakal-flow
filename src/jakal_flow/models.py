@@ -72,6 +72,9 @@ class RuntimeOptions:
     local_model_provider: str = ""
     provider_base_url: str = ""
     provider_api_key_env: str = ""
+    ensemble_openai_model: str = "gpt-5.4"
+    ensemble_gemini_model: str = "gemini-3-flash-preview"
+    ensemble_claude_model: str = "claude-sonnet-4-6"
     billing_mode: str = "included"
     input_cost_per_million_usd: float = 0.0
     cached_input_cost_per_million_usd: float = 0.0
@@ -97,6 +100,7 @@ class RuntimeOptions:
     parallel_worker_mode: str = "auto"
     parallel_workers: int = 0
     parallel_memory_per_worker_gib: float = 3.0
+    save_project_logs: bool = False
     extra_prompt: str = ""
     init_plan_prompt: str = ""
     approval_mode: str = "never"
@@ -104,6 +108,7 @@ class RuntimeOptions:
     test_cmd: str = "python -m pytest"
     max_blocks: int = 1
     allow_push: bool = False
+    auto_merge_pull_request: bool = False
     codex_path: str = field(default_factory=default_codex_path)
     git_user_name: str = "jakal-flow-bot"
     git_user_email: str = "jakal-flow@example.invalid"
@@ -123,7 +128,7 @@ class RuntimeOptions:
         current_path = str(self.codex_path or "").strip()
         legacy_default_path = default_codex_path()
         provider_default_path = default_codex_path(normalized_provider)
-        if not current_path or (normalized_provider == "gemini" and current_path == legacy_default_path):
+        if not current_path or (provider_default_path != legacy_default_path and current_path == legacy_default_path):
             self.codex_path = provider_default_path
 
     def to_dict(self) -> dict[str, Any]:

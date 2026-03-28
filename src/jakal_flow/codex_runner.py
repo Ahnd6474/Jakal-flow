@@ -9,6 +9,7 @@ from .codex_app_server import cli_backend_kind, is_auto_model, resolve_codex_pat
 from .execution_control import execution_scope_id, run_subprocess_capture
 from .model_selection import normalize_reasoning_effort
 from .model_providers import (
+    provider_backend_kind,
     normalize_local_model_provider,
     normalize_model_provider,
     provider_preset,
@@ -52,6 +53,7 @@ class CodexRunner:
             output_file=output_file,
             search_enabled=search_enabled,
             reasoning_effort=reasoning_effort,
+            prompt_text=formatted_prompt,
         )
         stdout = ""
         stderr = ""
@@ -70,13 +72,17 @@ class CodexRunner:
                 scope_id=scope_id,
                 label=f"{backend.title()} {pass_type}",
                 cwd=context.paths.repo_dir,
-                input_bytes=formatted_prompt.encode("utf-8"),
+                input_bytes=None if backend in {"claude", "qwen"} else formatted_prompt.encode("utf-8"),
                 env=child_env,
             )
             stdout = decode_process_output(completed.stdout)
             stderr = decode_process_output(completed.stderr)
             if backend == "gemini":
                 self._write_gemini_output_file(output_file, stdout)
+            elif backend == "claude":
+                self._write_claude_output_file(output_file, stdout)
+            elif backend == "qwen":
+                self._write_qwen_output_file(output_file, stdout)
             attempt_last_message = read_text(output_file).strip()
             unexpected_token_detected = self._is_unexpected_token_failure(
                 completed.returncode,
@@ -167,8 +173,7 @@ class CodexRunner:
             if not isinstance(payload, dict):
                 continue
             if payload.get("type") != "turn.completed":
-                if isinstance(payload, dict):
-                    self._accumulate_gemini_usage(payload, usage)
+                if isinstance(payload, dict) and self._accumulate_gemini_usage(payload, usage):
                     gemini_usage_detected = True
                 continue
             turn_usage = payload.get("usage", {})
@@ -183,6 +188,14 @@ class CodexRunner:
                 payload = None
             if isinstance(payload, dict):
                 self._accumulate_gemini_usage(payload, usage)
+                self._accumulate_claude_usage(payload, usage)
+                if isinstance(payload.get("message"), dict):
+                    self._accumulate_qwen_usage(payload, usage)
+            elif isinstance(payload, list):
+                for item in payload:
+                    if not isinstance(item, dict):
+                        continue
+                    self._accumulate_qwen_usage(item, usage)
         if usage["total_tokens"] <= 0:
             usage["total_tokens"] = (
                 usage["input_tokens"] + usage["output_tokens"] + usage["reasoning_output_tokens"]
@@ -230,6 +243,28 @@ class CodexRunner:
 
     def _provider_environment(self, context: ProjectContext, *, backend: str) -> dict[str, str]:
         provider = normalize_model_provider(getattr(context.runtime, "model_provider", ""))
+        preset = provider_preset(provider)
+        if backend == "claude" or provider_backend_kind(provider) == "claude":
+            provider_base_url = str(getattr(context.runtime, "provider_base_url", "") or "").strip() or preset.default_base_url
+            api_key_env_name = str(getattr(context.runtime, "provider_api_key_env", "") or "").strip() or preset.default_api_key_env
+            dotenv_path = context.paths.repo_dir / ".env"
+            env_updates: dict[str, str] = {}
+            if provider_base_url:
+                env_updates["ANTHROPIC_BASE_URL"] = provider_base_url
+            if api_key_env_name:
+                api_key = get_env_or_dotenv(api_key_env_name, dotenv_path).strip()
+                if api_key:
+                    env_updates["ANTHROPIC_API_KEY"] = api_key
+                    env_updates["ANTHROPIC_AUTH_TOKEN"] = api_key
+            selected_model = str(getattr(context.runtime, "model", "") or "").strip()
+            if selected_model:
+                env_updates["ANTHROPIC_MODEL"] = selected_model
+                if provider != "claude":
+                    env_updates["ANTHROPIC_DEFAULT_SONNET_MODEL"] = selected_model
+                    env_updates["ANTHROPIC_DEFAULT_OPUS_MODEL"] = selected_model
+                    env_updates["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = selected_model
+                    env_updates["ANTHROPIC_SMALL_FAST_MODEL"] = selected_model
+            return env_updates
         if backend == "gemini" or provider == "gemini":
             api_key_env_name = str(getattr(context.runtime, "provider_api_key_env", "") or "").strip() or "GEMINI_API_KEY"
             if not api_key_env_name:
@@ -239,9 +274,23 @@ class CodexRunner:
             if not api_key:
                 return {}
             return {"GEMINI_API_KEY": api_key}
+        if backend == "qwen" or provider == "qwen_code":
+            provider_base_url = str(getattr(context.runtime, "provider_base_url", "") or "").strip() or preset.default_base_url
+            api_key_env_name = str(getattr(context.runtime, "provider_api_key_env", "") or "").strip() or preset.default_api_key_env
+            dotenv_path = context.paths.repo_dir / ".env"
+            env_updates: dict[str, str] = {}
+            if api_key_env_name:
+                api_key = get_env_or_dotenv(api_key_env_name, dotenv_path).strip()
+                if api_key:
+                    env_updates["OPENAI_API_KEY"] = api_key
+                    if provider_base_url:
+                        env_updates["OPENAI_BASE_URL"] = provider_base_url
+                    selected_model = str(getattr(context.runtime, "model", "") or "").strip()
+                    if selected_model:
+                        env_updates["OPENAI_MODEL"] = selected_model
+            return env_updates
         if not provider_uses_openai_compatible_api(provider):
             return {}
-        preset = provider_preset(provider)
         provider_base_url = str(getattr(context.runtime, "provider_base_url", "") or "").strip() or preset.default_base_url
         api_key_env_name = str(getattr(context.runtime, "provider_api_key_env", "") or "").strip() or preset.default_api_key_env
         dotenv_path = context.paths.repo_dir / ".env"
@@ -259,8 +308,12 @@ class CodexRunner:
         return f'"{escaped}"'
 
     def _backend_kind(self, provider: str) -> str:
-        if provider == "gemini" or cli_backend_kind(self.codex_path) == "gemini":
-            return "gemini"
+        explicit_backend = provider_backend_kind(provider)
+        if explicit_backend in {"claude", "gemini", "qwen"}:
+            return explicit_backend
+        detected_backend = cli_backend_kind(self.codex_path)
+        if detected_backend in {"claude", "gemini", "qwen"}:
+            return detected_backend
         return "codex"
 
     def _build_command(
@@ -271,10 +324,19 @@ class CodexRunner:
         output_file: Path,
         search_enabled: bool,
         reasoning_effort: str | None,
+        prompt_text: str,
     ) -> list[str]:
         provider = normalize_model_provider(getattr(context.runtime, "model_provider", ""))
+        if backend == "claude":
+            return self._build_claude_command(
+                context,
+                prompt_text=prompt_text,
+                reasoning_effort=reasoning_effort,
+            )
         if backend == "gemini":
             return self._build_gemini_command(context)
+        if backend == "qwen":
+            return self._build_qwen_command(context, prompt_text=prompt_text)
         command = [self.codex_path]
         if provider == "oss":
             command.append("--oss")
@@ -315,6 +377,33 @@ class CodexRunner:
         )
         return command
 
+    def _build_claude_command(
+        self,
+        context: ProjectContext,
+        *,
+        prompt_text: str,
+        reasoning_effort: str | None,
+    ) -> list[str]:
+        command = [
+            self.codex_path,
+            "--print",
+            "--output-format",
+            "json",
+            "--bare",
+            "--dangerously-skip-permissions",
+        ]
+        effort = self._claude_reasoning_effort(
+            normalize_reasoning_effort(str(reasoning_effort or getattr(context.runtime, "effort", "")), fallback="medium")
+        )
+        if effort:
+            command.extend(["--effort", effort])
+        if not is_auto_model(context.runtime.model):
+            command.extend(["--model", context.runtime.model])
+        for directory in (context.paths.docs_dir, context.paths.memory_dir, context.paths.state_dir):
+            command.extend(["--add-dir", str(directory)])
+        command.append(prompt_text)
+        return command
+
     def _build_gemini_command(
         self,
         context: ProjectContext,
@@ -340,6 +429,32 @@ class CodexRunner:
             command.extend(["-m", context.runtime.model])
         return command
 
+    def _build_qwen_command(
+        self,
+        context: ProjectContext,
+        *,
+        prompt_text: str,
+    ) -> list[str]:
+        command = [
+            self.codex_path,
+            "--output-format",
+            "json",
+            "--yolo",
+            "--include-directories",
+            ",".join(
+                [
+                    str(context.paths.docs_dir),
+                    str(context.paths.memory_dir),
+                    str(context.paths.state_dir),
+                ]
+            ),
+            "-p",
+            prompt_text,
+        ]
+        if context.runtime.sandbox_mode != "danger-full-access":
+            command.append("--sandbox")
+        return command
+
     def _write_gemini_output_file(self, output_file: Path, stdout: str) -> None:
         response_text = stdout.strip()
         if response_text:
@@ -354,19 +469,48 @@ class CodexRunner:
         if response_text:
             write_text(output_file, response_text)
 
-    def _accumulate_gemini_usage(self, payload: dict[str, object], usage: dict[str, int]) -> None:
+    def _write_claude_output_file(self, output_file: Path, stdout: str) -> None:
+        response_text = stdout.strip()
+        if response_text:
+            try:
+                payload = parse_json_text(response_text)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict):
+                candidate = payload.get("result", payload.get("response", ""))
+                if isinstance(candidate, str) and candidate.strip():
+                    response_text = candidate.strip()
+        if response_text:
+            write_text(output_file, response_text)
+
+    def _write_qwen_output_file(self, output_file: Path, stdout: str) -> None:
+        response_text = stdout.strip()
+        if response_text:
+            try:
+                payload = parse_json_text(response_text)
+            except json.JSONDecodeError:
+                payload = None
+            candidate = self._extract_qwen_response(payload)
+            if candidate:
+                response_text = candidate
+        if response_text:
+            write_text(output_file, response_text)
+
+    def _accumulate_gemini_usage(self, payload: dict[str, object], usage: dict[str, int]) -> bool:
         stats = payload.get("stats")
         if not isinstance(stats, dict):
-            return
+            return False
         models = stats.get("models")
         if not isinstance(models, dict):
-            return
+            return False
+        detected = False
         for details in models.values():
             if not isinstance(details, dict):
                 continue
             tokens = details.get("tokens")
             if not isinstance(tokens, dict):
                 continue
+            detected = True
             prompt_tokens = tokens.get("prompt")
             cached_tokens = tokens.get("cached")
             candidate_tokens = tokens.get("candidates")
@@ -382,3 +526,95 @@ class CodexRunner:
                 usage["reasoning_output_tokens"] += thought_tokens
             if isinstance(total_tokens, int):
                 usage["total_tokens"] += total_tokens
+        return detected
+
+    def _accumulate_claude_usage(self, payload: dict[str, object], usage: dict[str, int]) -> None:
+        if "result" not in payload and str(payload.get("subtype", "")).strip().lower() != "result":
+            return
+        raw_usage = payload.get("usage")
+        if not isinstance(raw_usage, dict):
+            return
+        input_tokens = raw_usage.get("input_tokens")
+        cached_tokens = raw_usage.get("cache_read_input_tokens", raw_usage.get("cached_input_tokens"))
+        output_tokens = raw_usage.get("output_tokens")
+        reasoning_tokens = raw_usage.get("reasoning_output_tokens", raw_usage.get("thinking_tokens"))
+        total_tokens = raw_usage.get("total_tokens")
+        if isinstance(input_tokens, int):
+            usage["input_tokens"] += input_tokens
+        if isinstance(cached_tokens, int):
+            usage["cached_input_tokens"] += cached_tokens
+        if isinstance(output_tokens, int):
+            usage["output_tokens"] += output_tokens
+        if isinstance(reasoning_tokens, int):
+            usage["reasoning_output_tokens"] += reasoning_tokens
+        if isinstance(total_tokens, int):
+            usage["total_tokens"] += total_tokens
+
+    def _accumulate_qwen_usage(self, payload: dict[str, object], usage: dict[str, int]) -> None:
+        payload_type = str(payload.get("type", "")).strip().lower()
+        if payload_type and payload_type != "result":
+            return
+        raw_usage = payload.get("usage")
+        if not isinstance(raw_usage, dict):
+            message = payload.get("message")
+            if isinstance(message, dict):
+                raw_usage = message.get("usage")
+        if not isinstance(raw_usage, dict):
+            return
+        input_tokens = raw_usage.get("input_tokens", raw_usage.get("inputTokens", raw_usage.get("input")))
+        cached_tokens = raw_usage.get(
+            "cache_read_input_tokens",
+            raw_usage.get("cached_input_tokens", raw_usage.get("cachedInputTokens", raw_usage.get("cached"))),
+        )
+        output_tokens = raw_usage.get("output_tokens", raw_usage.get("outputTokens", raw_usage.get("output")))
+        reasoning_tokens = raw_usage.get(
+            "reasoning_output_tokens",
+            raw_usage.get("thinking_tokens", raw_usage.get("reasoningTokens", raw_usage.get("thoughts"))),
+        )
+        total_tokens = raw_usage.get("total_tokens", raw_usage.get("totalTokens", raw_usage.get("total")))
+        if isinstance(input_tokens, int):
+            usage["input_tokens"] += input_tokens
+        if isinstance(cached_tokens, int):
+            usage["cached_input_tokens"] += cached_tokens
+        if isinstance(output_tokens, int):
+            usage["output_tokens"] += output_tokens
+        if isinstance(reasoning_tokens, int):
+            usage["reasoning_output_tokens"] += reasoning_tokens
+        if isinstance(total_tokens, int):
+            usage["total_tokens"] += total_tokens
+
+    def _extract_qwen_response(self, payload: object) -> str:
+        if isinstance(payload, dict):
+            response_value = payload.get("response", payload.get("result", ""))
+            if isinstance(response_value, str) and response_value.strip():
+                return response_value.strip()
+        if not isinstance(payload, list):
+            return ""
+        for item in reversed(payload):
+            if not isinstance(item, dict):
+                continue
+            result_text = item.get("result")
+            if isinstance(result_text, str) and result_text.strip():
+                return result_text.strip()
+            message = item.get("message")
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            text_chunks = [
+                str(block.get("text", "")).strip()
+                for block in content
+                if isinstance(block, dict) and str(block.get("type", "")).strip() == "text" and str(block.get("text", "")).strip()
+            ]
+            if text_chunks:
+                return "\n".join(text_chunks).strip()
+        return ""
+
+    def _claude_reasoning_effort(self, effort: str) -> str:
+        normalized = str(effort or "").strip().lower()
+        if normalized == "xhigh":
+            return "max"
+        if normalized in {"low", "medium", "high"}:
+            return normalized
+        return "medium"

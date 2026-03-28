@@ -16,12 +16,15 @@ from .model_constants import (
     VALID_MODEL_PROVIDERS,
 )
 
+ALL_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"]
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderPreset:
     provider: str
     display_name: str
     description: str
+    backend_kind: str = "codex"
     default_base_url: str = ""
     default_api_key_env: str = ""
     default_billing_mode: str = BILLING_MODE_INCLUDED
@@ -31,6 +34,18 @@ class ProviderPreset:
 
 
 PROVIDER_PRESETS: dict[str, ProviderPreset] = {
+    "ensemble": ProviderPreset(
+        provider="ensemble",
+        display_name="GPT + Gemini + Claude Ensemble",
+        description=(
+            "Use Codex CLI as the primary planner and general executor while allowing per-step routing "
+            "to Claude Code or Gemini CLI when the plan pins those backends."
+        ),
+        default_api_key_env="OPENAI_API_KEY",
+        default_billing_mode=BILLING_MODE_INCLUDED,
+        supports_auto_model=True,
+        supports_catalog=True,
+    ),
     "openai": ProviderPreset(
         provider="openai",
         display_name="OpenAI / Codex Cloud",
@@ -40,6 +55,16 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         supports_auto_model=True,
         supports_catalog=True,
     ),
+    "claude": ProviderPreset(
+        provider="claude",
+        display_name="Claude Code",
+        description="Use the installed Claude Code CLI in print mode with Anthropic authentication or API key credentials.",
+        backend_kind="claude",
+        default_api_key_env="ANTHROPIC_API_KEY",
+        default_billing_mode=BILLING_MODE_INCLUDED,
+        supports_auto_model=False,
+        supports_catalog=True,
+    ),
     "gemini": ProviderPreset(
         provider="gemini",
         display_name="Gemini CLI",
@@ -47,7 +72,72 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         default_api_key_env="GEMINI_API_KEY",
         default_billing_mode=BILLING_MODE_INCLUDED,
         supports_auto_model=False,
-        supports_catalog=False,
+        supports_catalog=True,
+    ),
+    "qwen_code": ProviderPreset(
+        provider="qwen_code",
+        display_name="Qwen Code",
+        description=(
+            "Use the installed Qwen Code CLI in headless mode. By default this preset targets "
+            "DashScope-compatible OpenAI endpoints when an API key is configured."
+        ),
+        backend_kind="qwen",
+        default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        default_api_key_env="DASHSCOPE_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
+        supports_auto_model=False,
+        supports_catalog=True,
+    ),
+    "deepseek": ProviderPreset(
+        provider="deepseek",
+        display_name="DeepSeek via Claude Code",
+        description=(
+            "Use Claude Code against DeepSeek's Anthropic-compatible API for coding-oriented runs."
+        ),
+        backend_kind="claude",
+        default_base_url="https://api.deepseek.com/anthropic",
+        default_api_key_env="DEEPSEEK_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
+        supports_auto_model=False,
+        supports_catalog=True,
+    ),
+    "kimi": ProviderPreset(
+        provider="kimi",
+        display_name="Kimi",
+        description=(
+            "Use Kimi through Moonshot's OpenAI-compatible API endpoint from the Codex CLI path."
+        ),
+        default_base_url="https://api.moonshot.cn/v1",
+        default_api_key_env="MOONSHOT_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
+        supports_auto_model=False,
+        supports_catalog=True,
+    ),
+    "minimax": ProviderPreset(
+        provider="minimax",
+        display_name="MiniMax via Claude Code",
+        description=(
+            "Use Claude Code against MiniMax's Anthropic-compatible API for coding-oriented runs."
+        ),
+        backend_kind="claude",
+        default_base_url="https://api.minimax.io/anthropic/v1",
+        default_api_key_env="MINIMAX_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
+        supports_auto_model=False,
+        supports_catalog=True,
+    ),
+    "glm": ProviderPreset(
+        provider="glm",
+        display_name="GLM via Claude Code",
+        description=(
+            "Use Claude Code against Zhipu GLM's Anthropic-compatible API for coding-oriented runs."
+        ),
+        backend_kind="claude",
+        default_base_url="https://open.bigmodel.cn/api/anthropic",
+        default_api_key_env="ZHIPUAI_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
+        supports_auto_model=False,
+        supports_catalog=True,
     ),
     "openrouter": ProviderPreset(
         provider="openrouter",
@@ -84,9 +174,114 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         description="Use Codex CLI OSS mode through a local provider such as Ollama or LM Studio.",
         default_billing_mode=BILLING_MODE_PER_PASS,
         supports_auto_model=False,
-        supports_catalog=False,
+        supports_catalog=True,
         is_local=True,
     ),
+}
+
+CURATED_PROVIDER_MODEL_CATALOG: dict[str, list[dict[str, Any]]] = {
+    "claude": [
+        {
+            "model": "claude-sonnet-4-6",
+            "display_name": "Claude Sonnet 4.6",
+            "description": "Default Claude Code model for balanced coding work.",
+            "is_default": True,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ALL_REASONING_EFFORTS,
+        },
+        {
+            "model": "claude-3.7-sonnet",
+            "display_name": "Claude 3.7 Sonnet",
+            "description": "Previous Claude coding model kept for compatibility with older projects.",
+            "is_default": False,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ALL_REASONING_EFFORTS,
+        },
+    ],
+    "gemini": [
+        {
+            "model": "gemini-3-flash-preview",
+            "display_name": "Gemini 3 Flash Preview",
+            "description": "Default Gemini CLI model for fast code-focused runs.",
+            "is_default": True,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ["medium"],
+        },
+        {
+            "model": "gemini-2.5-pro",
+            "display_name": "Gemini 2.5 Pro",
+            "description": "Higher-capacity Gemini model for heavier planning or implementation tasks.",
+            "is_default": False,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ["medium"],
+        },
+        {
+            "model": "gemini-2.5-flash",
+            "display_name": "Gemini 2.5 Flash",
+            "description": "Fast Gemini model that already appears in the CLI examples.",
+            "is_default": False,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ["medium"],
+        },
+    ],
+    "qwen_code": [
+        {
+            "model": "qwen3-coder-plus",
+            "display_name": "Qwen3 Coder Plus",
+            "description": "Default Qwen Code model for DashScope-compatible coding runs.",
+            "is_default": True,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ["medium"],
+        },
+    ],
+    "deepseek": [
+        {
+            "model": "deepseek-chat",
+            "display_name": "DeepSeek Chat",
+            "description": "Default DeepSeek Anthropic-compatible model for general coding work.",
+            "is_default": True,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ALL_REASONING_EFFORTS,
+        },
+        {
+            "model": "deepseek-reasoner",
+            "display_name": "DeepSeek Reasoner",
+            "description": "Reasoning-oriented DeepSeek model with a stronger default inference budget.",
+            "is_default": False,
+            "default_reasoning_effort": "high",
+            "supported_reasoning_efforts": ["medium", "high", "xhigh"],
+        },
+    ],
+    "kimi": [
+        {
+            "model": "kimi-k2.5",
+            "display_name": "Kimi K2.5",
+            "description": "Default Kimi model for Moonshot's OpenAI-compatible endpoint.",
+            "is_default": True,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ALL_REASONING_EFFORTS,
+        },
+    ],
+    "minimax": [
+        {
+            "model": "MiniMax-M2.5",
+            "display_name": "MiniMax M2.5",
+            "description": "Default MiniMax Anthropic-compatible model for coding runs.",
+            "is_default": True,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ALL_REASONING_EFFORTS,
+        },
+    ],
+    "glm": [
+        {
+            "model": "glm-4.7",
+            "display_name": "GLM 4.7",
+            "description": "Default GLM Anthropic-compatible coding model.",
+            "is_default": True,
+            "default_reasoning_effort": "medium",
+            "supported_reasoning_efforts": ALL_REASONING_EFFORTS,
+        },
+    ],
 }
 
 
@@ -117,8 +312,26 @@ def provider_supports_catalog(value: str) -> bool:
     return provider_preset(value).supports_catalog
 
 
+def provider_backend_kind(value: str, fallback: str = "codex") -> str:
+    preset = provider_preset(value)
+    backend_kind = str(getattr(preset, "backend_kind", "") or "").strip().lower()
+    return backend_kind or fallback
+
+
 def provider_uses_openai_compatible_api(value: str) -> bool:
-    return normalize_model_provider(value) in {"openai", "openrouter", "opencdk", "local_openai"}
+    normalized = normalize_model_provider(value)
+    return normalized in {
+        "ensemble",
+        "openai",
+        "kimi",
+        "openrouter",
+        "opencdk",
+        "local_openai",
+    }
+
+
+def provider_uses_claude_compatible_api(value: str) -> bool:
+    return provider_backend_kind(value) == "claude"
 
 
 def normalize_billing_mode(value: str, provider: str, fallback: str | None = None) -> str:
@@ -128,6 +341,31 @@ def normalize_billing_mode(value: str, provider: str, fallback: str | None = Non
     if fallback and fallback in VALID_BILLING_MODES:
         return fallback
     return provider_preset(provider).default_billing_mode
+
+
+def builtin_model_catalog() -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for provider, models in CURATED_PROVIDER_MODEL_CATALOG.items():
+        for item in models:
+            entries.append(
+                {
+                    "id": f"{provider}:{item['model']}",
+                    "model": item["model"],
+                    "display_name": item["display_name"],
+                    "description": item["description"],
+                    "hidden": False,
+                    "is_default": bool(item.get("is_default", False)),
+                    "default_reasoning_effort": item["default_reasoning_effort"],
+                    "supported_reasoning_efforts": list(item["supported_reasoning_efforts"]),
+                    "input_modalities": ["text"],
+                    "supports_personality": False,
+                    "upgrade": None,
+                    "availability_nux": None,
+                    "provider": provider,
+                    "local_provider": None,
+                }
+            )
+    return entries
 
 
 def discover_local_model_catalog(third_party_root: Path | None = None) -> list[dict[str, Any]]:
@@ -147,7 +385,7 @@ def discover_local_model_catalog(third_party_root: Path | None = None) -> list[d
                 "hidden": False,
                 "is_default": False,
                 "default_reasoning_effort": "medium",
-                "supported_reasoning_efforts": ["low", "medium", "high", "xhigh"],
+                "supported_reasoning_efforts": ALL_REASONING_EFFORTS,
                 "input_modalities": ["text"],
                 "supports_personality": False,
                 "upgrade": None,

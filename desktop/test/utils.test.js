@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   activityLineSummary,
+  applyConfigRuntimeModelSelection,
   applyProviderDefaults,
   applyProgramSettings,
   applyProgramSettingsToForm,
@@ -19,6 +20,8 @@ import {
   commandLabel,
   detailApplySignature,
   computePlanStats,
+  CLAUDE_DEFAULT_MODEL,
+  DEEPSEEK_DEFAULT_MODEL,
   defaultCodexPath,
   planStepsWithCloseout,
   deriveExecutionProgress,
@@ -29,18 +32,27 @@ import {
   executionProgressCaptionDisplay,
   firstSelectableStepId,
   GEMINI_DEFAULT_MODEL,
+  GLM_DEFAULT_MODEL,
   inheritProjectIdentityForm,
   isDuplicateProjectJobError,
+  isPlanningProgressRunning,
+  KIMI_DEFAULT_MODEL,
   mergeProjectDetailCodexStatus,
+  MINIMAX_DEFAULT_MODEL,
   normalizeMemoryBudgetGiB,
   normalizeInterruptedPlan,
   planDependencyValidationMessage,
+  planningProgressCaptionDisplay,
   progressCaption,
   programSettingsFromRuntime,
+  providerAvailable,
+  providerStatusReason,
+  providerSupportsCatalog,
   projectJobFromJobs,
   projectFormFromDetail,
   projectStatusWithJob,
   runtimeSummary,
+  QWEN_CODE_DEFAULT_MODEL,
   sanitizeProjectDetailForJobState,
   sanitizeProjectListForJobState,
   selectedConfigReasoning,
@@ -48,6 +60,7 @@ import {
   shouldShowEstimatedCost,
   shouldReplaceVisibleProject,
   statusTone,
+  syncProgramSettingsModel,
   toolbarProgressCaptionDisplay,
   workspaceStatsFromProjects,
 } from "../src/utils.js";
@@ -205,7 +218,10 @@ test("deriveGithubMode distinguishes manual and existing projects", () => {
 
 test("defaultCodexPath follows the current platform", () => {
   assert.equal(defaultCodexPath(), process.platform === "win32" ? "codex.cmd" : "codex");
+  assert.equal(defaultCodexPath("claude"), process.platform === "win32" ? "claude.cmd" : "claude");
   assert.equal(defaultCodexPath("gemini"), process.platform === "win32" ? "gemini.cmd" : "gemini");
+  assert.equal(defaultCodexPath("qwen_code"), process.platform === "win32" ? "qwen.cmd" : "qwen");
+  assert.equal(defaultCodexPath("deepseek"), process.platform === "win32" ? "claude.cmd" : "claude");
 });
 
 test("program settings helpers keep global runtime controls separate from project-specific values", () => {
@@ -220,6 +236,10 @@ test("program settings helpers keep global runtime controls separate from projec
     local_model_provider: "ollama",
     provider_base_url: "",
     provider_api_key_env: "OPENAI_API_KEY",
+    billing_mode: "included",
+    ensemble_openai_model: "gpt-5.4",
+    ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+    ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
     model: "gpt-5.4",
     planning_effort: "medium",
     model_preset: "",
@@ -237,6 +257,7 @@ test("program settings helpers keep global runtime controls separate from projec
     parallel_worker_mode: "auto",
     parallel_workers: 0,
     parallel_memory_per_worker_gib: 3,
+    save_project_logs: false,
     developer_mode: false,
     ui_theme: "dark",
     dashboard_visibility: {
@@ -272,6 +293,9 @@ test("program settings helpers keep global runtime controls separate from projec
       local_model_provider: "ollama",
       provider_base_url: "",
       provider_api_key_env: "OPENAI_API_KEY",
+      ensemble_openai_model: "gpt-5.4",
+      ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+      ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
       model: "gpt-5.4",
       planning_effort: "medium",
       model_preset: "",
@@ -289,6 +313,7 @@ test("program settings helpers keep global runtime controls separate from projec
       parallel_worker_mode: "auto",
       parallel_workers: 0,
       parallel_memory_per_worker_gib: 3,
+      save_project_logs: false,
     },
   );
 
@@ -316,6 +341,9 @@ test("program settings helpers keep global runtime controls separate from projec
         local_model_provider: "ollama",
         provider_base_url: "",
         provider_api_key_env: "OPENAI_API_KEY",
+        ensemble_openai_model: "gpt-5.4",
+        ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+        ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
         planning_effort: "medium",
         approval_mode: "untrusted",
         sandbox_mode: "workspace-write",
@@ -329,9 +357,42 @@ test("program settings helpers keep global runtime controls separate from projec
         parallel_worker_mode: "auto",
         parallel_workers: 0,
         parallel_memory_per_worker_gib: 3,
+        save_project_logs: false,
       },
     },
   );
+});
+
+test("program settings normalize provider selection to GPT Codex only defaults", () => {
+  const settings = programSettingsFromRuntime({
+    model_provider: "gemini",
+    model: "gemini-3-flash-preview",
+    model_slug_input: "gemini-3-flash-preview",
+    provider_base_url: "https://generativelanguage.googleapis.com",
+    provider_api_key_env: "GEMINI_API_KEY",
+    codex_path: defaultCodexPath("gemini"),
+  });
+
+  assert.equal(settings.model_provider, "openai");
+  assert.equal(settings.model, "gpt-5.4");
+  assert.equal(settings.model_slug_input, "gpt-5.4");
+  assert.equal(settings.provider_base_url, "");
+  assert.equal(settings.provider_api_key_env, "OPENAI_API_KEY");
+  assert.equal(settings.codex_path, defaultCodexPath());
+});
+
+test("program settings reset custom OpenAI model selections back to GPT Codex only", () => {
+  const settings = programSettingsFromRuntime({
+    model_provider: "openai",
+    model: "gpt-4.1-mini",
+    model_slug_input: "gpt-4.1-mini",
+    codex_path: "C:\\tools\\codex.cmd",
+  });
+
+  assert.equal(settings.model_provider, "openai");
+  assert.equal(settings.model, "gpt-5.4");
+  assert.equal(settings.model_slug_input, "gpt-5.4");
+  assert.equal(settings.codex_path, "C:\\tools\\codex.cmd");
 });
 
 test("blankProjectForm seeds runtime defaults without mutating the source runtime", () => {
@@ -374,6 +435,36 @@ test("blankProjectForm falls back to repository defaults when runtime is missing
   assert.equal(form.runtime.background_queue_priority, 0);
 });
 
+test("providerSupportsCatalog enables curated catalogs for first-party provider presets", () => {
+  assert.equal(providerSupportsCatalog("openai"), true);
+  assert.equal(providerSupportsCatalog("gemini"), true);
+  assert.equal(providerSupportsCatalog("claude"), true);
+  assert.equal(providerSupportsCatalog("deepseek"), true);
+  assert.equal(providerSupportsCatalog("openrouter"), false);
+  assert.equal(providerSupportsCatalog("local_openai"), false);
+});
+
+test("provider availability helpers read provider statuses from codex payloads", () => {
+  const codexStatus = {
+    provider_statuses: {
+      claude: {
+        available: false,
+        usable: false,
+        reason: "Claude Code is not installed.",
+      },
+      gemini: {
+        available: true,
+        usable: true,
+        reason: "Gemini CLI is available.",
+      },
+    },
+  };
+
+  assert.equal(providerAvailable("claude", codexStatus), false);
+  assert.equal(providerAvailable("gemini", codexStatus), true);
+  assert.equal(providerStatusReason("claude", codexStatus), "Claude Code is not installed.");
+});
+
 test("applyProviderDefaults drops the auto sentinel for providers without auto routing", () => {
   const runtime = applyProviderDefaults(
     {
@@ -409,6 +500,121 @@ test("applyProviderDefaults switches the runtime path for Gemini CLI and clears 
   assert.equal(runtime.provider_api_key_env, "GEMINI_API_KEY");
 });
 
+test("applyProviderDefaults switches the runtime path for Claude Code and applies Anthropic defaults", () => {
+  const runtime = applyProviderDefaults(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      codex_path: defaultCodexPath(),
+    },
+    "claude",
+  );
+
+  assert.equal(runtime.model_provider, "claude");
+  assert.equal(runtime.codex_path, defaultCodexPath("claude"));
+  assert.equal(runtime.model, CLAUDE_DEFAULT_MODEL);
+  assert.equal(runtime.model_slug_input, CLAUDE_DEFAULT_MODEL);
+  assert.equal(runtime.provider_api_key_env, "ANTHROPIC_API_KEY");
+});
+
+test("applyProviderDefaults switches the runtime path for Qwen Code and applies DashScope defaults", () => {
+  const runtime = applyProviderDefaults(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      codex_path: defaultCodexPath(),
+    },
+    "qwen_code",
+  );
+
+  assert.equal(runtime.model_provider, "qwen_code");
+  assert.equal(runtime.codex_path, defaultCodexPath("qwen_code"));
+  assert.equal(runtime.model, QWEN_CODE_DEFAULT_MODEL);
+  assert.equal(runtime.model_slug_input, QWEN_CODE_DEFAULT_MODEL);
+  assert.equal(runtime.provider_base_url, "https://dashscope.aliyuncs.com/compatible-mode/v1");
+  assert.equal(runtime.provider_api_key_env, "DASHSCOPE_API_KEY");
+});
+
+test("applyProviderDefaults seeds Claude-compatible vendor defaults", () => {
+  const deepseek = applyProviderDefaults(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      codex_path: defaultCodexPath(),
+    },
+    "deepseek",
+  );
+  const minimax = applyProviderDefaults(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      codex_path: defaultCodexPath(),
+    },
+    "minimax",
+  );
+  const glm = applyProviderDefaults(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      codex_path: defaultCodexPath(),
+    },
+    "glm",
+  );
+
+  assert.equal(deepseek.codex_path, defaultCodexPath("deepseek"));
+  assert.equal(deepseek.model, DEEPSEEK_DEFAULT_MODEL);
+  assert.equal(deepseek.provider_api_key_env, "DEEPSEEK_API_KEY");
+  assert.equal(deepseek.provider_base_url, "https://api.deepseek.com/anthropic");
+  assert.equal(minimax.model, MINIMAX_DEFAULT_MODEL);
+  assert.equal(minimax.provider_base_url, "https://api.minimax.io/anthropic/v1");
+  assert.equal(glm.model, GLM_DEFAULT_MODEL);
+  assert.equal(glm.provider_base_url, "https://open.bigmodel.cn/api/anthropic");
+});
+
+test("applyProviderDefaults seeds Kimi defaults on the Codex/OpenAI-compatible path", () => {
+  const runtime = applyProviderDefaults(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      codex_path: defaultCodexPath(),
+    },
+    "kimi",
+  );
+
+  assert.equal(runtime.model_provider, "kimi");
+  assert.equal(runtime.codex_path, defaultCodexPath());
+  assert.equal(runtime.model, KIMI_DEFAULT_MODEL);
+  assert.equal(runtime.provider_base_url, "https://api.moonshot.cn/v1");
+  assert.equal(runtime.provider_api_key_env, "MOONSHOT_API_KEY");
+});
+
+test("applyProviderDefaults switches the runtime path for the ensemble provider and keeps Codex defaults", () => {
+  const runtime = applyProviderDefaults(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      codex_path: defaultCodexPath(),
+    },
+    "ensemble",
+  );
+
+  assert.equal(runtime.model_provider, "ensemble");
+  assert.equal(runtime.codex_path, defaultCodexPath());
+  assert.equal(runtime.model, "gpt-5.4");
+  assert.equal(runtime.model_slug_input, "gpt-5.4");
+  assert.equal(runtime.provider_api_key_env, "OPENAI_API_KEY");
+  assert.equal(runtime.ensemble_openai_model, "gpt-5.4");
+  assert.equal(runtime.ensemble_gemini_model, GEMINI_DEFAULT_MODEL);
+  assert.equal(runtime.ensemble_claude_model, CLAUDE_DEFAULT_MODEL);
+});
+
 test("blankProjectForm keeps Gemini CLI projects on the Gemini default model", () => {
   const form = blankProjectForm({
     model_provider: "gemini",
@@ -419,6 +625,45 @@ test("blankProjectForm keeps Gemini CLI projects on the Gemini default model", (
   assert.equal(form.runtime.model_provider, "gemini");
   assert.equal(form.runtime.model, GEMINI_DEFAULT_MODEL);
   assert.equal(form.runtime.model_slug_input, GEMINI_DEFAULT_MODEL);
+});
+
+test("blankProjectForm keeps Claude Code projects on the Claude default model", () => {
+  const form = blankProjectForm({
+    model_provider: "claude",
+    provider_api_key_env: "ANTHROPIC_API_KEY",
+    codex_path: defaultCodexPath("claude"),
+  });
+
+  assert.equal(form.runtime.model_provider, "claude");
+  assert.equal(form.runtime.model, CLAUDE_DEFAULT_MODEL);
+  assert.equal(form.runtime.model_slug_input, CLAUDE_DEFAULT_MODEL);
+});
+
+test("blankProjectForm keeps Qwen Code projects on the Qwen default model", () => {
+  const form = blankProjectForm({
+    model_provider: "qwen_code",
+    provider_api_key_env: "DASHSCOPE_API_KEY",
+    codex_path: defaultCodexPath("qwen_code"),
+  });
+
+  assert.equal(form.runtime.model_provider, "qwen_code");
+  assert.equal(form.runtime.model, QWEN_CODE_DEFAULT_MODEL);
+  assert.equal(form.runtime.model_slug_input, QWEN_CODE_DEFAULT_MODEL);
+});
+
+test("blankProjectForm keeps ensemble projects on the Codex default model", () => {
+  const form = blankProjectForm({
+    model_provider: "ensemble",
+    provider_api_key_env: "OPENAI_API_KEY",
+    codex_path: defaultCodexPath(),
+  });
+
+  assert.equal(form.runtime.model_provider, "ensemble");
+  assert.equal(form.runtime.model, "gpt-5.4");
+  assert.equal(form.runtime.model_slug_input, "gpt-5.4");
+  assert.equal(form.runtime.ensemble_openai_model, "gpt-5.4");
+  assert.equal(form.runtime.ensemble_gemini_model, GEMINI_DEFAULT_MODEL);
+  assert.equal(form.runtime.ensemble_claude_model, CLAUDE_DEFAULT_MODEL);
 });
 
 test("normalizeMemoryBudgetGiB keeps one decimal place for UI memory budgets", () => {
@@ -578,7 +823,7 @@ test("running-state helpers fall back to idle project status when no job is acti
     closeout_status: "running",
     steps: [
       { step_id: "ST1", status: "completed" },
-      { step_id: "ST2", status: "running" },
+      { step_id: "ST2", status: "integrating" },
     ],
   };
   const normalizedPlan = normalizeInterruptedPlan(plan);
@@ -703,6 +948,96 @@ test("job-aware detail sanitizer ignores a stale running bridge job when saved p
 
   assert.equal(sanitizedDetail.project.current_status, "closed_out");
   assert.equal(sanitizedDetail.plan.closeout_status, "completed");
+});
+
+test("job-aware detail sanitizer prefers terminal plan state over recent running activity", () => {
+  const nowMs = Date.parse("2026-03-26T10:00:00Z");
+  const failedDetail = {
+    project: {
+      repo_id: "repo-a",
+      current_status: "running:block:2",
+      last_run_at: "2026-03-26T09:59:58Z",
+    },
+    activity: ["2026-03-26T09:59:59Z | step-started [ST2] | Running ST2: Build the screen"],
+    plan: {
+      closeout_status: "not_started",
+      steps: [
+        { step_id: "ST1", status: "completed" },
+        { step_id: "ST2", status: "failed" },
+      ],
+    },
+    stats: {
+      total_steps: 2,
+      completed_steps: 1,
+      failed_steps: 1,
+      running_steps: 0,
+      remaining_steps: 1,
+    },
+    bottom_panels: {
+      git_status: {
+        current_status: "running:block:2",
+      },
+    },
+  };
+  const completedDetail = {
+    project: {
+      repo_id: "repo-b",
+      current_status: "running:closeout",
+      last_run_at: "2026-03-26T09:59:58Z",
+    },
+    activity: ["2026-03-26T09:59:59Z | closeout-started | Started project closeout."],
+    plan: {
+      closeout_status: "completed",
+      steps: [
+        { step_id: "ST1", status: "completed" },
+        { step_id: "ST2", status: "completed" },
+      ],
+    },
+    stats: {
+      total_steps: 2,
+      completed_steps: 2,
+      failed_steps: 0,
+      running_steps: 0,
+      remaining_steps: 0,
+    },
+    bottom_panels: {
+      git_status: {
+        current_status: "running:closeout",
+      },
+    },
+  };
+
+  const sanitizedFailedDetail = sanitizeProjectDetailForJobState(failedDetail, null, { nowMs });
+  const sanitizedCompletedDetail = sanitizeProjectDetailForJobState(completedDetail, null, { nowMs });
+
+  assert.equal(sanitizedFailedDetail.project.current_status, "failed");
+  assert.equal(sanitizedFailedDetail.bottom_panels.git_status.current_status, "failed");
+  assert.equal(sanitizedCompletedDetail.project.current_status, "closed_out");
+  assert.equal(sanitizedCompletedDetail.bottom_panels.git_status.current_status, "closed_out");
+});
+
+test("job-aware detail sanitizer marks planning progress as generate-plan when the job snapshot is missing", () => {
+  const detail = {
+    project: {
+      repo_id: "repo-plan",
+      current_status: "setup_ready",
+    },
+    planning_progress: {
+      stage_count: 4,
+      current_stage_index: 2,
+      current_stage_status: "running",
+    },
+    bottom_panels: {
+      git_status: {
+        current_status: "setup_ready",
+      },
+    },
+  };
+
+  const sanitizedDetail = sanitizeProjectDetailForJobState(detail, null);
+
+  assert.equal(sanitizedDetail.project.current_status, "running:generate-plan");
+  assert.equal(sanitizedDetail.bottom_panels.git_status.current_status, "running:generate-plan");
 });
 
 test("job-aware detail sanitizer preserves a very recent active run signal while the job snapshot catches up", () => {
@@ -918,6 +1253,83 @@ test("deriveExecutionProgress uses structured planning progress when available",
   assert.equal(progress.headlineActivity, "Planner Agent A is decomposing the work into implementation blocks.");
 });
 
+test("deriveExecutionProgress treats running planning progress as active even without a bridge job", () => {
+  const progress = deriveExecutionProgress(
+    {
+      project: {
+        current_status: "setup_ready",
+      },
+      planning_progress: {
+        stage_count: 4,
+        current_stage_index: 2,
+        current_stage_status: "running",
+        current_stage_label: "Planner Agent A",
+      },
+      plan: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [],
+      },
+    },
+    null,
+    null,
+  );
+
+  assert.equal(progress.isActive, true);
+  assert.equal(progress.phase, "planning");
+  assert.equal(progress.indeterminate, false);
+  assert.equal(progress.planningCurrentStage.label, "Planner Agent A");
+});
+
+test("planningProgressCaptionDisplay reports the active planning stage and status", () => {
+  assert.equal(isPlanningProgressRunning({ current_stage_status: "running" }), true);
+  assert.equal(isPlanningProgressRunning({ currentStageStatus: "completed" }), false);
+  assert.equal(
+    planningProgressCaptionDisplay({
+      stage_count: 4,
+      current_stage_index: 2,
+      current_stage_status: "running",
+    }),
+    "Planning stage 2/4, Running",
+  );
+  assert.equal(
+    planningProgressCaptionDisplay(null),
+    "Generating execution plan",
+  );
+});
+
+test("syncProgramSettingsModel mirrors project model changes back into program defaults", () => {
+  const nextSettings = syncProgramSettingsModel(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      model_preset: "",
+      model_selection_mode: "slug",
+      model_slug_input: "gpt-5.4",
+      ensemble_openai_model: "gpt-5.4",
+      ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+      ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
+    },
+    {
+      model_provider: "gemini",
+      model: "gemini-2.5-pro",
+      model_preset: "",
+      model_selection_mode: "slug",
+      model_slug_input: "gemini-2.5-pro",
+      ensemble_openai_model: "gpt-5.4-mini",
+      ensemble_gemini_model: "gemini-2.5-pro",
+      ensemble_claude_model: "claude-3.7-sonnet",
+    },
+  );
+
+  assert.equal(nextSettings.model_provider, "gemini");
+  assert.equal(nextSettings.model, "gemini-2.5-pro");
+  assert.equal(nextSettings.model_slug_input, "gemini-2.5-pro");
+  assert.equal(nextSettings.ensemble_openai_model, "gpt-5.4-mini");
+  assert.equal(nextSettings.ensemble_gemini_model, "gemini-2.5-pro");
+  assert.equal(nextSettings.ensemble_claude_model, "claude-3.7-sonnet");
+});
+
 test("deriveExecutionProgress marks debugger recovery as an active debugging phase", () => {
   const progress = deriveExecutionProgress(
     {
@@ -955,6 +1367,44 @@ test("deriveExecutionProgress marks debugger recovery as an active debugging pha
   assert.equal(progress.debugging, true);
   assert.equal(progress.status, "running:debugging");
   assert.equal(progress.headlineActivity, "Debugging ST2 - Build | python -m pytest exited with 1");
+});
+
+test("deriveExecutionProgress keeps integrating steps in the active execution set", () => {
+  const progress = deriveExecutionProgress(
+    {
+      project: {
+        current_status: "running:parallel",
+      },
+      activity: [
+        "2026-03-26T09:02:00Z | batch-started | Integrating ST2 while ST3 keeps running",
+      ],
+      plan: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Integrate", status: "integrating", depends_on: ["ST1"] },
+          { step_id: "ST3", title: "Backend", status: "running", depends_on: ["ST1"] },
+        ],
+      },
+      stats: {
+        total_steps: 3,
+        completed_steps: 1,
+        failed_steps: 0,
+        running_steps: 2,
+        remaining_steps: 2,
+      },
+    },
+    null,
+    {
+      status: "running",
+      command: "run-plan",
+    },
+  );
+
+  assert.equal(progress.isActive, true);
+  assert.deepEqual(progress.runningStepList.map((step) => step.step_id), ["ST2", "ST3"]);
+  assert.equal(progress.runningStep?.status, "integrating");
 });
 
 test("buildProjectPayload trims fields, blanks origin_url for existing repos, and clones plan data", () => {
@@ -1166,6 +1616,34 @@ test("runtimeSummary shows Gemini CLI as a first-class backend", () => {
   );
 });
 
+test("runtimeSummary shows Claude Code as a first-class backend", () => {
+  assert.equal(
+    runtimeSummary(
+      {
+        model_provider: "claude",
+        model: CLAUDE_DEFAULT_MODEL,
+        effort: "medium",
+      },
+      [],
+    ),
+    "Claude Code | Standard Mode | claude-sonnet-4-6 | reasoning Medium | parallel auto",
+  );
+});
+
+test("runtimeSummary shows the ensemble provider as a first-class backend", () => {
+  assert.equal(
+    runtimeSummary(
+      {
+        model_provider: "ensemble",
+        model: "gpt-5.4",
+        effort: "medium",
+      },
+      [],
+    ),
+    "GPT+Gemini+Claude Ensemble | Standard Mode | gpt-5.4 | reasoning Medium | parallel auto",
+  );
+});
+
 test("config reasoning helpers keep auto separate from explicit efforts", () => {
   const modelCatalog = [
     {
@@ -1188,6 +1666,37 @@ test("config reasoning helpers keep auto separate from explicit efforts", () => 
   assert.equal(reasoningEffortLabel("auto"), "Auto");
   assert.equal(autoRoutingPresetLabel("low"), "Low Only");
   assert.equal(autoRoutingPresetLabel("xhigh", "ko"), "매우 높음만");
+});
+
+test("applyConfigRuntimeModelSelection updates reasoning for models with stricter defaults", () => {
+  const nextRuntime = applyConfigRuntimeModelSelection(
+    {
+      model_provider: "deepseek",
+      model: "deepseek-chat",
+      model_slug_input: "deepseek-chat",
+      effort: "low",
+      effort_selection_mode: "explicit",
+    },
+    [
+      {
+        model: "deepseek-chat",
+        default_reasoning_effort: "medium",
+        supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+      },
+      {
+        model: "deepseek-reasoner",
+        default_reasoning_effort: "high",
+        supported_reasoning_efforts: ["medium", "high", "xhigh"],
+      },
+    ],
+    "deepseek-reasoner",
+  );
+
+  assert.equal(nextRuntime.model, "deepseek-reasoner");
+  assert.equal(nextRuntime.model_slug_input, "deepseek-reasoner");
+  assert.equal(nextRuntime.effort, "high");
+  assert.equal(nextRuntime.planning_effort, "high");
+  assert.equal(nextRuntime.effort_selection_mode, "auto");
 });
 
 test("codexUsageBuckets separates 5h, 7d, and spark usage windows", () => {
@@ -1246,6 +1755,36 @@ test("progressCaption summarizes empty, partial, and completed plans", () => {
   );
 });
 
+test("toolbarProgressCaptionDisplay shows planning progress while plan generation is active", () => {
+  assert.equal(
+    toolbarProgressCaptionDisplay(
+      { steps: [] },
+      "en",
+      {
+        planningProgress: {
+          stage_count: 4,
+          current_stage_index: 2,
+          current_stage_status: "running",
+        },
+      },
+    ),
+    "Planning stage 2/4, Running",
+  );
+  assert.equal(
+    toolbarProgressCaptionDisplay(
+      { steps: [] },
+      "en",
+      {
+        activeJob: {
+          status: "running",
+          command: "generate-plan",
+        },
+      },
+    ),
+    "Generating execution plan",
+  );
+});
+
 test("canEditStep only allows pending steps when the controller is idle", () => {
   assert.equal(canEditStep({ status: "pending" }, false), true);
   assert.equal(canEditStep({ status: "completed" }, false), false);
@@ -1267,6 +1806,9 @@ test("statusTone maps operational states to UI tones", () => {
   assert.equal(statusTone("running"), "info");
   assert.equal(statusTone("running:debugging"), "warning");
   assert.equal(statusTone("running:parallel-debugging"), "warning");
+  assert.equal(statusTone("integrating"), "info");
+  assert.equal(statusTone("awaiting_review"), "warning");
+  assert.equal(statusTone("awaiting_checkpoint_approval"), "warning");
   assert.equal(statusTone("cancelled"), "neutral");
   assert.equal(statusTone("completed"), "success");
   assert.equal(statusTone("paused_for_review"), "warning");
@@ -1309,12 +1851,12 @@ test("display progress captions include closeout in the visible total", () => {
     executionProgressCaptionDisplay({
       steps: [
         { step_id: "ST1", status: "completed" },
-        { step_id: "ST2", status: "pending", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
-        { step_id: "ST3", status: "pending", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
+        { step_id: "ST2", status: "integrating", depends_on: ["ST1"], owned_paths: ["desktop/src"] },
+        { step_id: "ST3", status: "running", depends_on: ["ST1"], owned_paths: ["src/jakal_flow"] },
       ],
       closeout_status: "not_started",
     }),
-    "Completed 1/4 steps, ready: ST2, ST3",
+    "Completed 1/4 steps, running: ST3; integrating: ST2",
   );
   assert.equal(
     toolbarProgressCaptionDisplay({

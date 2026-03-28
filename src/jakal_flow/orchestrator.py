@@ -168,6 +168,7 @@ class Orchestrator:
             getattr(runtime, "planning_effort", ""),
             fallback=normalize_reasoning_effort(runtime.effort, fallback="high"),
         )
+        planning_effort = self._planning_effort_for_runtime(runtime, planning_effort)
         planning_stage_count = 4
 
         def report_progress(event_type: str, message: str, details: dict[str, object] | None = None) -> None:
@@ -330,6 +331,7 @@ class Orchestrator:
                 planner_outline=planner_outline,
                 execution_mode=normalized_execution_mode,
             )
+            steps = self._materialize_generated_step_models(steps, runtime)
         if not steps:
             steps = [
                 ExecutionStep(
@@ -387,6 +389,19 @@ class Orchestrator:
         if planning_effort == "xhigh":
             return False
         return bool(getattr(context.runtime, "use_fast_mode", False))
+
+    def _planning_effort_for_runtime(self, runtime: RuntimeOptions, planning_effort: str) -> str:
+        selected_provider = str(getattr(runtime, "model_provider", "") or "").strip().lower()
+        if selected_provider == "ensemble":
+            planning_model = str(getattr(runtime, "ensemble_openai_model", "") or getattr(runtime, "model", "")).strip().lower()
+        else:
+            planning_model = str(getattr(runtime, "model", "") or getattr(runtime, "model_slug_input", "")).strip().lower()
+        normalized_effort = normalize_reasoning_effort(planning_effort, fallback="high")
+        if planning_model != "gpt-5.4":
+            return normalized_effort
+        effort_ladder = ["low", "medium", "high", "xhigh"]
+        current_index = effort_ladder.index(normalized_effort) if normalized_effort in effort_ladder else 1
+        return effort_ladder[max(0, current_index - 1)]
 
     def _postprocess_generated_plan_steps(
         self,
@@ -454,6 +469,31 @@ class Orchestrator:
                 shared_contracts=shared_contracts,
             )
         return processed_steps
+
+    def _materialize_generated_step_models(
+        self,
+        steps: list[ExecutionStep],
+        runtime: RuntimeOptions,
+    ) -> list[ExecutionStep]:
+        if str(getattr(runtime, "model_provider", "") or "").strip().lower() != "ensemble":
+            return steps
+
+        materialized: list[ExecutionStep] = []
+        for step in steps:
+            next_step = deepcopy(step)
+            choice = resolve_step_model_choice(next_step, runtime)
+            metadata = deepcopy(next_step.metadata) if isinstance(next_step.metadata, dict) else {}
+            if not next_step.model_provider:
+                next_step.model_provider = choice.provider
+            if not next_step.model:
+                next_step.model = choice.model
+            if "model_selection_source" not in metadata:
+                metadata["model_selection_source"] = choice.source
+            if "model_selection_reason" not in metadata:
+                metadata["model_selection_reason"] = choice.reason
+            next_step.metadata = metadata
+            materialized.append(next_step)
+        return materialized
 
     def _parse_planner_outline_payload(self, planner_outline: str) -> dict[str, object]:
         raw = planner_outline.strip()
@@ -1077,6 +1117,81 @@ class Orchestrator:
             detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "unknown_error"
             return False, f"push_failed:{detail}"
 
+    def _delete_remote_branch_if_present(
+        self,
+        context: ProjectContext,
+        repo_dir: Path,
+        branch: str,
+        remote_name: str = "origin",
+    ) -> tuple[bool, str]:
+        target_branch = branch.strip()
+        if not context.runtime.allow_push:
+            return False, "push_disabled"
+        if not repo_dir.exists():
+            return False, "missing_repo_dir"
+        if not target_branch:
+            return False, "missing_branch"
+        remote_url = self.git.remote_url(repo_dir, remote_name)
+        if not remote_url:
+            return False, "missing_remote"
+        remote_head = self.git.remote_branch_revision(repo_dir, remote_name, target_branch)
+        if not remote_head:
+            return False, "missing_remote_branch"
+        try:
+            self.git.delete_remote_branch(repo_dir, remote_name, target_branch)
+            return True, "deleted"
+        except Exception as exc:
+            detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "unknown_error"
+            return False, f"delete_failed:{detail}"
+
+    def _can_auto_promote_lineage_step(
+        self,
+        step: ExecutionStep,
+        child_counts: dict[str, int],
+        *,
+        batch_size: int,
+    ) -> bool:
+        return batch_size == 1 and self._step_kind(step) == "task" and child_counts.get(step.step_id, 0) == 0
+
+    def _promote_lineage_to_target_branch(
+        self,
+        context: ProjectContext,
+        lineage: LineageState,
+    ) -> tuple[bool, str, str | None]:
+        base_safe_revision = str(
+            context.metadata.current_safe_revision
+            or context.loop_state.current_safe_revision
+            or self.git.current_revision(context.paths.repo_dir)
+        ).strip()
+        branch_name = str(lineage.branch_name or "").strip()
+        if not branch_name:
+            return False, "missing_lineage_branch", None
+        try:
+            self.git.merge_ff_only(context.paths.repo_dir, branch_name)
+            integrated_revision = self.git.current_revision(context.paths.repo_dir)
+        except Exception as exc:
+            self.git.hard_reset(context.paths.repo_dir, base_safe_revision)
+            detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "unknown_error"
+            return False, f"merge_failed:{detail}", None
+
+        context.metadata.current_safe_revision = integrated_revision
+        context.loop_state.current_safe_revision = integrated_revision
+        context.loop_state.last_commit_hash = integrated_revision
+        pushed, push_reason = self._push_if_ready(
+            context,
+            context.paths.repo_dir,
+            context.metadata.branch,
+            commit_hash=integrated_revision,
+        )
+        if pushed or push_reason == "already_up_to_date":
+            return True, push_reason, integrated_revision
+
+        self.git.hard_reset(context.paths.repo_dir, base_safe_revision)
+        context.metadata.current_safe_revision = base_safe_revision
+        context.loop_state.current_safe_revision = base_safe_revision
+        context.loop_state.last_commit_hash = base_safe_revision
+        return False, push_reason, None
+
     def _run_lineage_execution_batch(
         self,
         context: ProjectContext,
@@ -1296,6 +1411,35 @@ class Orchestrator:
                     lineage.status = "active"
                     lineage.notes = str(worker_result.get("test_summary") or worker_result.get("notes") or "").strip()
 
+                    promotion_result = {"promoted": False, "reason": "not_applicable", "commit_hash": None}
+                    if self._can_auto_promote_lineage_step(step, child_counts, batch_size=len(ordered_targets)):
+                        promoted, promotion_reason, integrated_revision = self._promote_lineage_to_target_branch(context, lineage)
+                        promotion_result = {
+                            "promoted": promoted,
+                            "reason": promotion_reason,
+                            "commit_hash": integrated_revision,
+                        }
+                        if promoted:
+                            lineage.status = "merged"
+                            lineage.merged_by_step_id = step.step_id
+                            lineage.updated_at = completion_time
+                            if integrated_revision:
+                                lineage.head_commit = integrated_revision
+                                lineage.safe_revision = integrated_revision
+                            lineage.notes = (
+                                lineage.notes + f" | Merged into `{context.metadata.branch}` immediately."
+                            ).strip(" |")
+                            worker_result["lineage_promotion"] = promotion_result
+                            self._cleanup_lineage_worktree(context.paths.repo_dir, lineage)
+                            step.status = "completed"
+                            step.completed_at = completion_time
+                            step.commit_hash = integrated_revision or (lineage.head_commit or None)
+                            step.notes = lineage.notes or "Lineage step completed successfully."
+                            continue
+                        if promotion_reason not in {"not_applicable"}:
+                            lineage.notes = (lineage.notes + f" | Immediate merge skipped: {promotion_reason}").strip(" |")
+                    worker_result["lineage_promotion"] = promotion_result
+
                     push_result = {"pushed": False, "reason": "missing_head_commit"}
                     if lineage.head_commit:
                         pushed, push_reason = self._push_if_ready(
@@ -1451,6 +1595,8 @@ class Orchestrator:
             lineage = lineages.get(lineage_id)
             if lineage is None:
                 raise RuntimeError(f"{step.step_id} references lineage {lineage_id}, but that lineage is unavailable.")
+            if str(lineage.status or "").strip().lower() == "merged":
+                continue
             seen_lineages.add(lineage_id)
             selected.append(lineage)
         return selected
@@ -1699,9 +1845,15 @@ class Orchestrator:
             else:
                 metadata.pop("step_kind", None)
             if step_kind == "join":
-                merge_from = self._coerce_string_list(metadata.get("merge_from", [])) or list(step.depends_on)
+                direct_dependencies = list(step.depends_on)
+                merge_from = [item for item in self._coerce_string_list(metadata.get("merge_from", [])) if item in direct_dependencies]
+                if len(merge_from) < 2:
+                    merge_from = direct_dependencies
                 metadata["merge_from"] = merge_from
                 metadata["join_policy"] = self._normalize_join_policy(metadata.get("join_policy", ""))
+            else:
+                metadata.pop("merge_from", None)
+                metadata.pop("join_policy", None)
             step.metadata = metadata
 
     def load_execution_plan_state(self, context: ProjectContext) -> ExecutionPlanState:
@@ -1715,8 +1867,12 @@ class Orchestrator:
             )
         state = ExecutionPlanState.from_dict(payload)
         state.workflow_mode = normalize_workflow_mode(state.workflow_mode or context.runtime.workflow_mode)
+        state.execution_mode = self._normalize_execution_mode(state.execution_mode or context.runtime.execution_mode)
         if not state.default_test_command:
             state.default_test_command = context.runtime.test_cmd
+        if state.execution_mode == "parallel":
+            self._reduce_redundant_parallel_dependencies(state.steps)
+            self._normalize_hybrid_step_metadata(state.steps)
         fallback_effort = normalize_reasoning_effort(context.runtime.effort, fallback="high")
         for step in state.steps:
             step.reasoning_effort = normalize_reasoning_effort(step.reasoning_effort, fallback=fallback_effort)
@@ -1874,6 +2030,7 @@ class Orchestrator:
         for raw_id, step in zip(raw_ids, steps, strict=False):
             depends_on: list[str] = []
             owned_paths: list[str] = []
+            metadata = deepcopy(step.metadata) if isinstance(step.metadata, dict) else {}
             if execution_mode == "parallel":
                 for dependency in step.depends_on:
                     ref = dependency.strip()
@@ -1893,6 +2050,7 @@ class Orchestrator:
                         continue
                     seen_paths.add(normalized_path)
                     owned_paths.append(normalized_path)
+                metadata = self._normalize_parallel_step_metadata(raw_id, metadata, id_map)
             normalized_steps.append(
                 ExecutionStep(
                     step_id=id_map[raw_id],
@@ -1912,9 +2070,11 @@ class Orchestrator:
                     completed_at=step.completed_at,
                     commit_hash=step.commit_hash,
                     notes=step.notes.strip(),
-                    metadata=deepcopy(step.metadata) if isinstance(step.metadata, dict) else {},
+                    metadata=metadata,
                 )
             )
+        if execution_mode == "parallel":
+            self._reduce_redundant_parallel_dependencies(normalized_steps)
         self._normalize_hybrid_step_metadata(normalized_steps)
         if execution_mode == "parallel":
             self._validate_hybrid_execution_steps(normalized_steps)
@@ -1922,11 +2082,78 @@ class Orchestrator:
             self._validate_parallel_execution_steps(normalized_steps)
         return normalized_steps
 
+    def _normalize_parallel_step_metadata(
+        self,
+        raw_id: str,
+        metadata: dict[str, object],
+        id_map: dict[str, str],
+    ) -> dict[str, object]:
+        normalized = deepcopy(metadata) if isinstance(metadata, dict) else {}
+        if "merge_from" not in normalized:
+            return normalized
+        mapped_merge_from: list[str] = []
+        seen_refs: set[str] = set()
+        for item in self._coerce_string_list(normalized.get("merge_from", [])):
+            ref = str(item).strip()
+            if not ref:
+                continue
+            if ref not in id_map:
+                raise ValueError(f"Unknown merge_from reference: {ref}")
+            mapped_ref = id_map[ref]
+            if mapped_ref == id_map[raw_id]:
+                raise ValueError(f"{raw_id} cannot merge from itself.")
+            if mapped_ref in seen_refs:
+                continue
+            seen_refs.add(mapped_ref)
+            mapped_merge_from.append(mapped_ref)
+        normalized["merge_from"] = mapped_merge_from
+        return normalized
+
     def _normalize_owned_path(self, value: str) -> str:
         normalized = str(value).strip().replace("\\", "/")
         while normalized.startswith("./"):
             normalized = normalized[2:]
         return normalized.rstrip("/")
+
+    def _reduce_redundant_parallel_dependencies(self, steps: list[ExecutionStep]) -> None:
+        step_by_id = {step.step_id: step for step in steps}
+        dependency_cache: dict[str, set[str]] = {}
+
+        def dependency_closure(step_id: str, visiting: set[str]) -> set[str]:
+            cached = dependency_cache.get(step_id)
+            if cached is not None:
+                return cached
+            if step_id in visiting:
+                return set()
+            step = step_by_id.get(step_id)
+            if step is None:
+                dependency_cache[step_id] = set()
+                return dependency_cache[step_id]
+            next_visiting = set(visiting)
+            next_visiting.add(step_id)
+            closure: set[str] = set()
+            for dependency in step.depends_on:
+                if dependency not in step_by_id:
+                    continue
+                closure.add(dependency)
+                closure.update(dependency_closure(dependency, next_visiting))
+            dependency_cache[step_id] = closure
+            return closure
+
+        for step in steps:
+            if len(step.depends_on) < 2:
+                continue
+            redundant_dependencies = {
+                dependency
+                for dependency in step.depends_on
+                if any(
+                    dependency in dependency_closure(other_dependency, set())
+                    for other_dependency in step.depends_on
+                    if other_dependency != dependency
+                )
+            }
+            if redundant_dependencies:
+                step.depends_on = [dependency for dependency in step.depends_on if dependency not in redundant_dependencies]
 
     def _plan_uses_dag_parallelism(self, steps: list[ExecutionStep]) -> bool:
         return any(step.depends_on or step.owned_paths for step in steps)
@@ -2077,6 +2304,7 @@ class Orchestrator:
         context: ProjectContext,
         runtime: RuntimeOptions,
         step_id: str | None = None,
+        allow_push: bool = True,
     ) -> tuple[ProjectContext, ExecutionPlanState, ExecutionStep]:
         plan_state = self.load_execution_plan_state(context)
         if not plan_state.steps:
@@ -2118,7 +2346,7 @@ class Orchestrator:
             target_step,
             execution_mode=previous_runtime.execution_mode or "parallel",
             max_blocks=1,
-            allow_push=True,
+            allow_push=allow_push,
             approval_mode=runtime.approval_mode,
             sandbox_mode=runtime.sandbox_mode,
             require_checkpoint_approval=False,
@@ -2233,8 +2461,6 @@ class Orchestrator:
                 break
             if attempts < attempt_limit:
                 context.metadata.current_status = f"running:retry-{execution_step.step_id.lower()}"
-                context.metadata.last_run_at = now_utc_iso()
-                self.workspace.save_project(context)
         return latest_block, attempts
 
     def run_parallel_execution_batch(
@@ -2331,7 +2557,6 @@ class Orchestrator:
         batch_token = f"{now_utc_iso().replace(':', '').replace('-', '').replace('+', '').replace('T', 't')}-{uuid4().hex[:8]}"
         worker_results: list[dict[str, object]] = []
         merged_commit_hashes: list[str] = []
-        merged_commit_by_step_id: dict[str, str] = {}
         group_test_result: TestRunResult | None = None
         rollback_status = "not_needed"
         final_status = "completed"
@@ -2469,7 +2694,7 @@ class Orchestrator:
                                 failing_summary=merge_test_result.summary,
                                 failing_stdout=read_text(merge_test_result.stdout_file),
                                 failing_stderr=read_text(merge_test_result.stderr_file),
-                                merge_targets=[step.step_id for step in batch_targets],
+                                merge_targets=[step.step_id for step in ordered_targets],
                                 post_success_strategy="continue_cherry_pick",
                             )
                             if merge_run_result.returncode == 0 and merge_success and merge_commit_hash:
@@ -2888,6 +3113,57 @@ class Orchestrator:
                         self.workspace.save_project(context)
                         return context, saved, target_step
                     raise RuntimeError(result_step.notes or "Join execution failed.")
+            _integration_project, _integration_saved, result_step = self._run_saved_execution_step_with_context(
+                context=integration_context,
+                runtime=runtime,
+                step_id=target_step.step_id,
+                allow_push=False,
+            )
+        except ImmediateStopRequested as exc:
+            if integration_info is not None:
+                integration_context = integration_info.get("integration_context")
+                if isinstance(integration_context, ProjectContext):
+                    self.git.abort_cherry_pick(integration_context.paths.repo_dir)
+                    self.git.hard_reset(integration_context.paths.repo_dir, pre_join_safe_revision)
+                self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
+            context.metadata.current_status = self._status_from_plan_state(plan_state)
+            target_step.status = "paused"
+            target_step.completed_at = None
+            target_step.commit_hash = None
+            target_step.notes = str(exc).strip() or "Immediate stop requested."
+            saved = self.save_execution_plan_state(context, plan_state)
+            self.workspace.save_project(context)
+            return context, saved, target_step
+        except Exception as exc:
+            if integration_info is not None:
+                integration_context = integration_info.get("integration_context")
+                if isinstance(integration_context, ProjectContext):
+                    self.git.abort_cherry_pick(integration_context.paths.repo_dir)
+                    self.git.hard_reset(integration_context.paths.repo_dir, pre_join_safe_revision)
+                self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
+            context.metadata.current_status = "failed"
+            target_step.status = "failed"
+            target_step.notes = str(exc).strip() or "Join execution failed."
+            saved = self.save_execution_plan_state(context, plan_state)
+            self.workspace.save_project(context)
+            raise
+
+        if result_step.status != "completed":
+            if integration_info is not None:
+                integration_context = integration_info.get("integration_context")
+                if isinstance(integration_context, ProjectContext):
+                    self.git.abort_cherry_pick(integration_context.paths.repo_dir)
+                    self.git.hard_reset(integration_context.paths.repo_dir, pre_join_safe_revision)
+                self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
+            interrupted = result_step.status == "paused"
+            context.metadata.current_status = self._status_from_plan_state(plan_state) if interrupted else "failed"
+            target_step.status = "paused" if interrupted else "failed"
+            target_step.completed_at = None
+            target_step.commit_hash = None
+            target_step.notes = result_step.notes or ("Immediate stop requested." if interrupted else "Join execution failed.")
+            saved = self.save_execution_plan_state(context, plan_state)
+            self.workspace.save_project(context)
+            return context, saved, target_step
 
                 branch_name = str(integration_info.get("branch_name") if integration_info else "").strip()
                 self.git.merge_ff_only(context.paths.repo_dir, branch_name)
@@ -2913,6 +3189,28 @@ class Orchestrator:
                     refreshed_step.notes = f"{refreshed_step.notes} (push skipped: {push_reason})"
                 saved = self.save_execution_plan_state(context, refreshed)
                 context.metadata.current_status = self._status_from_plan_state(saved)
+        refreshed = self.load_execution_plan_state(context)
+        refreshed_step = next((step for step in refreshed.steps if step.step_id == result_step.step_id), target_step)
+        refreshed_step.status = "completed"
+        refreshed_step.completed_at = result_step.completed_at or now_utc_iso()
+        refreshed_step.commit_hash = integrated_revision
+        refreshed_step.notes = result_step.notes or "Join step completed successfully."
+        if not pushed and push_reason not in {"already_up_to_date"}:
+            refreshed_step.notes = f"{refreshed_step.notes} (push skipped: {push_reason})"
+        if pushed or push_reason == "already_up_to_date":
+            remote_cleanup_notes: list[str] = []
+            for candidate_branch in [lineage.branch_name for lineage in merge_lineages] + ([branch_name] if branch_name else []):
+                deleted, delete_reason = self._delete_remote_branch_if_present(
+                    context,
+                    context.paths.repo_dir,
+                    candidate_branch,
+                )
+                if delete_reason not in {"deleted", "missing_remote_branch", "push_disabled", "missing_remote"}:
+                    remote_cleanup_notes.append(f"{candidate_branch}: {delete_reason}")
+            if remote_cleanup_notes:
+                refreshed_step.notes = f"{refreshed_step.notes} (remote cleanup: {'; '.join(remote_cleanup_notes)})"
+        saved = self.save_execution_plan_state(context, refreshed)
+        context.metadata.current_status = self._status_from_plan_state(saved)
 
                 merged_at = now_utc_iso()
                 for lineage in merge_lineages:

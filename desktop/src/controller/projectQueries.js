@@ -1,6 +1,13 @@
 import { listBridgeJobs } from "../api.js";
 import { BRIDGE_COMMANDS } from "../bridgeProtocol.js";
-import { loadHistoryDetail, loadProjectDetail } from "./projectDetails.js";
+import {
+  loadHistoryDetail,
+  loadProjectCheckpoints,
+  loadProjectDetail,
+  loadProjectHistory,
+  loadProjectReports,
+  loadProjectWorkspace,
+} from "./projectDetails.js";
 
 function listBridgeJobsRequest() {
   if (typeof globalThis.__JAKAL_FLOW_TEST_LIST_BRIDGE_JOBS__ === "function") {
@@ -15,6 +22,10 @@ export async function loadBootstrap(bridgeRequest) {
 
 export async function loadProjectListing(bridgeRequest, workspaceRoot) {
   return bridgeRequest(BRIDGE_COMMANDS.LIST_PROJECTS, null, workspaceRoot || null);
+}
+
+export async function loadWorkspaceShareDetail(bridgeRequest, workspaceRoot) {
+  return bridgeRequest(BRIDGE_COMMANDS.LOAD_WORKSPACE_SHARE, {}, workspaceRoot || null);
 }
 
 export async function fetchProjectDetailBySelector(bridgeRequest, selector, workspaceRoot, options = {}) {
@@ -32,6 +43,38 @@ export async function fetchHistoryDetail(bridgeRequest, archiveId, workspaceRoot
   return loadHistoryDetail(bridgeRequest, archiveId, workspaceRoot || null, {
     includeFull: (options.detailLevel ?? "full") === "full",
   });
+}
+
+export async function fetchProjectReportsBySelector(bridgeRequest, selector, workspaceRoot) {
+  return loadProjectReports(bridgeRequest, selector, workspaceRoot || null);
+}
+
+export async function fetchProjectReports(bridgeRequest, repoId, workspaceRoot) {
+  return fetchProjectReportsBySelector(bridgeRequest, { repoId }, workspaceRoot);
+}
+
+export async function fetchProjectWorkspaceBySelector(bridgeRequest, selector, workspaceRoot) {
+  return loadProjectWorkspace(bridgeRequest, selector, workspaceRoot || null);
+}
+
+export async function fetchProjectWorkspace(bridgeRequest, repoId, workspaceRoot) {
+  return fetchProjectWorkspaceBySelector(bridgeRequest, { repoId }, workspaceRoot);
+}
+
+export async function fetchProjectCheckpointsBySelector(bridgeRequest, selector, workspaceRoot) {
+  return loadProjectCheckpoints(bridgeRequest, selector, workspaceRoot || null);
+}
+
+export async function fetchProjectCheckpoints(bridgeRequest, repoId, workspaceRoot) {
+  return fetchProjectCheckpointsBySelector(bridgeRequest, { repoId }, workspaceRoot);
+}
+
+export async function fetchProjectHistoryBySelector(bridgeRequest, selector, workspaceRoot) {
+  return loadProjectHistory(bridgeRequest, selector, workspaceRoot || null);
+}
+
+export async function fetchProjectHistory(bridgeRequest, repoId, workspaceRoot) {
+  return fetchProjectHistoryBySelector(bridgeRequest, { repoId }, workspaceRoot);
 }
 
 export async function refreshVisibleProjectState(bridgeRequest, workspaceRoot, repoId, options = {}) {

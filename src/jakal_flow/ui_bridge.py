@@ -9,10 +9,12 @@ import signal
 import subprocess
 import sys
 import time
+from time import perf_counter
 from typing import Any
 
 from .bridge_events import emit_bridge_event
 from .codex_app_server import fetch_codex_backend_snapshot
+from .failure_logs import write_runtime_failure_log
 from .model_constants import AUTO_MODEL_SLUG, DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER
 from .execution_control import EXECUTION_STOP_REGISTRY, execution_scope_id
 from .optimization import normalize_optimization_mode
@@ -57,7 +59,16 @@ from .share import (
     save_share_server_config,
     share_server_status_payload,
 )
-from .step_models import GEMINI_DEFAULT_MODEL
+from .step_models import (
+    CLAUDE_DEFAULT_MODEL,
+    DEEPSEEK_DEFAULT_MODEL,
+    GEMINI_DEFAULT_MODEL,
+    GLM_DEFAULT_MODEL,
+    KIMI_DEFAULT_MODEL,
+    MINIMAX_DEFAULT_MODEL,
+    QWEN_CODE_DEFAULT_MODEL,
+    provider_statuses_payload,
+)
 from .ui_bridge_commands import (
     BridgeCommandContext,
     build_project_command_handlers,
@@ -92,6 +103,8 @@ def default_workspace_root() -> Path:
 
 def bootstrap_payload(workspace_root: Path) -> dict[str, Any]:
     codex_status = _codex_snapshot_service.get_snapshot(force_refresh=True)
+    codex_status_payload = codex_status.to_dict()
+    codex_status_payload["provider_statuses"] = provider_statuses_payload()
     return {
         "workspace_root": str(workspace_root),
         "model_presets": [
@@ -106,7 +119,7 @@ def bootstrap_payload(workspace_root: Path) -> dict[str, Any]:
             for preset in MODEL_PRESETS
         ],
         "model_catalog": codex_status.model_catalog,
-        "codex_status": codex_status.to_dict(),
+        "codex_status": codex_status_payload,
         "default_runtime": runtime_from_payload({}).to_dict(),
     }
 
@@ -354,6 +367,7 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         approval_mode="never",
         sandbox_mode="danger-full-access",
         allow_push=True,
+        auto_merge_pull_request=True,
         checkpoint_interval_blocks=1,
         require_checkpoint_approval=False,
         generate_word_report=True,
@@ -363,6 +377,9 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         model="gpt-5.4",
         model_preset="",
         model_slug_input="gpt-5.4",
+        ensemble_openai_model="gpt-5.4",
+        ensemble_gemini_model=GEMINI_DEFAULT_MODEL,
+        ensemble_claude_model=CLAUDE_DEFAULT_MODEL,
     ).to_dict()
     merged = {**base, **payload}
     merged["max_blocks"] = coerce_positive_int(merged.get("max_blocks", 5), default=5)
@@ -407,11 +424,13 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         merged.get("parallel_memory_per_worker_gib", 3),
         default=3.0,
     )
+    merged["save_project_logs"] = coerce_bool(merged.get("save_project_logs", False), False)
     merged["ml_max_cycles"] = coerce_positive_int(
         merged.get("ml_max_cycles", 3),
         default=3,
     )
     merged["allow_push"] = coerce_bool(merged.get("allow_push", True), True)
+    merged["auto_merge_pull_request"] = coerce_bool(merged.get("auto_merge_pull_request", True), True)
     merged["allow_background_queue"] = coerce_bool(merged.get("allow_background_queue", True), True)
     merged["background_queue_priority"] = coerce_int(merged.get("background_queue_priority", 0), default=0)
     merged["require_checkpoint_approval"] = coerce_bool(
@@ -441,6 +460,18 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
     merged["provider_api_key_env"] = str(merged.get("provider_api_key_env", "")).strip()
     if not merged["provider_api_key_env"] and provider.default_api_key_env:
         merged["provider_api_key_env"] = provider.default_api_key_env
+    merged["ensemble_openai_model"] = str(merged.get("ensemble_openai_model", "")).strip().lower()
+    merged["ensemble_gemini_model"] = str(merged.get("ensemble_gemini_model", "")).strip().lower()
+    merged["ensemble_claude_model"] = str(merged.get("ensemble_claude_model", "")).strip().lower()
+    if merged["model_provider"] == "ensemble":
+        primary_ensemble_model = str(payload.get("model", payload.get("model_slug_input", ""))).strip().lower()
+        merged["ensemble_openai_model"] = merged["ensemble_openai_model"] or primary_ensemble_model or "gpt-5.4"
+        merged["ensemble_gemini_model"] = merged["ensemble_gemini_model"] or GEMINI_DEFAULT_MODEL
+        merged["ensemble_claude_model"] = merged["ensemble_claude_model"] or CLAUDE_DEFAULT_MODEL
+    else:
+        merged["ensemble_openai_model"] = merged["ensemble_openai_model"] or "gpt-5.4"
+        merged["ensemble_gemini_model"] = merged["ensemble_gemini_model"] or GEMINI_DEFAULT_MODEL
+        merged["ensemble_claude_model"] = merged["ensemble_claude_model"] or CLAUDE_DEFAULT_MODEL
     merged["billing_mode"] = normalize_billing_mode(
         str(merged.get("billing_mode", "")),
         merged["model_provider"],
@@ -464,9 +495,26 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
     raw_effort = str(merged.get("effort", "")).strip()
     merged["effort"] = raw_effort.lower()
 
-    if merged["model_provider"] == "gemini" and "model" not in payload and "model_slug_input" not in payload:
-        merged["model"] = GEMINI_DEFAULT_MODEL
-        merged["model_slug_input"] = GEMINI_DEFAULT_MODEL
+    provider_default_model = ""
+    if merged["model_provider"] == "gemini":
+        provider_default_model = GEMINI_DEFAULT_MODEL
+    elif merged["model_provider"] == "claude":
+        provider_default_model = CLAUDE_DEFAULT_MODEL
+    elif merged["model_provider"] == "qwen_code":
+        provider_default_model = QWEN_CODE_DEFAULT_MODEL
+    elif merged["model_provider"] == "deepseek":
+        provider_default_model = DEEPSEEK_DEFAULT_MODEL
+    elif merged["model_provider"] == "kimi":
+        provider_default_model = KIMI_DEFAULT_MODEL
+    elif merged["model_provider"] == "minimax":
+        provider_default_model = MINIMAX_DEFAULT_MODEL
+    elif merged["model_provider"] == "glm":
+        provider_default_model = GLM_DEFAULT_MODEL
+    elif merged["model_provider"] == "ensemble":
+        provider_default_model = merged["ensemble_openai_model"] or "gpt-5.4"
+    if provider_default_model and "model" not in payload and "model_slug_input" not in payload:
+        merged["model"] = provider_default_model
+        merged["model_slug_input"] = provider_default_model
 
     if not merged["model"]:
         preset = model_preset_by_id(merged["model_preset"] or DEFAULT_MODEL_PRESET_ID)
@@ -494,6 +542,8 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         merged["model_preset"] = ""
     merged["model_selection_mode"] = str(merged.get("model_selection_mode", "slug")).strip() or "slug"
     merged["model_slug_input"] = str(merged.get("model_slug_input", merged["model"])).strip().lower() or merged["model"]
+    if provider_default_model and "model" not in payload and "model_slug_input" not in payload:
+        merged["model_slug_input"] = provider_default_model
     if "model" not in payload and str(payload.get("model_slug_input", "")).strip():
         merged["model"] = merged["model_slug_input"]
     if not merged["model"] and merged["model_slug_input"]:
@@ -537,6 +587,16 @@ def resolve_history_project(
     raise ValueError("archive_id is required.")
 
 
+def best_effort_project(
+    orchestrator: Orchestrator,
+    payload: dict[str, Any],
+) -> ProjectContext | None:
+    try:
+        return resolve_project(orchestrator, payload)
+    except Exception:
+        return None
+
+
 def append_ui_event(context: ProjectContext, event_type: str, message: str, details: dict[str, Any] | None = None) -> None:
     payload = {
         "timestamp": now_utc_iso(),
@@ -545,6 +605,18 @@ def append_ui_event(context: ProjectContext, event_type: str, message: str, deta
         "details": details or {},
     }
     append_jsonl(context.paths.ui_event_log_file, payload)
+    if getattr(context.runtime, "save_project_logs", False):
+        append_jsonl(
+            context.paths.logs_dir / "project_activity.jsonl",
+            {
+                "timestamp": payload["timestamp"],
+                "repo_id": context.metadata.repo_id,
+                "project_dir": str(context.metadata.repo_path),
+                "event_type": event_type,
+                "message": message,
+                "details": payload["details"],
+            },
+        )
     emit_bridge_event(
         "project.ui_event",
         {
@@ -588,6 +660,9 @@ def bridge_command_handlers() -> dict[str, Any]:
             append_ui_event=append_ui_event,
             save_run_control=save_run_control,
             default_run_control=default_run_control,
+            clear_stop_request=clear_stop_request,
+            execution_scope_id=execution_scope_id,
+            execution_stop_registry=EXECUTION_STOP_REGISTRY,
         ),
         **build_share_command_handlers(
             resolve_project=resolve_project,
@@ -616,8 +691,39 @@ def bridge_command_handlers() -> dict[str, Any]:
     }
 
 
+def _payload_size_bytes(value: Any) -> int:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    except Exception:
+        return 0
+
+
+def _bridge_perf_log(workspace_root: Path, command: str, payload: dict[str, Any], result: Any, duration_ms: float) -> None:
+    append_jsonl(
+        workspace_root / "bridge_perf.jsonl",
+        {
+            "timestamp": now_utc_iso(),
+            "command": command,
+            "workspace_root": str(workspace_root),
+            "repo_id": str(payload.get("repo_id", "")).strip(),
+            "project_dir": str(payload.get("project_dir", "")).strip(),
+            "archive_id": str(payload.get("archive_id", "")).strip(),
+            "detail_level": str(payload.get("detail_level", "")).strip().lower(),
+            "refresh_codex_status": coerce_bool(payload.get("refresh_codex_status", False), False),
+            "duration_ms": round(duration_ms, 3),
+            "payload_size_bytes": _payload_size_bytes(payload),
+            "result_size_bytes": _payload_size_bytes(result),
+            "result_keys": sorted(result.keys()) if isinstance(result, dict) else [],
+            "payload_cache_hit": bool(result.get("payload_cache_hit")) if isinstance(result, dict) else False,
+            "content_signature": str(result.get("content_signature", "")).strip() if isinstance(result, dict) else "",
+            "detail_signature": str(result.get("detail_signature", "")).strip() if isinstance(result, dict) else "",
+        },
+    )
+
+
 def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
+    command_started_at = perf_counter()
     orchestrator = orchestrator_for(workspace_root)
 
     def detail_payload(project: ProjectContext, **kwargs: Any) -> dict[str, Any]:
@@ -632,14 +738,27 @@ def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | No
     handler = bridge_command_handlers().get(command)
     if handler is None:
         raise ValueError(f"Unsupported bridge command: {command}")
-    return handler(
-        BridgeCommandContext(
-            workspace_root=workspace_root,
-            payload=payload,
-            orchestrator=orchestrator,
-            detail_payload=detail_payload,
+    try:
+        result = handler(
+            BridgeCommandContext(
+                workspace_root=workspace_root,
+                payload=payload,
+                orchestrator=orchestrator,
+                detail_payload=detail_payload,
+            )
         )
-    )
+    except Exception as exc:
+        write_runtime_failure_log(
+            workspace_root,
+            source="ui-bridge",
+            command=command,
+            exc=exc,
+            payload=payload,
+            project=best_effort_project(orchestrator, payload),
+        )
+        raise
+    _bridge_perf_log(workspace_root, command, payload, result, (perf_counter() - command_started_at) * 1000.0)
+    return result
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

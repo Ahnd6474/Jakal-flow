@@ -1,6 +1,27 @@
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { canEditStep, effectiveStepStatus, formatDurationCompact, formatUsd, isSystemStep, planStepsWithCloseout, projectStatusWithJob, REASONING_OPTIONS, reasoningEffortLabel, shouldShowEstimatedCost, statusTone } from "../../utils";
+import {
+  canEditStep,
+  CLAUDE_DEFAULT_MODEL,
+  DEEPSEEK_DEFAULT_MODEL,
+  effectiveStepStatus,
+  formatDurationCompact,
+  formatUsd,
+  GEMINI_DEFAULT_MODEL,
+  GLM_DEFAULT_MODEL,
+  isSystemStep,
+  KIMI_DEFAULT_MODEL,
+  MINIMAX_DEFAULT_MODEL,
+  planStepsWithCloseout,
+  providerAvailable,
+  providerStatusReason,
+  projectStatusWithJob,
+  QWEN_CODE_DEFAULT_MODEL,
+  REASONING_OPTIONS,
+  reasoningEffortLabel,
+  shouldShowEstimatedCost,
+  statusTone,
+} from "../../utils";
 
 function autoProviderLabel(language) {
   return language === "ko" ? "자동 (AGENTS.md 선호)" : "Auto (AGENTS.md preference)";
@@ -14,13 +35,72 @@ function autoModelHint(language) {
 
 function modelPlaceholder(step, runtime) {
   const provider = String(step?.model_provider || "").trim().toLowerCase();
+  if (provider === "claude") {
+    return "sonnet";
+  }
   if (provider === "gemini") {
-    return "gemini-3-flash";
+    return GEMINI_DEFAULT_MODEL;
+  }
+  if (provider === "qwen_code") {
+    return QWEN_CODE_DEFAULT_MODEL;
+  }
+  if (provider === "deepseek") {
+    return DEEPSEEK_DEFAULT_MODEL;
+  }
+  if (provider === "kimi") {
+    return KIMI_DEFAULT_MODEL;
+  }
+  if (provider === "minimax") {
+    return MINIMAX_DEFAULT_MODEL;
+  }
+  if (provider === "glm") {
+    return GLM_DEFAULT_MODEL;
   }
   if (provider === "openai") {
     return String(runtime?.model || runtime?.model_slug_input || "gpt-5.4").trim() || "gpt-5.4";
   }
   return "";
+}
+
+function stepAutoModelHint(language, runtime) {
+  const provider = String(runtime?.model_provider || "openai").trim().toLowerCase();
+  if (provider === "ensemble") {
+    return language === "ko"
+      ? "비워두면 ensemble 라우팅을 따릅니다. 계획과 일반 구현은 Codex CLI를 쓰고, UI/프론트엔드 단계는 Claude Code를 우선 사용하며 Claude가 없으면 Gemini CLI로 대체합니다."
+      : "Leave blank to follow ensemble routing: planning and general steps use Codex CLI, UI and frontend steps use Claude Code, and Gemini CLI is the fallback when Claude is unavailable.";
+  }
+  return language === "ko"
+    ? "비워두면 AGENTS.md 규칙에 따라 UI 단계는 Gemini CLI, 그 외 단계는 Codex CLI를 자동 선택합니다."
+    : "Leave blank to follow AGENTS.md: UI steps prefer Gemini CLI and other steps prefer Codex CLI.";
+}
+
+function stepModelPlaceholder(step, runtime) {
+  const provider = String(step?.model_provider || runtime?.model_provider || "").trim().toLowerCase();
+  if (provider === "claude") {
+    return CLAUDE_DEFAULT_MODEL;
+  }
+  if (provider === "gemini") {
+    return GEMINI_DEFAULT_MODEL;
+  }
+  if (provider === "qwen_code") {
+    return QWEN_CODE_DEFAULT_MODEL;
+  }
+  if (provider === "deepseek") {
+    return DEEPSEEK_DEFAULT_MODEL;
+  }
+  if (provider === "kimi") {
+    return KIMI_DEFAULT_MODEL;
+  }
+  if (provider === "minimax") {
+    return MINIMAX_DEFAULT_MODEL;
+  }
+  if (provider === "glm") {
+    return GLM_DEFAULT_MODEL;
+  }
+  if (provider === "openai" || provider === "ensemble") {
+    return String(runtime?.model || runtime?.model_slug_input || "gpt-5.4").trim() || "gpt-5.4";
+  }
+  return modelPlaceholder(step, runtime);
 }
 
 function FlowNode({ step, projectStatus, selected, onSelect, language, t }) {
@@ -41,6 +121,7 @@ function FlowNode({ step, projectStatus, selected, onSelect, language, t }) {
 
 export function RunControlView({
   detail,
+  codexStatus,
   planDraft,
   activeJob,
   selectedStepId,
@@ -60,6 +141,21 @@ export function RunControlView({
   onMoveStep,
 }) {
   const { language, t } = useI18n();
+  const providerOptions = [
+    ["ensemble", t("option.providerEnsemble")],
+    ["openai", "Codex CLI"],
+    ["claude", "Claude Code"],
+    ["gemini", "Gemini CLI"],
+    ["qwen_code", "Qwen Code"],
+    ["deepseek", "DeepSeek via Claude Code"],
+    ["kimi", "Kimi"],
+    ["minimax", "MiniMax via Claude Code"],
+    ["glm", "GLM via Claude Code"],
+    ["openrouter", "OpenRouter"],
+    ["opencdk", "OpenCDK"],
+    ["local_openai", "Local OpenAI-Compatible"],
+    ["oss", "Local OSS"],
+  ];
   const steps = planStepsWithCloseout(planDraft, {
     title: t("run.closeout"),
     description: t("reports.closeoutReport"),
@@ -80,6 +176,10 @@ export function RunControlView({
   const closeoutStatus = String(planDraft?.closeout_status || "not_started").trim().toLowerCase();
   const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
   const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
+  const isPlanningJobRunning =
+    String(activeJob?.status || "").trim().toLowerCase() === "running"
+    && String(activeJob?.command || "").trim().toLowerCase() === "generate-plan";
+  const canResetPlan = !busy || isPlanningJobRunning;
   const latestFailure = detail?.reports?.latest_failure || {};
   const failureArtifacts = Array.isArray(latestFailure?.artifact_files) ? latestFailure.artifact_files.slice(0, 8) : [];
   const showFailureCard = Boolean(
@@ -178,7 +278,7 @@ export function RunControlView({
             <button className="toolbar-button" onClick={onSavePlan} type="button" disabled={busy}>
               {t("action.save")}
             </button>
-            <button className="toolbar-button toolbar-button--ghost" onClick={onResetPlan} type="button" disabled={busy}>
+            <button className="toolbar-button toolbar-button--ghost" onClick={onResetPlan} type="button" disabled={!canResetPlan}>
               {t("action.reset")}
             </button>
             <button className="toolbar-button toolbar-button--accent" onClick={onRunPlan} type="button" disabled={busy}>
@@ -277,23 +377,30 @@ export function RunControlView({
                   <span>{t("field.modelProvider")}</span>
                   <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStep}>
                     <option value="">{autoProviderLabel(language)}</option>
-                    <option value="openai">Codex CLI</option>
-                    <option value="gemini">Gemini CLI</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="opencdk">OpenCDK</option>
-                    <option value="local_openai">Local OpenAI-Compatible</option>
-                    <option value="oss">Local OSS</option>
+                    {providerOptions.map(([value, label]) => (
+                      <option
+                        key={value}
+                        value={value}
+                        disabled={!providerAvailable(value, codexStatus)}
+                        title={providerStatusReason(value, codexStatus)}
+                      >
+                        {label}
+                      </option>
+                    ))}
                   </select>
+                  {selectedStep.model_provider && !providerAvailable(selectedStep.model_provider, codexStatus) && providerStatusReason(selectedStep.model_provider, codexStatus) ? (
+                    <small className="muted">{providerStatusReason(selectedStep.model_provider, codexStatus)}</small>
+                  ) : null}
                 </label>
                 <label className="field field--wide">
                   <span>{t("field.model")}</span>
                   <input
                     value={selectedStep.model || ""}
-                    placeholder={modelPlaceholder(selectedStep, detail?.runtime)}
+                    placeholder={stepModelPlaceholder(selectedStep, detail?.runtime)}
                     onChange={(event) => onUpdateStepField("model", event.target.value)}
                     disabled={!editableStep}
                   />
-                  <small className="muted">{autoModelHint(language)}</small>
+                  <small className="muted">{stepAutoModelHint(language, detail?.runtime)}</small>
                 </label>
                 <label className="field">
                   <span>{t("field.parallelGroup")}</span>

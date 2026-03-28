@@ -5,7 +5,14 @@ VALID_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 DEFAULT_MODEL_PROVIDER = "openai"
 VALID_MODEL_PROVIDERS = {
     DEFAULT_MODEL_PROVIDER,
+    "ensemble",
+    "claude",
     "gemini",
+    "qwen_code",
+    "deepseek",
+    "kimi",
+    "minimax",
+    "glm",
     "openrouter",
     "opencdk",
     "local_openai",

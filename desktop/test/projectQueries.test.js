@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadInitialDesktopState, refreshVisibleProjectState } from "../src/controller/projectQueries.js";
+import {
+  fetchProjectCheckpoints,
+  fetchProjectHistory,
+  fetchProjectReports,
+  fetchProjectWorkspace,
+  loadInitialDesktopState,
+  loadWorkspaceShareDetail,
+  refreshVisibleProjectState,
+} from "../src/controller/projectQueries.js";
 
 test("refreshVisibleProjectState loads listing and selected project detail in parallel", async () => {
   const calls = [];
@@ -145,4 +153,82 @@ test("loadInitialDesktopState keeps queued jobs as the active snapshot when noth
   } finally {
     globalThis.__JAKAL_FLOW_TEST_LIST_BRIDGE_JOBS__ = originalListBridgeJobs;
   }
+});
+
+test("project supplement fetches wrap partial bridge payloads for detail merging", async () => {
+  const calls = [];
+  const bridgeRequest = async (command, payload, workspaceRoot) => {
+    calls.push({ command, payload, workspaceRoot });
+    if (command === "load-project-reports") {
+      return { closeout_report_text: "done" };
+    }
+    if (command === "load-project-workspace") {
+      return { workspace_tree: [{ label: "Repository" }] };
+    }
+    if (command === "load-project-checkpoints") {
+      return { items: [], pending: null, timeline_markdown: "" };
+    }
+    if (command === "load-project-history") {
+      return { ui_events: [], blocks: [], passes: [], test_runs: [], flow_svg_text: "" };
+    }
+    throw new Error(`Unexpected command: ${command}`);
+  };
+
+  assert.deepEqual(await fetchProjectReports(bridgeRequest, "demo", "/workspace"), {
+    reports: { closeout_report_text: "done" },
+    loaded_sections: { reports: true },
+  });
+  assert.deepEqual(await fetchProjectWorkspace(bridgeRequest, "demo", "/workspace"), {
+    workspace_tree: [{ label: "Repository" }],
+    loaded_sections: { workspace: true },
+  });
+  assert.deepEqual(await fetchProjectCheckpoints(bridgeRequest, "demo", "/workspace"), {
+    checkpoints: { items: [], pending: null, timeline_markdown: "" },
+    loaded_sections: { checkpoints: true },
+  });
+  assert.deepEqual(await fetchProjectHistory(bridgeRequest, "demo", "/workspace"), {
+    history: { ui_events: [], blocks: [], passes: [], test_runs: [], flow_svg_text: "" },
+    loaded_sections: { history: true },
+  });
+  assert.deepEqual(calls, [
+    {
+      command: "load-project-reports",
+      payload: { repo_id: "demo" },
+      workspaceRoot: "/workspace",
+    },
+    {
+      command: "load-project-workspace",
+      payload: { repo_id: "demo" },
+      workspaceRoot: "/workspace",
+    },
+    {
+      command: "load-project-checkpoints",
+      payload: { repo_id: "demo" },
+      workspaceRoot: "/workspace",
+    },
+    {
+      command: "load-project-history",
+      payload: { repo_id: "demo" },
+      workspaceRoot: "/workspace",
+    },
+  ]);
+});
+
+test("loadWorkspaceShareDetail fetches workspace share only on demand", async () => {
+  const calls = [];
+  const bridgeRequest = async (command, payload, workspaceRoot) => {
+    calls.push({ command, payload, workspaceRoot });
+    return { share: { active_session: null } };
+  };
+
+  const result = await loadWorkspaceShareDetail(bridgeRequest, "/workspace");
+
+  assert.deepEqual(result, { share: { active_session: null } });
+  assert.deepEqual(calls, [
+    {
+      command: "load-workspace-share",
+      payload: {},
+      workspaceRoot: "/workspace",
+    },
+  ]);
 });

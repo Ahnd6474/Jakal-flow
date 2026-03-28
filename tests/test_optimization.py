@@ -115,6 +115,7 @@ class OptimizationTests(unittest.TestCase):
                 optimization_large_file_lines=20,
                 optimization_long_function_lines=20,
                 optimization_max_files=2,
+                auto_merge_pull_request=True,
             )
             context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
             context.metadata.current_safe_revision = "safe-revision"
@@ -166,7 +167,11 @@ class OptimizationTests(unittest.TestCase):
                 orchestrator.git,
                 "remote_url",
                 return_value=None,
-            ):
+            ), mock.patch.object(
+                orchestrator,
+                "_publish_closeout_pull_request",
+                return_value={"created": False, "reason": "non_github_origin"},
+            ) as mocked_publish_closeout:
                 _, plan_state = orchestrator.run_execution_closeout(repo_dir, runtime)
 
             block_entries = read_jsonl_tail(context.paths.block_log_file, 5)
@@ -175,6 +180,54 @@ class OptimizationTests(unittest.TestCase):
         self.assertEqual(context.metadata.current_safe_revision, "opt-commit")
         self.assertEqual([call.kwargs["pass_type"] for call in mocked_run_pass.call_args_list], ["project-optimization-pass", "project-closeout-pass"])
         self.assertEqual([item["status"] for item in block_entries], ["optimization_completed", "closeout_completed"])
+        mocked_publish_closeout.assert_called_once()
+
+    def test_publish_closeout_pull_request_uses_temporary_branch_when_head_matches_base(self) -> None:
+        with _TemporaryTestDir() as temp_root:
+            workspace_root = temp_root / "workspace"
+            repo_dir = temp_root / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            (repo_dir / "README.md").write_text("demo\n", encoding="utf-8")
+            orchestrator = Orchestrator(workspace_root)
+            runtime = RuntimeOptions(
+                model="gpt-5.4",
+                effort="medium",
+                test_cmd="python -m pytest",
+                auto_merge_pull_request=True,
+                allow_push=True,
+            )
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            plan_state = ExecutionPlanState(
+                plan_title="Closeout demo",
+                closeout_status="completed",
+                closeout_started_at="2026-03-26T00:10:00+00:00",
+                closeout_commit_hash="abc123456789",
+                steps=[ExecutionStep(step_id="ST1", title="Done", status="completed")],
+            )
+
+            with mock.patch.object(
+                orchestrator,
+                "_maybe_open_pull_request",
+                side_effect=[
+                    {"created": False, "reason": "head_matches_base"},
+                    {"created": True, "pull_request": 17, "html_url": "https://github.com/example/demo/pull/17"},
+                ],
+            ) as mocked_pr, mock.patch.object(
+                orchestrator.git,
+                "push_refspec",
+            ) as mocked_push_refspec:
+                result = orchestrator._publish_closeout_pull_request(context, plan_state)
+
+        self.assertTrue(result["created"])
+        self.assertTrue(result["closeout_branch_pushed"])
+        self.assertEqual(result["head_branch"], "jakal-flow-closeout-20260326001000-abc12345")
+        mocked_push_refspec.assert_called_once_with(repo_dir, "HEAD", "jakal-flow-closeout-20260326001000-abc12345")
+        self.assertEqual(mocked_pr.call_count, 2)
+        self.assertEqual(mocked_pr.call_args_list[0].kwargs["head_branch"], "main")
+        self.assertEqual(mocked_pr.call_args_list[0].kwargs["merge_method"], "merge")
+        self.assertEqual(mocked_pr.call_args_list[1].kwargs["head_branch"], "jakal-flow-closeout-20260326001000-abc12345")
+        self.assertEqual(mocked_pr.call_args_list[1].kwargs["base_branch"], "main")
+        self.assertEqual(mocked_pr.call_args_list[1].kwargs["merge_method"], "merge")
 
     def test_run_execution_closeout_continues_after_failed_optimization_pass(self) -> None:
         with _TemporaryTestDir() as temp_root:
