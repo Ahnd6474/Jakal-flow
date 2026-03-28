@@ -72,6 +72,9 @@ class RuntimeOptions:
     local_model_provider: str = ""
     provider_base_url: str = ""
     provider_api_key_env: str = ""
+    ensemble_openai_model: str = "gpt-5.4"
+    ensemble_gemini_model: str = "gemini-3-flash-preview"
+    ensemble_claude_model: str = "claude-sonnet-4-6"
     billing_mode: str = "included"
     input_cost_per_million_usd: float = 0.0
     cached_input_cost_per_million_usd: float = 0.0

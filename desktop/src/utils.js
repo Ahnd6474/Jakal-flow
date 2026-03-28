@@ -153,6 +153,9 @@ export const PROGRAM_RUNTIME_KEYS = [
   "local_model_provider",
   "provider_base_url",
   "provider_api_key_env",
+  "ensemble_openai_model",
+  "ensemble_gemini_model",
+  "ensemble_claude_model",
   "model",
   "planning_effort",
   "model_preset",
@@ -209,6 +212,9 @@ const DEFAULT_PROGRAM_RUNTIME = {
   local_model_provider: "ollama",
   provider_base_url: "",
   provider_api_key_env: "OPENAI_API_KEY",
+  ensemble_openai_model: "gpt-5.4",
+  ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+  ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
   model: "gpt-5.4",
   planning_effort: "medium",
   model_preset: "",
@@ -395,9 +401,17 @@ export function defaultModelForProvider(provider = "openai", runtime = {}) {
   const normalizedProvider = String(provider || "").trim().toLowerCase();
   const currentModel = String(runtime?.model || runtime?.model_slug_input || "").trim().toLowerCase();
   if (normalizedProvider === "claude") {
+    const ensembleClaudeModel = String(runtime?.ensemble_claude_model || "").trim().toLowerCase();
+    if (normalizedModelProvider(runtime) === "ensemble" && ensembleClaudeModel) {
+      return ensembleClaudeModel;
+    }
     return looksLikeClaudeModel(currentModel) ? currentModel : CLAUDE_DEFAULT_MODEL;
   }
   if (normalizedProvider === "gemini") {
+    const ensembleGeminiModel = String(runtime?.ensemble_gemini_model || "").trim().toLowerCase();
+    if (normalizedModelProvider(runtime) === "ensemble" && ensembleGeminiModel) {
+      return ensembleGeminiModel;
+    }
     return currentModel.startsWith("gemini") ? currentModel : GEMINI_DEFAULT_MODEL;
   }
   if (providerDefaultModelSlug(normalizedProvider)) {
@@ -406,6 +420,10 @@ export function defaultModelForProvider(provider = "openai", runtime = {}) {
       : providerDefaultModelSlug(normalizedProvider);
   }
   if (normalizedProvider === "ensemble" || normalizedProvider === "openai") {
+    const ensembleOpenAiModel = String(runtime?.ensemble_openai_model || "").trim().toLowerCase();
+    if (normalizedModelProvider(runtime) === "ensemble" && ensembleOpenAiModel) {
+      return ensembleOpenAiModel;
+    }
     if (!currentModel) {
       return "gpt-5.4";
     }
@@ -425,6 +443,16 @@ export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nex
     ? String(nextProvider || "").trim().toLowerCase()
     : "openai";
   const previousProvider = normalizedModelProvider(runtime);
+  const previousModel = String(runtime?.model_slug_input || runtime?.model || "").trim().toLowerCase();
+  const nextEnsembleOpenAiModel =
+    String(runtime?.ensemble_openai_model || "").trim().toLowerCase()
+      || (previousProvider === "openai" && previousModel && previousModel !== "auto" ? previousModel : "gpt-5.4");
+  const nextEnsembleGeminiModel =
+    String(runtime?.ensemble_gemini_model || "").trim().toLowerCase()
+      || (previousProvider === "gemini" && previousModel ? previousModel : GEMINI_DEFAULT_MODEL);
+  const nextEnsembleClaudeModel =
+    String(runtime?.ensemble_claude_model || "").trim().toLowerCase()
+      || (previousProvider === "claude" && previousModel ? previousModel : CLAUDE_DEFAULT_MODEL);
   const localProvider = provider === "oss" ? (String(nextLocalProvider || runtime?.local_model_provider || "ollama").trim().toLowerCase() === "lmstudio" ? "lmstudio" : "ollama") : "";
   const supportsAuto = providerSupportsAutoModel(provider);
   const currentModel = String(runtime?.model_slug_input || runtime?.model || "").trim().toLowerCase();
@@ -432,8 +460,11 @@ export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nex
     previousProvider === provider
       ? (currentModel || "auto")
       : defaultModelForProvider(provider, { ...runtime, model: "", model_slug_input: "" });
+  const ensembleDefaultModel = nextEnsembleOpenAiModel || "gpt-5.4";
   const nextModel = supportsAuto
     ? autoModelBase
+    : provider === "ensemble"
+      ? ensembleDefaultModel
     : provider === "claude" && !looksLikeClaudeModel(currentModel)
       ? CLAUDE_DEFAULT_MODEL
     : provider === "gemini" && !currentModel.startsWith("gemini")
@@ -447,6 +478,9 @@ export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nex
     ...(cloneValue(runtime) || {}),
     model_provider: provider,
     local_model_provider: localProvider,
+    ensemble_openai_model: nextEnsembleOpenAiModel,
+    ensemble_gemini_model: nextEnsembleGeminiModel,
+    ensemble_claude_model: nextEnsembleClaudeModel,
     provider_base_url:
       previousProvider === provider
         ? String(runtime?.provider_base_url || "").trim() || defaultProviderBaseUrl(provider)
@@ -1355,7 +1389,7 @@ export function findModelCatalogEntry(modelCatalog = [], model = "") {
 export function defaultProviderBaseUrl(provider = "openai") {
   switch (String(provider || "").trim().toLowerCase()) {
     case "deepseek":
-      return "https://api.deepseek.com";
+      return "https://api.deepseek.com/anthropic";
     case "kimi":
       return "https://api.moonshot.cn/v1";
     case "minimax":

@@ -371,6 +371,9 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         model="gpt-5.4",
         model_preset="",
         model_slug_input="gpt-5.4",
+        ensemble_openai_model="gpt-5.4",
+        ensemble_gemini_model=GEMINI_DEFAULT_MODEL,
+        ensemble_claude_model=CLAUDE_DEFAULT_MODEL,
     ).to_dict()
     merged = {**base, **payload}
     merged["max_blocks"] = coerce_positive_int(merged.get("max_blocks", 5), default=5)
@@ -450,6 +453,18 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
     merged["provider_api_key_env"] = str(merged.get("provider_api_key_env", "")).strip()
     if not merged["provider_api_key_env"] and provider.default_api_key_env:
         merged["provider_api_key_env"] = provider.default_api_key_env
+    merged["ensemble_openai_model"] = str(merged.get("ensemble_openai_model", "")).strip().lower()
+    merged["ensemble_gemini_model"] = str(merged.get("ensemble_gemini_model", "")).strip().lower()
+    merged["ensemble_claude_model"] = str(merged.get("ensemble_claude_model", "")).strip().lower()
+    if merged["model_provider"] == "ensemble":
+        primary_ensemble_model = str(payload.get("model", payload.get("model_slug_input", ""))).strip().lower()
+        merged["ensemble_openai_model"] = merged["ensemble_openai_model"] or primary_ensemble_model or "gpt-5.4"
+        merged["ensemble_gemini_model"] = merged["ensemble_gemini_model"] or GEMINI_DEFAULT_MODEL
+        merged["ensemble_claude_model"] = merged["ensemble_claude_model"] or CLAUDE_DEFAULT_MODEL
+    else:
+        merged["ensemble_openai_model"] = merged["ensemble_openai_model"] or "gpt-5.4"
+        merged["ensemble_gemini_model"] = merged["ensemble_gemini_model"] or GEMINI_DEFAULT_MODEL
+        merged["ensemble_claude_model"] = merged["ensemble_claude_model"] or CLAUDE_DEFAULT_MODEL
     merged["billing_mode"] = normalize_billing_mode(
         str(merged.get("billing_mode", "")),
         merged["model_provider"],
@@ -488,6 +503,8 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         provider_default_model = MINIMAX_DEFAULT_MODEL
     elif merged["model_provider"] == "glm":
         provider_default_model = GLM_DEFAULT_MODEL
+    elif merged["model_provider"] == "ensemble":
+        provider_default_model = merged["ensemble_openai_model"] or "gpt-5.4"
     if provider_default_model and "model" not in payload and "model_slug_input" not in payload:
         merged["model"] = provider_default_model
         merged["model_slug_input"] = provider_default_model

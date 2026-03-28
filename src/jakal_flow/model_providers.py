@@ -93,7 +93,7 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
             "Use Claude Code against DeepSeek's Anthropic-compatible API for coding-oriented runs."
         ),
         backend_kind="claude",
-        default_base_url="https://api.deepseek.com",
+        default_base_url="https://api.deepseek.com/anthropic",
         default_api_key_env="DEEPSEEK_API_KEY",
         default_billing_mode=BILLING_MODE_TOKEN,
         supports_auto_model=False,

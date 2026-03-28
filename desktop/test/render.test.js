@@ -1836,6 +1836,52 @@ test("ConfigEditorView keeps a selected model visible even when the catalog omit
   assert.match(html, /GPT-5\.3-Codex-Spark/);
 });
 
+test("AppSettingsView shows per-provider model fields for ensemble mode", async () => {
+  const html = await renderBundledComponent(
+    "app-settings-ensemble-model-render",
+    "./src/components/views/AppSettingsView.jsx",
+    "AppSettingsView",
+    {
+      settings: {
+        model_provider: "ensemble",
+        provider_api_key_env: "OPENAI_API_KEY",
+        provider_base_url: "",
+        ensemble_openai_model: "gpt-5.4-mini",
+        ensemble_gemini_model: "gemini-2.5-pro",
+        ensemble_claude_model: "claude-3.7-sonnet",
+        model: "gpt-5.4-mini",
+        model_slug_input: "gpt-5.4-mini",
+        approval_mode: "never",
+        sandbox_mode: "danger-full-access",
+        checkpoint_interval_blocks: 1,
+        workflow_mode: "standard",
+        planning_effort: "medium",
+        ml_max_cycles: 3,
+        parallel_worker_mode: "manual",
+        parallel_workers: 4,
+        parallel_memory_per_worker_gib: 3,
+        background_concurrency_limit: 2,
+        dashboard_visibility: {},
+        codex_path: "codex.cmd",
+      },
+      shareSettings: {},
+      shareDetail: {},
+      busy: false,
+      shareBusy: false,
+      onChangeSettings: noop,
+      onGenerateShareLink: noop,
+      onCopyShareLink: noop,
+      onRevokeShareLink: noop,
+      onChangeShareSettings: noop,
+    },
+  );
+
+  assert.match(html, /OpenAI Model Slug/);
+  assert.match(html, /Gemini Model Slug/);
+  assert.match(html, /Claude Model Slug/);
+  assert.doesNotMatch(html, /Custom Model Slug/);
+});
+
 test("ReportsView shows the saved Word report path next to the closeout report", async () => {
   const html = await renderBundledComponent(
     "reports-view-word-path-render",

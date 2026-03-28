@@ -3315,6 +3315,9 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             planning_effort="medium",
             execution_mode="parallel",
             model_provider="ensemble",
+            ensemble_openai_model="gpt-5.4-mini",
+            ensemble_gemini_model="gemini-2.5-pro",
+            ensemble_claude_model="claude-3.7-sonnet",
             use_fast_mode=True,
             test_cmd="python -m pytest",
         )
@@ -3379,11 +3382,11 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual(plan_state.plan_title, "Ensemble planner demo")
         self.assertEqual(plan_state.steps[0].model_provider, "claude")
-        self.assertEqual(plan_state.steps[0].model, CLAUDE_DEFAULT_MODEL)
+        self.assertEqual(plan_state.steps[0].model, "claude-3.7-sonnet")
         self.assertEqual(plan_state.steps[0].metadata["model_selection_source"], "auto")
         self.assertIn("Ensemble UI preference", plan_state.steps[0].metadata["model_selection_reason"])
         self.assertEqual(plan_state.steps[1].model_provider, "openai")
-        self.assertEqual(plan_state.steps[1].model, "gpt-5.4")
+        self.assertEqual(plan_state.steps[1].model, "gpt-5.4-mini")
         self.assertEqual(plan_state.steps[1].metadata["model_selection_source"], "auto")
 
     def test_ensure_gitignore_adds_missing_entries_once(self) -> None:

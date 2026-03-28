@@ -202,11 +202,18 @@ def _default_model_for_provider(provider: str, runtime: RuntimeOptions) -> str:
     normalized_provider = normalize_step_model_provider(provider) or "openai"
     runtime_provider = str(getattr(runtime, "model_provider", "") or "").strip().lower()
     runtime_model = normalize_step_model(getattr(runtime, "model", "") or getattr(runtime, "model_slug_input", ""))
+    ensemble_openai_model = normalize_step_model(getattr(runtime, "ensemble_openai_model", ""))
+    ensemble_gemini_model = normalize_step_model(getattr(runtime, "ensemble_gemini_model", ""))
+    ensemble_claude_model = normalize_step_model(getattr(runtime, "ensemble_claude_model", ""))
     if normalized_provider == "gemini":
+        if runtime_provider == "ensemble" and ensemble_gemini_model:
+            return ensemble_gemini_model
         if runtime_provider == "gemini" and runtime_model:
             return runtime_model
         return GEMINI_DEFAULT_MODEL
     if normalized_provider == "claude":
+        if runtime_provider == "ensemble" and ensemble_claude_model:
+            return ensemble_claude_model
         if runtime_provider == "claude" and runtime_model:
             return runtime_model
         return CLAUDE_DEFAULT_MODEL
@@ -231,6 +238,8 @@ def _default_model_for_provider(provider: str, runtime: RuntimeOptions) -> str:
             return runtime_model
         return GLM_DEFAULT_MODEL
     if normalized_provider in {"ensemble", "openai"}:
+        if runtime_provider == "ensemble" and ensemble_openai_model:
+            return ensemble_openai_model
         if runtime_provider in {"ensemble", "openai"} and runtime_model:
             return runtime_model
         return runtime_model or "auto"

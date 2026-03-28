@@ -449,7 +449,7 @@ class CodexRunnerTests(unittest.TestCase):
                 runtime=RuntimeOptions(
                     model_provider="deepseek",
                     provider_api_key_env="DEEPSEEK_API_KEY",
-                    provider_base_url="https://api.deepseek.com",
+                    provider_base_url="https://api.deepseek.com/anthropic",
                     model=DEEPSEEK_DEFAULT_MODEL,
                     effort="medium",
                     codex_path="claude.cmd",
@@ -489,7 +489,7 @@ class CodexRunnerTests(unittest.TestCase):
             self.assertIn(DEEPSEEK_DEFAULT_MODEL, observed_commands[0])
             self.assertEqual(observed_envs[0]["ANTHROPIC_API_KEY"], "deepseek-secret")
             self.assertEqual(observed_envs[0]["ANTHROPIC_AUTH_TOKEN"], "deepseek-secret")
-            self.assertEqual(observed_envs[0]["ANTHROPIC_BASE_URL"], "https://api.deepseek.com")
+            self.assertEqual(observed_envs[0]["ANTHROPIC_BASE_URL"], "https://api.deepseek.com/anthropic")
             self.assertEqual(observed_envs[0]["ANTHROPIC_MODEL"], DEEPSEEK_DEFAULT_MODEL)
             self.assertEqual(result.last_message, "DeepSeek response")
             self.assertEqual(result.usage["total_tokens"], 19)

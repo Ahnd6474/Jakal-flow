@@ -231,6 +231,9 @@ test("program settings helpers keep global runtime controls separate from projec
     local_model_provider: "ollama",
     provider_base_url: "",
     provider_api_key_env: "OPENAI_API_KEY",
+    ensemble_openai_model: "gpt-5.4",
+    ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+    ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
     model: "gpt-5.4",
     planning_effort: "medium",
     model_preset: "",
@@ -284,6 +287,9 @@ test("program settings helpers keep global runtime controls separate from projec
       local_model_provider: "ollama",
       provider_base_url: "",
       provider_api_key_env: "OPENAI_API_KEY",
+      ensemble_openai_model: "gpt-5.4",
+      ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+      ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
       model: "gpt-5.4",
       planning_effort: "medium",
       model_preset: "",
@@ -329,6 +335,9 @@ test("program settings helpers keep global runtime controls separate from projec
         local_model_provider: "ollama",
         provider_base_url: "",
         provider_api_key_env: "OPENAI_API_KEY",
+        ensemble_openai_model: "gpt-5.4",
+        ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+        ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
         planning_effort: "medium",
         approval_mode: "untrusted",
         sandbox_mode: "workspace-write",
@@ -492,6 +501,7 @@ test("applyProviderDefaults seeds Claude-compatible vendor defaults", () => {
   assert.equal(deepseek.codex_path, defaultCodexPath("deepseek"));
   assert.equal(deepseek.model, DEEPSEEK_DEFAULT_MODEL);
   assert.equal(deepseek.provider_api_key_env, "DEEPSEEK_API_KEY");
+  assert.equal(deepseek.provider_base_url, "https://api.deepseek.com/anthropic");
   assert.equal(minimax.model, MINIMAX_DEFAULT_MODEL);
   assert.equal(minimax.provider_base_url, "https://api.minimax.io/anthropic/v1");
   assert.equal(glm.model, GLM_DEFAULT_MODEL);
@@ -532,6 +542,9 @@ test("applyProviderDefaults switches the runtime path for the ensemble provider 
   assert.equal(runtime.model, "gpt-5.4");
   assert.equal(runtime.model_slug_input, "gpt-5.4");
   assert.equal(runtime.provider_api_key_env, "OPENAI_API_KEY");
+  assert.equal(runtime.ensemble_openai_model, "gpt-5.4");
+  assert.equal(runtime.ensemble_gemini_model, GEMINI_DEFAULT_MODEL);
+  assert.equal(runtime.ensemble_claude_model, CLAUDE_DEFAULT_MODEL);
 });
 
 test("blankProjectForm keeps Gemini CLI projects on the Gemini default model", () => {
@@ -580,6 +593,9 @@ test("blankProjectForm keeps ensemble projects on the Codex default model", () =
   assert.equal(form.runtime.model_provider, "ensemble");
   assert.equal(form.runtime.model, "gpt-5.4");
   assert.equal(form.runtime.model_slug_input, "gpt-5.4");
+  assert.equal(form.runtime.ensemble_openai_model, "gpt-5.4");
+  assert.equal(form.runtime.ensemble_gemini_model, GEMINI_DEFAULT_MODEL);
+  assert.equal(form.runtime.ensemble_claude_model, CLAUDE_DEFAULT_MODEL);
 });
 
 test("normalizeMemoryBudgetGiB keeps one decimal place for UI memory budgets", () => {

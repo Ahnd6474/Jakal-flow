@@ -556,7 +556,7 @@ class UIBridgeTests(unittest.TestCase):
 
         self.assertEqual(runtime.model_provider, "deepseek")
         self.assertEqual(runtime.provider_api_key_env, "DEEPSEEK_API_KEY")
-        self.assertEqual(runtime.provider_base_url, "https://api.deepseek.com")
+        self.assertEqual(runtime.provider_base_url, "https://api.deepseek.com/anthropic")
         self.assertEqual(runtime.codex_path, "claude.cmd" if os.name == "nt" else "claude")
         self.assertEqual(runtime.model, DEEPSEEK_DEFAULT_MODEL)
         self.assertEqual(runtime.model_slug_input, DEEPSEEK_DEFAULT_MODEL)
@@ -616,6 +616,25 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.codex_path, "codex.cmd" if os.name == "nt" else "codex")
         self.assertEqual(runtime.model, "gpt-5.4")
         self.assertEqual(runtime.model_slug_input, "gpt-5.4")
+        self.assertEqual(runtime.ensemble_openai_model, "gpt-5.4")
+        self.assertEqual(runtime.ensemble_gemini_model, GEMINI_DEFAULT_MODEL)
+        self.assertEqual(runtime.ensemble_claude_model, CLAUDE_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_preserves_custom_ensemble_models(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "ensemble",
+                "ensemble_openai_model": "gpt-5.4-mini",
+                "ensemble_gemini_model": "gemini-2.5-pro",
+                "ensemble_claude_model": "claude-3.7-sonnet",
+            }
+        )
+
+        self.assertEqual(runtime.model, "gpt-5.4-mini")
+        self.assertEqual(runtime.model_slug_input, "gpt-5.4-mini")
+        self.assertEqual(runtime.ensemble_openai_model, "gpt-5.4-mini")
+        self.assertEqual(runtime.ensemble_gemini_model, "gemini-2.5-pro")
+        self.assertEqual(runtime.ensemble_claude_model, "claude-3.7-sonnet")
 
     def test_bootstrap_exposes_workspace_and_model_presets(self) -> None:
         with TemporaryTestDir() as temp_dir:

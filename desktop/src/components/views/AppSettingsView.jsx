@@ -1,9 +1,11 @@
 import { useI18n } from "../../i18n";
 import {
   applyProviderDefaults,
+  CLAUDE_DEFAULT_MODEL,
   defaultCodexPath,
   defaultProviderApiKeyEnv,
   defaultProviderBaseUrl,
+  GEMINI_DEFAULT_MODEL,
   normalizeMemoryBudgetGiB,
   normalizeDashboardVisibility,
   REASONING_OPTIONS,
@@ -26,6 +28,8 @@ export function AppSettingsView({
   const planningReasoningLabel = language === "ko" ? "계획 추론" : "Planning Reasoning";
   const activeShare = shareDetail?.active_session || null;
   const shareServer = shareDetail?.server || null;
+  const selectedProvider = String(settings.model_provider || "openai").trim().toLowerCase();
+  const isEnsembleProvider = selectedProvider === "ensemble";
   const dashboardVisibility = normalizeDashboardVisibility(settings?.dashboard_visibility);
   const interfaceBusy = false;
   const runtimeBusy = busy;
@@ -171,7 +175,7 @@ export function AppSettingsView({
                   <option value="oss">{t("option.providerOSS")}</option>
                 </select>
               </label>
-              {String(settings.model_provider || "openai").trim().toLowerCase() === "oss" ? (
+              {selectedProvider === "oss" ? (
                 <label className="field">
                   <span>{t("field.localProvider")}</span>
                   <select
@@ -184,7 +188,7 @@ export function AppSettingsView({
                   </select>
                 </label>
               ) : null}
-              {String(settings.model_provider || "openai").trim().toLowerCase() !== "oss" ? (
+              {selectedProvider !== "oss" ? (
                 <label className="field">
                   <span>{t("field.providerBaseUrl")}</span>
                   <input
@@ -194,7 +198,7 @@ export function AppSettingsView({
                   />
                 </label>
               ) : null}
-              {String(settings.model_provider || "openai").trim().toLowerCase() !== "oss" ? (
+              {selectedProvider !== "oss" ? (
                 <label className="field">
                   <span>{t("field.providerApiKeyEnv")}</span>
                   <input
@@ -204,25 +208,76 @@ export function AppSettingsView({
                   />
                 </label>
               ) : null}
-              <label className="field">
-                <span>{t("field.customModelSlug")}</span>
-                <input
-                  value={settings.model_slug_input || settings.model || ""}
-                  onChange={(event) =>
-                    onChangeSettings((current) => {
-                      const nextModel = event.target.value.trim().toLowerCase();
-                      return {
-                        ...current,
-                        model: nextModel,
-                        model_preset: nextModel === "auto" ? "auto" : "",
-                        model_selection_mode: "slug",
-                        model_slug_input: event.target.value,
-                      };
-                    })
-                  }
-                  disabled={runtimeBusy}
-                />
-              </label>
+              {isEnsembleProvider ? (
+                <>
+                  <label className="field">
+                    <span>OpenAI Model Slug</span>
+                    <input
+                      value={settings.ensemble_openai_model || settings.model_slug_input || settings.model || "gpt-5.4"}
+                      onChange={(event) =>
+                        onChangeSettings((current) => {
+                          const nextModel = event.target.value.trim().toLowerCase() || "gpt-5.4";
+                          return {
+                            ...current,
+                            ensemble_openai_model: nextModel,
+                            model: nextModel,
+                            model_preset: "",
+                            model_selection_mode: "slug",
+                            model_slug_input: nextModel,
+                          };
+                        })
+                      }
+                      disabled={runtimeBusy}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Gemini Model Slug</span>
+                    <input
+                      value={settings.ensemble_gemini_model || GEMINI_DEFAULT_MODEL}
+                      onChange={(event) =>
+                        onChangeSettings((current) => ({
+                          ...current,
+                          ensemble_gemini_model: event.target.value.trim().toLowerCase() || GEMINI_DEFAULT_MODEL,
+                        }))
+                      }
+                      disabled={runtimeBusy}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Claude Model Slug</span>
+                    <input
+                      value={settings.ensemble_claude_model || CLAUDE_DEFAULT_MODEL}
+                      onChange={(event) =>
+                        onChangeSettings((current) => ({
+                          ...current,
+                          ensemble_claude_model: event.target.value.trim().toLowerCase() || CLAUDE_DEFAULT_MODEL,
+                        }))
+                      }
+                      disabled={runtimeBusy}
+                    />
+                  </label>
+                </>
+              ) : (
+                <label className="field">
+                  <span>{t("field.customModelSlug")}</span>
+                  <input
+                    value={settings.model_slug_input || settings.model || ""}
+                    onChange={(event) =>
+                      onChangeSettings((current) => {
+                        const nextModel = event.target.value.trim().toLowerCase();
+                        return {
+                          ...current,
+                          model: nextModel,
+                          model_preset: nextModel === "auto" ? "auto" : "",
+                          model_selection_mode: "slug",
+                          model_slug_input: event.target.value,
+                        };
+                      })
+                    }
+                    disabled={runtimeBusy}
+                  />
+                </label>
+              )}
               <label className="field">
                 <span>{t("field.approvalMode")}</span>
                 <select
