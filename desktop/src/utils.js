@@ -769,6 +769,15 @@ export function normalizeInterruptedPlan(plan = null) {
 }
 
 export function sanitizeProjectListForJobState(projects = [], activeJob = null, options = {}) {
+  if (
+    activeJob &&
+    !Array.isArray(activeJob) &&
+    ["queued", "running"].includes(String(activeJob?.status || "").trim().toLowerCase()) &&
+    !String(activeJob?.repo_id || "").trim() &&
+    !String(activeJob?.project_dir || "").trim()
+  ) {
+    return projects;
+  }
   const jobItems = Array.isArray(activeJob) ? activeJob.filter(Boolean) : activeJob ? [activeJob] : [];
   const nowMs = Number.isFinite(options?.nowMs) ? options.nowMs : Date.now();
   return (projects || []).map((project) => {
@@ -1537,22 +1546,23 @@ export function commandLabel(command, language = "en") {
 }
 
 export function statusTone(status) {
+  const normalized = String(status || "").trim().toLowerCase();
   if (isDebuggingStatus(status)) {
     return "warning";
   }
-  if (String(status || "").startsWith("queued")) {
+  if (normalized.startsWith("queued")) {
     return "info";
   }
-  if (String(status || "").includes("failed")) {
+  if (normalized.includes("failed")) {
     return "danger";
   }
-  if (String(status || "").includes("running")) {
+  if (normalized.includes("running")) {
     return "info";
   }
-  if (String(status || "") === "completed") {
+  if (normalized === "completed") {
     return "success";
   }
-  if (String(status || "").includes("paused")) {
+  if (normalized.includes("paused")) {
     return "warning";
   }
   return "neutral";

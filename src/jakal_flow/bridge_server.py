@@ -58,10 +58,15 @@ class BridgeJobStore:
         self._requests: dict[str, tuple[str, Path, dict[str, Any]]] = {}
         self._lock = Lock()
         self._send_message = send_message
+        self._job_sequence = 0
         raw_limit = max_running_jobs
         if raw_limit is None:
             raw_limit = os.environ.get("JAKAL_FLOW_MAX_CONCURRENT_JOBS", DEFAULT_MAX_CONCURRENT_JOBS)
         self._max_running_jobs = normalize_max_concurrent_jobs(raw_limit)
+
+    def _next_job_id_unlocked(self, command: str) -> str:
+        self._job_sequence += 1
+        return f"job-{command}-{now_ms()}-{self._job_sequence}"
 
     def _publish(self, snapshot: BridgeJobSnapshot) -> None:
         self._send_message(
@@ -73,7 +78,11 @@ class BridgeJobStore:
         )
 
     def _publish_many(self, snapshots: list[BridgeJobSnapshot]) -> None:
+        seen: set[str] = set()
         for snapshot in snapshots:
+            if snapshot.id in seen:
+                continue
+            seen.add(snapshot.id)
             self._publish(snapshot)
 
     def _list_jobs_unlocked(self) -> list[BridgeJobSnapshot]:
@@ -174,7 +183,6 @@ class BridgeJobStore:
             return None if snapshot is None else snapshot.to_dict()
 
     def create(self, command: str, workspace_root: Path, payload: dict[str, Any] | None = None) -> BridgeJobSnapshot:
-        job_id = f"job-{command}-{now_ms()}"
         repo_id = ""
         project_dir = ""
         request_payload = payload if isinstance(payload, dict) else {}
@@ -186,6 +194,7 @@ class BridgeJobStore:
         event_type = "job-started"
         event_details: dict[str, Any] = {}
         with self._lock:
+            job_id = self._next_job_id_unlocked(command)
             existing = self._matching_active_job_unlocked(
                 repo_id=repo_id,
                 project_dir=project_dir,

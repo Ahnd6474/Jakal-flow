@@ -11,6 +11,7 @@ import {
   parallelLimitTone,
   parallelWorkerLabel,
   planStepsWithCloseout,
+  projectStatusWithJob,
   REASONING_OPTIONS,
   reasoningEffortLabel,
   shouldShowEstimatedCost,
@@ -45,6 +46,7 @@ export function ParallelRunControlView({
   autoRunAfterPlan,
   selectedStepId,
   busy,
+  canRequestStop = false,
   onPromptChange,
   onGeneratePlan,
   onSavePlan,
@@ -78,7 +80,7 @@ export function ParallelRunControlView({
   const parallelLimitValue = parallelWorkerLabel(parallelInsight.recommended_workers ?? 1, language);
   const parallelLimitDetails = parallelLimitDescription(parallelInsight, language);
   const parallelLimitCardTone = parallelLimitTone(parallelInsight);
-  const projectStatus = detail?.project?.current_status || "";
+  const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", activeJob);
   const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
   const closeoutStatus = String(livePlan?.closeout_status || "not_started").trim().toLowerCase();
   const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
@@ -94,9 +96,9 @@ export function ParallelRunControlView({
       </div>
 
       <div className="run-summary">
-        <div className={`metric-card metric-card--${statusTone(detail?.project?.current_status)}`}>
+        <div className={`metric-card metric-card--${statusTone(projectStatus)}`}>
           <span>{t("common.status")}</span>
-          <strong>{displayStatus(detail?.project?.current_status || "idle", language)}</strong>
+          <strong>{displayStatus(projectStatus || "idle", language)}</strong>
         </div>
         <div className="metric-card metric-card--info">
           <span>{t("run.done")}</span>
@@ -157,7 +159,7 @@ export function ParallelRunControlView({
             <button className="toolbar-button toolbar-button--accent" onClick={onRunPlan} type="button" disabled={busy}>
               {t("action.run")}
             </button>
-            <button className="toolbar-button toolbar-button--ghost" onClick={onRequestStop} type="button" disabled={!busy}>
+            <button className="toolbar-button toolbar-button--ghost" onClick={onRequestStop} type="button" disabled={!canRequestStop}>
               {t("action.stop")}
             </button>
           </div>

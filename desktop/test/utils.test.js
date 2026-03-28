@@ -33,7 +33,9 @@ import {
   normalizeInterruptedPlan,
   progressCaption,
   programSettingsFromRuntime,
+  projectJobFromJobs,
   projectFormFromDetail,
+  projectStatusWithJob,
   runtimeSummary,
   sanitizeProjectDetailForJobState,
   sanitizeProjectListForJobState,
@@ -87,6 +89,30 @@ test("detailApplySignature tracks payload identity and running job state", () =>
     detailApplySignature(detail, { id: "job-1", status: "running" }),
     detailApplySignature(detail, { id: "job-2", status: "running" }),
   );
+});
+
+test("project job helpers match jobs by repo id or project path and derive display status", () => {
+  const jobs = [
+    {
+      id: "job-queued",
+      status: "queued",
+      command: "run-plan",
+      project_dir: "C:\\Work\\Repo",
+      updated_at_ms: 20,
+    },
+    {
+      id: "job-running",
+      status: "running",
+      command: "generate-plan",
+      repo_id: "repo-1",
+      updated_at_ms: 10,
+    },
+  ];
+
+  assert.equal(projectJobFromJobs(jobs, { repo_id: "repo-1" })?.id, "job-running");
+  assert.equal(projectJobFromJobs(jobs, { repo_path: "c:/work/repo" })?.id, "job-queued");
+  assert.equal(projectStatusWithJob("plan_ready", jobs[0]), "queued:run-plan");
+  assert.equal(projectStatusWithJob("setup_ready", jobs[1]), "running:generate-plan");
 });
 
 test("deriveGithubMode distinguishes manual and existing projects", () => {
@@ -565,6 +591,34 @@ test("job-aware sanitizers preserve recent running state while bridge tracking c
   assert.equal(preservedDetail.project.current_status, "running:block:2");
   assert.equal(preservedDetail.plan.steps[1].status, "running");
   assert.equal(preservedList[0].status, "running:block:2");
+});
+
+test("job-aware sanitizers overlay queued and running status from multiple active jobs", () => {
+  const projects = [
+    {
+      repo_id: "repo-a",
+      repo_path: "C:/work/repo-a",
+      status: "plan_ready",
+      stats: { total_steps: 1, completed_steps: 0, failed_steps: 0, running_steps: 0, remaining_steps: 1 },
+      closeout_status: "not_started",
+    },
+    {
+      repo_id: "repo-b",
+      repo_path: "C:/work/repo-b",
+      status: "setup_ready",
+      stats: { total_steps: 0, completed_steps: 0, failed_steps: 0, running_steps: 0, remaining_steps: 0 },
+      closeout_status: "not_started",
+    },
+  ];
+  const jobs = [
+    { id: "job-1", status: "queued", command: "run-plan", project_dir: "C:\\work\\repo-a", updated_at_ms: 20 },
+    { id: "job-2", status: "running", command: "generate-plan", repo_id: "repo-b", updated_at_ms: 10 },
+  ];
+
+  const nextProjects = sanitizeProjectListForJobState(projects, jobs);
+
+  assert.equal(nextProjects[0].status, "queued:run-plan");
+  assert.equal(nextProjects[1].status, "running:generate-plan");
 });
 
 test("activityLineSummary strips the timestamp and event prefix", () => {

@@ -87,6 +87,7 @@ export function CenterWorkspace({
   modelPresets,
   modelCatalog,
   busy,
+  canRequestStop,
   shareBusy,
   onChangeForm,
   onChangeProgramSettings,
@@ -196,6 +197,7 @@ export function CenterWorkspace({
             autoRunAfterPlan={autoRunAfterPlan}
             selectedStepId={selectedStepId}
             busy={busy}
+            canRequestStop={canRequestStop}
             onPromptChange={onPromptChange}
             onGeneratePlan={onGeneratePlan}
             onSavePlan={onSavePlan}

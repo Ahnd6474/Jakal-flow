@@ -27,9 +27,12 @@ import {
   commandLabel,
   firstSelectableStepId,
   inheritProjectIdentityForm,
+  projectJobFromJobs,
   programSettingsFromRuntime,
   projectFormFromDetail,
+  sanitizeProjectListForJobState,
   shouldReplaceVisibleProject,
+  workspaceStatsFromProjects,
 } from "../utils";
 import {
   fetchHistoryDetail,
@@ -41,7 +44,6 @@ import {
   syncRunningJobSnapshot,
 } from "../controller/projectQueries";
 import {
-  applyActiveJobState,
   applyListingState,
   applyProjectDetailState,
   applyProjectDetailListingState,
@@ -70,8 +72,7 @@ export function useDesktopController() {
   const [planDirty, setPlanDirty] = useState(false);
   const [pendingAction, setPendingAction] = useState("");
   const [loadingProjectId, setLoadingProjectId] = useState("");
-  const [activeJobId, setActiveJobId] = useState("");
-  const [activeJob, setActiveJob] = useState(null);
+  const [jobs, setJobs] = useState([]);
   const [message, setMessage] = useState(null);
   const [shareSettings, setShareSettings] = useState(() => defaultShareSettings());
   const [autoRunAfterPlan, setAutoRunAfterPlan] = usePersistentState("jakal-flow:auto-run-after-plan", false);
@@ -84,6 +85,7 @@ export function useDesktopController() {
   const activeJobRef = useRef(null);
   const autoRunAfterPlanRef = useRef(false);
   const defaultRuntimeRef = useRef(null);
+  const jobsRef = useRef([]);
   const projectsRef = useRef([]);
 
   const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "run");
@@ -99,8 +101,18 @@ export function useDesktopController() {
     () => needsExpandedProjectDetail({ centerTab, sidebarTab, bottomCollapsed, bottomTab }),
     [bottomCollapsed, bottomTab, centerTab, sidebarTab],
   );
+  const activeJob = useMemo(
+    () =>
+      projectJobFromJobs(jobs, {
+        repo_id: selectedProjectId,
+        project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
+      }),
+    [jobs, projectDetail?.project?.repo_path, projectForm?.project_dir, selectedProjectId],
+  );
+  const activeJobId = activeJob?.id || "";
 
-  const busy = Boolean(pendingAction || (activeJob && activeJob.status === "running"));
+  const busy = Boolean(pendingAction || ["queued", "running"].includes(String(activeJob?.status || "").trim().toLowerCase()));
+  const canRequestStop = String(activeJob?.status || "").trim().toLowerCase() === "running";
   const shareBusy = pendingAction === "create_share_session" || pendingAction === "revoke_share_session";
   const programSettingsDirty = useMemo(() => JSON.stringify(programSettings) !== JSON.stringify(programSettingsFromRuntime(storedProgramSettings)), [programSettings, storedProgramSettings]);
 
@@ -170,19 +182,50 @@ export function useDesktopController() {
   }, [projects]);
 
   useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
+
+  useEffect(() => {
     if (selectedHistoryId && !historyProjects.some((item) => item.archive_id === selectedHistoryId)) {
       setSelectedHistoryId("");
       setHistoryDetail(null);
     }
   }, [historyProjects, selectedHistoryId, setSelectedHistoryId]);
 
-  function applyCurrentJobSnapshot(jobSnapshot) {
-    return applyActiveJobState({
-      jobSnapshot,
-      setActiveJobId,
-      setActiveJob,
-      activeJobRef,
+  function reapplyProjectJobState(jobItems = jobsRef.current) {
+    const nextProjects = sanitizeProjectListForJobState(projectsRef.current, jobItems);
+    setProjects(nextProjects);
+    setWorkspaceStats(workspaceStatsFromProjects(nextProjects));
+    projectsRef.current = nextProjects;
+  }
+
+  function syncJobs(jobItems = []) {
+    const nextJobs = Array.isArray(jobItems) ? jobItems.filter(Boolean) : [];
+    jobsRef.current = nextJobs;
+    setJobs(nextJobs);
+    const nextActiveJob = projectJobFromJobs(nextJobs, {
+      repo_id: selectedProjectId,
+      project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
     });
+    activeJobRef.current = nextActiveJob;
+    return nextActiveJob;
+  }
+
+  function mergeJobUpdate(job) {
+    const nextJobs = [...jobsRef.current];
+    const index = nextJobs.findIndex((item) => item?.id === job?.id);
+    if (index >= 0) {
+      nextJobs[index] = job;
+    } else {
+      nextJobs.unshift(job);
+    }
+    nextJobs.sort((left, right) => (Number(right?.updated_at_ms || 0) || 0) - (Number(left?.updated_at_ms || 0) || 0));
+    return syncJobs(nextJobs);
+  }
+
+  function applyCurrentJobSnapshot(jobSnapshot) {
+    const selectedJob = syncJobs(jobSnapshot?.jobs || []);
+    return String(selectedJob?.status || "").trim().toLowerCase() === "running" ? selectedJob : null;
   }
 
   function applyProjectDetail(detail, options = {}) {
@@ -215,7 +258,7 @@ export function useDesktopController() {
       const nextProjects = applyProjectDetailListingState({
         projects: projectsRef.current,
         detail,
-        runningJob: options.runningJob ?? activeJobRef.current,
+        runningJob: options.runningJob ?? jobsRef.current,
         setProjects,
         setWorkspaceStats,
       });
@@ -243,13 +286,13 @@ export function useDesktopController() {
         setStoredProgramSettings(nextProgramSettings);
         setProgramSettings(nextProgramSettings);
         setProjectForm(blankProjectForm(applyProgramSettings(bootstrap.default_runtime, nextProgramSettings)));
-        const runningJob = applyCurrentJobSnapshot(jobSnapshot);
+        applyCurrentJobSnapshot(jobSnapshot);
         if (cancelled) {
           return;
         }
         const nextProjects = applyListingState({
           listing,
-          runningJob,
+          runningJob: jobsRef.current,
           setProjects,
           setWorkspaceStats,
         });
@@ -379,7 +422,10 @@ export function useDesktopController() {
       pendingBridgeRefreshRepoIdRef.current = "";
       pendingBridgeRefreshListingRef.current = false;
       try {
-        const runningJob = activeJobRef.current?.status === "running" ? activeJobRef.current : null;
+        const selectedJob = projectJobFromJobs(jobsRef.current, {
+          repo_id: selectedProjectId,
+          project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
+        });
         const shouldLoadDetail = shouldRefreshSelectedProject(selectedProjectId, pendingRepoId);
         const { listing, detail } = await refreshVisibleProjectState(
           bridgeRequest,
@@ -397,7 +443,7 @@ export function useDesktopController() {
         if (listing) {
           const nextProjects = applyListingState({
             listing,
-            runningJob,
+            runningJob: jobsRef.current,
             setProjects,
             setWorkspaceStats,
           });
@@ -407,7 +453,7 @@ export function useDesktopController() {
         if (detail && !cancelled) {
           applyProjectDetail(detail, {
             preserveSelectedStep: true,
-            runningJob,
+            runningJob: selectedJob,
           });
         }
       } catch {
@@ -429,7 +475,7 @@ export function useDesktopController() {
       bridgeRefreshTimerRef.current = window.setTimeout(() => {
         bridgeRefreshTimerRef.current = null;
         void flushBridgeRefresh();
-      }, projectRefreshDebounceMs(activeJobRef.current));
+      }, projectRefreshDebounceMs(jobsRef.current.find((job) => String(job?.status || "").trim().toLowerCase() === "running") || null));
     }
 
     async function handleBridgeEvent(eventPayload) {
@@ -441,18 +487,15 @@ export function useDesktopController() {
         if (!job) {
           return;
         }
-        setActiveJob(job);
-        if (job.status === "running") {
-          activeJobRef.current = job;
-          setActiveJobId(job.id || "");
-        } else if (!cancelled) {
-          activeJobRef.current = null;
-          setActiveJobId("");
+        const nextSelectedJob = mergeJobUpdate(job);
+        reapplyProjectJobState(jobsRef.current);
+        const jobStatus = String(job.status || "").trim().toLowerCase();
+        if (!["queued", "running"].includes(jobStatus) && !cancelled) {
           if (job.result?.project && shouldReplaceVisibleProject(selectedProjectId, job.result.project.repo_id)) {
-            applyProjectDetail(job.result, { preserveDirtyPlan: false, runningJob: null, force: true });
+            applyProjectDetail(job.result, { preserveDirtyPlan: false, runningJob: nextSelectedJob, force: true });
           }
           if (
-            job.status === "completed"
+            jobStatus === "completed"
             && job.command === BRIDGE_COMMANDS.GENERATE_PLAN
             && autoRunAfterPlanRef.current
           ) {
@@ -470,7 +513,7 @@ export function useDesktopController() {
           }
           const nextProjects = applyListingState({
             listing,
-            runningJob: null,
+            runningJob: jobsRef.current,
             setProjects,
             setWorkspaceStats,
           });
@@ -539,7 +582,7 @@ export function useDesktopController() {
     const listing = await loadProjectListing(bridgeRequest, workspaceRoot);
     const nextProjects = applyListingState({
       listing,
-      runningJob: activeJob?.status === "running" ? activeJob : null,
+      runningJob: jobsRef.current,
       setProjects,
       setWorkspaceStats,
     });
@@ -553,11 +596,15 @@ export function useDesktopController() {
   async function forceRefresh() {
     try {
       const jobSnapshot = await syncRunningJobSnapshot(activeJobId);
-      const runningJob = applyCurrentJobSnapshot(jobSnapshot);
+      applyCurrentJobSnapshot(jobSnapshot);
+      const selectedJob = projectJobFromJobs(jobsRef.current, {
+        repo_id: selectedProjectId,
+        project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
+      });
       const listing = await loadProjectListing(bridgeRequest, workspaceRoot);
       const nextProjects = applyListingState({
         listing,
-        runningJob,
+        runningJob: jobsRef.current,
         setProjects,
         setWorkspaceStats,
       });
@@ -569,7 +616,7 @@ export function useDesktopController() {
           refreshCodexStatus: true,
           detailLevel: wantsExpandedDetail ? "full" : "core",
         });
-        applyProjectDetail(detail, { preserveSelectedStep: true, runningJob });
+        applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob });
       } else if (selectedHistoryId) {
         const detail = await fetchHistoryDetail(bridgeRequest, selectedHistoryId, workspaceRoot, {
           detailLevel: centerTab === "history" ? "full" : "core",
@@ -601,7 +648,15 @@ export function useDesktopController() {
         refreshCodexStatus: options.refreshCodexStatus ?? false,
         detailLevel: options.detailLevel ?? "core",
       });
-      applyProjectDetail(detail, { runningJob: activeJob?.status === "running" ? activeJob : null });
+      applyProjectDetail(
+        detail,
+        {
+          runningJob: projectJobFromJobs(jobsRef.current, {
+            repo_id: repoId,
+            project_dir: detail?.project?.repo_path || "",
+          }),
+        },
+      );
       return detail;
     } catch (error) {
       setLoadingProjectId("");
@@ -1043,16 +1098,21 @@ export function useDesktopController() {
     try {
       setMessage(null);
       const job = await startBridgeJob(command, payload, workspaceRoot || null);
-      setActiveJobId(job.id);
-      setActiveJob(job);
+      mergeJobUpdate(job);
+      reapplyProjectJobState(jobsRef.current);
       setCenterTab("run");
       setBottomTab("json");
       setMessage(
         messagePayload(
           "info",
-          translate(language, "message.commandStarted", {
-            command: commandLabel(command, language),
-          }),
+          String(job?.status || "").trim().toLowerCase() === "queued"
+            ? translate(language, "message.commandQueued", {
+                command: commandLabel(command, language),
+                position: Math.max(1, Number.parseInt(String(job?.queue_position || 1), 10) || 1),
+              })
+            : translate(language, "message.commandStarted", {
+                command: commandLabel(command, language),
+              }),
         ),
       );
       return job;
@@ -1116,7 +1176,7 @@ export function useDesktopController() {
   }
 
   async function requestStop() {
-    if (!projectForm.project_dir.trim()) {
+    if (!projectForm.project_dir.trim() || String(activeJob?.status || "").trim().toLowerCase() !== "running") {
       return;
     }
     await withPending("request-stop", async () => {
@@ -1361,6 +1421,7 @@ export function useDesktopController() {
     loadingProjectId,
     activeJob,
     activeJobId,
+    canRequestStop,
     message,
     shareSettings,
     autoRunAfterPlan,
