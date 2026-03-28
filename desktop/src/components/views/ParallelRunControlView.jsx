@@ -46,6 +46,32 @@ function modelPlaceholder(step, runtime) {
   return "";
 }
 
+function stepAutoModelHint(language, runtime) {
+  const provider = String(runtime?.model_provider || "openai").trim().toLowerCase();
+  if (provider === "ensemble") {
+    return language === "ko"
+      ? "비워두면 ensemble 라우팅을 따릅니다. 계획과 일반 구현은 Codex CLI를 쓰고, UI/프론트엔드 단계는 Claude Code를 우선 사용하며 Claude가 없으면 Gemini CLI로 대체합니다."
+      : "Leave blank to follow ensemble routing: planning and general steps use Codex CLI, UI and frontend steps use Claude Code, and Gemini CLI is the fallback when Claude is unavailable.";
+  }
+  return language === "ko"
+    ? "비워두면 AGENTS.md 규칙에 따라 UI 단계는 Gemini CLI, 그 외 단계는 Codex CLI를 자동 선택합니다."
+    : "Leave blank to follow AGENTS.md: UI steps prefer Gemini CLI and other steps prefer Codex CLI.";
+}
+
+function stepModelPlaceholder(step, runtime) {
+  const provider = String(step?.model_provider || runtime?.model_provider || "").trim().toLowerCase();
+  if (provider === "claude") {
+    return CLAUDE_DEFAULT_MODEL;
+  }
+  if (provider === "gemini") {
+    return GEMINI_DEFAULT_MODEL;
+  }
+  if (provider === "openai" || provider === "ensemble") {
+    return String(runtime?.model || runtime?.model_slug_input || "gpt-5.4").trim() || "gpt-5.4";
+  }
+  return modelPlaceholder(step, runtime);
+}
+
 function normalizeListText(value) {
   const rawItems = Array.isArray(value) ? value : String(value || "").split(/[\r\n,]+/);
   const seen = new Set();
@@ -381,6 +407,7 @@ export function ParallelRunControlView({
                   <span>{t("field.modelProvider")}</span>
                   <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStep}>
                     <option value="">{autoProviderLabel(language)}</option>
+                    <option value="ensemble">{t("option.providerEnsemble")}</option>
                     <option value="openai">Codex CLI</option>
                     <option value="claude">Claude Code</option>
                     <option value="gemini">Gemini CLI</option>
@@ -394,11 +421,11 @@ export function ParallelRunControlView({
                   <span>{t("field.model")}</span>
                   <input
                     value={selectedStep.model || ""}
-                    placeholder={modelPlaceholder(selectedStep, detail?.runtime)}
+                    placeholder={stepModelPlaceholder(selectedStep, detail?.runtime)}
                     onChange={(event) => onUpdateStepField("model", event.target.value)}
                     disabled={!editableStep}
                   />
-                  <small className="muted">{autoModelHint(language)}</small>
+                  <small className="muted">{stepAutoModelHint(language, detail?.runtime)}</small>
                 </label>
                 <label className="field field--wide">
                   <span>{t("field.dependsOn")}</span>
