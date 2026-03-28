@@ -237,6 +237,7 @@ test("program settings helpers keep global runtime controls separate from projec
     parallel_worker_mode: "auto",
     parallel_workers: 0,
     parallel_memory_per_worker_gib: 3,
+    save_project_logs: false,
     developer_mode: false,
     ui_theme: "dark",
     dashboard_visibility: {
@@ -289,6 +290,7 @@ test("program settings helpers keep global runtime controls separate from projec
       parallel_worker_mode: "auto",
       parallel_workers: 0,
       parallel_memory_per_worker_gib: 3,
+      save_project_logs: false,
     },
   );
 
@@ -329,6 +331,7 @@ test("program settings helpers keep global runtime controls separate from projec
         parallel_worker_mode: "auto",
         parallel_workers: 0,
         parallel_memory_per_worker_gib: 3,
+        save_project_logs: false,
       },
     },
   );

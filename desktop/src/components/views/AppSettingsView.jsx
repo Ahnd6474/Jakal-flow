@@ -87,11 +87,28 @@ export function AppSettingsView({
               <input
                 type="checkbox"
                 checked={Boolean(settings.developer_mode)}
-                onChange={(event) => onChangeSettings((current) => ({ ...current, developer_mode: event.target.checked }))}
+                onChange={(event) =>
+                  onChangeSettings((current) => ({
+                    ...current,
+                    developer_mode: event.target.checked,
+                    save_project_logs: event.target.checked ? Boolean(current.save_project_logs) : false,
+                  }))
+                }
                 disabled={interfaceBusy}
               />
               <span>{t("option.developerMode")}</span>
             </label>
+            {Boolean(settings.developer_mode) ? (
+              <label className="choice-radio">
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings.save_project_logs)}
+                  onChange={(event) => onChangeSettings((current) => ({ ...current, save_project_logs: event.target.checked }))}
+                  disabled={interfaceBusy}
+                />
+                <span>{t("option.saveProjectLogs")}</span>
+              </label>
+            ) : null}
           </div>
 
           <div className="subsection">

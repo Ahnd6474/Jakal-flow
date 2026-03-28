@@ -97,6 +97,7 @@ class RuntimeOptions:
     parallel_worker_mode: str = "auto"
     parallel_workers: int = 0
     parallel_memory_per_worker_gib: float = 3.0
+    save_project_logs: bool = False
     extra_prompt: str = ""
     init_plan_prompt: str = ""
     approval_mode: str = "never"

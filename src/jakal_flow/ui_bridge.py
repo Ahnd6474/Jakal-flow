@@ -407,6 +407,7 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         merged.get("parallel_memory_per_worker_gib", 3),
         default=3.0,
     )
+    merged["save_project_logs"] = coerce_bool(merged.get("save_project_logs", False), False)
     merged["ml_max_cycles"] = coerce_positive_int(
         merged.get("ml_max_cycles", 3),
         default=3,
@@ -545,6 +546,18 @@ def append_ui_event(context: ProjectContext, event_type: str, message: str, deta
         "details": details or {},
     }
     append_jsonl(context.paths.ui_event_log_file, payload)
+    if getattr(context.runtime, "save_project_logs", False):
+        append_jsonl(
+            context.paths.logs_dir / "project_activity.jsonl",
+            {
+                "timestamp": payload["timestamp"],
+                "repo_id": context.metadata.repo_id,
+                "project_dir": str(context.metadata.repo_path),
+                "event_type": event_type,
+                "message": message,
+                "details": payload["details"],
+            },
+        )
     emit_bridge_event(
         "project.ui_event",
         {
