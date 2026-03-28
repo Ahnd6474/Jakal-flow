@@ -7,9 +7,10 @@ from ..share import (
     DEFAULT_SHARE_PUBLIC_BASE_URL,
     DEFAULT_SHARE_TTL_MINUTES,
     ShareServerConfig,
-    create_share_session,
+    create_workspace_share_session,
     project_share_payload,
     public_session_summary,
+    resolve_shared_session,
     revoke_share_session,
     share_server_status_payload,
 )
@@ -117,7 +118,8 @@ def build_share_command_handlers(
             raise RuntimeError(
                 "Public share URL could not be created. Configure a public base URL or install cloudflared for automatic Quick Tunnel sharing."
             )
-        session = create_share_session(
+        session = create_workspace_share_session(
+            ctx.workspace_root,
             project,
             expires_in_minutes=expires_in_minutes,
             created_by=str(ctx.payload.get("created_by", "desktop-ui")).strip() or "desktop-ui",
@@ -144,22 +146,26 @@ def build_share_command_handlers(
         return detail
 
     def revoke_share(ctx: BridgeCommandContext) -> dict:
-        project = resolve_project(ctx.orchestrator, ctx.payload)
+        current_project = None
+        if str(ctx.payload.get("repo_id", "")).strip() or str(ctx.payload.get("project_dir", "")).strip():
+            current_project = resolve_project(ctx.orchestrator, ctx.payload)
         session_id = str(ctx.payload.get("session_id", "")).strip()
         if not session_id:
             raise ValueError("session_id is required.")
-        session = revoke_share_session(project, session_id)
+        owner_project, _session = resolve_shared_session(ctx.workspace_root, session_id)
+        session = revoke_share_session(owner_project, session_id)
         append_ui_event(
-            project,
+            owner_project,
             "share-session-revoked",
             "Revoked a temporary remote monitor share session.",
             {"session_id": session.session_id},
         )
-        detail = ctx.detail_payload(project)
-        detail["share"] = project_share_payload(ctx.workspace_root, project)
+        detail_project = current_project or owner_project
+        detail = ctx.detail_payload(detail_project)
+        detail["share"] = project_share_payload(ctx.workspace_root, detail_project)
         detail["revoked_share_session"] = public_session_summary(
             ctx.workspace_root,
-            project,
+            owner_project,
             session,
             include_token=False,
             server=detail["share"]["server"],

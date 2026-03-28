@@ -290,6 +290,7 @@ const STRINGS = {
     "message.closeoutAfterAllSteps": "Closeout can run only after all steps are completed.",
     "message.commandCompleted": "{command} completed.",
     "message.commandFailed": "{command} failed.",
+    "message.commandQueued": "{command} queued. Position {position}.",
     "message.commandStarted": "{command} started.",
     "message.createPlanBeforeCloseout": "Create and complete the execution plan before running closeout.",
     "message.createStepBeforeRun": "Create or add at least one planned step first.",
@@ -452,6 +453,8 @@ const STRINGS = {
     "status.pending": "Pending",
     "status.plan_completed": "Plan completed",
     "status.plan_ready": "Plan ready",
+    "status.queued": "Queued",
+    "status.queuedWithDetail": "Queued: {detail}",
     "status.ready": "Ready",
     "status.running": "Running",
     "status.runningWithDetail": "Running: {detail}",
@@ -784,6 +787,9 @@ STRINGS.en["run.parallelLimitMemoryCap"] = "Memory cap {memoryCap}, CPU cap {cpu
 STRINGS.en["run.parallelLimitCpuCap"] = "CPU cap {cpuCap}, logical CPUs {logicalCpuCount}";
 STRINGS.en["run.parallelLimitRequestedCap"] = "Requested {requested}, capped to {recommended} by CPU {cpuCap} and memory {memoryCap}";
 STRINGS.en["run.parallelLimitAutoCap"] = "CPU cap {cpuCap}, memory cap {memoryCap}";
+STRINGS.en["reports.wordReportReady"] = "Word report saved at {path}";
+STRINGS.en["reports.wordReportDisabled"] = "Word report generation is disabled for this project.";
+STRINGS.en["message.commandCompletedWithWordReport"] = "{command} completed. Word report: {path}";
 STRINGS.en["prompt.confirmDeleteAllProjects"] =
   "Remove all projects from jakal-flow? The managed docs, logs, and state will be deleted, but the original repository folders will stay in place.";
 STRINGS.en["sidebar.projectContextDelete"] = "Right-click to open project actions";
@@ -811,6 +817,10 @@ STRINGS.ko["action.backgroundJob"] = "백그라운드 작업";
 STRINGS.ko["prompt.confirmDeleteAllProjects"] =
   "모든 프로젝트를 삭제할까요? 관리 중인 문서, 로그, 상태만 삭제되고 원본 저장소 폴더는 그대로 유지됩니다.";
 STRINGS.ko["sidebar.projectContextDelete"] = "우클릭으로 프로젝트 메뉴 열기";
+
+STRINGS.ko["reports.wordReportReady"] = "Word 보고서가 {path}에 저장되었습니다.";
+STRINGS.ko["reports.wordReportDisabled"] = "이 프로젝트에서는 Word 보고서 생성을 사용하지 않습니다.";
+STRINGS.ko["message.commandCompletedWithWordReport"] = "{command} 작업이 완료되었습니다. Word 보고서: {path}";
 
 const KO_HIGH_QUALITY_OVERRIDES = {
   "action.add": "추가",

@@ -111,11 +111,11 @@ test("program settings helpers keep global runtime controls separate from projec
     local_model_provider: "ollama",
     provider_base_url: "",
     provider_api_key_env: "OPENAI_API_KEY",
-    model: "auto",
+    model: "gpt-5.4",
     planning_effort: "medium",
-    model_preset: "auto",
+    model_preset: "",
     model_selection_mode: "slug",
-    model_slug_input: "auto",
+    model_slug_input: "gpt-5.4",
     approval_mode: "untrusted",
     sandbox_mode: "workspace-write",
     checkpoint_interval_blocks: 1,
@@ -157,17 +157,16 @@ test("program settings helpers keep global runtime controls separate from projec
       settings,
     ),
     {
-      model: "gpt-5.4",
       test_cmd: "pytest -q",
       model_provider: "openai",
       local_model_provider: "ollama",
       provider_base_url: "",
       provider_api_key_env: "OPENAI_API_KEY",
-      model: "auto",
+      model: "gpt-5.4",
       planning_effort: "medium",
-      model_preset: "auto",
+      model_preset: "",
       model_selection_mode: "slug",
-      model_slug_input: "auto",
+      model_slug_input: "gpt-5.4",
       approval_mode: "untrusted",
       sandbox_mode: "workspace-write",
       checkpoint_interval_blocks: 1,
@@ -198,10 +197,10 @@ test("program settings helpers keep global runtime controls separate from projec
     {
       project_dir: "demo",
       runtime: {
-        model: "auto",
-        model_preset: "auto",
+        model: "gpt-5.4",
+        model_preset: "",
         model_selection_mode: "slug",
-        model_slug_input: "auto",
+        model_slug_input: "gpt-5.4",
         test_cmd: "pytest -q",
         model_provider: "openai",
         local_model_provider: "ollama",
@@ -244,6 +243,7 @@ test("blankProjectForm seeds runtime defaults without mutating the source runtim
   });
   assert.equal(form.branch, "main");
   assert.equal(form.github_mode, "existing");
+  assert.equal(form.runtime.model, "gpt-5.4");
   assert.equal(form.runtime.max_blocks, 9);
   assert.equal(form.runtime.generate_word_report, false);
 });
@@ -251,6 +251,9 @@ test("blankProjectForm seeds runtime defaults without mutating the source runtim
 test("blankProjectForm falls back to repository defaults when runtime is missing", () => {
   const form = blankProjectForm(null);
 
+  assert.equal(form.runtime.model, "gpt-5.4");
+  assert.equal(form.runtime.model_preset, "");
+  assert.equal(form.runtime.model_slug_input, "gpt-5.4");
   assert.equal(form.runtime.generate_word_report, true);
   assert.equal(form.runtime.max_blocks, 5);
   assert.equal(form.runtime.optimization_mode, "light");
@@ -344,23 +347,48 @@ test("inheritProjectIdentityForm keeps project links but resets runtime to app d
     },
   );
 
-  assert.deepEqual(form, {
-    project_dir: "C:/work/demo",
-    display_name: "Demo App",
-    branch: "release",
-    origin_url: "https://github.com/openai/demo-app",
-    github_mode: "manual",
-    runtime: {
-      model: "auto",
-      effort: "medium",
-      parallel_memory_per_worker_gib: 3,
-      test_cmd: "python -m pytest",
-      optimization_mode: "light",
-      generate_word_report: true,
-      max_blocks: 5,
-      execution_mode: "parallel",
+  assert.deepEqual(
+    {
+      project_dir: form.project_dir,
+      display_name: form.display_name,
+      branch: form.branch,
+      origin_url: form.origin_url,
+      github_mode: form.github_mode,
     },
-  });
+    {
+      project_dir: "C:/work/demo",
+      display_name: "Demo App",
+      branch: "release",
+      origin_url: "https://github.com/openai/demo-app",
+      github_mode: "manual",
+    },
+  );
+  assert.equal(form.runtime.model, "auto");
+  assert.equal(form.runtime.effort, "medium");
+  assert.equal(form.runtime.parallel_memory_per_worker_gib, 3);
+  assert.equal(form.runtime.test_cmd, "python -m pytest");
+  assert.equal(form.runtime.optimization_mode, "light");
+  assert.equal(form.runtime.generate_word_report, true);
+  assert.equal(form.runtime.max_blocks, 5);
+  assert.equal(form.runtime.execution_mode, "parallel");
+  assert.equal(form.runtime.model_slug_input, "auto");
+  assert.equal(form.runtime.model_provider, "openai");
+  assert.equal(form.runtime.local_model_provider, "ollama");
+  assert.equal(form.runtime.approval_mode, "never");
+  assert.equal(form.runtime.sandbox_mode, "danger-full-access");
+  assert.equal(form.runtime.allow_push, true);
+  assert.equal(form.runtime.workflow_mode, "standard");
+  assert.equal(form.runtime.parallel_worker_mode, "auto");
+  assert.equal(form.runtime.parallel_workers, 0);
+  assert.equal(form.runtime.ml_max_cycles, 3);
+  assert.equal(form.runtime.checkpoint_interval_blocks, 1);
+  assert.equal(form.runtime.require_checkpoint_approval, false);
+  assert.equal(form.runtime.model_preset, "auto");
+  assert.equal(form.runtime.model_selection_mode, "slug");
+  assert.equal(form.runtime.planning_effort, "medium");
+  assert.equal(form.runtime.provider_base_url, "");
+  assert.equal(form.runtime.provider_api_key_env, "OPENAI_API_KEY");
+  assert.equal(form.runtime.codex_path, defaultCodexPath());
 });
 
 test("mergeProjectDetailCodexStatus preserves the last known catalog when a lightweight detail omits it", () => {

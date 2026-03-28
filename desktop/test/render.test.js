@@ -1569,6 +1569,75 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
   assert.match(html, />Delete Project<\/button>/);
 });
 
+test("ConfigEditorView keeps a selected model visible even when the catalog omits it", async () => {
+  const html = await renderBundledComponent(
+    "config-editor-selected-model-render",
+    "./src/components/views/ConfigEditorView.jsx",
+    "ConfigEditorView",
+    {
+      form: {
+        project_dir: "C:/demo",
+        display_name: "Demo",
+        branch: "main",
+        github_mode: "existing",
+        origin_url: "",
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          model_preset: "",
+          model_slug_input: "gpt-5.4",
+          effort: "medium",
+          workflow_mode: "standard",
+          execution_mode: "serial",
+          parallel_workers: 2,
+          parallel_memory_per_worker_gib: 3,
+          ml_max_cycles: 3,
+          max_blocks: 5,
+        },
+      },
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.3-codex-spark",
+          display_name: "GPT-5.3-Codex-Spark",
+          hidden: false,
+          default_reasoning_effort: "high",
+          supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+        },
+      ],
+      busy: false,
+      onChangeForm: noop,
+      onChooseDirectory: noop,
+      onArchiveProject: noop,
+      onDeleteProject: noop,
+    },
+  );
+
+  assert.match(html, /gpt-5\.4/);
+  assert.match(html, /GPT-5\.3-Codex-Spark/);
+});
+
+test("ReportsView shows the saved Word report path next to the closeout report", async () => {
+  const html = await renderBundledComponent(
+    "reports-view-word-path-render",
+    "./src/components/views/ReportsView.jsx",
+    "ReportsView",
+    {
+      reports: {
+        closeout_report_text: "# Closeout Report\n\nDone.",
+        ml_experiment_report_text: "No ML experiment report yet.",
+        attempt_history_text: "Attempt 1",
+        word_report_enabled: true,
+        word_report_path: "C:/workspace/reports/CLOSEOUT_REPORT.docx",
+      },
+    },
+  );
+
+  assert.match(html, /Closeout Report/);
+  assert.match(html, /Word report saved at C:\/workspace\/reports\/CLOSEOUT_REPORT\.docx/);
+  assert.match(html, /Attempt 1/);
+});
+
 test("HistoryView exposes a delete action for archived runs", async () => {
   const html = await renderBundledComponent(
     "history-view-render",

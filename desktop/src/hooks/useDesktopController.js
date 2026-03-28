@@ -1,5 +1,5 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
 import { bridgeRequest, startBridgeJob, subscribeBridgeEvents } from "../api";
 import { BRIDGE_COMMANDS } from "../bridgeProtocol";
 import { bridgeEventJob, bridgeEventProject, isJobUpdatedEvent, isProjectChangedEvent, isProjectUiEvent } from "../controller/bridgeEvents";
@@ -10,6 +10,7 @@ import {
   emptyPlanDraft,
   messagePayload,
   needsExpandedProjectDetail,
+  resolveConfirmation,
   shareSettingsFromDetail,
   shouldPreserveProjectPrompt,
 } from "../controllerHelpers";
@@ -478,9 +479,7 @@ export function useDesktopController() {
             job.status === "completed"
               ? messagePayload(
                   "success",
-                  translate(language, "message.commandCompleted", {
-                    command: commandLabel(job.command, language),
-                  }),
+                  completedJobMessage(job),
                 )
               : messagePayload(
                   "error",
@@ -783,12 +782,40 @@ export function useDesktopController() {
     setPlanDirty(true);
   }
 
+  async function requestConfirmation(messageKey, { kind = "warning", okLabel = undefined } = {}) {
+    return resolveConfirmation(
+      (message) =>
+        confirmDialog(message, {
+          title: "jakal-flow",
+          kind,
+          okLabel,
+          cancelLabel: translate(language, "common.no"),
+        }),
+      (message) => globalThis.window?.confirm?.(message),
+      translate(language, messageKey),
+    );
+  }
+
+  function completedJobMessage(job) {
+    const command = commandLabel(job?.command, language);
+    const normalizedCommand = String(job?.command || "").trim().toLowerCase();
+    const closeoutCompleted = String(job?.result?.plan?.closeout_status || "").trim().toLowerCase() === "completed";
+    const wordReportPath = String(job?.result?.reports?.word_report_path || "").trim();
+    if (["run-plan", "run-closeout"].includes(normalizedCommand) && closeoutCompleted && wordReportPath) {
+      return translate(language, "message.commandCompletedWithWordReport", {
+        command,
+        path: wordReportPath,
+      });
+    }
+    return translate(language, "message.commandCompleted", { command });
+  }
+
   async function archiveProject() {
     if (!selectedProjectId) {
       setMessage(messagePayload("error", translate(language, "message.openProjectFirst")));
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmArchiveProject"))) {
+    if (!(await requestConfirmation("prompt.confirmArchiveProject", { okLabel: translate(language, "action.archiveProject") }))) {
       return;
     }
     const nextForm = cloneValue(projectForm);
@@ -815,7 +842,7 @@ export function useDesktopController() {
     if (!repoId) {
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmArchiveProject"))) {
+    if (!(await requestConfirmation("prompt.confirmArchiveProject", { okLabel: translate(language, "action.archiveProject") }))) {
       return;
     }
     const nextForm = repoId === selectedProjectId ? cloneValue(projectForm) : null;
@@ -847,7 +874,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.openProjectFirst")));
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmDeleteProject"))) {
+    if (!(await requestConfirmation("prompt.confirmDeleteProject", { okLabel: translate(language, "action.deleteProject") }))) {
       return;
     }
     const nextForm = cloneValue(projectForm);
@@ -873,7 +900,7 @@ export function useDesktopController() {
     if (!repoId) {
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmDeleteProject"))) {
+    if (!(await requestConfirmation("prompt.confirmDeleteProject", { okLabel: translate(language, "action.deleteProject") }))) {
       return;
     }
     const nextForm = repoId === selectedProjectId ? cloneValue(projectForm) : null;
@@ -903,7 +930,7 @@ export function useDesktopController() {
     if (!projects.length) {
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmArchiveAllProjects"))) {
+    if (!(await requestConfirmation("prompt.confirmArchiveAllProjects", { okLabel: translate(language, "action.archiveAllProjects") }))) {
       return;
     }
     await withPending("archive-all-projects", async () => {
@@ -921,7 +948,7 @@ export function useDesktopController() {
     if (!projects.length) {
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmDeleteAllProjects"))) {
+    if (!(await requestConfirmation("prompt.confirmDeleteAllProjects", { okLabel: translate(language, "action.deleteAllProjects") }))) {
       return;
     }
     await withPending("delete-all-projects", async () => {
@@ -938,7 +965,7 @@ export function useDesktopController() {
     if (!archiveId) {
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmDeleteHistoryEntry"))) {
+    if (!(await requestConfirmation("prompt.confirmDeleteHistoryEntry", { okLabel: translate(language, "action.deleteArchivedRun") }))) {
       return;
     }
     await withPending("delete-history-entry", async () => {
@@ -991,7 +1018,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.openOrCreateProjectFirst")));
       return;
     }
-    if (!window.confirm(translate(language, "prompt.confirmResetPlan"))) {
+    if (!(await requestConfirmation("prompt.confirmResetPlan", { okLabel: translate(language, "action.reset") }))) {
       return;
     }
     await withPending("reset-plan", async () => {
@@ -1064,7 +1091,10 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.editRemainingSteps")));
       return;
     }
-    if ((planDraft?.steps || []).length && !window.confirm(translate(language, "prompt.confirmRegeneratePlan"))) {
+    if (
+      (planDraft?.steps || []).length
+      && !(await requestConfirmation("prompt.confirmRegeneratePlan", { kind: "info", okLabel: translate(language, "action.generatePlan") }))
+    ) {
       return;
     }
     await startJob(BRIDGE_COMMANDS.GENERATE_PLAN, {

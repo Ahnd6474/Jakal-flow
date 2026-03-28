@@ -112,7 +112,18 @@ export function ConfigEditorView({
           hidden: false,
         },
       ];
-  const recommendedModels = allModels.filter((item) => !item.hidden);
+  const selectedModelOption =
+    selectedModel && !allModels.some((item) => item?.model === selectedModel)
+      ? {
+          model: selectedModel,
+          display_name: selectedCatalogEntry?.display_name || selectedModel || t("common.none"),
+          hidden: false,
+        }
+      : null;
+  const recommendedModels = [
+    ...(selectedModelOption ? [selectedModelOption] : []),
+    ...allModels.filter((item) => !item.hidden),
+  ];
   const additionalModels = allModels.filter((item) => item.hidden);
 
   return (

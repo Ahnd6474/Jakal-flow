@@ -339,6 +339,47 @@ def create_share_session(
     return session
 
 
+def iter_workspace_share_sessions(workspace_root: Path) -> list[tuple[ProjectContext, ShareSession]]:
+    manager = WorkspaceManager(workspace_root)
+    items: list[tuple[ProjectContext, ShareSession]] = []
+    for project in manager.list_projects():
+        for session in load_share_sessions(project):
+            items.append((project, session))
+    return items
+
+
+def revoke_workspace_active_share_sessions(workspace_root: Path) -> list[ShareSession]:
+    revoked: list[ShareSession] = []
+    for project, session in iter_workspace_share_sessions(workspace_root):
+        if not session.is_active():
+            continue
+        session.revoked_at = now_utc_iso()
+        sessions = load_share_sessions(project)
+        changed = False
+        for candidate in sessions:
+            if candidate.session_id == session.session_id and candidate.is_active():
+                candidate.revoked_at = session.revoked_at
+                changed = True
+        if changed:
+            save_share_sessions(project, sessions)
+            revoked.append(session)
+    return revoked
+
+
+def create_workspace_share_session(
+    workspace_root: Path,
+    context: ProjectContext,
+    expires_in_minutes: int = DEFAULT_SHARE_TTL_MINUTES,
+    created_by: str = "desktop-ui",
+) -> ShareSession:
+    revoke_workspace_active_share_sessions(workspace_root)
+    return create_share_session(
+        context,
+        expires_in_minutes=expires_in_minutes,
+        created_by=created_by,
+    )
+
+
 def revoke_share_session(context: ProjectContext, session_id: str) -> ShareSession:
     target = session_id.strip()
     if not target:
@@ -379,6 +420,46 @@ def resolve_shared_session(workspace_root: Path, session_id: str) -> tuple[Proje
         if session is not None:
             return project, session
     raise KeyError(f"Unknown share session: {session_id}")
+
+
+def workspace_active_share_session(
+    workspace_root: Path,
+    *,
+    server: dict[str, Any] | None = None,
+    state: ShareServerState | None | object = _UNSET,
+) -> dict[str, Any] | None:
+    if state is _UNSET:
+        state = load_share_server_state(workspace_root)
+    if server is None:
+        server = share_server_status_payload(workspace_root)
+    active_sessions = [
+        (project, session)
+        for project, session in iter_workspace_share_sessions(workspace_root)
+        if session.is_active()
+    ]
+    if not active_sessions:
+        return None
+
+    def sort_key(item: tuple[ProjectContext, ShareSession]) -> tuple[datetime, str]:
+        _project, session = item
+        created_at = parse_iso_datetime(session.created_at) or datetime.min.replace(tzinfo=UTC)
+        return created_at, session.session_id
+
+    project, session = max(active_sessions, key=sort_key)
+    payload = public_session_summary(
+        workspace_root,
+        project,
+        session,
+        include_token=False,
+        server=server,
+        state=state,
+    )
+    payload["project"] = {
+        "repo_id": project.metadata.repo_id,
+        "display_name": project.metadata.display_name or project.metadata.slug,
+        "slug": project.metadata.slug,
+    }
+    return payload
 
 
 def mask_public_text(value: str, max_chars: int = MAX_PUBLIC_LOG_LINE_CHARS) -> str:
@@ -662,9 +743,15 @@ def project_share_payload(workspace_root: Path, context: ProjectContext) -> dict
         )
         for session in sorted(sessions, key=lambda item: item.created_at, reverse=True)
     ]
-    active = next((item for item in public_sessions if item.get("active")), None)
+    project_active = next((item for item in public_sessions if item.get("active")), None)
+    active = workspace_active_share_session(
+        workspace_root,
+        server=server,
+        state=state,
+    )
     return {
         "server": server,
         "sessions": public_sessions,
+        "project_active_session": project_active,
         "active_session": active,
     }

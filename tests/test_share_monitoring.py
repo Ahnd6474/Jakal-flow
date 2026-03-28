@@ -21,6 +21,7 @@ from jakal_flow.models import ExecutionPlanState, ExecutionStep
 from jakal_flow.share import (
     ShareSession,
     ShareServerState,
+    create_workspace_share_session,
     current_step_summary,
     create_share_session,
     load_share_sessions,
@@ -33,6 +34,7 @@ from jakal_flow.share import (
     share_server_status_payload,
     normalize_share_bind_host,
     validate_share_session,
+    workspace_active_share_session,
 )
 from jakal_flow.public_tunnel import (
     ensure_cloudflared_path,
@@ -226,6 +228,30 @@ class ShareMonitoringTests(unittest.TestCase):
             self.assertIsNotNone(next(item for item in sessions if item.session_id == first.session_id).revoked_at)
             self.assertTrue(next(item for item in sessions if item.session_id == second.session_id).is_active())
 
+    def test_workspace_share_session_revokes_active_session_across_projects(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_one = temp_dir / "repo-one"
+            repo_two = temp_dir / "repo-two"
+            repo_one.mkdir(parents=True, exist_ok=True)
+            repo_two.mkdir(parents=True, exist_ok=True)
+            _orchestrator, project_one = create_project(workspace_root, repo_one)
+            _orchestrator, project_two = create_project(workspace_root, repo_two)
+
+            first = create_workspace_share_session(workspace_root, project_one, expires_in_minutes=60, created_by="test")
+            second = create_workspace_share_session(workspace_root, project_two, expires_in_minutes=60, created_by="test")
+
+            first_sessions = load_share_sessions(project_one)
+            second_sessions = load_share_sessions(project_two)
+            active = workspace_active_share_session(workspace_root)
+
+            self.assertIsNotNone(next(item for item in first_sessions if item.session_id == first.session_id).revoked_at)
+            self.assertTrue(next(item for item in second_sessions if item.session_id == second.session_id).is_active())
+            self.assertIsNotNone(active)
+            assert active is not None
+            self.assertEqual(active["session_id"], second.session_id)
+            self.assertEqual(active["project"]["display_name"], "Share Demo")
+
     def test_session_expiry_and_token_validation_and_revoke_behavior(self) -> None:
         session = ShareSession(
             session_id="demo-session",
@@ -371,6 +397,26 @@ class ShareMonitoringTests(unittest.TestCase):
             self.assertEqual(state_mock.call_count, 1)
             self.assertEqual(len(payload["sessions"]), 2)
             self.assertEqual(payload["server"]["share_base_url"], "https://share.example.com/base")
+
+    def test_project_share_payload_exposes_workspace_active_session_from_other_project(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_one = temp_dir / "repo-one"
+            repo_two = temp_dir / "repo-two"
+            repo_one.mkdir(parents=True, exist_ok=True)
+            repo_two.mkdir(parents=True, exist_ok=True)
+            _orchestrator, project_one = create_project(workspace_root, repo_one)
+            _orchestrator, project_two = create_project(workspace_root, repo_two)
+
+            create_workspace_share_session(workspace_root, project_two, expires_in_minutes=60, created_by="test")
+
+            payload = project_share_payload(workspace_root, project_one)
+
+            self.assertEqual(payload["sessions"], [])
+            self.assertIsNone(payload["project_active_session"])
+            self.assertIsNotNone(payload["active_session"])
+            assert payload["active_session"] is not None
+            self.assertEqual(payload["active_session"]["project"]["slug"], project_two.metadata.slug)
 
     def test_share_server_status_ignores_stale_tunnel_target(self) -> None:
         workspace_root = Path("C:/tmp/share-status-demo")

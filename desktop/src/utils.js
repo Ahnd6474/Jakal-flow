@@ -22,6 +22,62 @@ export function cloneValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+export function normalizeProjectPath(value = "") {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  const normalized = text.replace(/\\/g, "/").replace(/\/+/g, "/");
+  return normalized.toLowerCase();
+}
+
+export function jobMatchesProject(job = null, project = {}) {
+  if (!job || !project) {
+    return false;
+  }
+  const jobRepoId = String(job?.repo_id || "").trim();
+  const projectRepoId = String(project?.repo_id || "").trim();
+  if (jobRepoId && projectRepoId && jobRepoId === projectRepoId) {
+    return true;
+  }
+  const jobProjectDir = normalizeProjectPath(job?.project_dir || "");
+  const projectDir = normalizeProjectPath(project?.project_dir || project?.repo_path || "");
+  return Boolean(jobProjectDir) && Boolean(projectDir) && jobProjectDir === projectDir;
+}
+
+export function projectJobFromJobs(jobs = [], project = {}) {
+  const jobItems = Array.isArray(jobs) ? jobs.filter(Boolean) : [];
+  const statusRank = {
+    running: 0,
+    queued: 1,
+  };
+  const matches = jobItems.filter((job) => jobMatchesProject(job, project));
+  if (!matches.length) {
+    return null;
+  }
+  return [...matches].sort((left, right) => {
+    const leftRank = statusRank[String(left?.status || "").trim().toLowerCase()] ?? 9;
+    const rightRank = statusRank[String(right?.status || "").trim().toLowerCase()] ?? 9;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+    return (Number(right?.updated_at_ms || 0) || 0) - (Number(left?.updated_at_ms || 0) || 0);
+  })[0] || null;
+}
+
+export function projectStatusWithJob(status = "", activeJob = null) {
+  const currentStatus = String(status || "").trim();
+  const jobStatus = String(activeJob?.status || "").trim().toLowerCase();
+  const command = String(activeJob?.command || "").trim() || "background-job";
+  if (jobStatus === "queued") {
+    return `queued:${command}`;
+  }
+  if (jobStatus === "running" && !currentStatus.toLowerCase().startsWith("running:")) {
+    return `running:${command}`;
+  }
+  return currentStatus;
+}
+
 export function detailApplySignature(detail = null, runningJob = null) {
   return [
     String(detail?.project?.repo_id || "").trim(),
@@ -90,11 +146,11 @@ const DEFAULT_PROGRAM_RUNTIME = {
   local_model_provider: "ollama",
   provider_base_url: "",
   provider_api_key_env: "OPENAI_API_KEY",
-  model: "auto",
+  model: "gpt-5.4",
   planning_effort: "medium",
-  model_preset: "auto",
+  model_preset: "",
   model_selection_mode: "slug",
-  model_slug_input: "auto",
+  model_slug_input: "gpt-5.4",
   approval_mode: "never",
   sandbox_mode: "danger-full-access",
   checkpoint_interval_blocks: 1,
@@ -249,6 +305,19 @@ export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nex
 }
 
 export function blankProjectForm(defaultRuntime) {
+  const runtimeSource = cloneValue(defaultRuntime) || {};
+  const runtimeDefaults = {
+    ...DEFAULT_PROGRAM_RUNTIME,
+    ...runtimeSource,
+  };
+  const defaultModel = String(runtimeSource.model ?? runtimeDefaults.model ?? "gpt-5.4").trim().toLowerCase() || "gpt-5.4";
+  const defaultModelSlugInput = String(runtimeSource.model_slug_input ?? defaultModel).trim().toLowerCase() || defaultModel;
+  const defaultModelPreset =
+    runtimeSource.model_preset !== undefined
+      ? String(runtimeSource.model_preset || "").trim().toLowerCase()
+      : defaultModel === "auto"
+        ? "auto"
+        : "";
   return {
     project_dir: "",
     display_name: "",
@@ -256,11 +325,14 @@ export function blankProjectForm(defaultRuntime) {
     origin_url: "",
     github_mode: "existing",
     runtime: {
-      ...(cloneValue(defaultRuntime) || {}),
-      generate_word_report: defaultRuntime?.generate_word_report ?? true,
-      max_blocks: defaultRuntime?.max_blocks || 5,
-      optimization_mode: defaultRuntime?.optimization_mode || "light",
-      test_cmd: defaultRuntime?.test_cmd || "python -m pytest",
+      ...runtimeDefaults,
+      model: defaultModel,
+      model_preset: defaultModelPreset,
+      model_slug_input: defaultModelSlugInput,
+      generate_word_report: runtimeDefaults.generate_word_report ?? true,
+      max_blocks: runtimeDefaults.max_blocks || 5,
+      optimization_mode: runtimeDefaults.optimization_mode || "light",
+      test_cmd: runtimeDefaults.test_cmd || "python -m pytest",
       execution_mode: "parallel",
     },
   };
@@ -697,11 +769,16 @@ export function normalizeInterruptedPlan(plan = null) {
 }
 
 export function sanitizeProjectListForJobState(projects = [], activeJob = null, options = {}) {
-  if (activeJob?.status === "running") {
-    return projects;
-  }
+  const jobItems = Array.isArray(activeJob) ? activeJob.filter(Boolean) : activeJob ? [activeJob] : [];
   const nowMs = Number.isFinite(options?.nowMs) ? options.nowMs : Date.now();
   return (projects || []).map((project) => {
+    const matchedJob = projectJobFromJobs(jobItems, project);
+    if (matchedJob && ["queued", "running"].includes(String(matchedJob?.status || "").trim().toLowerCase())) {
+      return {
+        ...project,
+        status: projectStatusWithJob(project?.status, matchedJob),
+      };
+    }
     const currentStatus = String(project?.status || "").trim();
     if (!currentStatus.toLowerCase().startsWith("running:")) {
       return project;
@@ -727,7 +804,10 @@ export function sanitizeProjectListForJobState(projects = [], activeJob = null, 
 }
 
 export function sanitizeProjectDetailForJobState(detail, activeJob = null, options = {}) {
-  if (!detail || activeJob?.status === "running") {
+  const matchedJob = Array.isArray(activeJob)
+    ? projectJobFromJobs(activeJob, detail?.project || {})
+    : activeJob;
+  if (!detail || ["queued", "running"].includes(String(matchedJob?.status || "").trim().toLowerCase())) {
     return detail;
   }
   const currentStatus = String(detail?.project?.current_status || "").trim();
@@ -1459,6 +1539,9 @@ export function commandLabel(command, language = "en") {
 export function statusTone(status) {
   if (isDebuggingStatus(status)) {
     return "warning";
+  }
+  if (String(status || "").startsWith("queued")) {
+    return "info";
   }
   if (String(status || "").includes("failed")) {
     return "danger";

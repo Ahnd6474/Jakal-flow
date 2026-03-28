@@ -15,9 +15,10 @@ from .runtime_insights import build_runtime_insights
 from .share import project_share_payload
 from .status_views import effective_project_status
 from .utils import compact_text, normalize_workflow_mode, read_json, read_jsonl_tail, read_last_jsonl, read_text, write_json
+from .workspace import WorkspaceManager
 
 
-DETAIL_CACHE_VERSION = 5
+DETAIL_CACHE_VERSION = 6
 
 PLANNING_STAGE_DEFINITIONS = (
     {"key": "context_scan", "label": "Scan repository context"},
@@ -75,6 +76,16 @@ def _preview_tree_signature(path: Path, max_entries: int = 16, child_limit: int 
     return digest.hexdigest()
 
 
+def _workspace_share_signature(workspace_root: Path) -> str:
+    digest = hashlib.sha1()
+    manager = WorkspaceManager(workspace_root)
+    digest.update(_path_signature(manager.registry_file).encode("utf-8"))
+    for project in manager.list_projects():
+        digest.update(project.metadata.repo_id.encode("utf-8"))
+        digest.update(_path_signature(project.paths.state_dir / "share_sessions.json").encode("utf-8"))
+    return digest.hexdigest()
+
+
 def project_detail_content_signature(project: ProjectContext, detail_level: str) -> str:
     digest = hashlib.sha1()
     digest.update(f"detail-cache-v{DETAIL_CACHE_VERSION}:{detail_level}".encode("utf-8"))
@@ -105,6 +116,7 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
         project.paths.workspace_root / "share_server.json",
         project.paths.workspace_root / "public_tunnel.json",
         project.paths.workspace_root / "share_server_config.json",
+        project.paths.closeout_report_docx_file,
     ]
     if str(detail_level).strip().lower() == "full":
         tracked_files.extend(
@@ -118,6 +130,7 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
         )
     for path in tracked_files:
         digest.update(_path_signature(path).encode("utf-8"))
+    digest.update(_workspace_share_signature(project.paths.workspace_root).encode("utf-8"))
     if str(detail_level).strip().lower() == "full":
         for path in [
             project.paths.repo_dir,
@@ -331,6 +344,8 @@ def project_summary(
         lines.append(f"Archived At: {project.metadata.archived_at}")
     if project.metadata.last_run_at:
         lines.append(f"Last Run: {project.metadata.last_run_at}")
+    if project.paths.closeout_report_docx_file.exists():
+        lines.append(f"Word Report: {project.paths.closeout_report_docx_file}")
     if recent_statuses:
         lines.append(f"Recent Blocks: {', '.join(recent_statuses)}")
     return "\n".join(lines)

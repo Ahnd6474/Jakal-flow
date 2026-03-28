@@ -348,6 +348,9 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         max_blocks=5,
         workflow_mode="standard",
         ml_max_cycles=3,
+        model="gpt-5.4",
+        model_preset="",
+        model_slug_input="gpt-5.4",
     ).to_dict()
     merged = {**base, **payload}
     merged["max_blocks"] = coerce_positive_int(merged.get("max_blocks", 5), default=5)
@@ -473,6 +476,8 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         merged["model_preset"] = ""
     merged["model_selection_mode"] = str(merged.get("model_selection_mode", "slug")).strip() or "slug"
     merged["model_slug_input"] = str(merged.get("model_slug_input", merged["model"])).strip().lower() or merged["model"]
+    if "model" not in payload and str(payload.get("model_slug_input", "")).strip():
+        merged["model"] = merged["model_slug_input"]
     if not merged["model"] and merged["model_slug_input"]:
         merged["model"] = merged["model_slug_input"]
     return RuntimeOptions(**merged)
