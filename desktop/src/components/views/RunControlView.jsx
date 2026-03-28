@@ -78,9 +78,9 @@ export function RunControlView({
           <span>{t("run.done")}</span>
           <strong>{completedCount}/{steps.length || 0}</strong>
         </div>
-        <div className={`metric-card metric-card--${detail?.run_control?.stop_after_current_step ? "warning" : "neutral"}`}>
+        <div className={`metric-card metric-card--${detail?.run_control?.stop_immediately ? "warning" : "neutral"}`}>
           <span>{t("run.stopAfterStep")}</span>
-          <strong>{detail?.run_control?.stop_after_current_step ? t("common.on") : t("common.off")}</strong>
+          <strong>{detail?.run_control?.stop_immediately ? t("common.on") : t("common.off")}</strong>
         </div>
         <div className="metric-card metric-card--info">
           <span>{t("run.estimatedRemaining")}</span>

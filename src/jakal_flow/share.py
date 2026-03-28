@@ -745,6 +745,7 @@ def public_run_control(context: ProjectContext) -> dict[str, Any]:
     control = load_run_control(context)
     return {
         "stop_after_current_step": bool(control.get("stop_after_current_step")),
+        "stop_immediately": bool(control.get("stop_immediately")),
         "requested_at": str(control.get("requested_at") or "").strip() or None,
         "request_source": str(control.get("request_source") or "").strip() or None,
     }

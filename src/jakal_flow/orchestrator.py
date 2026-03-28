@@ -12,6 +12,7 @@ from uuid import uuid4
 from .commit_naming import build_commit_descriptor, build_initial_commit_descriptor
 from .environment import ensure_gitignore, ensure_virtualenv
 from .codex_runner import CodexRunner
+from .execution_control import ImmediateStopRequested
 from .git_ops import GitOps
 from .memory import MemoryStore
 from .model_selection import normalize_reasoning_effort
@@ -799,6 +800,7 @@ class Orchestrator:
             repo_kind=context.metadata.repo_kind,
             display_name=f"{context.metadata.display_name or context.metadata.slug} [{lineage.lineage_id}]",
             origin_url=context.metadata.origin_url,
+            source_repo_id=context.metadata.source_repo_id or context.metadata.repo_id,
         )
         lineage_loop_state = LoopState(
             repo_id=lineage_metadata.repo_id,
@@ -927,6 +929,9 @@ class Orchestrator:
                     "head_commit": head_commit,
                 }
             )
+        except ImmediateStopRequested as exc:
+            lineage_result["status"] = "paused"
+            lineage_result["notes"] = str(exc).strip() or "Immediate stop requested."
         except Exception as exc:
             lineage_result["status"] = "failed"
             lineage_result["notes"] = str(exc).strip() or "Lineage worker failed."
@@ -1096,6 +1101,23 @@ class Orchestrator:
                         )
                     worker_results = [by_step_id[step.step_id] for step in ordered_targets]
 
+            paused_worker = next((item for item in worker_results if str(item.get("status") or "").strip() == "paused"), None)
+            if paused_worker is not None:
+                final_status = "paused"
+                batch_summary = str(paused_worker.get("notes") or "Immediate stop requested.").strip()
+                for step in ordered_targets:
+                    lineage_id = str((step.metadata or {}).get("lineage_id", "")).strip()
+                    lineage = lineages.get(lineage_id)
+                    if lineage is not None and lineage.worktree_dir.exists() and lineage.safe_revision:
+                        self.git.hard_reset(lineage.worktree_dir, lineage.safe_revision)
+                        lineage.status = "active"
+                        lineage.notes = batch_summary
+                        lineage.updated_at = now_utc_iso()
+                    step.status = "paused"
+                    step.completed_at = None
+                    step.commit_hash = None
+                    step.notes = batch_summary
+                context.metadata.current_status = self._status_from_plan_state(plan_state)
             completion_time = now_utc_iso()
             for index, step in enumerate(ordered_targets):
                 worker_result = worker_results[index] if index < len(worker_results) else {}
@@ -1109,6 +1131,8 @@ class Orchestrator:
                 if step.step_id not in lineage.step_ids:
                     lineage.step_ids.append(step.step_id)
 
+                if final_status == "paused":
+                    continue
                 if str(worker_result.get("status") or "").strip() == "completed":
                     head_commit = str(
                         worker_result.get("head_commit")
@@ -1154,7 +1178,7 @@ class Orchestrator:
             if final_status == "completed":
                 batch_summary = "Lineage batch completed successfully."
                 context.metadata.current_status = self._status_from_plan_state(plan_state)
-            else:
+            elif final_status == "failed":
                 context.metadata.current_status = "failed"
 
             self._save_lineage_states(context, lineages)
@@ -1187,7 +1211,7 @@ class Orchestrator:
                         "repository_id": context.metadata.repo_id,
                         "repository_slug": context.metadata.slug,
                         "block_index": next_block_index,
-                        "status": "completed" if step.status == "completed" else "failed",
+                        "status": "completed" if step.status == "completed" else ("paused" if step.status == "paused" else "failed"),
                         "selected_task": step.title,
                         "changed_files": changed_files,
                         "test_summary": step.notes or batch_summary,
@@ -1202,7 +1226,7 @@ class Orchestrator:
                     attempt_history_entry(
                         next_block_index,
                         step.title,
-                        "completed" if step.status == "completed" else "lineage step failed",
+                        "completed" if step.status == "completed" else ("lineage step paused" if step.status == "paused" else "lineage step failed"),
                         [step.commit_hash] if step.commit_hash else [],
                     )
                 )
@@ -1222,7 +1246,7 @@ class Orchestrator:
                     [step.commit_hash for step in ordered_targets if step.commit_hash],
                 )
             )
-            if final_status != "completed":
+            if final_status == "failed":
                 self._report_failure(
                     context,
                     reporter,
@@ -1361,6 +1385,7 @@ class Orchestrator:
             repo_kind=context.metadata.repo_kind,
             display_name=f"{context.metadata.display_name or context.metadata.slug} [integration {step.step_id}]",
             origin_url=context.metadata.origin_url,
+            source_repo_id=context.metadata.source_repo_id or context.metadata.repo_id,
         )
         integration_loop_state = LoopState(
             repo_id=integration_metadata.repo_id,
@@ -1907,6 +1932,13 @@ class Orchestrator:
                 target_step.notes = failure_summary or "Step execution failed."
                 context.metadata.current_status = "failed"
             self._collect_ml_step_report(context, target_step)
+        except ImmediateStopRequested as exc:
+            self.git.hard_reset(context.paths.repo_dir, context.metadata.current_safe_revision or self.git.current_revision(context.paths.repo_dir))
+            target_step.status = "paused"
+            target_step.completed_at = None
+            target_step.commit_hash = None
+            target_step.notes = str(exc).strip() or "Immediate stop requested."
+            context.metadata.current_status = self._status_from_plan_state(plan_state)
         except Exception as exc:
             target_step.status = "failed"
             target_step.notes = str(exc).strip() or "Step execution failed."
@@ -2102,8 +2134,21 @@ class Orchestrator:
                     )
                 worker_results = [by_step_id[step.step_id] for step in ordered_targets]
 
-            failed_worker = next((item for item in worker_results if str(item.get("status")) != "completed"), None)
-            if failed_worker is not None:
+            paused_worker = next((item for item in worker_results if str(item.get("status") or "").strip() == "paused"), None)
+            failed_worker = next((item for item in worker_results if str(item.get("status") or "").strip() == "failed"), None)
+            if paused_worker is not None:
+                final_status = "paused"
+                rollback_status = "rolled_back_to_safe_revision"
+                batch_summary = str(paused_worker.get("notes") or "Immediate stop requested.").strip()
+                self.git.abort_cherry_pick(context.paths.repo_dir)
+                self.git.hard_reset(context.paths.repo_dir, base_revision)
+                for step in ordered_targets:
+                    step.status = "paused"
+                    step.completed_at = None
+                    step.commit_hash = None
+                    step.notes = batch_summary
+                context.metadata.current_status = self._status_from_plan_state(plan_state)
+            elif failed_worker is not None:
                 final_status = "failed"
                 rollback_status = "not_needed"
                 batch_summary = str(failed_worker.get("notes") or "Parallel worker failed.").strip()
@@ -2189,6 +2234,18 @@ class Orchestrator:
                         raise RuntimeError(
                             f"Parallel merge conflict while cherry-picking {worker_commit}: {', '.join(conflicted_files) or merge_result.stderr.strip() or 'unknown conflict'}"
                         )
+                except ImmediateStopRequested as exc:
+                    self.git.abort_cherry_pick(context.paths.repo_dir)
+                    self.git.hard_reset(context.paths.repo_dir, base_revision)
+                    rollback_status = "rolled_back_to_safe_revision"
+                    final_status = "paused"
+                    batch_summary = str(exc).strip() or "Immediate stop requested."
+                    for step in ordered_targets:
+                        step.status = "paused"
+                        step.completed_at = None
+                        step.commit_hash = None
+                        step.notes = batch_summary
+                    context.metadata.current_status = self._status_from_plan_state(plan_state)
                 except Exception as exc:
                     self.git.abort_cherry_pick(context.paths.repo_dir)
                     self.git.hard_reset(context.paths.repo_dir, base_revision)
@@ -2200,101 +2257,115 @@ class Orchestrator:
                         step.notes = batch_summary
                     context.metadata.current_status = "failed"
                 else:
-                    if any(commit_hash.strip() for commit_hash in merged_commit_hashes):
-                        close_block_index = max(1, context.loop_state.block_index + len(ordered_targets))
-                        group_test_result = self._run_test_command(context, close_block_index, "parallel-batch-pass")
-                        reporter.save_test_result(close_block_index, "parallel-batch-pass", group_test_result)
-                    else:
-                        group_test_result = self._run_test_command(context, verification_block_index, "parallel-batch-pass")
-                        reporter.save_test_result(verification_block_index, "parallel-batch-pass", group_test_result)
-                    if group_test_result and group_test_result.returncode != 0:
-                        debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
-                            context=context,
-                            runner=batch_runner,
-                            reporter=reporter,
-                            block_index=verification_block_index,
-                            candidate=batch_candidate,
-                            execution_step=batch_debug_step,
-                            memory_context=batch_memory_context,
-                            failing_pass_name="parallel-batch-pass",
-                            failing_test_result=group_test_result,
-                        )
-                        if debug_run_result.returncode != 0 or debug_test_result is None or debug_test_result.returncode != 0:
-                            self.git.hard_reset(context.paths.repo_dir, base_revision)
-                            rollback_status = "rolled_back_to_safe_revision"
-                            final_status = "failed"
-                            batch_summary = "Parallel batch verification failed and debugger recovery did not fix it."
-                            group_test_result = None
-                            self._log_pass_result(
-                                context=context,
-                                reporter=reporter,
-                                block_index=verification_block_index,
-                                candidate=batch_candidate,
-                                pass_name=debug_pass_name,
-                                run_result=debug_run_result,
-                                test_result=debug_test_result,
-                                commit_hash=None,
-                                rollback_status=rollback_status,
-                                search_enabled=False,
-                            )
-                            for step in ordered_targets:
-                                step.status = "failed"
-                                step.notes = batch_summary
-                            context.metadata.current_status = "failed"
+                    try:
+                        if any(commit_hash.strip() for commit_hash in merged_commit_hashes):
+                            close_block_index = max(1, context.loop_state.block_index + len(ordered_targets))
+                            group_test_result = self._run_test_command(context, close_block_index, "parallel-batch-pass")
+                            reporter.save_test_result(close_block_index, "parallel-batch-pass", group_test_result)
                         else:
-                            self._log_pass_result(
+                            group_test_result = self._run_test_command(context, verification_block_index, "parallel-batch-pass")
+                            reporter.save_test_result(verification_block_index, "parallel-batch-pass", group_test_result)
+                        if group_test_result and group_test_result.returncode != 0:
+                            debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
                                 context=context,
+                                runner=batch_runner,
                                 reporter=reporter,
                                 block_index=verification_block_index,
                                 candidate=batch_candidate,
-                                pass_name=debug_pass_name,
-                                run_result=debug_run_result,
-                                test_result=debug_test_result,
-                                commit_hash=debug_commit_hash,
-                                rollback_status="not_needed",
-                                search_enabled=False,
+                                execution_step=batch_debug_step,
+                                memory_context=batch_memory_context,
+                                failing_pass_name="parallel-batch-pass",
+                                failing_test_result=group_test_result,
                             )
-                            if debug_commit_hash:
-                                merged_commit_hashes.append(debug_commit_hash)
-                            group_test_result = debug_test_result
-                            batch_summary = debug_test_result.summary
-                            merged_commits = [item for item in merged_commit_hashes if item]
-                            if merged_commits:
-                                last_commit = merged_commits[-1]
-                                context.metadata.current_safe_revision = last_commit
-                                context.loop_state.current_safe_revision = last_commit
-                                context.loop_state.last_commit_hash = last_commit
+                            if debug_run_result.returncode != 0 or debug_test_result is None or debug_test_result.returncode != 0:
+                                self.git.hard_reset(context.paths.repo_dir, base_revision)
+                                rollback_status = "rolled_back_to_safe_revision"
+                                final_status = "failed"
+                                batch_summary = "Parallel batch verification failed and debugger recovery did not fix it."
+                                group_test_result = None
+                                self._log_pass_result(
+                                    context=context,
+                                    reporter=reporter,
+                                    block_index=verification_block_index,
+                                    candidate=batch_candidate,
+                                    pass_name=debug_pass_name,
+                                    run_result=debug_run_result,
+                                    test_result=debug_test_result,
+                                    commit_hash=None,
+                                    rollback_status=rollback_status,
+                                    search_enabled=False,
+                                )
+                                for step in ordered_targets:
+                                    step.status = "failed"
+                                    step.notes = batch_summary
+                                context.metadata.current_status = "failed"
+                            else:
+                                self._log_pass_result(
+                                    context=context,
+                                    reporter=reporter,
+                                    block_index=verification_block_index,
+                                    candidate=batch_candidate,
+                                    pass_name=debug_pass_name,
+                                    run_result=debug_run_result,
+                                    test_result=debug_test_result,
+                                    commit_hash=debug_commit_hash,
+                                    rollback_status="not_needed",
+                                    search_enabled=False,
+                                )
+                                if debug_commit_hash:
+                                    merged_commit_hashes.append(debug_commit_hash)
+                                group_test_result = debug_test_result
+                                batch_summary = debug_test_result.summary
+                                merged_commits = [item for item in merged_commit_hashes if item]
+                                if merged_commits:
+                                    last_commit = merged_commits[-1]
+                                    context.metadata.current_safe_revision = last_commit
+                                    context.loop_state.current_safe_revision = last_commit
+                                    context.loop_state.last_commit_hash = last_commit
+                                for index, step in enumerate(ordered_targets):
+                                    step.status = "completed"
+                                    step.completed_at = now_utc_iso()
+                                    merged_commit = merged_commit_hashes[index] if index < len(merged_commit_hashes) else ""
+                                    step.commit_hash = merged_commit or None
+                                    worker_note = str(worker_results[index].get("test_summary") or "").strip()
+                                    step.notes = worker_note if worker_note else debug_test_result.summary
+                                context.metadata.current_status = self._status_from_plan_state(plan_state)
+                        else:
+                            batch_summary = group_test_result.summary if group_test_result else "Parallel batch completed successfully."
                             for index, step in enumerate(ordered_targets):
                                 step.status = "completed"
                                 step.completed_at = now_utc_iso()
                                 merged_commit = merged_commit_hashes[index] if index < len(merged_commit_hashes) else ""
                                 step.commit_hash = merged_commit or None
                                 worker_note = str(worker_results[index].get("test_summary") or "").strip()
-                                step.notes = worker_note if worker_note else debug_test_result.summary
+                                step.notes = worker_note if worker_note else batch_summary
+                            merged_commits = [item for item in merged_commit_hashes if item]
+                            if merged_commits:
+                                last_commit = merged_commits[-1]
+                                context.metadata.current_safe_revision = last_commit
+                                context.loop_state.current_safe_revision = last_commit
+                                context.loop_state.last_commit_hash = last_commit
+                                pushed, push_reason = self._push_if_ready(
+                                    context,
+                                    context.paths.repo_dir,
+                                    context.metadata.branch,
+                                    commit_hash=last_commit,
+                                )
+                                if not pushed and push_reason not in {"already_up_to_date"}:
+                                    batch_summary = (batch_summary + f" | push skipped: {push_reason}").strip(" |")
                             context.metadata.current_status = self._status_from_plan_state(plan_state)
-                    else:
-                        batch_summary = group_test_result.summary if group_test_result else "Parallel batch completed successfully."
-                        for index, step in enumerate(ordered_targets):
-                            step.status = "completed"
-                            step.completed_at = now_utc_iso()
-                            merged_commit = merged_commit_hashes[index] if index < len(merged_commit_hashes) else ""
-                            step.commit_hash = merged_commit or None
-                            worker_note = str(worker_results[index].get("test_summary") or "").strip()
-                            step.notes = worker_note if worker_note else batch_summary
-                        merged_commits = [item for item in merged_commit_hashes if item]
-                        if merged_commits:
-                            last_commit = merged_commits[-1]
-                            context.metadata.current_safe_revision = last_commit
-                            context.loop_state.current_safe_revision = last_commit
-                            context.loop_state.last_commit_hash = last_commit
-                            pushed, push_reason = self._push_if_ready(
-                                context,
-                                context.paths.repo_dir,
-                                context.metadata.branch,
-                                commit_hash=last_commit,
-                            )
-                            if not pushed and push_reason not in {"already_up_to_date"}:
-                                batch_summary = (batch_summary + f" | push skipped: {push_reason}").strip(" |")
+                    except ImmediateStopRequested as exc:
+                        self.git.abort_cherry_pick(context.paths.repo_dir)
+                        self.git.hard_reset(context.paths.repo_dir, base_revision)
+                        rollback_status = "rolled_back_to_safe_revision"
+                        final_status = "paused"
+                        batch_summary = str(exc).strip() or "Immediate stop requested."
+                        group_test_result = None
+                        for step in ordered_targets:
+                            step.status = "paused"
+                            step.completed_at = None
+                            step.commit_hash = None
+                            step.notes = batch_summary
                         context.metadata.current_status = self._status_from_plan_state(plan_state)
 
             next_block_index = context.loop_state.block_index
@@ -2323,7 +2394,7 @@ class Orchestrator:
                         "repository_id": context.metadata.repo_id,
                         "repository_slug": context.metadata.slug,
                         "block_index": next_block_index,
-                        "status": "completed" if step.status == "completed" else "failed",
+                        "status": "completed" if step.status == "completed" else ("paused" if step.status == "paused" else "failed"),
                         "selected_task": step.title,
                         "changed_files": changed_files,
                         "test_summary": step.notes or batch_summary,
@@ -2337,7 +2408,7 @@ class Orchestrator:
                     attempt_history_entry(
                         next_block_index,
                         step.title,
-                        "completed" if step.status == "completed" else "parallel batch failed",
+                        "completed" if step.status == "completed" else ("parallel batch paused" if step.status == "paused" else "parallel batch failed"),
                         [step.commit_hash] if step.commit_hash else [],
                     )
                 )
@@ -2356,7 +2427,7 @@ class Orchestrator:
                     [item for item in merged_commit_hashes if item],
                 )
             )
-            if final_status != "completed":
+            if final_status == "failed":
                 self._report_failure(
                     context,
                     reporter,
@@ -2528,6 +2599,21 @@ class Orchestrator:
                 runtime=runtime,
                 step_id=target_step.step_id,
             )
+        except ImmediateStopRequested as exc:
+            if integration_info is not None:
+                integration_context = integration_info.get("integration_context")
+                if isinstance(integration_context, ProjectContext):
+                    self.git.abort_cherry_pick(integration_context.paths.repo_dir)
+                    self.git.hard_reset(integration_context.paths.repo_dir, pre_join_safe_revision)
+                self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
+            context.metadata.current_status = self._status_from_plan_state(plan_state)
+            target_step.status = "paused"
+            target_step.completed_at = None
+            target_step.commit_hash = None
+            target_step.notes = str(exc).strip() or "Immediate stop requested."
+            saved = self.save_execution_plan_state(context, plan_state)
+            self.workspace.save_project(context)
+            return context, saved, target_step
         except Exception as exc:
             if integration_info is not None:
                 integration_context = integration_info.get("integration_context")
@@ -2549,9 +2635,12 @@ class Orchestrator:
                     self.git.abort_cherry_pick(integration_context.paths.repo_dir)
                     self.git.hard_reset(integration_context.paths.repo_dir, pre_join_safe_revision)
                 self._cleanup_integration_worktree(context.paths.repo_dir, integration_info)
-            context.metadata.current_status = "failed"
-            target_step.status = "failed"
-            target_step.notes = result_step.notes or "Join execution failed."
+            interrupted = result_step.status == "paused"
+            context.metadata.current_status = self._status_from_plan_state(plan_state) if interrupted else "failed"
+            target_step.status = "paused" if interrupted else "failed"
+            target_step.completed_at = None
+            target_step.commit_hash = None
+            target_step.notes = result_step.notes or ("Immediate stop requested." if interrupted else "Join execution failed.")
             saved = self.save_execution_plan_state(context, plan_state)
             self.workspace.save_project(context)
             return context, saved, target_step
@@ -2740,6 +2829,7 @@ class Orchestrator:
             repo_kind=context.metadata.repo_kind,
             display_name=f"{context.metadata.display_name or context.metadata.slug} [{step.step_id}]",
             origin_url=context.metadata.origin_url,
+            source_repo_id=context.metadata.source_repo_id or context.metadata.repo_id,
         )
         worker_loop_state = LoopState(
             repo_id=worker_metadata.repo_id,
@@ -2803,6 +2893,12 @@ class Orchestrator:
                 step.commit_hash = None
                 step.notes = worker_note or "Parallel worker finished and is waiting for batch integration."
             context.metadata.current_status = running_status
+        elif result_status == "paused":
+            step.status = "paused"
+            step.completed_at = None
+            step.commit_hash = None
+            step.notes = worker_note or "Immediate stop requested."
+            context.metadata.current_status = self._status_from_plan_state(plan_state)
         else:
             step.status = "failed"
             step.completed_at = None
@@ -2892,6 +2988,9 @@ class Orchestrator:
                     "ml_report_payload": read_json(worker_context.paths.ml_step_report_file, default={}),
                 }
             )
+        except ImmediateStopRequested as exc:
+            worker_result["status"] = "paused"
+            worker_result["notes"] = str(exc).strip() or "Immediate stop requested."
         except Exception as exc:
             worker_result["status"] = "failed"
             worker_result["notes"] = str(exc).strip() or "Parallel worker failed."
@@ -2925,13 +3024,17 @@ class Orchestrator:
         task_name: str,
         safe_revision: str,
     ) -> dict[str, object]:
-        run_result = runner.run_pass(
-            context=context,
-            prompt=prompt,
-            pass_type=pass_type,
-            block_index=block_index,
-            search_enabled=False,
-        )
+        try:
+            run_result = runner.run_pass(
+                context=context,
+                prompt=prompt,
+                pass_type=pass_type,
+                block_index=block_index,
+                search_enabled=False,
+            )
+        except ImmediateStopRequested:
+            self.git.hard_reset(context.paths.repo_dir, safe_revision)
+            raise
         run_result.changed_files = self.git.changed_files(context.paths.repo_dir)
 
         commit_hash: str | None = None
@@ -2946,7 +3049,11 @@ class Orchestrator:
             rollback_status = "rolled_back_to_safe_revision"
             notes = f"{task_name} Codex pass failed and changes were rolled back."
         else:
-            test_result = self._run_test_command(context, block_index, pass_type)
+            try:
+                test_result = self._run_test_command(context, block_index, pass_type)
+            except ImmediateStopRequested:
+                self.git.hard_reset(context.paths.repo_dir, safe_revision)
+                raise
             reporter.save_test_result(block_index, pass_type, test_result)
             if test_result.returncode != 0:
                 self.git.hard_reset(context.paths.repo_dir, safe_revision)
@@ -3239,6 +3346,7 @@ class Orchestrator:
             "rollback_status": "not_needed",
             "safe_revision": safe_revision,
         }
+        closeout_interrupted = False
 
         try:
             closeout_result = self._execute_verified_repo_pass(
@@ -3259,22 +3367,31 @@ class Orchestrator:
             else:
                 plan_state.closeout_status = "failed"
                 plan_state.closeout_notes = str(closeout_result.get("notes") or "").strip()
+        except ImmediateStopRequested as exc:
+            self.git.hard_reset(context.paths.repo_dir, safe_revision)
+            closeout_interrupted = True
+            plan_state.closeout_status = "not_started"
+            plan_state.closeout_started_at = None
+            plan_state.closeout_completed_at = None
+            plan_state.closeout_commit_hash = None
+            plan_state.closeout_notes = str(exc).strip() or "Immediate stop requested."
         except Exception as exc:
             plan_state.closeout_status = "failed"
             plan_state.closeout_notes = str(exc).strip() or "Closeout failed."
             raise
         finally:
             closeout_result["notes"] = plan_state.closeout_notes
-            self._record_repo_pass(
-                context=context,
-                reporter=reporter,
-                block_index=closeout_block_index,
-                pass_type="project-closeout-pass",
-                selected_task=closeout_task,
-                pass_result=closeout_result,
-                success_block_status="closeout_completed",
-                failure_block_status="closeout_failed",
-            )
+            if not closeout_interrupted:
+                self._record_repo_pass(
+                    context=context,
+                    reporter=reporter,
+                    block_index=closeout_block_index,
+                    pass_type="project-closeout-pass",
+                    selected_task=closeout_task,
+                    pass_result=closeout_result,
+                    success_block_status="closeout_completed",
+                    failure_block_status="closeout_failed",
+                )
             context.runtime = previous_runtime
             if normalize_workflow_mode(context.runtime.workflow_mode) == "ml":
                 self.refresh_ml_mode_outputs(context)
@@ -3285,7 +3402,7 @@ class Orchestrator:
             reporter.write_status_report()
             if context.runtime.generate_word_report:
                 reporter.write_closeout_word_report()
-            if plan_state.closeout_status != "completed":
+            if plan_state.closeout_status != "completed" and not closeout_interrupted:
                 self._report_failure(
                     context,
                     reporter,
@@ -4432,13 +4549,17 @@ class Orchestrator:
             execution_step=execution_step,
             template_text=execution_prompt_template,
         )
-        run_result = runner.run_pass(
-            context=context,
-            prompt=prompt,
-            pass_type=pass_name,
-            block_index=block_index,
-            search_enabled=search_enabled,
-        )
+        try:
+            run_result = runner.run_pass(
+                context=context,
+                prompt=prompt,
+                pass_type=pass_name,
+                block_index=block_index,
+                search_enabled=search_enabled,
+            )
+        except ImmediateStopRequested:
+            self.git.hard_reset(context.paths.repo_dir, safe_revision)
+            raise
         run_result.changed_files = self.git.changed_files(context.paths.repo_dir)
         if run_result.returncode != 0:
             self.git.hard_reset(context.paths.repo_dir, safe_revision)
@@ -4456,7 +4577,11 @@ class Orchestrator:
             )
             return run_result, None, None
 
-        test_result = self._run_test_command(context, block_index, pass_name)
+        try:
+            test_result = self._run_test_command(context, block_index, pass_name)
+        except ImmediateStopRequested:
+            self.git.hard_reset(context.paths.repo_dir, safe_revision)
+            raise
         reporter.save_test_result(block_index, pass_name, test_result)
         commit_hash: str | None = None
         rollback_status = "not_needed"
@@ -4473,17 +4598,21 @@ class Orchestrator:
                 rollback_status="debugger_invoked",
                 search_enabled=search_enabled,
             )
-            debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
-                context=context,
-                runner=runner,
-                reporter=reporter,
-                block_index=block_index,
-                candidate=candidate,
-                execution_step=execution_step,
-                memory_context=memory_context,
-                failing_pass_name=pass_name,
-                failing_test_result=test_result,
-            )
+            try:
+                debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
+                    context=context,
+                    runner=runner,
+                    reporter=reporter,
+                    block_index=block_index,
+                    candidate=candidate,
+                    execution_step=execution_step,
+                    memory_context=memory_context,
+                    failing_pass_name=pass_name,
+                    failing_test_result=test_result,
+                )
+            except ImmediateStopRequested:
+                self.git.hard_reset(context.paths.repo_dir, safe_revision)
+                raise
             run_result.changed_files = sorted(set(run_result.changed_files + debug_run_result.changed_files))
             debug_rollback_status = "not_needed"
             if debug_run_result.returncode != 0 or debug_test_result is None or debug_test_result.returncode != 0:

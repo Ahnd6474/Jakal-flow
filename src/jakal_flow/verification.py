@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from time import monotonic
 
+from .execution_control import execution_scope_id, run_subprocess_capture
 from .models import ProjectContext, TestRunResult
 from .utils import decode_process_output, ensure_dir, now_utc_iso, read_json, read_text, sanitized_subprocess_env, write_json, write_text
 
@@ -59,13 +60,13 @@ class VerificationRunner:
                 return cached_result
 
         start = monotonic()
-        completed = subprocess.run(
+        completed = run_subprocess_capture(
             verify_command,
+            scope_id=execution_scope_id(context),
+            label=f"verification {label}",
             cwd=context.paths.repo_dir,
-            shell=True,
-            capture_output=True,
-            check=False,
             env=sanitized_subprocess_env(),
+            shell=True,
         )
         duration_seconds = round(max(0.0, monotonic() - start), 3)
         stdout = decode_process_output(completed.stdout)

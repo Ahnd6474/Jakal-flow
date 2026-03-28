@@ -42,7 +42,7 @@ class VerificationRunnerTests(unittest.TestCase):
                 runner,
                 "_environment_fingerprint",
                 return_value="env-a",
-            ), mock.patch("jakal_flow.verification.subprocess.run", return_value=completed) as mocked_run:
+            ), mock.patch("jakal_flow.verification.run_subprocess_capture", return_value=completed) as mocked_run:
                 first = runner.run(context=context, block_index=1, label="block-search-pass", command="python -m pytest")
                 second = runner.run(context=context, block_index=2, label="block-search-pass", command="python -m pytest")
 
@@ -73,7 +73,7 @@ class VerificationRunnerTests(unittest.TestCase):
                 runner,
                 "_environment_fingerprint",
                 return_value="env-a",
-            ), mock.patch("jakal_flow.verification.subprocess.run", return_value=completed) as mocked_run:
+            ), mock.patch("jakal_flow.verification.run_subprocess_capture", return_value=completed) as mocked_run:
                 first = runner.run(context=context, block_index=1, label="block-search-pass", command="python -m pytest")
                 second = runner.run(context=context, block_index=2, label="block-search-pass", command="python -m pytest")
 
@@ -102,7 +102,7 @@ class VerificationRunnerTests(unittest.TestCase):
                 "_environment_fingerprint",
                 return_value="env-a",
             ), mock.patch.dict("os.environ", {"PYTHONPATH": r"C:\leaked\src"}, clear=False), mock.patch(
-                "jakal_flow.verification.subprocess.run",
+                "jakal_flow.verification.run_subprocess_capture",
                 return_value=completed,
             ) as mocked_run:
                 runner.run(context=context, block_index=1, label="block-search-pass", command="python -m pytest")

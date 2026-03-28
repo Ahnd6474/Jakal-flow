@@ -114,6 +114,7 @@ function baseWorkspaceProps(overrides = {}) {
       },
       run_control: {
         stop_after_current_step: false,
+        stop_immediately: false,
       },
     },
     form: {

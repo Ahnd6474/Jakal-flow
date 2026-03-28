@@ -14,6 +14,7 @@ from typing import Any
 from .bridge_events import emit_bridge_event
 from .codex_app_server import fetch_codex_backend_snapshot
 from .model_constants import AUTO_MODEL_SLUG, DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER
+from .execution_control import EXECUTION_STOP_REGISTRY, execution_scope_id
 from .optimization import normalize_optimization_mode
 from .model_selection import (
     DEFAULT_MODEL_PRESET_ID,
@@ -38,8 +39,10 @@ from .public_tunnel import public_tunnel_status_payload, start_cloudflare_quick_
 from .run_control import (
     clear_stop_request,
     default_run_control,
+    immediate_stop_requested,
     load_run_control,
     normalize_run_control,
+    request_stop_immediately,
     request_stop_after_current_step,
     save_run_control,
     stop_requested,
@@ -588,8 +591,11 @@ def bridge_command_handlers() -> dict[str, Any]:
             append_ui_event=append_ui_event,
             save_run_control=save_run_control,
             default_run_control=default_run_control,
-            request_stop_after_current_step=request_stop_after_current_step,
+            request_stop_immediately=request_stop_immediately,
             stop_requested=stop_requested,
+            immediate_stop_requested=immediate_stop_requested,
+            execution_scope_id=execution_scope_id,
+            execution_stop_registry=EXECUTION_STOP_REGISTRY,
             coerce_bool=coerce_bool,
         ),
     }

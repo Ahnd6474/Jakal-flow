@@ -49,7 +49,7 @@ class CodexRunnerTests(unittest.TestCase):
             runner = CodexRunner("codex.cmd")
             attempts = {"count": 0}
 
-            def fake_run(command, input, capture_output, check, env=None):
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, **_kwargs):
                 attempts["count"] += 1
                 output_file = Path(command[command.index("-o") + 1])
                 if attempts["count"] == 1:
@@ -67,7 +67,7 @@ class CodexRunnerTests(unittest.TestCase):
                     stderr=b"",
                 )
 
-            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run), mock.patch(
+            with mock.patch("jakal_flow.codex_runner.run_subprocess_capture", side_effect=fake_run), mock.patch(
                 "jakal_flow.codex_runner.time.sleep"
             ):
                 result = runner.run_pass(
@@ -97,7 +97,7 @@ class CodexRunnerTests(unittest.TestCase):
             runner = CodexRunner("codex.cmd")
             attempts = {"count": 0}
 
-            def fake_run(command, input, capture_output, check, env=None):
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, **_kwargs):
                 attempts["count"] += 1
                 return subprocess.CompletedProcess(
                     command,
@@ -106,7 +106,7 @@ class CodexRunnerTests(unittest.TestCase):
                     stderr=b"authentication failed",
                 )
 
-            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run), mock.patch(
+            with mock.patch("jakal_flow.codex_runner.run_subprocess_capture", side_effect=fake_run), mock.patch(
                 "jakal_flow.codex_runner.time.sleep"
             ) as mocked_sleep:
                 result = runner.run_pass(
@@ -136,13 +136,13 @@ class CodexRunnerTests(unittest.TestCase):
             runner = CodexRunner("codex.cmd")
             observed_commands: list[list[str]] = []
 
-            def fake_run(command, input, capture_output, check, env=None):
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, **_kwargs):
                 observed_commands.append(command)
                 output_file = Path(command[command.index("-o") + 1])
                 output_file.write_text("Auto response", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
-            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run):
+            with mock.patch("jakal_flow.codex_runner.run_subprocess_capture", side_effect=fake_run):
                 runner.run_pass(
                     context=context,
                     prompt="Use the default model routing",
@@ -160,13 +160,13 @@ class CodexRunnerTests(unittest.TestCase):
             runner = CodexRunner("codex.cmd")
             observed_commands: list[list[str]] = []
 
-            def fake_run(command, input, capture_output, check, env=None):
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, **_kwargs):
                 observed_commands.append(command)
                 output_file = Path(command[command.index("-o") + 1])
                 output_file.write_text("Override response", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
-            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run):
+            with mock.patch("jakal_flow.codex_runner.run_subprocess_capture", side_effect=fake_run):
                 runner.run_pass(
                     context=context,
                     prompt="Use the planning override",
@@ -192,13 +192,13 @@ class CodexRunnerTests(unittest.TestCase):
             runner = CodexRunner("codex.cmd")
             observed_inputs: list[bytes] = []
 
-            def fake_run(command, input, capture_output, check, env=None):
-                observed_inputs.append(input)
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, **_kwargs):
+                observed_inputs.append(input_bytes)
                 output_file = Path(command[command.index("-o") + 1])
                 output_file.write_text("Fast response", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
-            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run):
+            with mock.patch("jakal_flow.codex_runner.run_subprocess_capture", side_effect=fake_run):
                 runner.run_pass(
                     context=context,
                     prompt="Apply the requested fix",
@@ -228,13 +228,13 @@ class CodexRunnerTests(unittest.TestCase):
             runner = CodexRunner("codex.cmd")
             observed_commands: list[list[str]] = []
 
-            def fake_run(command, input, capture_output, check, env=None):
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, **_kwargs):
                 observed_commands.append(command)
                 output_file = Path(command[command.index("-o") + 1])
                 output_file.write_text("OSS response", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
-            with mock.patch("jakal_flow.codex_runner.subprocess.run", side_effect=fake_run):
+            with mock.patch("jakal_flow.codex_runner.run_subprocess_capture", side_effect=fake_run):
                 runner.run_pass(
                     context=context,
                     prompt="Use the local model",
@@ -269,7 +269,7 @@ class CodexRunnerTests(unittest.TestCase):
             observed_commands: list[list[str]] = []
             observed_envs: list[dict[str, str]] = []
 
-            def fake_run(command, input, capture_output, check, env=None):
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, **_kwargs):
                 observed_commands.append(command)
                 observed_envs.append(dict(env or {}))
                 output_file = Path(command[command.index("-o") + 1])
@@ -277,7 +277,7 @@ class CodexRunnerTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
             with mock.patch.dict("os.environ", {"OPENROUTER_API_KEY": "router-secret"}, clear=False), mock.patch(
-                "jakal_flow.codex_runner.subprocess.run",
+                "jakal_flow.codex_runner.run_subprocess_capture",
                 side_effect=fake_run,
             ):
                 runner.run_pass(
@@ -301,14 +301,14 @@ class CodexRunnerTests(unittest.TestCase):
             runner = CodexRunner("codex.cmd")
             observed_envs: list[dict[str, str]] = []
 
-            def fake_run(command, input, capture_output, check, env=None):
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, **_kwargs):
                 observed_envs.append(dict(env or {}))
                 output_file = Path(command[command.index("-o") + 1])
                 output_file.write_text("Sanitized response", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
             with mock.patch.dict("os.environ", {"PYTHONPATH": r"C:\leaked\src"}, clear=False), mock.patch(
-                "jakal_flow.codex_runner.subprocess.run",
+                "jakal_flow.codex_runner.run_subprocess_capture",
                 side_effect=fake_run,
             ):
                 runner.run_pass(

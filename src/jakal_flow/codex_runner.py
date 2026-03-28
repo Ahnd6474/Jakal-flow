@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import time
 from pathlib import Path
 
 from .codex_app_server import is_auto_model, resolve_codex_path
+from .execution_control import execution_scope_id, run_subprocess_capture
 from .model_selection import normalize_reasoning_effort
 from .model_providers import (
     normalize_local_model_provider,
@@ -87,20 +87,21 @@ class CodexRunner:
         )
         stdout = ""
         stderr = ""
-        completed: subprocess.CompletedProcess[bytes] | None = None
+        completed = None
         attempt_records: list[dict[str, object]] = []
         started_monotonic = time.monotonic()
+        scope_id = execution_scope_id(context)
         for attempt_index in range(1, self._TRANSIENT_RETRY_LIMIT + 2):
             try:
                 output_file.unlink(missing_ok=True)
             except OSError:
                 pass
             attempt_started_monotonic = time.monotonic()
-            completed = subprocess.run(
+            completed = run_subprocess_capture(
                 command,
-                input=formatted_prompt.encode("utf-8"),
-                capture_output=True,
-                check=False,
+                scope_id=scope_id,
+                label=f"Codex {pass_type}",
+                input_bytes=formatted_prompt.encode("utf-8"),
                 env=child_env,
             )
             stdout = decode_process_output(completed.stdout)

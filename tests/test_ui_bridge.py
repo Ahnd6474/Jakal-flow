@@ -413,6 +413,7 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(detail["project"]["display_name"], "Demo Project")
             self.assertEqual(detail["runtime"]["test_cmd"], "python -m unittest")
             self.assertEqual(detail["run_control"]["stop_after_current_step"], False)
+            self.assertEqual(detail["run_control"]["stop_immediately"], False)
             self.assertIn("workspace_tree", detail)
             self.assertIn("reports", detail)
             self.assertIn("history", detail)
@@ -970,7 +971,8 @@ class UIBridgeTests(unittest.TestCase):
                     "source": "unit-test",
                 },
             )
-            self.assertEqual(stop_payload["run_control"]["stop_after_current_step"], True)
+            self.assertEqual(stop_payload["run_control"]["stop_immediately"], True)
+            self.assertEqual(stop_payload["run_control"]["stop_after_current_step"], False)
 
             with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
                 loaded = run_command(
@@ -980,7 +982,8 @@ class UIBridgeTests(unittest.TestCase):
                         "project_dir": str(repo_dir),
                     },
                 )
-            self.assertEqual(loaded["run_control"]["stop_after_current_step"], True)
+            self.assertEqual(loaded["run_control"]["stop_immediately"], True)
+            self.assertEqual(loaded["run_control"]["stop_after_current_step"], False)
 
             control_path = Path(loaded["files"]["ui_control_file"])
             self.assertTrue(control_path.exists())
@@ -1018,6 +1021,7 @@ class UIBridgeTests(unittest.TestCase):
                 json.dumps(
                     {
                         "stop_after_current_step": "yes",
+                        "stop_immediately": "on",
                         "requested_at": 123,
                         "request_source": ["desktop"],
                     }
@@ -1048,6 +1052,7 @@ class UIBridgeTests(unittest.TestCase):
                 )
 
             self.assertTrue(loaded["run_control"]["stop_after_current_step"])
+            self.assertTrue(loaded["run_control"]["stop_immediately"])
             self.assertEqual(loaded["run_control"]["requested_at"], "123")
             self.assertIsNone(loaded["run_control"]["request_source"])
             self.assertEqual(len(loaded["checkpoints"]["items"]), 1)

@@ -14,6 +14,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jakal_flow.environment import ensure_gitignore
+from jakal_flow.execution_control import ImmediateStopRequested
 from jakal_flow.model_selection import (
     DEFAULT_MODEL_PRESET_ID,
     MODEL_MODE_CODEX,
@@ -1282,6 +1283,54 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(observed_statuses, ["running:st1"])
         self.assertEqual(step.status, "completed")
         self.assertEqual(context.metadata.current_status, "plan_completed")
+
+    def test_run_saved_execution_step_pauses_when_immediate_stop_is_requested(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_immediate_stop_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+
+        def fake_run_single_block(*args, **kwargs) -> None:
+            raise ImmediateStopRequested("Immediate stop requested while running Codex demo-pass.")
+
+        try:
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch.object(
+                orchestrator,
+                "_run_single_block",
+                side_effect=fake_run_single_block,
+            ), mock.patch.object(
+                orchestrator.git,
+                "current_revision",
+                return_value="safe-revision",
+            ), mock.patch.object(
+                orchestrator.git,
+                "hard_reset",
+            ) as mocked_hard_reset:
+                orchestrator.update_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    plan_state=ExecutionPlanState(
+                        plan_title="Immediate Stop Demo",
+                        default_test_command="python -m pytest",
+                        steps=[ExecutionStep(step_id="custom-1", title="Stop now", test_command="python -m pytest")],
+                    ),
+                )
+                context, _plan_state, step = orchestrator.run_saved_execution_step(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_id="ST1",
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        mocked_hard_reset.assert_called_once_with(repo_dir, "safe-revision")
+        self.assertEqual(step.status, "paused")
+        self.assertEqual(step.commit_hash, None)
+        self.assertIn("Immediate stop requested", step.notes)
+        self.assertEqual(context.metadata.current_status, "plan_ready")
 
     def test_run_saved_execution_step_marks_failed_after_retry_limit(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_retry_failure_test"

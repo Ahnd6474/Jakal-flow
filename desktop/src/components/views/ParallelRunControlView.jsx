@@ -129,6 +129,10 @@ export function ParallelRunControlView({
           <strong>{queuedJobs.length}</strong>
           {activeQueuePosition ? <span>{t("run.queuePosition", { position: activeQueuePosition })}</span> : null}
         </div>
+        <div className={`metric-card metric-card--${detail?.run_control?.stop_immediately ? "warning" : "neutral"}`}>
+          <span>{t("run.stopAfterStep")}</span>
+          <strong>{detail?.run_control?.stop_immediately ? t("common.on") : t("common.off")}</strong>
+        </div>
         <div className="metric-card metric-card--info">
           <span>{t("run.estimatedRemaining")}</span>
           <strong>{formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language)}</strong>
