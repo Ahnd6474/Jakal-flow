@@ -1037,6 +1037,10 @@ KO_HIGH_QUALITY_OVERRIDES["message.historyEntryDeleted"] = "보관된 실행 기
 KO_HIGH_QUALITY_OVERRIDES["prompt.confirmDeleteHistoryEntry"] =
   "이 보관된 실행 기록을 완전히 삭제할까요? history 아래의 관리 문서, 로그, 리포트, 상태가 모두 제거됩니다.";
 
+KO_HIGH_QUALITY_OVERRIDES["message.commandQueued"] = "{command} 작업을 대기열에 추가했습니다. {position}번째로 실행됩니다.";
+KO_HIGH_QUALITY_OVERRIDES["status.queued"] = "대기열에 있음";
+KO_HIGH_QUALITY_OVERRIDES["status.queuedWithDetail"] = "대기열에 있음: {detail}";
+
 const STATIC_LANGUAGE_PACKS = new Map(
   ["en", "ko"].map((language) => [
     language,
@@ -1196,6 +1200,15 @@ export function displayStatus(status, language) {
   }
   if (normalized === "debugging" || normalized === "running:debugging" || normalized === "running:parallel-debugging") {
     return translate(normalizedLanguage, "run.debugging");
+  }
+  if (normalized === "queued") {
+    return translate(normalizedLanguage, "status.queued");
+  }
+  if (normalized.startsWith("queued:")) {
+    const detail = humanizeToken(raw.slice(raw.indexOf(":") + 1));
+    return translate(normalizedLanguage, "status.queuedWithDetail", {
+      detail: normalizedLanguage === "ko" ? detail : titleCase(detail),
+    });
   }
   if (normalized.startsWith("running:")) {
     const detail = humanizeToken(raw.slice(raw.indexOf(":") + 1));
