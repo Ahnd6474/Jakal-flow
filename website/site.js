@@ -594,7 +594,83 @@ function bootstrapConsent() {
   });
 }
 
+function bootstrapScrollEffects() {
+  // Scroll progress bar
+  const bar = document.createElement("div");
+  bar.className = "scroll-progress";
+  document.body.prepend(bar);
+
+  function updateProgress() {
+    const total = document.documentElement.scrollHeight - window.innerHeight;
+    bar.style.width = total > 0 ? (window.scrollY / total * 100) + "%" : "0%";
+  }
+  window.addEventListener("scroll", updateProgress, { passive: true });
+  updateProgress();
+
+  // Reveal sections on scroll
+  const reveals = document.querySelectorAll(".reveal");
+  if (reveals.length > 0 && "IntersectionObserver" in window) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("visible");
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.08, rootMargin: "0px 0px -40px 0px" });
+    reveals.forEach((el) => observer.observe(el));
+  } else {
+    reveals.forEach((el) => el.classList.add("visible"));
+  }
+
+  // Active nav link based on scroll position
+  const navLinks = document.querySelectorAll(".nav a[href^='#']");
+  const sectionIds = ["product", "workflow", "release", "contact"];
+  const sections = sectionIds
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+
+  function updateActiveNav() {
+    const scrollY = window.scrollY + 160;
+    let current = "";
+    sections.forEach((section) => {
+      if (section.offsetTop <= scrollY) {
+        current = section.id;
+      }
+    });
+    navLinks.forEach((link) => {
+      const target = link.getAttribute("href").replace("#", "");
+      link.classList.toggle("active", target === current);
+    });
+  }
+
+  window.addEventListener("scroll", updateActiveNav, { passive: true });
+  updateActiveNav();
+}
+
+function bootstrapMobileMenu() {
+  const toggle = document.querySelector("[data-menu-toggle]");
+  const side = document.querySelector(".topbar-side");
+  if (!toggle || !side) return;
+
+  toggle.addEventListener("click", () => {
+    const isOpen = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", String(!isOpen));
+    side.classList.toggle("open", !isOpen);
+  });
+
+  // Close menu when a nav link is clicked
+  side.querySelectorAll(".nav a").forEach((link) => {
+    link.addEventListener("click", () => {
+      toggle.setAttribute("aria-expanded", "false");
+      side.classList.remove("open");
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   bootstrapLanguage();
   bootstrapConsent();
+  bootstrapScrollEffects();
+  bootstrapMobileMenu();
 });
