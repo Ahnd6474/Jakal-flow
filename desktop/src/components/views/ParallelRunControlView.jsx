@@ -5,17 +5,22 @@ import {
   basename,
   canEditStep,
   CLAUDE_DEFAULT_MODEL,
+  DEEPSEEK_DEFAULT_MODEL,
   commandLabel,
   effectiveStepStatus,
   formatDurationCompact,
   formatUsd,
   GEMINI_DEFAULT_MODEL,
+  GLM_DEFAULT_MODEL,
   isSystemStep,
+  KIMI_DEFAULT_MODEL,
+  MINIMAX_DEFAULT_MODEL,
   parallelLimitDescription,
   parallelLimitTone,
   parallelWorkerLabel,
   planStepsWithCloseout,
   projectStatusWithJob,
+  QWEN_CODE_DEFAULT_MODEL,
   REASONING_OPTIONS,
   reasoningEffortLabel,
   shouldShowEstimatedCost,
@@ -38,7 +43,22 @@ function modelPlaceholder(step, runtime) {
     return "sonnet";
   }
   if (provider === "gemini") {
-    return "gemini-3-flash";
+    return GEMINI_DEFAULT_MODEL;
+  }
+  if (provider === "qwen_code") {
+    return QWEN_CODE_DEFAULT_MODEL;
+  }
+  if (provider === "deepseek") {
+    return DEEPSEEK_DEFAULT_MODEL;
+  }
+  if (provider === "kimi") {
+    return KIMI_DEFAULT_MODEL;
+  }
+  if (provider === "minimax") {
+    return MINIMAX_DEFAULT_MODEL;
+  }
+  if (provider === "glm") {
+    return GLM_DEFAULT_MODEL;
   }
   if (provider === "openai") {
     return String(runtime?.model || runtime?.model_slug_input || "gpt-5.4").trim() || "gpt-5.4";
@@ -411,6 +431,11 @@ export function ParallelRunControlView({
                     <option value="openai">Codex CLI</option>
                     <option value="claude">Claude Code</option>
                     <option value="gemini">Gemini CLI</option>
+                    <option value="qwen_code">Qwen Code</option>
+                    <option value="deepseek">DeepSeek via Claude Code</option>
+                    <option value="kimi">Kimi</option>
+                    <option value="minimax">MiniMax via Claude Code</option>
+                    <option value="glm">GLM via Claude Code</option>
                     <option value="openrouter">OpenRouter</option>
                     <option value="opencdk">OpenCDK</option>
                     <option value="local_openai">Local OpenAI-Compatible</option>

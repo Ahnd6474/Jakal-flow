@@ -2,7 +2,7 @@ import { displayStatus, normalizeLanguage, translate } from "./locale.js";
 
 export function defaultCodexPath(provider = "openai") {
   const normalizedProvider = String(provider || "").trim().toLowerCase();
-  if (normalizedProvider === "claude") {
+  if (normalizedProvider === "claude" || normalizedProvider === "deepseek" || normalizedProvider === "minimax" || normalizedProvider === "glm") {
     const platform = String(globalThis.process?.platform || "").trim().toLowerCase();
     if (platform === "win32") {
       return "claude.cmd";
@@ -23,6 +23,17 @@ export function defaultCodexPath(provider = "openai") {
       return "gemini.cmd";
     }
     return "gemini";
+  }
+  if (normalizedProvider === "qwen_code") {
+    const platform = String(globalThis.process?.platform || "").trim().toLowerCase();
+    if (platform === "win32") {
+      return "qwen.cmd";
+    }
+    const userAgent = String(globalThis.navigator?.userAgent || "").toLowerCase();
+    if (userAgent.includes("windows")) {
+      return "qwen.cmd";
+    }
+    return "qwen";
   }
   const platform = String(globalThis.process?.platform || "").trim().toLowerCase();
   if (platform === "win32") {
@@ -136,7 +147,7 @@ export function detailApplySignature(detail = null, runningJob = null) {
 export const AUTO_REASONING_OPTION = "auto";
 export const REASONING_OPTIONS = ["low", "medium", "high", "xhigh"];
 export const MODEL_REASONING_OPTIONS = [AUTO_REASONING_OPTION, ...REASONING_OPTIONS];
-export const MODEL_PROVIDER_OPTIONS = ["openai", "ensemble", "claude", "gemini", "openrouter", "opencdk", "local_openai", "oss"];
+export const MODEL_PROVIDER_OPTIONS = ["openai", "ensemble", "claude", "gemini", "qwen_code", "deepseek", "kimi", "minimax", "glm", "openrouter", "opencdk", "local_openai", "oss"];
 export const PROGRAM_RUNTIME_KEYS = [
   "model_provider",
   "local_model_provider",
@@ -181,6 +192,11 @@ export const DEFAULT_DASHBOARD_VISIBILITY = Object.freeze({
 export const PROGRAM_UI_KEYS = ["ui_theme", "developer_mode", "dashboard_visibility", "background_concurrency_limit"];
 export const CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6";
 export const GEMINI_DEFAULT_MODEL = "gemini-3-flash-preview";
+export const QWEN_CODE_DEFAULT_MODEL = "qwen3-coder-plus";
+export const DEEPSEEK_DEFAULT_MODEL = "deepseek-chat";
+export const KIMI_DEFAULT_MODEL = "kimi-k2.5";
+export const MINIMAX_DEFAULT_MODEL = "MiniMax-M2.5";
+export const GLM_DEFAULT_MODEL = "glm-4.7";
 
 const LEGACY_DASHBOARD_VISIBILITY_ALIASES = Object.freeze({
   rate_limit_window_5h: "rate_limits",
@@ -334,6 +350,47 @@ function looksLikeClaudeModel(model = "") {
   return normalized === "sonnet" || normalized === "opus" || normalized === "haiku" || normalized.startsWith("claude");
 }
 
+function providerDefaultModelSlug(provider = "openai") {
+  switch (String(provider || "").trim().toLowerCase()) {
+    case "qwen_code":
+      return QWEN_CODE_DEFAULT_MODEL;
+    case "deepseek":
+      return DEEPSEEK_DEFAULT_MODEL;
+    case "kimi":
+      return KIMI_DEFAULT_MODEL;
+    case "minimax":
+      return MINIMAX_DEFAULT_MODEL;
+    case "glm":
+      return GLM_DEFAULT_MODEL;
+    default:
+      return "";
+  }
+}
+
+function currentModelMatchesProvider(provider = "openai", model = "") {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedModel = String(model || "").trim().toLowerCase();
+  if (!normalizedModel) {
+    return false;
+  }
+  if (normalizedProvider === "qwen_code") {
+    return normalizedModel.startsWith("qwen");
+  }
+  if (normalizedProvider === "deepseek") {
+    return normalizedModel.startsWith("deepseek");
+  }
+  if (normalizedProvider === "kimi") {
+    return normalizedModel.startsWith("kimi");
+  }
+  if (normalizedProvider === "minimax") {
+    return normalizedModel.includes("minimax");
+  }
+  if (normalizedProvider === "glm") {
+    return normalizedModel.startsWith("glm");
+  }
+  return false;
+}
+
 export function defaultModelForProvider(provider = "openai", runtime = {}) {
   const normalizedProvider = String(provider || "").trim().toLowerCase();
   const currentModel = String(runtime?.model || runtime?.model_slug_input || "").trim().toLowerCase();
@@ -342,6 +399,11 @@ export function defaultModelForProvider(provider = "openai", runtime = {}) {
   }
   if (normalizedProvider === "gemini") {
     return currentModel.startsWith("gemini") ? currentModel : GEMINI_DEFAULT_MODEL;
+  }
+  if (providerDefaultModelSlug(normalizedProvider)) {
+    return currentModelMatchesProvider(normalizedProvider, currentModel)
+      ? currentModel
+      : providerDefaultModelSlug(normalizedProvider);
   }
   if (normalizedProvider === "ensemble" || normalizedProvider === "openai") {
     if (!currentModel) {
@@ -376,6 +438,8 @@ export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nex
       ? CLAUDE_DEFAULT_MODEL
     : provider === "gemini" && !currentModel.startsWith("gemini")
       ? GEMINI_DEFAULT_MODEL
+    : providerDefaultModelSlug(provider) && !currentModelMatchesProvider(provider, currentModel)
+      ? providerDefaultModelSlug(provider)
       : currentModel === "auto"
         ? ""
         : currentModel || defaultModelForProvider(provider, runtime);
@@ -1290,6 +1354,16 @@ export function findModelCatalogEntry(modelCatalog = [], model = "") {
 
 export function defaultProviderBaseUrl(provider = "openai") {
   switch (String(provider || "").trim().toLowerCase()) {
+    case "deepseek":
+      return "https://api.deepseek.com";
+    case "kimi":
+      return "https://api.moonshot.cn/v1";
+    case "minimax":
+      return "https://api.minimax.io/anthropic/v1";
+    case "glm":
+      return "https://open.bigmodel.cn/api/anthropic";
+    case "qwen_code":
+      return "https://dashscope.aliyuncs.com/compatible-mode/v1";
     case "openrouter":
       return "https://openrouter.ai/api/v1";
     case "local_openai":
@@ -1307,6 +1381,16 @@ export function defaultProviderApiKeyEnv(provider = "openai") {
       return "ANTHROPIC_API_KEY";
     case "gemini":
       return "GEMINI_API_KEY";
+    case "qwen_code":
+      return "DASHSCOPE_API_KEY";
+    case "deepseek":
+      return "DEEPSEEK_API_KEY";
+    case "kimi":
+      return "MOONSHOT_API_KEY";
+    case "minimax":
+      return "MINIMAX_API_KEY";
+    case "glm":
+      return "ZHIPUAI_API_KEY";
     case "openrouter":
       return "OPENROUTER_API_KEY";
     case "opencdk":
@@ -1320,6 +1404,11 @@ export function defaultProviderApiKeyEnv(provider = "openai") {
 
 export function defaultBillingMode(provider = "openai") {
   switch (String(provider || "").trim().toLowerCase()) {
+    case "deepseek":
+    case "kimi":
+    case "minimax":
+    case "glm":
+    case "qwen_code":
     case "openrouter":
     case "opencdk":
       return "token";
@@ -1350,6 +1439,21 @@ export function providerDisplayName(provider = "openai", localProvider = "") {
   }
   if (normalized === "gemini") {
     return "Gemini CLI";
+  }
+  if (normalized === "qwen_code") {
+    return "Qwen Code";
+  }
+  if (normalized === "deepseek") {
+    return "DeepSeek via Claude Code";
+  }
+  if (normalized === "kimi") {
+    return "Kimi";
+  }
+  if (normalized === "minimax") {
+    return "MiniMax via Claude Code";
+  }
+  if (normalized === "glm") {
+    return "GLM via Claude Code";
   }
   if (normalized === "oss") {
     const local = String(localProvider || "").trim().toLowerCase();

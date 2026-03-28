@@ -16,6 +16,11 @@ from .platform_defaults import default_codex_path
 
 CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6"
 GEMINI_DEFAULT_MODEL = "gemini-3-flash-preview"
+QWEN_CODE_DEFAULT_MODEL = "qwen3-coder-plus"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
+KIMI_DEFAULT_MODEL = "kimi-k2.5"
+MINIMAX_DEFAULT_MODEL = "MiniMax-M2.5"
+GLM_DEFAULT_MODEL = "glm-4.7"
 _OPENAI_AUTH_ENV_VARS = ("OPENAI_API_KEY",)
 _CLAUDE_AUTH_ENV_VARS = ("ANTHROPIC_API_KEY",)
 _GEMINI_AUTH_ENV_VARS = (
@@ -205,6 +210,26 @@ def _default_model_for_provider(provider: str, runtime: RuntimeOptions) -> str:
         if runtime_provider == "claude" and runtime_model:
             return runtime_model
         return CLAUDE_DEFAULT_MODEL
+    if normalized_provider == "qwen_code":
+        if runtime_provider == "qwen_code" and runtime_model:
+            return runtime_model
+        return QWEN_CODE_DEFAULT_MODEL
+    if normalized_provider == "deepseek":
+        if runtime_provider == "deepseek" and runtime_model:
+            return runtime_model
+        return DEEPSEEK_DEFAULT_MODEL
+    if normalized_provider == "kimi":
+        if runtime_provider == "kimi" and runtime_model:
+            return runtime_model
+        return KIMI_DEFAULT_MODEL
+    if normalized_provider == "minimax":
+        if runtime_provider == "minimax" and runtime_model:
+            return runtime_model
+        return MINIMAX_DEFAULT_MODEL
+    if normalized_provider == "glm":
+        if runtime_provider == "glm" and runtime_model:
+            return runtime_model
+        return GLM_DEFAULT_MODEL
     if normalized_provider in {"ensemble", "openai"}:
         if runtime_provider in {"ensemble", "openai"} and runtime_model:
             return runtime_model

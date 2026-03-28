@@ -185,6 +185,19 @@ class CodexAppServerTests(unittest.TestCase):
         self.assertEqual(snapshot.model_catalog, [])
         self.assertEqual(snapshot.error, "")
 
+    def test_fetch_codex_backend_snapshot_supports_qwen_code(self) -> None:
+        with mock.patch(
+            "jakal_flow.codex_app_server.subprocess.run",
+            return_value=subprocess.CompletedProcess(["qwen", "--version"], 0, stdout="0.13.1\n", stderr=""),
+        ):
+            snapshot = fetch_codex_backend_snapshot("qwen")
+
+        self.assertTrue(snapshot.available)
+        self.assertEqual(snapshot.account["type"], "qwen-code")
+        self.assertEqual(snapshot.account["version"], "0.13.1")
+        self.assertEqual(snapshot.model_catalog, [])
+        self.assertEqual(snapshot.error, "")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -64,7 +64,7 @@ from jakal_flow.planning import (
     source_prompt_template_path,
 )
 from jakal_flow.reporting import Reporter
-from jakal_flow.step_models import GEMINI_DEFAULT_MODEL, resolve_step_model_choice
+from jakal_flow.step_models import CLAUDE_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL, resolve_step_model_choice
 from jakal_flow.utils import append_jsonl, read_json, read_jsonl_tail, read_last_jsonl, write_json
 
 
@@ -254,12 +254,12 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 "step_id": "ST1",
                 "title": "UI pass",
                 "model_provider": "gemini",
-                "model": "gemini-3-flash",
+                "model": GEMINI_DEFAULT_MODEL,
             }
         )
 
         self.assertEqual(step.model_provider, "gemini")
-        self.assertEqual(step.model, "gemini-3-flash")
+        self.assertEqual(step.model, GEMINI_DEFAULT_MODEL)
 
     def test_resolve_step_model_choice_prefers_gemini_for_ui_steps(self) -> None:
         runtime = RuntimeOptions(model="gpt-5.4", model_provider="openai")
@@ -323,6 +323,26 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(choice.provider, "openai")
         self.assertEqual(choice.model, "gpt-5.4")
         self.assertEqual(choice.source, "auto")
+
+    def test_resolve_step_model_choice_prefers_claude_for_ensemble_ui_steps(self) -> None:
+        runtime = RuntimeOptions(model="gpt-5.4", model_provider="ensemble")
+        step = ExecutionStep(
+            step_id="ST1",
+            title="Refresh desktop settings panel",
+            display_description="Update the UI layout for the settings screen.",
+            owned_paths=["desktop/src/components/views/AppSettingsView.jsx"],
+        )
+
+        with mock.patch("jakal_flow.step_models.claude_available_for_auto_selection", return_value=True), mock.patch(
+            "jakal_flow.step_models.gemini_available_for_auto_selection",
+            return_value=False,
+        ):
+            choice = resolve_step_model_choice(step, runtime)
+
+        self.assertEqual(choice.provider, "claude")
+        self.assertEqual(choice.model, CLAUDE_DEFAULT_MODEL)
+        self.assertEqual(choice.source, "auto")
+        self.assertIn("Ensemble UI preference", choice.reason)
 
     def test_execution_plan_state_reads_closeout_fields(self) -> None:
         state = ExecutionPlanState.from_dict(
@@ -2996,6 +3016,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("prefer editing or extending that code", decomposition_prompt)
         self.assertIn("Use the following priority order while planning:", plan_prompt)
         self.assertIn("Requested execution mode:", plan_prompt)
+        self.assertIn("Model routing guidance for this run:", plan_prompt)
+        self.assertIn("Default routing for this run:", plan_prompt)
         self.assertIn("parallel", plan_prompt)
         self.assertIn("Planner Agent A decomposition artifact:", plan_prompt)
         self.assertIn("Planner Agent A output unavailable.", plan_prompt)
@@ -3003,6 +3025,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("fold scaffold-only bootstrap work into the concrete implementation step", plan_prompt)
         self.assertIn('"block_id":"B1"', packed_plan_prompt)
         self.assertIn("step_id", plan_prompt)
+        self.assertIn("model_provider", plan_prompt)
+        self.assertIn('"model"', plan_prompt)
         self.assertIn("depends_on", plan_prompt)
         self.assertIn("owned_paths", plan_prompt)
         self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", plan_prompt)
@@ -3272,6 +3296,95 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertTrue(planning_events[2][2]["skipped"])
         self.assertEqual(plan_state.plan_title, "Fast planner demo")
         self.assertEqual([step.step_id for step in plan_state.steps], ["ST1"])
+
+    def test_generate_execution_plan_materializes_ensemble_step_models(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_ensemble_planner_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
+        (repo_dir / "desktop").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "desktop" / "ui.jsx").write_text("export default function Demo() { return null; }\n", encoding="utf-8")
+        (repo_dir / "src").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "src" / "planner.py").write_text("def run() -> None:\n    pass\n", encoding="utf-8")
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            planning_effort="medium",
+            execution_mode="parallel",
+            model_provider="ensemble",
+            use_fast_mode=True,
+            test_cmd="python -m pytest",
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            final_plan_json = """
+            {
+              "title": "Ensemble planner demo",
+              "summary": "Route UI work to Claude and backend work to Codex.",
+              "tasks": [
+                {
+                  "step_id": "ST1",
+                  "task_title": "Polish the desktop UI",
+                  "display_description": "Update the desktop layout and visual polish.",
+                  "codex_description": "Adjust the desktop UI and keep the Tauri entrypoint intact.",
+                  "reasoning_effort": "medium",
+                  "depends_on": [],
+                  "owned_paths": ["desktop/src/components/views/AppSettingsView.jsx"],
+                  "success_criteria": "The desktop UI reflects the new model routing controls."
+                },
+                {
+                  "step_id": "ST2",
+                  "task_title": "Update orchestrator routing",
+                  "display_description": "Wire ensemble routing into planning and execution.",
+                  "codex_description": "Update the orchestrator to preserve traceable backend routing.",
+                  "reasoning_effort": "medium",
+                  "depends_on": ["ST1"],
+                  "owned_paths": ["src/jakal_flow/orchestrator.py"],
+                  "success_criteria": "The planner and orchestrator share the same routing policy."
+                }
+              ]
+            }
+            """
+            run_result = CodexRunResult(
+                pass_type="plan-agent-b-packing",
+                prompt_file=context.paths.logs_dir / "b.prompt.md",
+                output_file=context.paths.logs_dir / "b.last_message.txt",
+                event_file=context.paths.logs_dir / "b.events.jsonl",
+                returncode=0,
+                search_enabled=False,
+                changed_files=[],
+                usage={"input_tokens": 12},
+                last_message=final_plan_json,
+            )
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch(
+                "jakal_flow.orchestrator.CodexRunner.run_pass",
+                return_value=run_result,
+            ), mock.patch("jakal_flow.step_models.claude_available_for_auto_selection", return_value=True), mock.patch(
+                "jakal_flow.step_models.gemini_available_for_auto_selection",
+                return_value=False,
+            ):
+                _context, plan_state = orchestrator.generate_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    project_prompt="Route frontend work to Claude and backend work to Codex.",
+                    max_steps=4,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(plan_state.plan_title, "Ensemble planner demo")
+        self.assertEqual(plan_state.steps[0].model_provider, "claude")
+        self.assertEqual(plan_state.steps[0].model, CLAUDE_DEFAULT_MODEL)
+        self.assertEqual(plan_state.steps[0].metadata["model_selection_source"], "auto")
+        self.assertIn("Ensemble UI preference", plan_state.steps[0].metadata["model_selection_reason"])
+        self.assertEqual(plan_state.steps[1].model_provider, "openai")
+        self.assertEqual(plan_state.steps[1].model, "gpt-5.4")
+        self.assertEqual(plan_state.steps[1].metadata["model_selection_source"], "auto")
 
     def test_ensure_gitignore_adds_missing_entries_once(self) -> None:
         project_dir = Path(__file__).resolve().parents[1] / ".tmp_gitignore_test"

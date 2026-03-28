@@ -57,7 +57,15 @@ from .share import (
     save_share_server_config,
     share_server_status_payload,
 )
-from .step_models import CLAUDE_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL
+from .step_models import (
+    CLAUDE_DEFAULT_MODEL,
+    DEEPSEEK_DEFAULT_MODEL,
+    GEMINI_DEFAULT_MODEL,
+    GLM_DEFAULT_MODEL,
+    KIMI_DEFAULT_MODEL,
+    MINIMAX_DEFAULT_MODEL,
+    QWEN_CODE_DEFAULT_MODEL,
+)
 from .ui_bridge_commands import (
     BridgeCommandContext,
     build_project_command_handlers,
@@ -470,6 +478,16 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         provider_default_model = GEMINI_DEFAULT_MODEL
     elif merged["model_provider"] == "claude":
         provider_default_model = CLAUDE_DEFAULT_MODEL
+    elif merged["model_provider"] == "qwen_code":
+        provider_default_model = QWEN_CODE_DEFAULT_MODEL
+    elif merged["model_provider"] == "deepseek":
+        provider_default_model = DEEPSEEK_DEFAULT_MODEL
+    elif merged["model_provider"] == "kimi":
+        provider_default_model = KIMI_DEFAULT_MODEL
+    elif merged["model_provider"] == "minimax":
+        provider_default_model = MINIMAX_DEFAULT_MODEL
+    elif merged["model_provider"] == "glm":
+        provider_default_model = GLM_DEFAULT_MODEL
     if provider_default_model and "model" not in payload and "model_slug_input" not in payload:
         merged["model"] = provider_default_model
         merged["model_slug_input"] = provider_default_model

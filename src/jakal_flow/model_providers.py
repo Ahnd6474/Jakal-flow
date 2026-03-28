@@ -22,6 +22,7 @@ class ProviderPreset:
     provider: str
     display_name: str
     description: str
+    backend_kind: str = "codex"
     default_base_url: str = ""
     default_api_key_env: str = ""
     default_billing_mode: str = BILLING_MODE_INCLUDED
@@ -56,6 +57,7 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         provider="claude",
         display_name="Claude Code",
         description="Use the installed Claude Code CLI in print mode with Anthropic authentication or API key credentials.",
+        backend_kind="claude",
         default_api_key_env="ANTHROPIC_API_KEY",
         default_billing_mode=BILLING_MODE_INCLUDED,
         supports_auto_model=False,
@@ -67,6 +69,71 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         description="Use the installed Gemini CLI in headless mode with Gemini authentication.",
         default_api_key_env="GEMINI_API_KEY",
         default_billing_mode=BILLING_MODE_INCLUDED,
+        supports_auto_model=False,
+        supports_catalog=False,
+    ),
+    "qwen_code": ProviderPreset(
+        provider="qwen_code",
+        display_name="Qwen Code",
+        description=(
+            "Use the installed Qwen Code CLI in headless mode. By default this preset targets "
+            "DashScope-compatible OpenAI endpoints when an API key is configured."
+        ),
+        backend_kind="qwen",
+        default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        default_api_key_env="DASHSCOPE_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
+        supports_auto_model=False,
+        supports_catalog=False,
+    ),
+    "deepseek": ProviderPreset(
+        provider="deepseek",
+        display_name="DeepSeek via Claude Code",
+        description=(
+            "Use Claude Code against DeepSeek's Anthropic-compatible API for coding-oriented runs."
+        ),
+        backend_kind="claude",
+        default_base_url="https://api.deepseek.com",
+        default_api_key_env="DEEPSEEK_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
+        supports_auto_model=False,
+        supports_catalog=False,
+    ),
+    "kimi": ProviderPreset(
+        provider="kimi",
+        display_name="Kimi",
+        description=(
+            "Use Kimi through Moonshot's OpenAI-compatible API endpoint from the Codex CLI path."
+        ),
+        default_base_url="https://api.moonshot.cn/v1",
+        default_api_key_env="MOONSHOT_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
+        supports_auto_model=False,
+        supports_catalog=False,
+    ),
+    "minimax": ProviderPreset(
+        provider="minimax",
+        display_name="MiniMax via Claude Code",
+        description=(
+            "Use Claude Code against MiniMax's Anthropic-compatible API for coding-oriented runs."
+        ),
+        backend_kind="claude",
+        default_base_url="https://api.minimax.io/anthropic/v1",
+        default_api_key_env="MINIMAX_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
+        supports_auto_model=False,
+        supports_catalog=False,
+    ),
+    "glm": ProviderPreset(
+        provider="glm",
+        display_name="GLM via Claude Code",
+        description=(
+            "Use Claude Code against Zhipu GLM's Anthropic-compatible API for coding-oriented runs."
+        ),
+        backend_kind="claude",
+        default_base_url="https://open.bigmodel.cn/api/anthropic",
+        default_api_key_env="ZHIPUAI_API_KEY",
+        default_billing_mode=BILLING_MODE_TOKEN,
         supports_auto_model=False,
         supports_catalog=False,
     ),
@@ -138,8 +205,26 @@ def provider_supports_catalog(value: str) -> bool:
     return provider_preset(value).supports_catalog
 
 
+def provider_backend_kind(value: str, fallback: str = "codex") -> str:
+    preset = provider_preset(value)
+    backend_kind = str(getattr(preset, "backend_kind", "") or "").strip().lower()
+    return backend_kind or fallback
+
+
 def provider_uses_openai_compatible_api(value: str) -> bool:
-    return normalize_model_provider(value) in {"ensemble", "openai", "openrouter", "opencdk", "local_openai"}
+    normalized = normalize_model_provider(value)
+    return normalized in {
+        "ensemble",
+        "openai",
+        "kimi",
+        "openrouter",
+        "opencdk",
+        "local_openai",
+    }
+
+
+def provider_uses_claude_compatible_api(value: str) -> bool:
+    return provider_backend_kind(value) == "claude"
 
 
 def normalize_billing_mode(value: str, provider: str, fallback: str | None = None) -> str:

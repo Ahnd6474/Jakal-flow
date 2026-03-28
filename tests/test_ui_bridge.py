@@ -23,7 +23,15 @@ from jakal_flow.models import ExecutionPlanState, ExecutionStep
 from jakal_flow.share import share_server_status_payload
 from jakal_flow.status_views import effective_project_status
 from jakal_flow.ui_bridge import default_workspace_root, progress_caption, run_command, runtime_from_payload
-from jakal_flow.step_models import CLAUDE_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL
+from jakal_flow.step_models import (
+    CLAUDE_DEFAULT_MODEL,
+    DEEPSEEK_DEFAULT_MODEL,
+    GEMINI_DEFAULT_MODEL,
+    GLM_DEFAULT_MODEL,
+    KIMI_DEFAULT_MODEL,
+    MINIMAX_DEFAULT_MODEL,
+    QWEN_CODE_DEFAULT_MODEL,
+)
 from jakal_flow.workspace import WorkspaceManager
 
 
@@ -524,6 +532,90 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.codex_path, "claude.cmd" if os.name == "nt" else "claude")
         self.assertEqual(runtime.model, CLAUDE_DEFAULT_MODEL)
         self.assertEqual(runtime.model_slug_input, CLAUDE_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_qwen_code_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "qwen_code",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "qwen_code")
+        self.assertEqual(runtime.provider_api_key_env, "DASHSCOPE_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        self.assertEqual(runtime.codex_path, "qwen.cmd" if os.name == "nt" else "qwen")
+        self.assertEqual(runtime.model, QWEN_CODE_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, QWEN_CODE_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_deepseek_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "deepseek",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "deepseek")
+        self.assertEqual(runtime.provider_api_key_env, "DEEPSEEK_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://api.deepseek.com")
+        self.assertEqual(runtime.codex_path, "claude.cmd" if os.name == "nt" else "claude")
+        self.assertEqual(runtime.model, DEEPSEEK_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, DEEPSEEK_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_kimi_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "kimi",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "kimi")
+        self.assertEqual(runtime.provider_api_key_env, "MOONSHOT_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://api.moonshot.cn/v1")
+        self.assertEqual(runtime.codex_path, "codex.cmd" if os.name == "nt" else "codex")
+        self.assertEqual(runtime.model, KIMI_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, KIMI_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_minimax_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "minimax",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "minimax")
+        self.assertEqual(runtime.provider_api_key_env, "MINIMAX_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://api.minimax.io/anthropic/v1")
+        self.assertEqual(runtime.codex_path, "claude.cmd" if os.name == "nt" else "claude")
+        self.assertEqual(runtime.model, MINIMAX_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, MINIMAX_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_glm_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "glm",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "glm")
+        self.assertEqual(runtime.provider_api_key_env, "ZHIPUAI_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "https://open.bigmodel.cn/api/anthropic")
+        self.assertEqual(runtime.codex_path, "claude.cmd" if os.name == "nt" else "claude")
+        self.assertEqual(runtime.model, GLM_DEFAULT_MODEL)
+        self.assertEqual(runtime.model_slug_input, GLM_DEFAULT_MODEL)
+
+    def test_runtime_from_payload_applies_ensemble_defaults(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model_provider": "ensemble",
+            }
+        )
+
+        self.assertEqual(runtime.model_provider, "ensemble")
+        self.assertEqual(runtime.provider_api_key_env, "OPENAI_API_KEY")
+        self.assertEqual(runtime.provider_base_url, "")
+        self.assertEqual(runtime.codex_path, "codex.cmd" if os.name == "nt" else "codex")
+        self.assertEqual(runtime.model, "gpt-5.4")
+        self.assertEqual(runtime.model_slug_input, "gpt-5.4")
 
     def test_bootstrap_exposes_workspace_and_model_presets(self) -> None:
         with TemporaryTestDir() as temp_dir:

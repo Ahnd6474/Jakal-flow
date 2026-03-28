@@ -20,6 +20,7 @@ import {
   detailApplySignature,
   computePlanStats,
   CLAUDE_DEFAULT_MODEL,
+  DEEPSEEK_DEFAULT_MODEL,
   defaultCodexPath,
   planStepsWithCloseout,
   deriveExecutionProgress,
@@ -30,10 +31,13 @@ import {
   executionProgressCaptionDisplay,
   firstSelectableStepId,
   GEMINI_DEFAULT_MODEL,
+  GLM_DEFAULT_MODEL,
   inheritProjectIdentityForm,
   isDuplicateProjectJobError,
   isPlanningProgressRunning,
+  KIMI_DEFAULT_MODEL,
   mergeProjectDetailCodexStatus,
+  MINIMAX_DEFAULT_MODEL,
   normalizeMemoryBudgetGiB,
   normalizeInterruptedPlan,
   planDependencyValidationMessage,
@@ -44,6 +48,7 @@ import {
   projectFormFromDetail,
   projectStatusWithJob,
   runtimeSummary,
+  QWEN_CODE_DEFAULT_MODEL,
   sanitizeProjectDetailForJobState,
   sanitizeProjectListForJobState,
   selectedConfigReasoning,
@@ -434,6 +439,24 @@ test("applyProviderDefaults switches the runtime path for Claude Code and applie
   assert.equal(runtime.provider_api_key_env, "ANTHROPIC_API_KEY");
 });
 
+test("applyProviderDefaults switches the runtime path for the ensemble provider and keeps Codex defaults", () => {
+  const runtime = applyProviderDefaults(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      codex_path: defaultCodexPath(),
+    },
+    "ensemble",
+  );
+
+  assert.equal(runtime.model_provider, "ensemble");
+  assert.equal(runtime.codex_path, defaultCodexPath());
+  assert.equal(runtime.model, "gpt-5.4");
+  assert.equal(runtime.model_slug_input, "gpt-5.4");
+  assert.equal(runtime.provider_api_key_env, "OPENAI_API_KEY");
+});
+
 test("blankProjectForm keeps Gemini CLI projects on the Gemini default model", () => {
   const form = blankProjectForm({
     model_provider: "gemini",
@@ -456,6 +479,18 @@ test("blankProjectForm keeps Claude Code projects on the Claude default model", 
   assert.equal(form.runtime.model_provider, "claude");
   assert.equal(form.runtime.model, CLAUDE_DEFAULT_MODEL);
   assert.equal(form.runtime.model_slug_input, CLAUDE_DEFAULT_MODEL);
+});
+
+test("blankProjectForm keeps ensemble projects on the Codex default model", () => {
+  const form = blankProjectForm({
+    model_provider: "ensemble",
+    provider_api_key_env: "OPENAI_API_KEY",
+    codex_path: defaultCodexPath(),
+  });
+
+  assert.equal(form.runtime.model_provider, "ensemble");
+  assert.equal(form.runtime.model, "gpt-5.4");
+  assert.equal(form.runtime.model_slug_input, "gpt-5.4");
 });
 
 test("normalizeMemoryBudgetGiB keeps one decimal place for UI memory budgets", () => {
@@ -1386,7 +1421,21 @@ test("runtimeSummary shows Claude Code as a first-class backend", () => {
       },
       [],
     ),
-    "Claude Code | Standard Mode | sonnet | reasoning Medium | parallel auto",
+    "Claude Code | Standard Mode | claude-sonnet-4-6 | reasoning Medium | parallel auto",
+  );
+});
+
+test("runtimeSummary shows the ensemble provider as a first-class backend", () => {
+  assert.equal(
+    runtimeSummary(
+      {
+        model_provider: "ensemble",
+        model: "gpt-5.4",
+        effort: "medium",
+      },
+      [],
+    ),
+    "GPT+Gemini+Claude Ensemble | Standard Mode | gpt-5.4 | reasoning Medium | parallel auto",
   );
 });
 

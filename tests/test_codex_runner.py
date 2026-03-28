@@ -14,7 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jakal_flow.codex_runner import CodexRunner
 from jakal_flow.models import RuntimeOptions
-from jakal_flow.step_models import CLAUDE_DEFAULT_MODEL
+from jakal_flow.step_models import (
+    CLAUDE_DEFAULT_MODEL,
+    DEEPSEEK_DEFAULT_MODEL,
+    KIMI_DEFAULT_MODEL,
+    QWEN_CODE_DEFAULT_MODEL,
+)
 from jakal_flow.workspace import WorkspaceManager
 
 
@@ -432,6 +437,183 @@ class CodexRunnerTests(unittest.TestCase):
             self.assertEqual(result.usage["cached_input_tokens"], 5)
             self.assertEqual(result.usage["output_tokens"], 8)
             self.assertEqual(result.usage["total_tokens"], 25)
+
+    def test_run_pass_routes_deepseek_through_claude_compatible_env(self) -> None:
+        with _TemporaryTestDir() as temp_root:
+            repo_dir = temp_root / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            manager = WorkspaceManager(temp_root / "workspace")
+            context = manager.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=RuntimeOptions(
+                    model_provider="deepseek",
+                    provider_api_key_env="DEEPSEEK_API_KEY",
+                    provider_base_url="https://api.deepseek.com",
+                    model=DEEPSEEK_DEFAULT_MODEL,
+                    effort="medium",
+                    codex_path="claude.cmd",
+                ),
+            )
+            runner = CodexRunner("claude.cmd")
+            observed_commands: list[list[str]] = []
+            observed_envs: list[dict[str, str]] = []
+
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, cwd=None, **_kwargs):
+                observed_commands.append(command)
+                observed_envs.append(dict(env or {}))
+                payload = {
+                    "result": "DeepSeek response",
+                    "usage": {
+                        "input_tokens": 13,
+                        "output_tokens": 6,
+                        "total_tokens": 19,
+                    },
+                }
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload).encode("utf-8"), stderr=b"")
+
+            with mock.patch.dict("os.environ", {"DEEPSEEK_API_KEY": "deepseek-secret"}, clear=False), mock.patch(
+                "jakal_flow.codex_runner.run_subprocess_capture",
+                side_effect=fake_run,
+            ):
+                result = runner.run_pass(
+                    context=context,
+                    prompt="Apply a safe DeepSeek-backed fix",
+                    pass_type="demo pass",
+                    block_index=1,
+                    search_enabled=False,
+                )
+
+            self.assertEqual(len(observed_commands), 1)
+            self.assertIn("--print", observed_commands[0])
+            self.assertIn(DEEPSEEK_DEFAULT_MODEL, observed_commands[0])
+            self.assertEqual(observed_envs[0]["ANTHROPIC_API_KEY"], "deepseek-secret")
+            self.assertEqual(observed_envs[0]["ANTHROPIC_AUTH_TOKEN"], "deepseek-secret")
+            self.assertEqual(observed_envs[0]["ANTHROPIC_BASE_URL"], "https://api.deepseek.com")
+            self.assertEqual(observed_envs[0]["ANTHROPIC_MODEL"], DEEPSEEK_DEFAULT_MODEL)
+            self.assertEqual(result.last_message, "DeepSeek response")
+            self.assertEqual(result.usage["total_tokens"], 19)
+
+    def test_run_pass_applies_kimi_openai_compatible_defaults(self) -> None:
+        with _TemporaryTestDir() as temp_root:
+            repo_dir = temp_root / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            manager = WorkspaceManager(temp_root / "workspace")
+            context = manager.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=RuntimeOptions(
+                    model_provider="kimi",
+                    provider_base_url="https://api.moonshot.cn/v1",
+                    provider_api_key_env="MOONSHOT_API_KEY",
+                    model=KIMI_DEFAULT_MODEL,
+                    effort="medium",
+                ),
+            )
+            runner = CodexRunner("codex.cmd")
+            observed_commands: list[list[str]] = []
+            observed_envs: list[dict[str, str]] = []
+
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, **_kwargs):
+                observed_commands.append(command)
+                observed_envs.append(dict(env or {}))
+                output_file = Path(command[command.index("-o") + 1])
+                output_file.write_text("Kimi response", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+            with mock.patch.dict("os.environ", {"MOONSHOT_API_KEY": "kimi-secret"}, clear=False), mock.patch(
+                "jakal_flow.codex_runner.run_subprocess_capture",
+                side_effect=fake_run,
+            ):
+                runner.run_pass(
+                    context=context,
+                    prompt="Use the Kimi endpoint",
+                    pass_type="demo pass",
+                    block_index=1,
+                    search_enabled=False,
+                )
+
+            self.assertEqual(len(observed_commands), 1)
+            self.assertIn('openai_base_url="https://api.moonshot.cn/v1"', observed_commands[0])
+            self.assertIn(KIMI_DEFAULT_MODEL, observed_commands[0])
+            self.assertEqual(observed_envs[0]["OPENAI_API_KEY"], "kimi-secret")
+            self.assertEqual(observed_envs[0]["OPENAI_BASE_URL"], "https://api.moonshot.cn/v1")
+
+    def test_run_pass_uses_qwen_code_headless_mode(self) -> None:
+        with _TemporaryTestDir() as temp_root:
+            repo_dir = temp_root / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            manager = WorkspaceManager(temp_root / "workspace")
+            context = manager.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=RuntimeOptions(
+                    model_provider="qwen_code",
+                    provider_api_key_env="DASHSCOPE_API_KEY",
+                    provider_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    model=QWEN_CODE_DEFAULT_MODEL,
+                    effort="medium",
+                    codex_path="qwen.cmd",
+                ),
+            )
+            runner = CodexRunner("qwen.cmd")
+            observed_commands: list[list[str]] = []
+            observed_envs: list[dict[str, str]] = []
+            observed_inputs: list[bytes | None] = []
+
+            def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, cwd=None, **_kwargs):
+                observed_commands.append(command)
+                observed_envs.append(dict(env or {}))
+                observed_inputs.append(input_bytes)
+                payload = [
+                    {"type": "system", "subtype": "session_start"},
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": [{"type": "text", "text": "Qwen response"}],
+                        },
+                    },
+                    {
+                        "type": "result",
+                        "subtype": "success",
+                        "result": "Qwen response",
+                        "usage": {
+                            "input_tokens": 21,
+                            "cached_input_tokens": 3,
+                            "output_tokens": 9,
+                            "total_tokens": 30,
+                        },
+                    },
+                ]
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload).encode("utf-8"), stderr=b"")
+
+            with mock.patch.dict("os.environ", {"DASHSCOPE_API_KEY": "dashscope-secret"}, clear=False), mock.patch(
+                "jakal_flow.codex_runner.run_subprocess_capture",
+                side_effect=fake_run,
+            ):
+                result = runner.run_pass(
+                    context=context,
+                    prompt="Apply the requested fix with Qwen Code",
+                    pass_type="demo pass",
+                    block_index=1,
+                    search_enabled=False,
+                )
+
+            self.assertEqual(len(observed_commands), 1)
+            self.assertIn("--output-format", observed_commands[0])
+            self.assertIn("json", observed_commands[0])
+            self.assertIn("--yolo", observed_commands[0])
+            self.assertIn("--include-directories", observed_commands[0])
+            self.assertIn("-p", observed_commands[0])
+            self.assertIsNone(observed_inputs[0])
+            self.assertEqual(observed_envs[0]["OPENAI_API_KEY"], "dashscope-secret")
+            self.assertEqual(observed_envs[0]["OPENAI_BASE_URL"], "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            self.assertEqual(observed_envs[0]["OPENAI_MODEL"], QWEN_CODE_DEFAULT_MODEL)
+            self.assertEqual(result.last_message, "Qwen response")
+            self.assertEqual(result.usage["input_tokens"], 21)
+            self.assertEqual(result.usage["cached_input_tokens"], 3)
+            self.assertEqual(result.usage["output_tokens"], 9)
+            self.assertEqual(result.usage["total_tokens"], 30)
 
     def test_run_pass_strips_inherited_pythonpath_from_child_env(self) -> None:
         with tempfile.TemporaryDirectory() as raw_temp:
