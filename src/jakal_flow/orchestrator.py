@@ -641,7 +641,7 @@ class Orchestrator:
         return f"LN{next_index}"
 
     def _lineage_branch_name(self, lineage_id: str) -> str:
-        return f"jakal-flow-lineage-{lineage_id.strip().lower()}"
+        return f"jakal-flow-lineage-{lineage_id.strip().lower()}-{uuid4().hex[:8]}"
 
     def _lineage_root(self, context: ProjectContext, lineage_id: str) -> Path:
         return context.paths.project_root / ".lineages" / lineage_id.strip().lower()
@@ -776,7 +776,10 @@ class Orchestrator:
             context.paths.repo_dir
         )
         if not lineage.worktree_dir.exists():
-            self.git.add_worktree(context.paths.repo_dir, lineage.worktree_dir, lineage.branch_name, source_revision)
+            if self.git.branch_exists(context.paths.repo_dir, lineage.branch_name):
+                self.git.attach_worktree(context.paths.repo_dir, lineage.worktree_dir, lineage.branch_name)
+            else:
+                self.git.add_worktree(context.paths.repo_dir, lineage.worktree_dir, lineage.branch_name, source_revision)
         lineage_paths = self._build_lineage_paths(context, lineage.lineage_id, lineage.worktree_dir)
         self._sync_lineage_support_files(context, lineage_paths)
         lineage_runtime = self._build_parallel_worker_runtime(runtime, step)
@@ -2476,6 +2479,8 @@ class Orchestrator:
         context.metadata.current_safe_revision = integrated_revision
         context.loop_state.current_safe_revision = integrated_revision
         context.loop_state.last_commit_hash = integrated_revision
+        if context.runtime.allow_push and self.git.remote_url(context.paths.repo_dir, "origin"):
+            self.git.push(context.paths.repo_dir, context.metadata.branch)
 
         refreshed = self.load_execution_plan_state(context)
         refreshed_step = next((step for step in refreshed.steps if step.step_id == result_step.step_id), target_step)
