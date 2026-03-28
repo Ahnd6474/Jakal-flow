@@ -124,7 +124,9 @@ export default function App() {
             modelCatalog={controller.modelCatalog}
             busy={controller.busy}
             canRequestStop={controller.canRequestStop}
+            canCancelReservation={controller.canCancelReservation}
             shareBusy={controller.shareBusy}
+            queuedJobs={controller.queuedJobs}
             onChangeForm={controller.setProjectForm}
             onChangeProgramSettings={controller.setProgramSettings}
             onChooseDirectory={controller.chooseDirectory}
@@ -147,6 +149,7 @@ export default function App() {
             onResetPlan={controller.resetPlan}
             onRunPlan={controller.runPlan}
             onRequestStop={controller.requestStop}
+            onCancelQueuedJob={controller.cancelQueuedReservation}
             onSelectStep={controller.setSelectedStepId}
             onUpdateStepField={controller.updateSelectedStep}
             onSaveStepLocal={controller.saveStepLocal}

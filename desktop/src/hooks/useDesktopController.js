@@ -1,6 +1,6 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
-import { bridgeRequest, startBridgeJob, subscribeBridgeEvents } from "../api";
+import { bridgeRequest, cancelBridgeJob, startBridgeJob, subscribeBridgeEvents } from "../api";
 import { BRIDGE_COMMANDS } from "../bridgeProtocol";
 import { bridgeEventJob, bridgeEventProject, isJobUpdatedEvent, isProjectChangedEvent, isProjectUiEvent } from "../controller/bridgeEvents";
 import { mergeRefreshRepoId, projectRefreshDebounceMs, shouldRefreshSelectedProject } from "../controller/projectRefresh";
@@ -106,13 +106,30 @@ export function useDesktopController() {
       projectJobFromJobs(jobs, {
         repo_id: selectedProjectId,
         project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
+        current_status: projectDetail?.project?.current_status || "",
+        last_run_at: projectDetail?.project?.last_run_at || "",
       }),
-    [jobs, projectDetail?.project?.repo_path, projectForm?.project_dir, selectedProjectId],
+    [jobs, projectDetail?.project?.current_status, projectDetail?.project?.last_run_at, projectDetail?.project?.repo_path, projectForm?.project_dir, selectedProjectId],
   );
   const activeJobId = activeJob?.id || "";
+  const queuedJobs = useMemo(
+    () =>
+      [...jobs]
+        .filter((job) => String(job?.status || "").trim().toLowerCase() === "queued")
+        .sort((left, right) => {
+          const leftPosition = Number.parseInt(String(left?.queue_position || 0), 10) || Number.MAX_SAFE_INTEGER;
+          const rightPosition = Number.parseInt(String(right?.queue_position || 0), 10) || Number.MAX_SAFE_INTEGER;
+          if (leftPosition !== rightPosition) {
+            return leftPosition - rightPosition;
+          }
+          return (Number(left?.updated_at_ms || 0) || 0) - (Number(right?.updated_at_ms || 0) || 0);
+        }),
+    [jobs],
+  );
 
   const busy = Boolean(pendingAction || ["queued", "running"].includes(String(activeJob?.status || "").trim().toLowerCase()));
   const canRequestStop = String(activeJob?.status || "").trim().toLowerCase() === "running";
+  const canCancelReservation = String(activeJob?.status || "").trim().toLowerCase() === "queued";
   const shareBusy = pendingAction === "create_share_session" || pendingAction === "revoke_share_session";
   const programSettingsDirty = useMemo(() => JSON.stringify(programSettings) !== JSON.stringify(programSettingsFromRuntime(storedProgramSettings)), [programSettings, storedProgramSettings]);
 
@@ -206,6 +223,8 @@ export function useDesktopController() {
     const nextActiveJob = projectJobFromJobs(nextJobs, {
       repo_id: selectedProjectId,
       project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
+      current_status: projectDetail?.project?.current_status || "",
+      last_run_at: projectDetail?.project?.last_run_at || "",
     });
     activeJobRef.current = nextActiveJob;
     return nextActiveJob;
@@ -425,6 +444,8 @@ export function useDesktopController() {
         const selectedJob = projectJobFromJobs(jobsRef.current, {
           repo_id: selectedProjectId,
           project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
+          current_status: projectDetail?.project?.current_status || "",
+          last_run_at: projectDetail?.project?.last_run_at || "",
         });
         const shouldLoadDetail = shouldRefreshSelectedProject(selectedProjectId, pendingRepoId);
         const { listing, detail } = await refreshVisibleProjectState(
@@ -524,13 +545,20 @@ export function useDesktopController() {
                   "success",
                   completedJobMessage(job),
                 )
-              : messagePayload(
-                  "error",
-                  job.error ||
-                    translate(language, "message.commandFailed", {
+              : jobStatus === "cancelled"
+                ? messagePayload(
+                    "info",
+                    translate(language, "message.commandCancelled", {
                       command: commandLabel(job.command, language),
                     }),
-                ),
+                  )
+                : messagePayload(
+                    "error",
+                    job.error ||
+                      translate(language, "message.commandFailed", {
+                        command: commandLabel(job.command, language),
+                      }),
+                  ),
           );
         }
         return;
@@ -600,6 +628,8 @@ export function useDesktopController() {
       const selectedJob = projectJobFromJobs(jobsRef.current, {
         repo_id: selectedProjectId,
         project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
+        current_status: projectDetail?.project?.current_status || "",
+        last_run_at: projectDetail?.project?.last_run_at || "",
       });
       const listing = await loadProjectListing(bridgeRequest, workspaceRoot);
       const nextProjects = applyListingState({
@@ -648,15 +678,17 @@ export function useDesktopController() {
         refreshCodexStatus: options.refreshCodexStatus ?? false,
         detailLevel: options.detailLevel ?? "core",
       });
-      applyProjectDetail(
-        detail,
-        {
-          runningJob: projectJobFromJobs(jobsRef.current, {
-            repo_id: repoId,
-            project_dir: detail?.project?.repo_path || "",
-          }),
-        },
-      );
+        applyProjectDetail(
+          detail,
+          {
+            runningJob: projectJobFromJobs(jobsRef.current, {
+              repo_id: repoId,
+              project_dir: detail?.project?.repo_path || "",
+              current_status: detail?.project?.current_status || "",
+              last_run_at: detail?.project?.last_run_at || "",
+            }),
+          },
+        );
       return detail;
     } catch (error) {
       setLoadingProjectId("");
@@ -1199,6 +1231,29 @@ export function useDesktopController() {
     });
   }
 
+  async function cancelQueuedReservation(jobId = activeJob?.id || "") {
+    const targetJob = jobsRef.current.find((item) => item?.id === jobId) || null;
+    if (!targetJob || String(targetJob?.status || "").trim().toLowerCase() !== "queued") {
+      return;
+    }
+    if (!(await requestConfirmation("prompt.confirmCancelReservation", { okLabel: translate(language, "action.cancelReservation") }))) {
+      return;
+    }
+    await withPending("cancel-reservation", async () => {
+      const job = await cancelBridgeJob(jobId);
+      mergeJobUpdate(job);
+      reapplyProjectJobState(jobsRef.current);
+      setMessage(
+        messagePayload(
+          "info",
+          translate(language, "message.commandCancelled", {
+            command: commandLabel(job?.command, language),
+          }),
+        ),
+      );
+    });
+  }
+
   async function copyShareLink() {
     const shareUrl = projectDetail?.share?.active_session?.share_url || "";
     if (!shareUrl) {
@@ -1421,7 +1476,9 @@ export function useDesktopController() {
     loadingProjectId,
     activeJob,
     activeJobId,
+    queuedJobs,
     canRequestStop,
+    canCancelReservation,
     message,
     shareSettings,
     autoRunAfterPlan,
@@ -1469,6 +1526,7 @@ export function useDesktopController() {
     generatePlan,
     runPlan,
     requestStop,
+    cancelQueuedReservation,
     generateShareLink,
     revokeShareLink,
     copyShareLink,

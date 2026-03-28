@@ -88,7 +88,9 @@ export function CenterWorkspace({
   modelCatalog,
   busy,
   canRequestStop,
+  canCancelReservation,
   shareBusy,
+  queuedJobs,
   onChangeForm,
   onChangeProgramSettings,
   onChooseDirectory,
@@ -106,6 +108,7 @@ export function CenterWorkspace({
   onResetPlan,
   onRunPlan,
   onRequestStop,
+  onCancelQueuedJob,
   onSelectStep,
   onUpdateStepField,
   onSaveStepLocal,
@@ -198,12 +201,15 @@ export function CenterWorkspace({
             selectedStepId={selectedStepId}
             busy={busy}
             canRequestStop={canRequestStop}
+            canCancelReservation={canCancelReservation}
+            queuedJobs={queuedJobs}
             onPromptChange={onPromptChange}
             onGeneratePlan={onGeneratePlan}
             onSavePlan={onSavePlan}
             onResetPlan={onResetPlan}
             onRunPlan={onRunPlan}
             onRequestStop={onRequestStop}
+            onCancelQueuedJob={onCancelQueuedJob}
             onGenerateShareLink={onGenerateShareLink}
             onCopyShareLink={onCopyShareLink}
             onRevokeShareLink={onRevokeShareLink}

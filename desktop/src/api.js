@@ -29,6 +29,12 @@ export function createBridgeClient(invoke = tauriInvoke, listen = tauriListen) {
       return invoke("list_bridge_jobs");
     },
 
+    cancelBridgeJob(jobId) {
+      return invoke("cancel_bridge_job", {
+        jobId,
+      });
+    },
+
     subscribeBridgeEvents(handler) {
       return listen("jakal-flow://bridge-event", (event) => {
         handler(event?.payload || null);
@@ -39,4 +45,4 @@ export function createBridgeClient(invoke = tauriInvoke, listen = tauriListen) {
 
 const bridgeClient = createBridgeClient();
 
-export const { bridgeRequest, startBridgeJob, getBridgeJob, listBridgeJobs, subscribeBridgeEvents } = bridgeClient;
+export const { bridgeRequest, startBridgeJob, getBridgeJob, listBridgeJobs, cancelBridgeJob, subscribeBridgeEvents } = bridgeClient;

@@ -73,6 +73,19 @@ test("listBridgeJobs forwards the listing request without payload", async () => 
   assert.deepEqual(calls, [["list_bridge_jobs"]]);
 });
 
+test("cancelBridgeJob forwards the queued job cancellation request", async () => {
+  const calls = [];
+  const client = createBridgeClient(async (...args) => {
+    calls.push(args);
+    return { id: "job-1", status: "cancelled" };
+  });
+
+  const result = await client.cancelBridgeJob("job-1");
+
+  assert.deepEqual(result, { id: "job-1", status: "cancelled" });
+  assert.deepEqual(calls, [["cancel_bridge_job", { jobId: "job-1" }]]);
+});
+
 test("subscribeBridgeEvents forwards bridge events to the provided handler", async () => {
   const handled = [];
   const client = createBridgeClient(

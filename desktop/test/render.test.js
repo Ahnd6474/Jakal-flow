@@ -253,6 +253,97 @@ test("ParallelRunControlView shows the auto-run toggle as off by default", async
   assert.match(html, /type="checkbox"/);
 });
 
+test("ParallelRunControlView renders queued reservations with cancellation controls", async () => {
+  const html = await renderBundledComponent(
+    "parallel-run-control-reservations-render",
+    "./src/components/views/ParallelRunControlView.jsx",
+    "ParallelRunControlView",
+    {
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+        runtime: {
+          execution_mode: "parallel",
+          effort: "medium",
+        },
+        runtime_insights: {
+          execution: {
+            remaining_seconds: 120,
+          },
+          parallel: {
+            recommended_workers: 1,
+            cpu_parallel_limit: 4,
+            cpu_logical_count: 16,
+            memory_parallel_limit: 4,
+            memory_available_bytes: 8589934592,
+          },
+        },
+      },
+      planDraft: {
+        project_prompt: "Ship the UI",
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          {
+            step_id: "ST1",
+            title: "Build",
+            display_description: "Build the screen",
+            codex_description: "Build the screen",
+            success_criteria: "Screen renders",
+            reasoning_effort: "high",
+            status: "pending",
+          },
+        ],
+      },
+      activeJob: {
+        id: "job-1",
+        status: "queued",
+        command: "run-plan",
+        queue_position: 1,
+      },
+      queuedJobs: [
+        {
+          id: "job-1",
+          status: "queued",
+          command: "run-plan",
+          queue_position: 1,
+          project_dir: "C:/work/repo-a",
+        },
+        {
+          id: "job-2",
+          status: "queued",
+          command: "generate-plan",
+          queue_position: 2,
+          project_dir: "C:/work/repo-b",
+        },
+      ],
+      autoRunAfterPlan: false,
+      selectedStepId: "ST1",
+      busy: true,
+      canCancelReservation: true,
+      onPromptChange: noop,
+      onGeneratePlan: noop,
+      onSavePlan: noop,
+      onResetPlan: noop,
+      onRunPlan: noop,
+      onRequestStop: noop,
+      onCancelQueuedJob: noop,
+      onAutoRunAfterPlanChange: noop,
+      onSelectStep: noop,
+      onUpdateStepField: noop,
+      onSaveStepLocal: noop,
+      onAddStep: noop,
+      onDeleteStep: noop,
+    },
+  );
+
+  assert.match(html, /Reservations/);
+  assert.match(html, /Queue #1/);
+  assert.match(html, /repo-a/);
+  assert.match(html, /Cancel Reservation/);
+});
+
 test("CenterWorkspace upgrades legacy serial plans into the parallel execution tree view", async () => {
   const html = await renderBundledComponent(
     "center-workspace-render",

@@ -115,6 +115,35 @@ test("project job helpers match jobs by repo id or project path and derive displ
   assert.equal(projectStatusWithJob("setup_ready", jobs[1]), "running:generate-plan");
 });
 
+test("project job helpers ignore stale running jobs when the project has a newer saved state", () => {
+  const jobs = [
+    {
+      id: "job-running",
+      status: "running",
+      command: "run-plan",
+      repo_id: "repo-1",
+      updated_at_ms: Date.parse("2026-03-27T03:00:00Z"),
+    },
+  ];
+
+  assert.equal(
+    projectJobFromJobs(jobs, {
+      repo_id: "repo-1",
+      current_status: "closed_out",
+      last_run_at: "2026-03-27T03:25:31Z",
+    }),
+    null,
+  );
+  assert.equal(
+    projectJobFromJobs(jobs, {
+      repo_id: "repo-1",
+      current_status: "plan_ready",
+      last_run_at: "2026-03-27T02:59:59Z",
+    })?.id,
+    "job-running",
+  );
+});
+
 test("deriveGithubMode distinguishes manual and existing projects", () => {
   assert.equal(deriveGithubMode("https://github.com/openai/jakal-flow"), "manual");
   assert.equal(deriveGithubMode(""), "existing");
@@ -552,6 +581,39 @@ test("job-aware sanitizers clear stale running status without touching active jo
   assert.equal(sanitizedList[0].status, "plan_ready");
 });
 
+test("job-aware detail sanitizer ignores a stale running bridge job when saved project state is newer", () => {
+  const detail = {
+    project: {
+      repo_id: "repo-a",
+      current_status: "closed_out",
+      last_run_at: "2026-03-27T03:25:31Z",
+    },
+    plan: {
+      closeout_status: "completed",
+      steps: [
+        { step_id: "ST1", status: "completed" },
+      ],
+    },
+    stats: {
+      total_steps: 1,
+      completed_steps: 1,
+      failed_steps: 0,
+      running_steps: 0,
+      remaining_steps: 0,
+    },
+  };
+
+  const sanitizedDetail = sanitizeProjectDetailForJobState(detail, {
+    id: "job-1",
+    status: "running",
+    repo_id: "repo-a",
+    updated_at_ms: Date.parse("2026-03-27T03:00:00Z"),
+  });
+
+  assert.equal(sanitizedDetail.project.current_status, "closed_out");
+  assert.equal(sanitizedDetail.plan.closeout_status, "completed");
+});
+
 test("job-aware sanitizers preserve recent running state while bridge tracking catches up", () => {
   const nowMs = Date.parse("2026-03-26T10:00:00Z");
   const runningDetail = {
@@ -619,6 +681,22 @@ test("job-aware sanitizers overlay queued and running status from multiple activ
 
   assert.equal(nextProjects[0].status, "queued:run-plan");
   assert.equal(nextProjects[1].status, "running:generate-plan");
+});
+
+test("job-aware sanitizers clear stale queued overlays when reservations disappear", () => {
+  const projects = [
+    {
+      repo_id: "repo-a",
+      repo_path: "C:/work/repo-a",
+      status: "queued:run-plan",
+      stats: { total_steps: 1, completed_steps: 0, failed_steps: 0, running_steps: 0, remaining_steps: 1 },
+      closeout_status: "not_started",
+    },
+  ];
+
+  const nextProjects = sanitizeProjectListForJobState(projects, []);
+
+  assert.equal(nextProjects[0].status, "plan_ready");
 });
 
 test("activityLineSummary strips the timestamp and event prefix", () => {
@@ -1082,6 +1160,7 @@ test("statusTone maps operational states to UI tones", () => {
   assert.equal(statusTone("running"), "info");
   assert.equal(statusTone("running:debugging"), "warning");
   assert.equal(statusTone("running:parallel-debugging"), "warning");
+  assert.equal(statusTone("cancelled"), "neutral");
   assert.equal(statusTone("completed"), "success");
   assert.equal(statusTone("paused_for_review"), "warning");
   assert.equal(statusTone("pending"), "neutral");

@@ -55,7 +55,11 @@ export function projectJobFromJobs(jobs = [], project = {}) {
   if (!matches.length) {
     return null;
   }
-  return [...matches].sort((left, right) => {
+  const candidates = matches.filter((job) => !jobIsSupersededByProject(job, project));
+  if (!candidates.length) {
+    return null;
+  }
+  return [...candidates].sort((left, right) => {
     const leftRank = statusRank[String(left?.status || "").trim().toLowerCase()] ?? 9;
     const rightRank = statusRank[String(right?.status || "").trim().toLowerCase()] ?? 9;
     if (leftRank !== rightRank) {
@@ -449,6 +453,23 @@ function parseTimestampMs(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function jobIsSupersededByProject(job = null, project = null) {
+  const jobStatus = String(job?.status || "").trim().toLowerCase();
+  if (!["queued", "running"].includes(jobStatus)) {
+    return false;
+  }
+  const currentStatus = String(project?.current_status || project?.status || "").trim().toLowerCase();
+  if (!currentStatus || currentStatus.startsWith("running:") || currentStatus === "queued" || currentStatus.startsWith("queued:")) {
+    return false;
+  }
+  const projectLastRunAtMs = parseTimestampMs(project?.last_run_at);
+  const jobUpdatedAtMs = Number.isFinite(Number(job?.updated_at_ms)) ? Number(job.updated_at_ms) : null;
+  if (projectLastRunAtMs !== null && jobUpdatedAtMs !== null && projectLastRunAtMs > jobUpdatedAtMs) {
+    return true;
+  }
+  return false;
+}
+
 function latestRunningSignalMs({
   project = null,
   plan = null,
@@ -789,7 +810,8 @@ export function sanitizeProjectListForJobState(projects = [], activeJob = null, 
       };
     }
     const currentStatus = String(project?.status || "").trim();
-    if (!currentStatus.toLowerCase().startsWith("running:")) {
+    const normalizedStatus = currentStatus.toLowerCase();
+    if (!normalizedStatus.startsWith("running:") && normalizedStatus !== "queued" && !normalizedStatus.startsWith("queued:")) {
       return project;
     }
     if (
@@ -813,9 +835,12 @@ export function sanitizeProjectListForJobState(projects = [], activeJob = null, 
 }
 
 export function sanitizeProjectDetailForJobState(detail, activeJob = null, options = {}) {
-  const matchedJob = Array.isArray(activeJob)
+  let matchedJob = Array.isArray(activeJob)
     ? projectJobFromJobs(activeJob, detail?.project || {})
     : activeJob;
+  if (jobIsSupersededByProject(matchedJob, detail?.project || {})) {
+    matchedJob = null;
+  }
   if (!detail || ["queued", "running"].includes(String(matchedJob?.status || "").trim().toLowerCase())) {
     return detail;
   }
@@ -1552,6 +1577,9 @@ export function statusTone(status) {
   }
   if (normalized.startsWith("queued")) {
     return "info";
+  }
+  if (normalized.includes("cancelled")) {
+    return "neutral";
   }
   if (normalized.includes("failed")) {
     return "danger";

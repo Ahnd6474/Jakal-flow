@@ -58,6 +58,34 @@ class BridgeJobStoreTests(unittest.TestCase):
             self.assertEqual(state["jobs"][0]["id"], second.id)
             self.assertEqual(state["jobs"][0]["status"], "running")
 
+    def test_cancel_releases_the_queue_slot_and_updates_scheduler_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace_root = Path(temp_dir) / "workspace"
+            published: list[dict] = []
+            store = BridgeJobStore(lambda envelope: published.append(envelope.to_dict()), max_running_jobs=1)
+
+            running = store.create("run-plan", workspace_root, {"project_dir": str(workspace_root / "repo-a")})
+            queued_one = store.create("run-plan", workspace_root, {"project_dir": str(workspace_root / "repo-b")})
+            queued_two = store.create("run-plan", workspace_root, {"project_dir": str(workspace_root / "repo-c")})
+
+            cancelled = store.cancel(queued_one.id)
+
+            self.assertIsNotNone(cancelled)
+            self.assertEqual(cancelled.status, "cancelled")
+            self.assertEqual(cancelled.queue_position, 0)
+
+            queued_two_snapshot = store.get_job(queued_two.id) or {}
+            self.assertEqual(queued_two_snapshot.get("status"), "queued")
+            self.assertEqual(queued_two_snapshot.get("queue_position"), 1)
+
+            state = read_json(workspace_root / "job_scheduler.json", default={}) or {}
+            self.assertEqual([item.get("id") for item in state.get("jobs", [])], [running.id, queued_two.id])
+            self.assertEqual([item.get("queue_position") for item in state.get("jobs", [])], [0, 1])
+
+            events = read_jsonl(workspace_root / "job_scheduler_events.jsonl")
+            self.assertEqual([item.get("event_type") for item in events], ["job-started", "job-queued", "job-queued", "job-cancelled"])
+            self.assertTrue(any(item.get("payload", {}).get("job", {}).get("status") == "cancelled" for item in published))
+
     def test_create_uses_unique_ids_even_with_same_timestamp(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace_root = Path(temp_dir) / "workspace"

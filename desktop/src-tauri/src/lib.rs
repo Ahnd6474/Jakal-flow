@@ -471,6 +471,16 @@ fn list_bridge_jobs<R: tauri::Runtime>(
     session.request("list_jobs", json!({}), bridge_timeout())
 }
 
+#[tauri::command]
+fn cancel_bridge_job<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<Value, String> {
+    let session = bridge_session(&app, state.inner())?;
+    session.request("cancel_job", json!({ "job_id": job_id }), bridge_timeout())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -479,7 +489,8 @@ pub fn run() {
             bridge_request,
             start_bridge_job,
             get_bridge_job,
-            list_bridge_jobs
+            list_bridge_jobs,
+            cancel_bridge_job
         ])
         .run(tauri::generate_context!())
         .expect("error while running jakal-flow desktop");

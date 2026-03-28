@@ -29,6 +29,7 @@ from jakal_flow.share import (
     project_share_payload,
     public_execution_flow_svg,
     public_monitor_status,
+    public_workspace_monitor_status,
     revoke_share_session,
     save_share_sessions,
     share_server_status_payload,
@@ -327,6 +328,56 @@ class ShareMonitoringTests(unittest.TestCase):
             self.assertNotIn("stdout_file", json.dumps(status))
             self.assertTrue(any("[masked]" in line or "[path]" in line for line in status["recent_logs"]))
 
+    def test_public_workspace_monitor_status_lists_all_in_progress_projects(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_one = temp_dir / "repo-one"
+            repo_two = temp_dir / "repo-two"
+            repo_one.mkdir(parents=True, exist_ok=True)
+            repo_two.mkdir(parents=True, exist_ok=True)
+            orchestrator, project_one = create_project(workspace_root, repo_one)
+            _orchestrator, project_two = create_project(workspace_root, repo_two)
+
+            project_one.metadata.current_status = "running:st1"
+            orchestrator.workspace.save_project(project_one)
+
+            save_plan_payload = {
+                "project_dir": str(repo_two),
+                "display_name": "Share Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": project_two.runtime.to_dict(),
+                "plan": {
+                    "execution_mode": "parallel",
+                    "workflow_mode": "standard",
+                    "steps": [
+                        {
+                            "step_id": "ST1",
+                            "title": "Resume me",
+                            "display_description": "Resume the saved run.",
+                            "codex_description": "Continue the remaining work for the saved plan.",
+                            "test_command": "python -m pytest",
+                            "success_criteria": "The saved plan can continue.",
+                            "reasoning_effort": "high",
+                            "depends_on": [],
+                            "owned_paths": ["src/jakal_flow/share.py"],
+                            "status": "pending",
+                        }
+                    ],
+                },
+            }
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: _fake_codex_snapshot()):
+                run_command("save-plan", workspace_root, save_plan_payload)
+
+            payload = public_workspace_monitor_status(workspace_root, orchestrator=Orchestrator(workspace_root))
+
+            self.assertEqual(payload["workspace"]["project_count"], 2)
+            self.assertEqual(payload["workspace"]["running_count"], 1)
+            self.assertEqual(payload["workspace"]["resume_ready_count"], 1)
+            self.assertEqual(len(payload["projects"]), 2)
+            self.assertEqual(payload["projects"][0]["project"]["repo_id"], project_one.metadata.repo_id)
+            self.assertIn(project_two.metadata.repo_id, [item["project"]["repo_id"] for item in payload["projects"]])
+
     def test_public_execution_flow_svg_masks_sensitive_step_text(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"
@@ -491,6 +542,8 @@ class ShareMonitoringTests(unittest.TestCase):
             repo_dir = temp_dir / "repo"
             repo_dir.mkdir(parents=True, exist_ok=True)
             orchestrator, project = create_project(workspace_root, repo_dir)
+            project.metadata.current_status = "running:st1"
+            orchestrator.workspace.save_project(project)
             append_jsonl(
                 project.paths.ui_event_log_file,
                 {
@@ -521,12 +574,15 @@ class ShareMonitoringTests(unittest.TestCase):
                     f"{base_url}/share/api/status?session={session.session_id}&token={session.viewer_token}"
                 )
                 payload = json.loads(response.read().decode("utf-8"))
-                self.assertEqual(payload["project"]["display_name"], "Share Demo")
-                self.assertIn("overall_run_status", payload)
-                self.assertIn("recent_logs", payload)
-                self.assertIn("latest_test_result", payload)
-                self.assertIn("run_control", payload)
-                self.assertIn("remote_control", payload)
+                self.assertIn("workspace", payload)
+                self.assertIn("projects", payload)
+                self.assertEqual(payload["workspace"]["project_count"], 1)
+                self.assertEqual(payload["projects"][0]["project"]["display_name"], "Share Demo")
+                self.assertIn("overall_run_status", payload["projects"][0])
+                self.assertIn("recent_logs", payload["projects"][0])
+                self.assertIn("latest_test_result", payload["projects"][0])
+                self.assertIn("run_control", payload["projects"][0])
+                self.assertIn("remote_control", payload["projects"][0])
                 self.assertNotIn("repo_path", json.dumps(payload))
                 self.assertNotIn("project_root", json.dumps(payload))
 
@@ -594,7 +650,9 @@ class ShareMonitoringTests(unittest.TestCase):
             workspace_root = temp_dir / "workspace"
             repo_dir = temp_dir / "repo"
             repo_dir.mkdir(parents=True, exist_ok=True)
-            _orchestrator, project = create_project(workspace_root, repo_dir)
+            orchestrator, project = create_project(workspace_root, repo_dir)
+            project.metadata.current_status = "running:st1"
+            orchestrator.workspace.save_project(project)
             append_jsonl(
                 project.paths.ui_event_log_file,
                 {
@@ -630,10 +688,11 @@ class ShareMonitoringTests(unittest.TestCase):
                         break
 
                 self.assertIsNotNone(payload)
-                self.assertEqual(payload["project"]["display_name"], "Share Demo")
-                self.assertIn("recent_logs", payload)
-                self.assertIn("latest_test_result", payload)
-                self.assertIn("remote_control", payload)
+                self.assertEqual(payload["workspace"]["project_count"], 1)
+                self.assertEqual(payload["projects"][0]["project"]["display_name"], "Share Demo")
+                self.assertIn("recent_logs", payload["projects"][0])
+                self.assertIn("latest_test_result", payload["projects"][0])
+                self.assertIn("remote_control", payload["projects"][0])
             finally:
                 server.shutdown()
                 server.server_close()
@@ -713,7 +772,7 @@ class ShareMonitoringTests(unittest.TestCase):
                 base_url = f"http://127.0.0.1:{server.server_address[1]}"
                 request = urllib.request.Request(
                     f"{base_url}/share/api/control?session={session.session_id}&token={session.viewer_token}",
-                    data=json.dumps({"action": "pause"}).encode("utf-8"),
+                    data=json.dumps({"action": "pause", "repo_id": project.metadata.repo_id}).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
@@ -721,8 +780,10 @@ class ShareMonitoringTests(unittest.TestCase):
                 payload = json.loads(response.read().decode("utf-8"))
 
                 self.assertEqual(payload["control_result"]["action"], "pause")
-                self.assertTrue(payload["run_control"]["stop_after_current_step"])
-                self.assertTrue(payload["remote_control"]["pause_requested"])
+                self.assertEqual(payload["control_result"]["repo_id"], project.metadata.repo_id)
+                monitored = next(item for item in payload["projects"] if item["project"]["repo_id"] == project.metadata.repo_id)
+                self.assertTrue(monitored["run_control"]["stop_after_current_step"])
+                self.assertTrue(monitored["remote_control"]["pause_requested"])
             finally:
                 server.shutdown()
                 server.server_close()
@@ -785,7 +846,7 @@ class ShareMonitoringTests(unittest.TestCase):
                     base_url = f"http://127.0.0.1:{server.server_address[1]}"
                     request = urllib.request.Request(
                         f"{base_url}/share/api/control?session={session.session_id}&token={session.viewer_token}",
-                        data=json.dumps({"action": "resume"}).encode("utf-8"),
+                        data=json.dumps({"action": "resume", "repo_id": project.metadata.repo_id}).encode("utf-8"),
                         headers={"Content-Type": "application/json"},
                         method="POST",
                     )
@@ -798,7 +859,8 @@ class ShareMonitoringTests(unittest.TestCase):
                 self.assertEqual(captured["payload"]["project_dir"], str(repo_dir))
                 self.assertEqual(payload["control_result"]["action"], "resume")
                 self.assertTrue(payload["control_result"]["queued"])
-                self.assertTrue(payload["remote_control"]["resume_starting"])
+                monitored = next(item for item in payload["projects"] if item["project"]["repo_id"] == project.metadata.repo_id)
+                self.assertTrue(monitored["remote_control"]["resume_starting"])
             finally:
                 release.set()
                 server.shutdown()

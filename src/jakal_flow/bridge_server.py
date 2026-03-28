@@ -86,7 +86,7 @@ class BridgeJobStore:
             self._publish(snapshot)
 
     def _list_jobs_unlocked(self) -> list[BridgeJobSnapshot]:
-        status_rank = {"running": 0, "queued": 1, "failed": 2, "completed": 3}
+        status_rank = {"running": 0, "queued": 1, "failed": 2, "cancelled": 3, "completed": 4}
         return sorted(
             self._jobs.values(),
             key=lambda item: (
@@ -164,7 +164,7 @@ class BridgeJobStore:
             [
                 job
                 for job in self._jobs.values()
-                if str(job.status).strip().lower() in {"completed", "failed"}
+                if str(job.status).strip().lower() in {"completed", "failed", "cancelled"}
             ],
             key=lambda item: (int(item.updated_at_ms or 0), item.id),
             reverse=True,
@@ -247,7 +247,7 @@ class BridgeJobStore:
                 setattr(snapshot, key, value)
             snapshot.updated_at_ms = now_ms()
             current_status = str(snapshot.status).strip().lower()
-            if current_status in {"completed", "failed"} and not snapshot.completed_at:
+            if current_status in {"completed", "failed", "cancelled"} and not snapshot.completed_at:
                 snapshot.completed_at = now_utc_iso()
                 self._requests.pop(job_id, None)
             queue_updates = self._refresh_queue_positions_unlocked(Path(snapshot.workspace_root), touch_timestamp=False)
@@ -267,6 +267,37 @@ class BridgeJobStore:
                 job=snapshot.to_dict(),
                 details=event_details,
             )
+        return snapshot
+
+    def cancel(self, job_id: str) -> BridgeJobSnapshot | None:
+        publish_updates: list[BridgeJobSnapshot] = []
+        workspace_root = Path()
+        with self._lock:
+            snapshot = self._jobs.get(job_id)
+            if snapshot is None:
+                return None
+            current_status = str(snapshot.status).strip().lower()
+            if current_status != "queued":
+                raise RuntimeError("Only queued jobs can be cancelled.")
+            snapshot.status = "cancelled"
+            snapshot.error = "Cancelled before execution."
+            snapshot.queue_position = 0
+            snapshot.result = None
+            snapshot.completed_at = now_utc_iso()
+            snapshot.updated_at_ms = now_ms()
+            self._requests.pop(job_id, None)
+            workspace_root = Path(snapshot.workspace_root)
+            queue_updates = self._refresh_queue_positions_unlocked(workspace_root, touch_timestamp=False)
+            self._persist_workspace_state_unlocked(workspace_root)
+            self._prune_terminal_jobs_unlocked()
+            publish_updates = [snapshot, *queue_updates]
+        self._publish_many(publish_updates)
+        append_scheduler_event(
+            workspace_root,
+            "job-cancelled",
+            job=snapshot.to_dict(),
+            details={},
+        )
         return snapshot
 
     def request_for(self, job_id: str) -> tuple[str, Path, dict[str, Any]] | None:
@@ -445,6 +476,13 @@ class BridgeServer:
 
         if method == "list_jobs":
             self._send_envelope(BridgeEnvelope(kind="response", id=request_id, ok=True, result=self._jobs.list_jobs()))
+            return
+
+        if method == "cancel_job":
+            result = self._jobs.cancel(str(params.get("job_id", "")).strip())
+            if result is None:
+                raise RuntimeError("The requested background job was not found.")
+            self._send_envelope(BridgeEnvelope(kind="response", id=request_id, ok=True, result=result.to_dict()))
             return
 
         if method == "ping":

@@ -4,6 +4,7 @@ from collections.abc import Callable
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -62,8 +63,12 @@ from .utils import compact_text, ensure_dir, normalize_workflow_mode, now_utc_is
 from .verification import VerificationRunner
 from .workspace import WorkspaceManager
 
+UTC = getattr(datetime, "UTC", timezone.utc)
+
 
 class Orchestrator:
+    _STALE_CLOSEOUT_TIMEOUT = timedelta(hours=6)
+
     def __init__(self, workspace_root: Path) -> None:
         self.workspace = WorkspaceManager(workspace_root)
         self.git = GitOps()
@@ -3051,6 +3056,38 @@ class Orchestrator:
         )
         return str(pass_result.get("safe_revision") or safe_revision), block_index + 1
 
+    def _parse_iso_timestamp(self, value: str | None) -> datetime | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+
+    def _closeout_run_is_stale(self, context: ProjectContext, plan_state: ExecutionPlanState) -> bool:
+        if plan_state.closeout_status != "running":
+            return False
+        if context.metadata.current_status != "running:closeout":
+            return True
+        heartbeat = max(
+            (
+                item
+                for item in (
+                    self._parse_iso_timestamp(context.metadata.last_run_at),
+                    self._parse_iso_timestamp(plan_state.closeout_started_at),
+                )
+                if item is not None
+            ),
+            default=None,
+        )
+        if heartbeat is None:
+            return True
+        return datetime.now(tz=UTC) - heartbeat > self._STALE_CLOSEOUT_TIMEOUT
+
     def run_execution_closeout(
         self,
         project_dir: Path,
@@ -3065,7 +3102,13 @@ class Orchestrator:
         if not self._all_steps_completed(plan_state.steps):
             raise RuntimeError("Closeout can run only after all execution tasks are completed.")
         if plan_state.closeout_status == "running":
-            raise RuntimeError("Closeout is already running.")
+            if not self._closeout_run_is_stale(context, plan_state):
+                raise RuntimeError("Closeout is already running.")
+            plan_state.closeout_status = "failed"
+            plan_state.closeout_notes = "Recovered a stale closeout state before retrying."
+            context.metadata.current_status = self._status_from_plan_state(plan_state)
+            self.save_execution_plan_state(context, plan_state)
+            self.workspace.save_project(context)
 
         previous_runtime = context.runtime
         context.runtime = RuntimeOptions(

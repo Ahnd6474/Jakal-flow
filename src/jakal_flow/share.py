@@ -658,6 +658,7 @@ def public_monitor_status(context: ProjectContext, plan_state: ExecutionPlanStat
     status = effective_project_status(context.metadata.current_status, plan_state, context.loop_state)
     return {
         "project": {
+            "repo_id": context.metadata.repo_id,
             "display_name": mask_public_text(context.metadata.display_name or context.metadata.slug, max_chars=80),
             "slug": context.metadata.slug,
         },
@@ -677,6 +678,85 @@ def public_monitor_status(context: ProjectContext, plan_state: ExecutionPlanStat
             "available": True,
             "step_count": len(plan_state.steps),
         },
+    }
+
+
+def _workspace_monitor_visibility(
+    context: ProjectContext,
+    plan_state: ExecutionPlanState,
+    *,
+    include_repo_ids: set[str] | None = None,
+) -> bool:
+    if include_repo_ids and context.metadata.repo_id in include_repo_ids:
+        return True
+    remote = public_remote_control_state(context, plan_state)
+    status = effective_project_status(context.metadata.current_status, plan_state, context.loop_state)
+    if context.loop_state.pending_checkpoint_approval:
+        return True
+    if remote["can_pause"] or remote["can_resume"] or remote["pause_requested"]:
+        return True
+    return status.startswith("running:")
+
+
+def _workspace_monitor_sort_key(item: dict[str, Any]) -> tuple[int, float, str]:
+    project = item.get("project", {}) if isinstance(item, dict) else {}
+    remote = item.get("remote_control", {}) if isinstance(item, dict) else {}
+    status = str(item.get("overall_run_status", "")).strip().lower()
+    last_updated = parse_iso_datetime(str(item.get("last_updated_at", "")).strip())
+    timestamp = last_updated.timestamp() if last_updated is not None else 0.0
+    if status.startswith("running:"):
+        priority = 0
+    elif bool(remote.get("pause_requested")):
+        priority = 1
+    elif bool(remote.get("can_resume")):
+        priority = 2
+    elif bool(item.get("checkpoint_pending")):
+        priority = 3
+    else:
+        priority = 4
+    display_name = str(project.get("display_name", "")).strip().lower()
+    return (priority, -timestamp, display_name)
+
+
+def public_workspace_monitor_status(
+    workspace_root: Path,
+    *,
+    orchestrator: Any | None = None,
+    log_limit: int = 8,
+    include_repo_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    from .orchestrator import Orchestrator
+
+    orchestrator = orchestrator or Orchestrator(workspace_root)
+    projects: list[dict[str, Any]] = []
+    last_updated_candidates: list[datetime] = []
+    for project in orchestrator.list_projects():
+        plan_state = orchestrator.load_execution_plan_state(project)
+        if not _workspace_monitor_visibility(project, plan_state, include_repo_ids=include_repo_ids):
+            continue
+        payload = public_monitor_status(project, plan_state, log_limit=log_limit)
+        payload["checkpoint_pending"] = bool(project.loop_state.pending_checkpoint_approval)
+        projects.append(payload)
+        parsed_last_updated = parse_iso_datetime(str(payload.get("last_updated_at", "")).strip())
+        if parsed_last_updated is not None:
+            last_updated_candidates.append(parsed_last_updated)
+
+    projects.sort(key=_workspace_monitor_sort_key)
+    running_count = sum(1 for item in projects if str(item.get("overall_run_status", "")).strip().lower().startswith("running:"))
+    resume_ready_count = sum(1 for item in projects if bool(item.get("remote_control", {}).get("can_resume")))
+    pause_requested_count = sum(1 for item in projects if bool(item.get("remote_control", {}).get("pause_requested")))
+    checkpoint_pending_count = sum(1 for item in projects if bool(item.get("checkpoint_pending")))
+    last_updated_at = max(last_updated_candidates).replace(microsecond=0).isoformat() if last_updated_candidates else None
+    return {
+        "workspace": {
+            "project_count": len(projects),
+            "running_count": running_count,
+            "resume_ready_count": resume_ready_count,
+            "pause_requested_count": pause_requested_count,
+            "checkpoint_pending_count": checkpoint_pending_count,
+        },
+        "projects": projects,
+        "last_updated_at": last_updated_at,
     }
 
 
