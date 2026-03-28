@@ -375,6 +375,17 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.model, "gpt-5.4")
         self.assertTrue(runtime.generate_word_report)
 
+    def test_runtime_from_payload_coerces_save_project_logs_flag(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model": "gpt-5.4",
+                "save_project_logs": "true",
+            }
+        )
+
+        self.assertEqual(runtime.model, "gpt-5.4")
+        self.assertTrue(runtime.save_project_logs)
+
     def test_runtime_from_payload_normalizes_local_model_provider(self) -> None:
         runtime = runtime_from_payload(
             {
@@ -445,8 +456,44 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(payload["default_runtime"]["model_preset"], "")
         self.assertEqual(payload["default_runtime"]["model_slug_input"], "gpt-5.4")
         self.assertTrue(payload["default_runtime"]["generate_word_report"])
+        self.assertFalse(payload["default_runtime"]["save_project_logs"])
         self.assertEqual(payload["default_runtime"]["sandbox_mode"], "danger-full-access")
         self.assertEqual(payload["default_runtime"]["optimization_mode"], "light")
+
+    def test_append_ui_event_saves_project_activity_log_when_enabled(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Log Capture Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "save_project_logs": True,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                run_command("save-project-setup", workspace_root, payload)
+
+            project = ui_bridge.orchestrator_for(workspace_root).local_project(repo_dir)
+            self.assertIsNotNone(project)
+            assert project is not None
+
+            ui_bridge.append_ui_event(project, "unit-test", "captured", {"scope": "test"})
+
+            activity_log = project.paths.logs_dir / "project_activity.jsonl"
+            self.assertTrue(activity_log.exists())
+            entries = [json.loads(line) for line in activity_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(entries[-1]["event_type"], "unit-test")
+            self.assertEqual(entries[-1]["message"], "captured")
 
     def test_project_setup_and_load_round_trip(self) -> None:
         with TemporaryTestDir() as temp_dir:

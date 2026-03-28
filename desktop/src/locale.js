@@ -772,6 +772,7 @@ STRINGS.en["message.allProjectsDeleted"] = "All projects removed from jakal-flow
 STRINGS.en["option.generateWordReport"] = "Word Report Creation";
 STRINGS.en["option.lightMode"] = "Light Mode";
 STRINGS.en["option.developerMode"] = "Developer Mode";
+STRINGS.en["option.saveProjectLogs"] = "Save Project Activity Logs";
 STRINGS.en["dashboard.codexPlan"] = "Codex Plan";
 STRINGS.en["dashboard.codexUsage"] = "Codex Usage";
 STRINGS.en["common.auth"] = "Auth";
@@ -819,6 +820,7 @@ STRINGS.ko["message.allProjectsDeleted"] = "모든 프로젝트를 제거했습�
 STRINGS.ko["option.generateWordReport"] = "Word 보고서 제작";
 STRINGS.ko["option.lightMode"] = "밝은 모드";
 STRINGS.ko["option.developerMode"] = "개발자 모드";
+STRINGS.ko["option.saveProjectLogs"] = "프로젝트 작업 로그 저장";
 STRINGS.ko["dashboard.codexPlan"] = "Codex 요금제";
 STRINGS.ko["dashboard.codexUsage"] = "Codex 사용량";
 STRINGS.ko["common.auth"] = "인증 방식";
@@ -930,6 +932,7 @@ const KO_HIGH_QUALITY_OVERRIDES = {
   "message.runStateRefreshed": "실행 상태를 새로고침했습니다.",
   "option.allowPushAfterSafeRuns": "안전 검증 후 push 허용",
   "option.developerMode": "개발자 모드",
+  "option.saveProjectLogs": "프로젝트 작업 로그 저장",
   "option.executionParallel": "병렬",
   "option.executionSerial": "직렬",
   "option.generateWordReport": "Word 보고서 생성",
