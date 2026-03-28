@@ -1,28 +1,30 @@
 import { useRef } from "react";
 
-export function Splitter({ axis = "vertical", onResize, className = "", title }) {
+export function Splitter({ axis = "vertical", onResize, onDragEnd, className = "", title }) {
   const draggingRef = useRef(false);
 
   function startDrag(event) {
     event.preventDefault();
     draggingRef.current = true;
-    const startX = event.clientX;
-    const startY = event.clientY;
+    const startPos = axis === "vertical" ? event.clientX : event.clientY;
 
     function handleMove(moveEvent) {
-      if (!draggingRef.current) {
-        return;
-      }
-      const delta = axis === "vertical" ? moveEvent.clientX - startX : moveEvent.clientY - startY;
-      onResize(delta);
+      if (!draggingRef.current) return;
+      const currentPos = axis === "vertical" ? moveEvent.clientX : moveEvent.clientY;
+      onResize(currentPos - startPos);
     }
 
     function handleUp() {
       draggingRef.current = false;
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      onDragEnd?.();
     }
 
+    document.body.style.cursor = axis === "vertical" ? "col-resize" : "row-resize";
+    document.body.style.userSelect = "none";
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp);
   }

@@ -341,6 +341,7 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.model_preset, "")
         self.assertEqual(runtime.max_blocks, 5)
         self.assertFalse(runtime.allow_push)
+        self.assertTrue(runtime.auto_merge_pull_request)
         self.assertTrue(runtime.require_checkpoint_approval)
         self.assertEqual(runtime.execution_mode, "parallel")
         self.assertEqual(runtime.parallel_worker_mode, "manual")
@@ -2349,6 +2350,99 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(listed[0]["slug"], detail["project"]["slug"])
             self.assertEqual(listed[0]["status"], "setup_ready")
             self.assertEqual(stderr.getvalue(), "")
+
+    def test_run_command_writes_project_crash_log_on_bridge_failure(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Bridge Crash Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            def explode(_ctx):
+                raise RuntimeError("bridge exploded")
+
+            with mock.patch("jakal_flow.ui_bridge.bridge_command_handlers", return_value={"explode": explode}):
+                with self.assertRaisesRegex(RuntimeError, "bridge exploded"):
+                    run_command("explode", workspace_root, {"project_dir": str(repo_dir)})
+
+            reports_dir = Path(detail["project"]["project_root"]) / "reports"
+            crash_logs = sorted(reports_dir.glob("*_ui-bridge_explode.crash.log"))
+            self.assertTrue(crash_logs)
+            crash_text = crash_logs[-1].read_text(encoding="utf-8")
+            self.assertIn("exception_message: bridge exploded", crash_text)
+            self.assertIn("Traceback", crash_text)
+
+    def test_cli_main_writes_project_crash_log_on_failure(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "CLI Crash Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch(
+                "jakal_flow.cli.Orchestrator.status",
+                side_effect=RuntimeError("cli exploded"),
+            ), redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = cli_main(
+                    [
+                        "status",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--repo-url",
+                        str(repo_dir.resolve()),
+                        "--branch",
+                        "main",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("error: cli exploded", stderr.getvalue())
+            reports_dir = Path(detail["project"]["project_root"]) / "reports"
+            crash_logs = sorted(reports_dir.glob("*_cli_status.crash.log"))
+            self.assertTrue(crash_logs)
+            crash_text = crash_logs[-1].read_text(encoding="utf-8")
+            self.assertIn("exception_message: cli exploded", crash_text)
+            self.assertIn("\"repo_url\":", crash_text)
 
     def test_save_project_setup_clears_stale_pending_checkpoint_when_approval_is_disabled(self) -> None:
         with TemporaryTestDir() as temp_dir:

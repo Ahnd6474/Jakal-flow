@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 
+from .failure_logs import write_runtime_failure_log
 from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER, VALID_MODEL_PROVIDERS
 from .models import RuntimeOptions
 from .orchestrator import Orchestrator
@@ -171,6 +172,14 @@ def _list_repo_status(orchestrator: Orchestrator, project) -> str:
     return effective_project_status(raw_status, plan_state, project.loop_state)
 
 
+def _best_effort_project(orchestrator: Orchestrator, args: argparse.Namespace):
+    repo_url = str(getattr(args, "repo_url", "") or "").strip()
+    branch = str(getattr(args, "branch", "") or "").strip() or "main"
+    if repo_url:
+        return orchestrator.workspace.find_project(repo_url, branch)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -234,5 +243,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"Unsupported command: {args.command}")
         return 2
     except Exception as exc:
+        write_runtime_failure_log(
+            Path(args.workspace_root).expanduser().resolve(),
+            source="cli",
+            command=str(getattr(args, "command", "") or "unknown"),
+            exc=exc,
+            payload=vars(args),
+            project=_best_effort_project(orchestrator, args),
+        )
         print(f"error: {exc}", file=sys.stderr)
         return 1

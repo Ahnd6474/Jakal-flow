@@ -3320,6 +3320,7 @@ class Orchestrator:
             block_log_file=logs_dir / "blocks.jsonl",
             checkpoint_state_file=state_dir / "CHECKPOINTS.json",
             execution_plan_file=state_dir / "EXECUTION_PLAN.json",
+            lineage_state_file=state_dir / "LINEAGES.json",
             ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
             ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
             ml_experiment_reports_dir=state_dir / "ml_experiments",
@@ -3991,16 +3992,7 @@ class Orchestrator:
                     selected_task=closeout_task,
                 )
             elif plan_state.closeout_status == "completed":
-                self._maybe_open_pull_request(
-                    context,
-                    head_branch=context.metadata.branch,
-                    title=plan_state.plan_title.strip() or "jakal-flow closeout",
-                    body=(
-                        "Automatically opened by jakal-flow after a successful closeout push.\n\n"
-                        f"- Branch: `{context.metadata.branch}`\n"
-                        f"- Closeout commit: `{plan_state.closeout_commit_hash or 'unknown'}`\n"
-                    ),
-                )
+                self._publish_closeout_pull_request(context, plan_state)
 
         return context, plan_state
 
@@ -5426,6 +5418,86 @@ class Orchestrator:
             },
         )
 
+    def _closeout_branch_name(self, plan_state: ExecutionPlanState) -> str:
+        commit_token = str(plan_state.closeout_commit_hash or "").strip().lower()[:8] or "pending"
+        started_token = "".join(char for char in str(plan_state.closeout_started_at or "") if char.isdigit())[:14]
+        if not started_token:
+            started_token = "".join(char for char in now_utc_iso() if char.isdigit())[:14] or "00000000000000"
+        return f"jakal-flow-closeout-{started_token}-{commit_token}"
+
+    def _sync_base_branch_after_closeout_merge(self, context: ProjectContext, base_branch: str) -> tuple[bool, str]:
+        branch = str(base_branch or "").strip()
+        if not branch:
+            return False, "missing_base_branch"
+        try:
+            self.git.fetch(context.paths.repo_dir, "origin", branch)
+            self.git.pull_ff_only(context.paths.repo_dir, "origin", branch)
+            synced_revision = self.git.current_revision(context.paths.repo_dir)
+            context.metadata.current_safe_revision = synced_revision
+            context.loop_state.current_safe_revision = synced_revision
+            context.loop_state.last_commit_hash = synced_revision
+            return True, synced_revision
+        except Exception as exc:
+            detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "unknown_error"
+            return False, f"sync_failed:{detail}"
+
+    def _publish_closeout_pull_request(
+        self,
+        context: ProjectContext,
+        plan_state: ExecutionPlanState,
+    ) -> dict:
+        title = plan_state.plan_title.strip() or "jakal-flow closeout"
+        body = (
+            "Automatically opened by jakal-flow after a successful closeout push.\n\n"
+            f"- Branch: `{context.metadata.branch}`\n"
+            f"- Closeout commit: `{plan_state.closeout_commit_hash or 'unknown'}`\n"
+        )
+        result = self._maybe_open_pull_request(
+            context,
+            head_branch=context.metadata.branch,
+            title=title,
+            body=body,
+            auto_merge=context.runtime.auto_merge_pull_request,
+            merge_method="merge",
+        )
+        if str(result.get("reason") or "").strip() != "head_matches_base":
+            return result
+
+        closeout_branch = self._closeout_branch_name(plan_state)
+        try:
+            self.git.push_refspec(context.paths.repo_dir, "HEAD", closeout_branch)
+        except Exception as exc:
+            detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "unknown_error"
+            return {
+                **result,
+                "created": False,
+                "head_branch": closeout_branch,
+                "reason": f"closeout_branch_push_failed:{detail}",
+            }
+
+        retry = self._maybe_open_pull_request(
+            context,
+            head_branch=closeout_branch,
+            base_branch=context.metadata.branch,
+            title=title,
+            body=(
+                "Automatically opened by jakal-flow after a successful closeout push.\n\n"
+                f"- Base branch: `{context.metadata.branch}`\n"
+                f"- Head branch: `{closeout_branch}`\n"
+                f"- Closeout commit: `{plan_state.closeout_commit_hash or 'unknown'}`\n"
+            ),
+            auto_merge=context.runtime.auto_merge_pull_request,
+            merge_method="merge",
+        )
+        retry["head_branch"] = closeout_branch
+        retry["base_branch"] = context.metadata.branch
+        retry["closeout_branch_pushed"] = True
+        if bool(retry.get("merged")):
+            synced, sync_result = self._sync_base_branch_after_closeout_merge(context, context.metadata.branch)
+            retry["base_branch_synced"] = synced
+            retry["base_branch_sync_result"] = sync_result
+        return retry
+
     def _maybe_open_pull_request(
         self,
         context: ProjectContext,
@@ -5435,6 +5507,8 @@ class Orchestrator:
         title: str,
         body: str = "",
         draft: bool = False,
+        auto_merge: bool = False,
+        merge_method: str = "squash",
         status_filename: str = "latest_pull_request_status.json",
     ) -> dict:
         reporter = Reporter(context)
@@ -5444,6 +5518,8 @@ class Orchestrator:
             title=title,
             body=body,
             draft=draft,
+            auto_merge=auto_merge,
+            merge_method=merge_method,
         )
         write_json(
             context.paths.reports_dir / status_filename,

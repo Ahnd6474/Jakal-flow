@@ -112,6 +112,9 @@ export function useDesktopController() {
   const [sidebarTab, setSidebarTab] = usePersistentState("jakal-flow:sidebar-tab", "projects");
   const [bottomCollapsed, setBottomCollapsed] = usePersistentState("jakal-flow:bottom-collapsed", false);
   const [bottomHeight, setBottomHeight] = usePersistentState("jakal-flow:bottom-height", 250);
+  const [rightCollapsed, setRightCollapsed] = usePersistentState("jakal-flow:right-collapsed", true);
+  const [rightWidth, setRightWidth] = usePersistentState("jakal-flow:right-width", 280);
+  const [sidebarWidth, setSidebarWidth] = usePersistentState("jakal-flow:sidebar-width", 312);
   const [projectFilter, setProjectFilter] = usePersistentState("jakal-flow:project-filter", "");
   const [workspaceFilter, setWorkspaceFilter] = usePersistentState("jakal-flow:workspace-filter", "");
   const deferredProjectFilter = useDeferredValue(projectFilter);
@@ -1704,6 +1707,9 @@ export function useDesktopController() {
     sidebarTab,
     bottomCollapsed,
     bottomHeight,
+    rightCollapsed,
+    rightWidth,
+    sidebarWidth,
     projectFilter,
     workspaceFilter,
     planDirty,
@@ -1718,6 +1724,9 @@ export function useDesktopController() {
     setSidebarTab,
     setBottomCollapsed,
     setBottomHeight,
+    setRightCollapsed,
+    setRightWidth,
+    setSidebarWidth,
     setProjectFilter,
     setWorkspaceFilter,
     setShareSettings,

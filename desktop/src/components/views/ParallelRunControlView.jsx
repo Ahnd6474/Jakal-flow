@@ -323,29 +323,43 @@ export function ParallelRunControlView({
   }, [onPromptChange, promptDraft, promptValue]);
 
   return (
-    <section className="workspace-view">
-      <div className="view-header">
-        <div>
-          <span className="eyebrow">{t("run.flow")}</span>
-          <h2>{t("run.executionFlow")}</h2>
+    <section className="workspace-view run-view">
+      {/* ── Compact metric ribbon ── */}
+      <div className="run-ribbon">
+        <div className="run-ribbon__metrics">
+          <span className={`run-ribbon__chip run-ribbon__chip--${statusTone(projectStatus)}`}>{displayStatus(projectStatus || "idle", language)}</span>
+          <span className="run-ribbon__chip">{completedCount}/{steps.length || 0} {t("run.done")}</span>
+          <span className="run-ribbon__chip">{readyNodes.length} {t("run.parallelReady")}</span>
+          {queuedJobs.length ? <span className="run-ribbon__chip">{queuedJobs.length} {t("run.reservations")}</span> : null}
+          {executionEstimate.remaining_seconds ? <span className="run-ribbon__chip">{formatDurationCompact(executionEstimate.remaining_seconds, language)} {t("run.estimatedRemaining")}</span> : null}
+          {showEstimatedCost ? <span className="run-ribbon__chip">{formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)}</span> : null}
+          <span className="run-ribbon__chip">{parallelLimitValue} {t("run.parallelLimit")}</span>
+          {showCloseoutStatus ? <span className={`run-ribbon__chip run-ribbon__chip--${statusTone(livePlan?.closeout_status)}`}>{t("run.closeout")}: {displayStatus(livePlan?.closeout_status || "not_started", language)}</span> : null}
+          {detail?.run_control?.stop_immediately ? <span className="run-ribbon__chip run-ribbon__chip--warning">{t("run.stopAfterStep")}</span> : null}
         </div>
-      </div>
-
-      {/* ── Metrics ── */}
-      <div className="run-summary">
-        <MetricCard tone={statusTone(projectStatus)} icon={<StatusMetricIcon />} iconTone={statusTone(projectStatus)} label={t("common.status")} value={displayStatus(projectStatus || "idle", language)} />
-        <MetricCard tone="info" icon={<DoneMetricIcon />} iconTone="success" label={t("run.done")} value={`${completedCount}/${steps.length || 0}`} />
-        <MetricCard tone="info" icon={<ParallelMetricIcon />} iconTone="info" label={t("run.parallelReady")} value={readyNodes.length} />
-        <MetricCard tone="info" icon={<QueueMetricIcon />} iconTone="info" label={t("run.reservations")} value={queuedJobs.length} sub={activeQueuePosition ? t("run.queuePosition", { position: activeQueuePosition }) : null} />
-        <MetricCard tone={detail?.run_control?.stop_immediately ? "warning" : "neutral"} icon={<StopMetricIcon />} iconTone={detail?.run_control?.stop_immediately ? "warning" : "neutral"} label={t("run.stopAfterStep")} value={detail?.run_control?.stop_immediately ? t("common.on") : t("common.off")} />
-        <MetricCard tone="info" icon={<ClockMetricIcon />} iconTone="info" label={t("run.estimatedRemaining")} value={formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language)} />
-        <MetricCard tone={parallelLimitCardTone} icon={<WorkersMetricIcon />} iconTone={parallelLimitCardTone} label={t("run.parallelLimit")} value={parallelLimitValue} sub={parallelLimitDetails} />
-        {showCloseoutStatus ? (
-          <MetricCard tone={statusTone(livePlan?.closeout_status)} icon={<CloseoutMetricIcon />} iconTone={statusTone(livePlan?.closeout_status)} label={t("run.closeout")} value={displayStatus(livePlan?.closeout_status || "not_started", language)} />
-        ) : null}
-        {showEstimatedCost ? (
-          <MetricCard tone="neutral" icon={<CostMetricIcon />} label={t("run.estimatedCost")} value={formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language)} />
-        ) : null}
+        <div className="run-ribbon__actions">
+          <label className="auto-run-badge">
+            <input type="checkbox" checked={Boolean(autoRunAfterPlan)} onChange={(event) => onAutoRunAfterPlanChange?.(event.target.checked)} disabled={busy} />
+            <span>{t("run.autoRunAfterPlan")}</span>
+          </label>
+          <button className="toolbar-btn" onClick={onGeneratePlan} type="button" disabled={busy}><GenerateIcon /><span>{t("action.generate")}</span></button>
+          <button className="toolbar-btn" onClick={onSavePlan} type="button" disabled={busy}><SaveIcon /><span>{t("action.save")}</span></button>
+          <button className="toolbar-btn" onClick={onResetPlan} type="button"><ResetIcon /><span>{t("action.reset")}</span></button>
+          <div className="toolbar-divider" />
+          <button className="toolbar-btn toolbar-btn--accent" onClick={onRunPlan} type="button" disabled={busy}><RunIcon /><span>{t("action.run")}</span></button>
+          {canCancelReservation ? (
+            <button className="toolbar-btn" onClick={() => onCancelQueuedJob?.(activeJob?.id)} type="button">{t("action.cancelReservation")}</button>
+          ) : null}
+          <button
+            className="toolbar-btn"
+            onClick={onRequestStop}
+            type="button"
+            disabled={!canRequestStop}
+            style={canRequestStop ? { color: "var(--danger)" } : {}}
+          >
+            <StopIcon /><span>{t("action.stop")}</span>
+          </button>
+        </div>
       </div>
 
       {/* ── Failure card ── */}
@@ -364,44 +378,27 @@ export function ParallelRunControlView({
         </div>
       ) : null}
 
-      {/* ── Flow chart ── */}
-      <div className="content-card content-card--flow">
-        <div className="content-card__header">
-          <strong>{t("run.flowChart")}</strong>
-          <div className="flow-action-bar">
-            <label className="auto-run-badge">
-              <input type="checkbox" checked={Boolean(autoRunAfterPlan)} onChange={(event) => onAutoRunAfterPlanChange?.(event.target.checked)} disabled={busy} />
-              <span>{t("run.autoRunAfterPlan")}</span>
-              <span className={`status-badge status-badge--${autoRunAfterPlan ? "info" : "neutral"}`} style={{ fontSize: "11px" }}>
-                {autoRunAfterPlan ? t("common.on") : t("common.off")}
-              </span>
-            </label>
-            <div className="toolbar-divider" />
-            <button className="toolbar-button" onClick={onGeneratePlan} type="button" disabled={busy}><GenerateIcon />{t("action.generate")}</button>
-            <button className="toolbar-button" onClick={onSavePlan} type="button" disabled={busy}><SaveIcon />{t("action.save")}</button>
-            <button className="toolbar-button toolbar-button--ghost" onClick={onResetPlan} type="button" disabled={busy}><ResetIcon />{t("action.reset")}</button>
-            <div className="toolbar-divider" />
-            <button className="toolbar-button toolbar-button--accent" onClick={onRunPlan} type="button" disabled={busy}><RunIcon />{t("action.run")}</button>
-            {canCancelReservation ? (
-              <button className="toolbar-button toolbar-button--ghost" onClick={() => onCancelQueuedJob?.(activeJob?.id)} type="button">{t("action.cancelReservation")}</button>
-            ) : null}
-            <button
-              className="toolbar-button toolbar-button--ghost"
-              onClick={onRequestStop}
-              type="button"
-              disabled={!canRequestStop}
-              style={canRequestStop ? { color: "var(--danger)", borderColor: "rgba(200,93,97,0.4)" } : {}}
-            >
-              <StopIcon />{t("action.stop")}
-            </button>
-          </div>
-        </div>
+      {/* ── Prompt (compact collapsible) ── */}
+      <div className="run-prompt-strip">
+        <textarea
+          className="run-prompt-strip__input"
+          value={promptDraft}
+          onChange={(event) => setPromptDraft(event.target.value)}
+          onBlur={() => { if (promptDraft !== promptValue) onPromptChange?.(promptDraft); }}
+          disabled={busy}
+          rows={2}
+          placeholder={language === "ko" ? "프로젝트 프롬프트..." : "Project prompt…"}
+        />
+        <span className="run-prompt-strip__count">{livePlan?.project_prompt?.length || 0}</span>
+      </div>
 
+      {/* ── Flow chart (main area) ── */}
+      <div className="run-flow-area">
         {steps.length ? (
           <ExecutionFlowChart steps={steps} projectStatus={projectStatus} language={language} selectedStepId={selectedStepId} onSelectStep={onSelectStep} />
         ) : (
-          <div className="empty-block">
-            <svg viewBox="0 0 48 48" fill="none">
+          <div className="empty-block" style={{ margin: "40px auto" }}>
+            <svg viewBox="0 0 48 48" fill="none" style={{ width: 48, height: 48 }}>
               <circle cx="24" cy="24" r="18" stroke="currentColor" strokeWidth="1.8" strokeDasharray="5 4" />
               <path d="M16 24l6 6 10-12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -413,186 +410,87 @@ export function ParallelRunControlView({
         )}
       </div>
 
-      {/* ── Lower section ── */}
-      <div className="run-layout">
-        {/* Prompt */}
-        <div className="content-card">
-          <div className="content-card__header">
-            <strong>{t("field.prompt")}</strong>
-            <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
-              {livePlan?.project_prompt?.length || 0} {language === "ko" ? "자" : "chars"}
-            </span>
+      {/* ── Queue (inline if any) ── */}
+      {queuedJobs.length ? (
+        <div className="run-queue-strip">
+          <strong>{t("run.reservations")} ({queuedJobs.length})</strong>
+          <div className="run-queue-strip__list">
+            {queuedJobs.map((job) => (
+              <div key={job.id} className="run-queue-strip__item">
+                <span>{reservationProjectLabel(job, t("project.none"))}</span>
+                <span className="status-badge status-badge--info" style={{ fontSize: "10px" }}>#{queuedPosition(job?.queue_position)}</span>
+                <button className="toolbar-btn" onClick={() => onCancelQueuedJob?.(job.id)} type="button" style={{ fontSize: "10px", padding: "2px 4px" }}>{t("action.cancelReservation")}</button>
+              </div>
+            ))}
           </div>
-          <textarea
-            className="editor-textarea editor-textarea--prompt"
-            value={promptDraft}
-            onChange={(event) => setPromptDraft(event.target.value)}
-            onBlur={() => {
-              if (promptDraft !== promptValue) {
-                onPromptChange?.(promptDraft);
-              }
-            }}
-            disabled={busy}
-            placeholder={language === "ko" ? "이 프로젝트에서 AI가 수행할 작업을 설명하세요..." : "Describe what the AI should accomplish in this project…"}
-          />
         </div>
+      ) : null}
 
-        {/* Queue */}
-        <div className="content-card">
-          <div className="content-card__header">
-            <strong>{t("run.reservations")}</strong>
-            <span className={`status-badge status-badge--${queuedJobs.length ? "info" : "neutral"}`}>{queuedJobs.length}</span>
-          </div>
-          {queuedJobs.length ? (
-            <div className="step-editor-grid">
-              {queuedJobs.map((job) => (
-                <div key={job.id} className="field field--wide" style={{ padding: "8px 10px", background: "var(--bg-panel-alt)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
-                    <strong>{reservationProjectLabel(job, t("project.none"))}</strong>
-                    <span className={`status-badge status-badge--${statusTone(`queued:${job?.command || ""}`)}`} style={{ fontSize: "11px" }}>
-                      {displayStatus(`queued:${job?.command || ""}`, language)}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>{commandLabel(job?.command, language)}</span>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "6px" }}>
-                    <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
-                      {t("run.queuePosition", { position: queuedPosition(job?.queue_position) })} · {t("run.queuePriority", { priority: Number.parseInt(String(job?.queue_priority ?? 0), 10) || 0 })}
-                    </span>
-                    <button className="toolbar-button toolbar-button--ghost" onClick={() => onCancelQueuedJob?.(job.id)} type="button" style={{ padding: "4px 8px", fontSize: "11px" }}>
-                      {t("action.cancelReservation")}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="empty-block">
-              <QueueMetricIcon />
-              <span>{t("run.noReservations")}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Step editor */}
-        <div className="content-card">
-          <div className="content-card__header">
-            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-              <strong>{t("run.selectedStep")}</strong>
-              {selectedStep ? <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>{selectedStep.step_id}</span> : null}
-            </div>
+      {/* ── Step editor (below flow) ── */}
+      {selectedStep ? (
+        <div className="run-step-editor">
+          <div className="run-step-editor__header">
+            <strong>{selectedStep.step_id}: {selectedStep.title || t("run.selectedStep")}</strong>
             <span className={`status-badge status-badge--${statusTone(selectedStepStatus)}`}>
-              {selectedStep ? displayStatus(selectedStepStatus, language) : t("common.none")}
+              {displayStatus(selectedStepStatus, language)}
             </span>
           </div>
 
-          {selectedStep ? (
-            selectedSystemStep ? (
-              <div className="step-editor-grid">
-                <div className="field field--wide"><span>{t("field.title")}</span><strong>{selectedStep.title || t("run.closeout")}</strong></div>
-                <div className="field field--wide"><span>{t("field.description")}</span><p>{selectedStep.display_description || t("run.noSummary")}</p></div>
-                <div className="field field--wide"><span>{t("field.dependsOn")}</span><p>{(selectedStep.depends_on || []).join(", ") || t("common.none")}</p></div>
-                <div className="field field--wide"><span>{t("field.successCriteria")}</span><p>{selectedStep.success_criteria || t("run.noSummary")}</p></div>
-                {selectedStep.notes ? <div className="field field--wide"><span>{t("common.status")}</span><p>{selectedStep.notes}</p></div> : null}
-              </div>
-            ) : (
-              <div className="step-fields-2col">
-                {/* Time estimate */}
-                {selectedStepEstimate ? (
-                  <div className="field field--wide">
-                    <div style={{ display: "flex", gap: "16px", padding: "8px 10px", background: "var(--bg-panel-alt)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
-                      <div>
-                        <span style={{ fontSize: "10.5px", color: "var(--text-dim)", display: "block" }}>{language === "ko" ? "예상 시간" : "Estimated"}</span>
-                        <strong style={{ fontSize: "13px" }}>{formatDurationCompact(selectedStepEstimate?.estimated_duration_seconds ?? 0, language)}</strong>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: "10.5px", color: "var(--text-dim)", display: "block" }}>{t("run.currentRemaining")}</span>
-                        <strong style={{ fontSize: "13px" }}>{formatDurationCompact(selectedStepEstimate?.remaining_seconds ?? 0, language)}</strong>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                <label className="field field--wide">
-                  <span>{t("field.title")}</span>
-                  <input value={selectedStep.title || ""} onChange={(event) => onUpdateStepField("title", event.target.value)} disabled={!editableStep} />
-                </label>
-
-                <label className="field">
-                  <span>{t("field.gptReasoning")}</span>
-                  <select value={selectedStep.reasoning_effort || detail?.runtime?.effort || "high"} onChange={(event) => onUpdateStepField("reasoning_effort", event.target.value)} disabled={!editableStep}>
-                    {REASONING_OPTIONS.map((effort) => (
-                      <option key={effort} value={effort}>{reasoningEffortLabel(effort, language)}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="field">
-                  <span>{t("field.modelProvider")}</span>
-                  <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStep}>
-                    <option value="">{autoProviderLabel(language)}</option>
-                    {providerOptions.map(([value, label]) => (
-                      <option key={value} value={value} disabled={!providerAvailable(value, codexStatus)} title={providerStatusReason(value, codexStatus)}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedStep.model_provider && !providerAvailable(selectedStep.model_provider, codexStatus) && providerStatusReason(selectedStep.model_provider, codexStatus) ? (
-                    <small className="field-hint" style={{ color: "var(--warning)" }}>{providerStatusReason(selectedStep.model_provider, codexStatus)}</small>
-                  ) : null}
-                </label>
-
-                <label className="field field--wide">
-                  <span>{t("field.model")}</span>
-                  <input value={selectedStep.model || ""} placeholder={stepModelPlaceholder(selectedStep, detail?.runtime)} onChange={(event) => onUpdateStepField("model", event.target.value)} disabled={!editableStep} />
-                  <small className="field-hint">{stepAutoModelHint(language, detail?.runtime)}</small>
-                </label>
-
-                <label className="field field--wide">
-                  <span>{t("field.dependsOn")}</span>
-                  <input value={(selectedStep.depends_on || []).join(", ")} onChange={(event) => onUpdateStepField("depends_on", normalizeListText(event.target.value))} disabled={!editableStep} placeholder="step_id1, step_id2" />
-                </label>
-
-                <label className="field field--wide">
-                  <span>{t("field.ownedPaths")}</span>
-                  <textarea value={(selectedStep.owned_paths || []).join("\n")} onChange={(event) => onUpdateStepField("owned_paths", normalizeListText(event.target.value))} disabled={!editableStep} placeholder={language === "ko" ? "한 줄에 하나씩 파일 경로" : "One file path per line"} style={{ minHeight: "60px" }} />
-                </label>
-
-                <label className="field field--wide">
-                  <span>{t("field.description")}</span>
-                  <textarea value={selectedStep.display_description || ""} onChange={(event) => onUpdateStepField("display_description", event.target.value)} disabled={!editableStep} style={{ minHeight: "72px" }} />
-                </label>
-
-                <label className="field field--wide">
-                  <span>{t("field.codexInstruction")}</span>
-                  <textarea value={selectedStep.codex_description || ""} onChange={(event) => onUpdateStepField("codex_description", event.target.value)} disabled={!editableStep} style={{ minHeight: "72px" }} />
-                </label>
-
-                <label className="field field--wide">
-                  <span>{t("field.successCriteria")}</span>
-                  <textarea value={selectedStep.success_criteria || ""} onChange={(event) => onUpdateStepField("success_criteria", event.target.value)} disabled={!editableStep} style={{ minHeight: "60px" }} />
-                </label>
-
-                <div className="action-row field--wide" style={{ paddingTop: "8px", borderTop: "1px solid var(--border)" }}>
-                  <button className="toolbar-button toolbar-button--accent" onClick={onSaveStepLocal} type="button" disabled={busy}><SaveIcon />{t("action.saveLocal")}</button>
-                  <button className="toolbar-button" onClick={onAddStep} type="button" disabled={busy}>{t("action.add")}</button>
-                  <button className="toolbar-button toolbar-button--ghost" onClick={onDeleteStep} type="button" disabled={!editableStep} style={editableStep ? { color: "var(--danger)" } : {}}>{t("action.delete")}</button>
-                </div>
-              </div>
-            )
+          {selectedSystemStep ? (
+            <div className="step-editor-grid">
+              <div className="field field--wide"><span>{t("field.description")}</span><p>{selectedStep.display_description || t("run.noSummary")}</p></div>
+              <div className="field field--wide"><span>{t("field.dependsOn")}</span><p>{(selectedStep.depends_on || []).join(", ") || t("common.none")}</p></div>
+              {selectedStep.notes ? <div className="field field--wide"><span>{t("common.status")}</span><p>{selectedStep.notes}</p></div> : null}
+            </div>
           ) : (
-            <div className="empty-block">
-              <svg viewBox="0 0 48 48" fill="none">
-                <rect x="8" y="8" width="32" height="32" rx="4" stroke="currentColor" strokeWidth="1.8" />
-                <path d="M16 24h16M22 18l6 6-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span>{t("run.selectStep")}</span>
-              <span style={{ fontSize: "12px", color: "var(--text-dim)" }}>
-                {language === "ko" ? "위 흐름도에서 단계를 클릭하세요." : "Click a step in the flow chart above."}
-              </span>
+            <div className="step-fields-2col">
+              {selectedStepEstimate ? (
+                <div className="field field--wide">
+                  <div style={{ display: "flex", gap: "16px", padding: "6px 10px", background: "var(--bg-panel-alt)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", fontSize: "11px" }}>
+                    <div><span style={{ color: "var(--text-dim)" }}>{language === "ko" ? "예상" : "Est."}</span> <strong>{formatDurationCompact(selectedStepEstimate?.estimated_duration_seconds ?? 0, language)}</strong></div>
+                    <div><span style={{ color: "var(--text-dim)" }}>{t("run.currentRemaining")}</span> <strong>{formatDurationCompact(selectedStepEstimate?.remaining_seconds ?? 0, language)}</strong></div>
+                  </div>
+                </div>
+              ) : null}
+
+              <label className="field field--wide"><span>{t("field.title")}</span><input value={selectedStep.title || ""} onChange={(event) => onUpdateStepField("title", event.target.value)} disabled={!editableStep} /></label>
+
+              <label className="field"><span>{t("field.gptReasoning")}</span>
+                <select value={selectedStep.reasoning_effort || detail?.runtime?.effort || "high"} onChange={(event) => onUpdateStepField("reasoning_effort", event.target.value)} disabled={!editableStep}>
+                  {REASONING_OPTIONS.map((effort) => (<option key={effort} value={effort}>{reasoningEffortLabel(effort, language)}</option>))}
+                </select>
+              </label>
+
+              <label className="field"><span>{t("field.modelProvider")}</span>
+                <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStep}>
+                  <option value="">{autoProviderLabel(language)}</option>
+                  {providerOptions.map(([value, label]) => (<option key={value} value={value} disabled={!providerAvailable(value, codexStatus)} title={providerStatusReason(value, codexStatus)}>{label}</option>))}
+                </select>
+                {selectedStep.model_provider && !providerAvailable(selectedStep.model_provider, codexStatus) && providerStatusReason(selectedStep.model_provider, codexStatus) ? (
+                  <small className="field-hint" style={{ color: "var(--warning)" }}>{providerStatusReason(selectedStep.model_provider, codexStatus)}</small>
+                ) : null}
+              </label>
+
+              <label className="field field--wide"><span>{t("field.model")}</span>
+                <input value={selectedStep.model || ""} placeholder={stepModelPlaceholder(selectedStep, detail?.runtime)} onChange={(event) => onUpdateStepField("model", event.target.value)} disabled={!editableStep} />
+                <small className="field-hint">{stepAutoModelHint(language, detail?.runtime)}</small>
+              </label>
+
+              <label className="field field--wide"><span>{t("field.dependsOn")}</span><input value={(selectedStep.depends_on || []).join(", ")} onChange={(event) => onUpdateStepField("depends_on", normalizeListText(event.target.value))} disabled={!editableStep} placeholder="step_id1, step_id2" /></label>
+              <label className="field field--wide"><span>{t("field.ownedPaths")}</span><textarea value={(selectedStep.owned_paths || []).join("\n")} onChange={(event) => onUpdateStepField("owned_paths", normalizeListText(event.target.value))} disabled={!editableStep} placeholder={language === "ko" ? "한 줄에 하나씩 파일 경로" : "One file path per line"} style={{ minHeight: "48px" }} /></label>
+              <label className="field field--wide"><span>{t("field.description")}</span><textarea value={selectedStep.display_description || ""} onChange={(event) => onUpdateStepField("display_description", event.target.value)} disabled={!editableStep} style={{ minHeight: "56px" }} /></label>
+              <label className="field field--wide"><span>{t("field.codexInstruction")}</span><textarea value={selectedStep.codex_description || ""} onChange={(event) => onUpdateStepField("codex_description", event.target.value)} disabled={!editableStep} style={{ minHeight: "56px" }} /></label>
+              <label className="field field--wide"><span>{t("field.successCriteria")}</span><textarea value={selectedStep.success_criteria || ""} onChange={(event) => onUpdateStepField("success_criteria", event.target.value)} disabled={!editableStep} style={{ minHeight: "48px" }} /></label>
+
+              <div className="action-row field--wide" style={{ paddingTop: "6px", borderTop: "1px solid var(--border)" }}>
+                <button className="toolbar-btn toolbar-btn--accent" onClick={onSaveStepLocal} type="button" disabled={busy}><SaveIcon /><span>{t("action.saveLocal")}</span></button>
+                <button className="toolbar-btn" onClick={onAddStep} type="button" disabled={busy}><span>{t("action.add")}</span></button>
+                <button className="toolbar-btn" onClick={onDeleteStep} type="button" disabled={!editableStep} style={editableStep ? { color: "var(--danger)" } : {}}><span>{t("action.delete")}</span></button>
+              </div>
             </div>
           )}
         </div>
-      </div>
+      ) : null}
     </section>
   );
 }

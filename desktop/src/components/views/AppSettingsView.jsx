@@ -202,6 +202,13 @@ export function AppSettingsView({
             />
 
             <ToggleRow
+              checked={Boolean(settings.compact_mode)}
+              onChange={(event) => onChangeSettings((current) => ({ ...current, compact_mode: event.target.checked }))}
+              label={language === "ko" ? "컴팩트 모드" : "Compact Mode"}
+              hint={language === "ko" ? "패널 크기와 여백을 줄여 정보 밀도 증가" : "Reduce panel sizes and padding for higher information density"}
+            />
+
+            <ToggleRow
               checked={Boolean(settings.developer_mode)}
               onChange={(event) =>
                 onChangeSettings((current) => ({

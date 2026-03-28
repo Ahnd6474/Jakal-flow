@@ -2539,6 +2539,36 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertFalse(background_error, str(background_error[0]) if background_error else "")
         self.assertEqual(synced_statuses, ["integrating", "running"])
 
+    def test_build_parallel_worker_paths_includes_lineage_state_file(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_worker_paths_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            execution_mode="parallel",
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            worker_paths = orchestrator._build_parallel_worker_paths(
+                context,
+                batch_token="batch-demo",
+                worker_slug="01-st1",
+                worktree_dir=repo_dir,
+            )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(worker_paths.lineage_state_file, worker_paths.state_dir / "LINEAGES.json")
+
     def test_parallel_batch_merge_conflict_invokes_merger_and_continues(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_merge_debugger_test"
         shutil.rmtree(temp_root, ignore_errors=True)

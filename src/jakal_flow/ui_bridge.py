@@ -14,6 +14,7 @@ from typing import Any
 
 from .bridge_events import emit_bridge_event
 from .codex_app_server import fetch_codex_backend_snapshot
+from .failure_logs import write_runtime_failure_log
 from .model_constants import AUTO_MODEL_SLUG, DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER
 from .execution_control import EXECUTION_STOP_REGISTRY, execution_scope_id
 from .optimization import normalize_optimization_mode
@@ -366,6 +367,7 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         approval_mode="never",
         sandbox_mode="danger-full-access",
         allow_push=True,
+        auto_merge_pull_request=True,
         checkpoint_interval_blocks=1,
         require_checkpoint_approval=False,
         generate_word_report=True,
@@ -428,6 +430,7 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         default=3,
     )
     merged["allow_push"] = coerce_bool(merged.get("allow_push", True), True)
+    merged["auto_merge_pull_request"] = coerce_bool(merged.get("auto_merge_pull_request", True), True)
     merged["allow_background_queue"] = coerce_bool(merged.get("allow_background_queue", True), True)
     merged["background_queue_priority"] = coerce_int(merged.get("background_queue_priority", 0), default=0)
     merged["require_checkpoint_approval"] = coerce_bool(
@@ -584,6 +587,16 @@ def resolve_history_project(
     raise ValueError("archive_id is required.")
 
 
+def best_effort_project(
+    orchestrator: Orchestrator,
+    payload: dict[str, Any],
+) -> ProjectContext | None:
+    try:
+        return resolve_project(orchestrator, payload)
+    except Exception:
+        return None
+
+
 def append_ui_event(context: ProjectContext, event_type: str, message: str, details: dict[str, Any] | None = None) -> None:
     payload = {
         "timestamp": now_utc_iso(),
@@ -725,14 +738,25 @@ def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | No
     handler = bridge_command_handlers().get(command)
     if handler is None:
         raise ValueError(f"Unsupported bridge command: {command}")
-    result = handler(
-        BridgeCommandContext(
-            workspace_root=workspace_root,
-            payload=payload,
-            orchestrator=orchestrator,
-            detail_payload=detail_payload,
+    try:
+        result = handler(
+            BridgeCommandContext(
+                workspace_root=workspace_root,
+                payload=payload,
+                orchestrator=orchestrator,
+                detail_payload=detail_payload,
+            )
         )
-    )
+    except Exception as exc:
+        write_runtime_failure_log(
+            workspace_root,
+            source="ui-bridge",
+            command=command,
+            exc=exc,
+            payload=payload,
+            project=best_effort_project(orchestrator, payload),
+        )
+        raise
     _bridge_perf_log(workspace_root, command, payload, result, (perf_counter() - command_started_at) * 1000.0)
     return result
 

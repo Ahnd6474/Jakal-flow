@@ -161,6 +161,78 @@ class GitHubClient:
         )
         return payload if isinstance(payload, dict) else {}
 
+    def get_pull_request(self, owner: str, repo: str, pull_number: int) -> dict:
+        if not self.token:
+            raise GitHubAPIError("PR 조회에는 GitHub Personal Access Token 이 필요합니다.")
+        url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}"
+        payload = self._request_json(url)
+        if not isinstance(payload, dict):
+            raise GitHubAPIError("GitHub PR 응답 형식이 올바르지 않습니다.")
+        return payload
+
+    def enable_pull_request_auto_merge(
+        self,
+        owner: str,
+        repo: str,
+        pull_number: int,
+        *,
+        merge_method: str = "SQUASH",
+    ) -> dict:
+        if not self.token:
+            raise GitHubAPIError("PR auto-merge 활성화에는 GitHub Personal Access Token 이 필요합니다.")
+        pull_request = self.get_pull_request(owner, repo, pull_number)
+        node_id = str(pull_request.get("node_id", "")).strip()
+        if not node_id:
+            raise GitHubAPIError("PR node_id 를 찾을 수 없어 auto-merge 를 활성화할 수 없습니다.")
+        payload = self._request_json(
+            "https://api.github.com/graphql",
+            method="POST",
+            payload={
+                "query": (
+                    "mutation EnablePullRequestAutoMerge($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) { "
+                    "enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId, mergeMethod: $mergeMethod}) { "
+                    "pullRequest { number autoMergeRequest { enabledAt } } } }"
+                ),
+                "variables": {
+                    "pullRequestId": node_id,
+                    "mergeMethod": str(merge_method or "SQUASH").strip().upper(),
+                },
+            },
+        )
+        if not isinstance(payload, dict):
+            raise GitHubAPIError("GitHub GraphQL auto-merge 응답 형식이 올바르지 않습니다.")
+        errors = payload.get("errors", [])
+        if isinstance(errors, list) and errors:
+            messages = ", ".join(str(item.get("message", "")).strip() for item in errors if isinstance(item, dict))
+            raise GitHubAPIError(messages or "GitHub auto-merge 활성화에 실패했습니다.")
+        data = payload.get("data", {})
+        if not isinstance(data, dict):
+            raise GitHubAPIError("GitHub auto-merge 응답에 data 필드가 없습니다.")
+        result = data.get("enablePullRequestAutoMerge", {})
+        if not isinstance(result, dict):
+            raise GitHubAPIError("GitHub auto-merge 응답에 enablePullRequestAutoMerge 필드가 없습니다.")
+        return result
+
+    def merge_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        pull_number: int,
+        *,
+        merge_method: str = "squash",
+        commit_title: str = "",
+    ) -> dict:
+        if not self.token:
+            raise GitHubAPIError("PR merge 에는 GitHub Personal Access Token 이 필요합니다.")
+        url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}/merge"
+        payload = {
+            "merge_method": str(merge_method or "squash").strip().lower() or "squash",
+        }
+        if commit_title.strip():
+            payload["commit_title"] = commit_title.strip()
+        result = self._request_json(url, method="PUT", payload=payload)
+        return result if isinstance(result, dict) else {}
+
     def _parse_repo(self, item: dict) -> GitHubRepository:
         return GitHubRepository(
             name=item.get("name", ""),

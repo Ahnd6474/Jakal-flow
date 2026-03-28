@@ -116,12 +116,12 @@ function EmptyCheckpointsIcon() {
 function SidebarSectionTabs({ activeTab, onChange, tabs }) {
   return (
     <div className="sidebar-rail">
-      {tabs.map(([value, icon, label]) => (
+      {tabs.map(([value, icon, label], index) => (
         <button
           key={value}
           className={`sidebar-icon ${activeTab === value ? "active" : ""}`}
           onClick={() => onChange(value)}
-          title={label}
+          title={`${label} (Alt+${index + 1})`}
           type="button"
           aria-pressed={activeTab === value}
         >

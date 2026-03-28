@@ -362,18 +362,19 @@ export function applyProgramSettingsToForm(form, programSettings) {
 }
 
 export function syncProgramSettingsModel(programSettings = {}, runtime = {}) {
-  return programSettingsFromRuntime({
-    ...(cloneValue(programSettings) || {}),
-    model_provider: runtime?.model_provider ?? programSettings?.model_provider,
-    local_model_provider: runtime?.local_model_provider ?? programSettings?.local_model_provider,
-    ensemble_openai_model: runtime?.ensemble_openai_model ?? programSettings?.ensemble_openai_model,
-    ensemble_gemini_model: runtime?.ensemble_gemini_model ?? programSettings?.ensemble_gemini_model,
-    ensemble_claude_model: runtime?.ensemble_claude_model ?? programSettings?.ensemble_claude_model,
-    model: runtime?.model ?? programSettings?.model,
-    model_preset: runtime?.model_preset ?? programSettings?.model_preset,
-    model_selection_mode: runtime?.model_selection_mode ?? programSettings?.model_selection_mode,
-    model_slug_input: runtime?.model_slug_input ?? programSettings?.model_slug_input,
-  });
+  const base = programSettingsFromRuntime(cloneValue(programSettings) || {});
+  return {
+    ...base,
+    model_provider: runtime?.model_provider ?? programSettings?.model_provider ?? base.model_provider,
+    local_model_provider: runtime?.local_model_provider ?? programSettings?.local_model_provider ?? base.local_model_provider,
+    ensemble_openai_model: runtime?.ensemble_openai_model ?? programSettings?.ensemble_openai_model ?? base.ensemble_openai_model,
+    ensemble_gemini_model: runtime?.ensemble_gemini_model ?? programSettings?.ensemble_gemini_model ?? base.ensemble_gemini_model,
+    ensemble_claude_model: runtime?.ensemble_claude_model ?? programSettings?.ensemble_claude_model ?? base.ensemble_claude_model,
+    model: runtime?.model ?? programSettings?.model ?? base.model,
+    model_preset: runtime?.model_preset ?? programSettings?.model_preset ?? base.model_preset,
+    model_selection_mode: runtime?.model_selection_mode ?? programSettings?.model_selection_mode ?? base.model_selection_mode,
+    model_slug_input: runtime?.model_slug_input ?? programSettings?.model_slug_input ?? base.model_slug_input,
+  };
 }
 
 export function normalizeMemoryBudgetGiB(value, fallback = 3) {

@@ -158,7 +158,7 @@ class GitOpsTests(unittest.TestCase):
         self.assertEqual(blocker_contents, "dist/\n")
 
     def test_changed_files_ignores_untracked_tmp_scratch_directories(self) -> None:
-        repo_dir = Path(__file__).resolve().parents[1] / ".tmp_git_ops_scratch_filter_test"
+        repo_dir = Path(__file__).resolve().parents[1] / ".tmp_git_ops_runtime_scratch_filter_test"
         shutil.rmtree(repo_dir, ignore_errors=True)
         git = GitOps()
         git.ensure_repository(repo_dir, "main")
@@ -182,7 +182,7 @@ class GitOpsTests(unittest.TestCase):
         self.assertTrue(has_changes)
 
     def test_has_changes_returns_false_for_only_untracked_tmp_scratch_directories(self) -> None:
-        repo_dir = Path(__file__).resolve().parents[1] / ".tmp_git_ops_only_scratch_filter_test"
+        repo_dir = Path(__file__).resolve().parents[1] / ".tmp_git_ops_runtime_only_scratch_filter_test"
         shutil.rmtree(repo_dir, ignore_errors=True)
         git = GitOps()
         git.ensure_repository(repo_dir, "main")

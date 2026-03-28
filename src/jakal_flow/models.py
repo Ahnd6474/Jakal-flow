@@ -108,6 +108,7 @@ class RuntimeOptions:
     test_cmd: str = "python -m pytest"
     max_blocks: int = 1
     allow_push: bool = False
+    auto_merge_pull_request: bool = False
     codex_path: str = field(default_factory=default_codex_path)
     git_user_name: str = "jakal-flow-bot"
     git_user_email: str = "jakal-flow@example.invalid"

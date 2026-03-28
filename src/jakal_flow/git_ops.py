@@ -183,6 +183,23 @@ class GitOps:
     def push(self, repo_dir: Path, branch: str) -> None:
         self.run(["push", "origin", branch], cwd=repo_dir)
 
+    def push_refspec(self, repo_dir: Path, local_ref: str, remote_branch: str, force: bool = False) -> None:
+        refspec = f"{local_ref.strip()}:refs/heads/{remote_branch.strip()}"
+        args = ["push", "origin"]
+        if force:
+            args.append("--force-with-lease")
+        args.append(refspec)
+        self.run(args, cwd=repo_dir)
+
+    def fetch(self, repo_dir: Path, remote_name: str, branch: str = "") -> None:
+        args = ["fetch", remote_name]
+        if branch.strip():
+            args.append(branch.strip())
+        self.run(args, cwd=repo_dir)
+
+    def pull_ff_only(self, repo_dir: Path, remote_name: str, branch: str) -> None:
+        self.run(["pull", "--ff-only", remote_name, branch], cwd=repo_dir)
+
     def delete_remote_branch(self, repo_dir: Path, remote_name: str, branch_name: str) -> None:
         self.run(["push", remote_name, "--delete", branch_name], cwd=repo_dir)
 

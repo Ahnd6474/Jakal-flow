@@ -491,8 +491,9 @@ def report_payload(context: ProjectContext) -> dict[str, Any]:
             if isinstance(block_index, int) and block_index >= 0
             else None
         )
-        artifact_files = []
-        if block_dir is not None and block_dir.exists():
+        artifact_files = bundle_json.get("artifact_files", []) if isinstance(bundle_json, dict) else []
+        artifact_files = artifact_files if isinstance(artifact_files, list) else []
+        if not artifact_files and block_dir is not None and block_dir.exists():
             try:
                 artifact_files = [
                     str(path)
@@ -514,6 +515,7 @@ def report_payload(context: ProjectContext) -> dict[str, Any]:
             "block_index": block_index if isinstance(block_index, int) else None,
             "block_dir": str(block_dir) if block_dir is not None else "",
             "artifact_files": artifact_files,
+            "artifacts": bundle_json.get("artifacts", []) if isinstance(bundle_json, dict) and isinstance(bundle_json.get("artifacts", []), list) else [],
         }
     return {
         "closeout_report_text": preview_text(
@@ -545,8 +547,9 @@ def latest_failure_payload(context: ProjectContext) -> dict[str, Any]:
         if isinstance(block_index, int) and block_index >= 0
         else None
     )
-    artifact_files = []
-    if block_dir is not None and block_dir.exists():
+    artifact_files = bundle_json.get("artifact_files", []) if isinstance(bundle_json, dict) else []
+    artifact_files = artifact_files if isinstance(artifact_files, list) else []
+    if not artifact_files and block_dir is not None and block_dir.exists():
         try:
             artifact_files = [
                 str(path)
@@ -568,6 +571,7 @@ def latest_failure_payload(context: ProjectContext) -> dict[str, Any]:
         "block_index": block_index if isinstance(block_index, int) else None,
         "block_dir": str(block_dir) if block_dir is not None else "",
         "artifact_files": artifact_files,
+        "artifacts": bundle_json.get("artifacts", []) if isinstance(bundle_json, dict) and isinstance(bundle_json.get("artifacts", []), list) else [],
     }
 
 
@@ -1109,8 +1113,11 @@ def project_detail_payload(
     perf_details["codex_status_ms"] = round((perf_counter() - codex_started_at) * 1000.0, 3)
     if isinstance(codex_status, dict):
         provider_statuses_started_at = perf_counter()
-        if refresh_codex_status:
-            codex_status["provider_statuses"] = provider_statuses_payload(fetch_snapshot=fetch_codex_status)
+        codex_status["provider_statuses"] = (
+            provider_statuses_payload(fetch_snapshot=fetch_codex_status)
+            if refresh_codex_status
+            else provider_statuses_payload()
+        )
         perf_details["provider_statuses_ms"] = round((perf_counter() - provider_statuses_started_at) * 1000.0, 3)
     finalize_started_at = perf_counter()
     payload = _finalize_project_detail_payload(

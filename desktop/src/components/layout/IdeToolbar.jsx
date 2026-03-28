@@ -2,17 +2,15 @@ import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import { commandLabel, isDebuggingStatus, isPlanningProgressRunning, projectStatusWithJob, statusTone, toolbarProgressCaptionDisplay } from "../../utils";
 
+/* ── Compact SVG icons ── */
 function AppLogo() {
   return (
     <div className="toolbar-logo">
-      <div className="toolbar-logo__icon">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M2 17l10 5 10-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M2 12l10 5 10-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-      <span className="toolbar-logo__name">jakal-flow</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M2 17l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
     </div>
   );
 }
@@ -23,18 +21,6 @@ function RefreshIcon() {
       <path d="M1 4v6h6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M23 20v-6h-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function SettingsIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="3" stroke="currentColor" />
-      <path
-        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-        stroke="currentColor"
-      />
     </svg>
   );
 }
@@ -64,16 +50,19 @@ function CheckIcon() {
   );
 }
 
-function ProjectIcon() {
+function SettingsIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" width="11" height="11" aria-hidden="true">
-      <path
-        d="M4.75 7.25A2.5 2.5 0 0 1 7.25 4.75h5.1c.66 0 1.3.26 1.77.73l5.15 5.15c.47.47.73 1.1.73 1.77v4.35a2.5 2.5 0 0 1-2.5 2.5h-10a2.5 2.5 0 0 1-2.5-2.5v-9.5Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path d="M13 4.9v5.35a1 1 0 0 0 1 1h5.1" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" stroke="currentColor" />
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" stroke="currentColor" />
+    </svg>
+  );
+}
+
+function ChevronRight() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="9 18 15 12 9 6" />
     </svg>
   );
 }
@@ -113,17 +102,15 @@ export function IdeToolbar({
     activeJob,
     planningProgress: projectDetail?.planning_progress,
   });
-
   const tone = statusTone(projectStatus);
 
   return (
     <header className="ide-toolbar">
-      {/* Branding */}
+      {/* Logo + Refresh */}
       <div className="ide-toolbar__group">
         <AppLogo />
-        <div className="toolbar-divider" />
         <button
-          className="toolbar-button toolbar-button--ghost toolbar-button--icon-only"
+          className="toolbar-btn toolbar-btn--icon"
           onClick={onRefresh}
           title={t("action.refresh")}
           type="button"
@@ -133,80 +120,79 @@ export function IdeToolbar({
         </button>
       </div>
 
-      {/* Status info */}
-      <div className="ide-toolbar__group ide-toolbar__group--grow">
-        <div className="toolbar-chip">
-          <ProjectIcon />
-          <span>{t("common.project")}</span>
+      {/* Breadcrumb: Project > Status > Plan */}
+      <nav className="ide-toolbar__breadcrumb" aria-label="Navigation">
+        <span className="breadcrumb-segment">
           <strong>{projectName || t("project.none")}</strong>
-        </div>
-
-        <div className={`toolbar-status toolbar-status--${tone}`}>
+        </span>
+        <ChevronRight />
+        <span className={`breadcrumb-segment breadcrumb-segment--${tone}`}>
           <span className={`chip-dot chip-dot--${tone}`} />
-          <span>{t("common.status")}</span>
-          <strong>{statusLabel}</strong>
-        </div>
-
-        {pendingCheckpoint ? (
-          <div className="toolbar-status toolbar-status--warning">
-            <span className="chip-dot chip-dot--warning" />
-            <span>{t("dashboard.checkpointPending")}</span>
-            <strong>{pendingCheckpoint.checkpoint_id || t("common.yes")}</strong>
-          </div>
+          {statusLabel}
+        </span>
+        {planStatusLabel ? (
+          <>
+            <ChevronRight />
+            <span className="breadcrumb-segment breadcrumb-segment--dim">{planStatusLabel}</span>
+          </>
         ) : null}
+        {pendingCheckpoint ? (
+          <>
+            <ChevronRight />
+            <span className="breadcrumb-segment breadcrumb-segment--warning">
+              <span className="chip-dot chip-dot--warning" />
+              {pendingCheckpoint.checkpoint_id || t("dashboard.checkpointPending")}
+            </span>
+          </>
+        ) : null}
+      </nav>
 
-        <div className="toolbar-status toolbar-status--neutral">
-          <span>{t("toolbar.plan")}</span>
-          <strong>{planStatusLabel}</strong>
-        </div>
-      </div>
-
-      {/* Actions */}
+      {/* Quick actions */}
       <div className="ide-toolbar__group">
         <button
-          className={`toolbar-button ${activeCenterTab === "app-settings" ? "toolbar-button--accent" : "toolbar-button--ghost"}`}
+          className={`toolbar-btn ${activeCenterTab === "app-settings" ? "toolbar-btn--active" : ""}`}
           onClick={onOpenSettings}
           title={`${t("toolbar.programSettings")} (Ctrl+6)`}
           type="button"
+          aria-label={t("toolbar.programSettings")}
         >
           <SettingsIcon />
-          {t("toolbar.programSettings")}
         </button>
 
         <div className="toolbar-divider" />
 
         <button
-          className="toolbar-button"
+          className="toolbar-btn"
           onClick={onGeneratePlan}
           type="button"
           disabled={busy}
           title={t("action.generatePlan")}
         >
           <PlanIcon />
-          {t("action.generatePlan")}
+          <span>{t("action.generatePlan")}</span>
         </button>
 
         <button
-          className="toolbar-button toolbar-button--accent"
+          className="toolbar-btn toolbar-btn--accent"
           onClick={onRunPlan}
           type="button"
           disabled={busy}
           title={t("action.runRemaining")}
         >
           <RunIcon />
-          {t("action.runRemaining")}
+          <span>{t("action.runRemaining")}</span>
         </button>
 
         {pendingCheckpoint ? (
           <button
-            className="toolbar-button toolbar-button--accent"
+            className="toolbar-btn toolbar-btn--accent"
             onClick={onApproveCheckpoint}
             type="button"
             disabled={busy}
             title={t("action.approveCheckpoint")}
           >
             <CheckIcon />
-            {t("action.approveCheckpoint")}
+            <span>{t("action.approveCheckpoint")}</span>
           </button>
         ) : null}
       </div>
