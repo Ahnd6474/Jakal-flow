@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 from .codex_runner import CodexRunner
+from .errors import JSON_PARSE_EXCEPTIONS
 from .execution_control import execution_scope_id, run_subprocess_capture
 from .models import ExecutionPlanState, ProjectContext
 from .model_providers import normalize_model_provider
@@ -233,10 +234,51 @@ def _read_jsonl_txt(path: Path) -> list[dict[str, Any]]:
             continue
         try:
             payload = parse_json_text(raw)
-        except Exception:
+        except JSON_PARSE_EXCEPTIONS:
             continue
         if isinstance(payload, dict):
             items.append(payload)
+    return items
+
+
+def _iter_text_lines_from_end(path: Path, chunk_size: int = 8192):
+    file_size = path.stat().st_size
+    if file_size <= 0:
+        return
+    with path.open("rb") as handle:
+        position = file_size
+        remainder = b""
+        while position > 0:
+            read_size = min(chunk_size, position)
+            position -= read_size
+            handle.seek(position)
+            chunk = handle.read(read_size)
+            buffer = chunk + remainder
+            parts = buffer.split(b"\n")
+            remainder = parts[0]
+            for line in reversed(parts[1:]):
+                yield line.rstrip(b"\r").decode("utf-8", errors="replace")
+        if remainder:
+            yield remainder.rstrip(b"\r").decode("utf-8", errors="replace")
+
+
+def _read_jsonl_txt_tail(path: Path, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0 or not path.exists():
+        return []
+    items: list[dict[str, Any]] = []
+    for line in _iter_text_lines_from_end(path):
+        raw = line.strip()
+        if not raw:
+            continue
+        try:
+            payload = parse_json_text(raw)
+        except JSON_PARSE_EXCEPTIONS:
+            continue
+        if isinstance(payload, dict):
+            items.append(payload)
+        if len(items) >= limit:
+            break
+    items.reverse()
     return items
 
 
@@ -439,10 +481,12 @@ def load_chat_messages(
     session_key = str(session_id or "").strip()
     if not session_key:
         return []
-    messages = [ChatMessageEntry.from_dict(item) for item in _read_jsonl_txt(chat_message_log_file(context, session_key))]
-    if limit is not None and limit > 0 and len(messages) > limit:
-        return messages[-limit:]
-    return messages
+    log_file = chat_message_log_file(context, session_key)
+    if limit is not None and limit > 0:
+        raw_items = _read_jsonl_txt_tail(log_file, limit)
+    else:
+        raw_items = _read_jsonl_txt(log_file)
+    return [ChatMessageEntry.from_dict(item) for item in raw_items]
 
 
 def _save_chat_message(
@@ -593,6 +637,8 @@ def chat_payload(
     session_id: str = "",
     activate: bool = False,
     message_limit: int = 80,
+    include_messages: bool = True,
+    include_summary: bool = True,
 ) -> dict[str, Any]:
     sessions = load_chat_sessions(context)
     session_map = {session.session_id: session for session in sessions}
@@ -610,8 +656,12 @@ def chat_payload(
     messages = [
         entry.to_dict()
         for entry in load_chat_messages(context, active_session_id, limit=message_limit)
-    ] if active_session else []
-    summary_text = read_text(Path(active_session.summary_file)) if active_session and active_session.summary_file else ""
+    ] if active_session and include_messages else []
+    summary_text = (
+        read_text(Path(active_session.summary_file))
+        if active_session and active_session.summary_file and include_summary
+        else ""
+    )
     transcript_file = active_session.transcript_file if active_session else ""
     summary_file = active_session.summary_file if active_session else ""
     return {

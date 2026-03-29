@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { memo, startTransition, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import {
   applyProviderDefaults,
+  cloneValue,
   defaultCodexPath,
   defaultProviderApiKeyEnv,
   defaultProviderBaseUrl,
@@ -11,6 +12,7 @@ import {
   providerAvailable,
   providerUsable,
   providerStatusReason,
+  programSettingsEqual,
   programSettingsAllowsModelSlugInput,
   REASONING_OPTIONS,
   reasoningEffortLabel,
@@ -105,8 +107,73 @@ function SectionHeader({ icon, title, description, badge }) {
 }
 
 const SETTINGS_TAB_KEYS = new Set(["app", "execution", "dashboard", "share"]);
+const PROVIDER_CATEGORIES = [
+  {
+    key: "closed",
+    label_ko: "클로즈드",
+    label_en: "Closed",
+    providers: [
+      { value: "openai", label: "OpenAI" },
+      { value: "claude", label: "Claude" },
+      { value: "gemini", label: "Gemini" },
+    ],
+  },
+  {
+    key: "opensource",
+    label_ko: "오픈소스",
+    label_en: "OpenSource",
+    providers: [
+      { value: "qwen_code", label: "Qwen Code" },
+      { value: "deepseek", label: "DeepSeek" },
+      { value: "kimi", label: "Kimi" },
+      { value: "minimax", label: "MiniMax" },
+      { value: "glm", label: "GLM" },
+      { value: "openrouter", label: "OpenRouter" },
+      { value: "opencdk", label: "OpenCDK" },
+    ],
+  },
+  {
+    key: "oss",
+    label_ko: "OSS",
+    label_en: "OSS",
+    providers: [
+      { value: "ollama", label: "Ollama" },
+      { value: "local_openai", label: "Local OpenAI" },
+      { value: "oss", label: "LM Studio / OSS" },
+    ],
+  },
+  {
+    key: "ensemble",
+    label_ko: "앙상블",
+    label_en: "Ensemble",
+    providers: [
+      { value: "ensemble", label: "Claude + GPT Ensemble", label_ko: "Claude + GPT 앙상블" },
+    ],
+  },
+];
 
-export function AppSettingsView({
+function cloneSettings(value) {
+  return cloneValue(value && typeof value === "object" ? value : {});
+}
+
+function sameSettingsSnapshot(left, right) {
+  return programSettingsEqual(left, right);
+}
+
+function appSettingsViewPropsEqual(previousProps, nextProps) {
+  return (
+    programSettingsEqual(previousProps.settings, nextProps.settings)
+    && previousProps.codexStatus === nextProps.codexStatus
+    && previousProps.shareSettings === nextProps.shareSettings
+    && previousProps.shareDetail === nextProps.shareDetail
+    && previousProps.busy === nextProps.busy
+    && previousProps.shareBusy === nextProps.shareBusy
+    && previousProps.dirty === nextProps.dirty
+    && previousProps.initialSettingsTab === nextProps.initialSettingsTab
+  );
+}
+
+export const AppSettingsView = memo(function AppSettingsView({
   settings,
   codexStatus,
   shareSettings,
@@ -126,66 +193,52 @@ export function AppSettingsView({
     SETTINGS_TAB_KEYS.has(initialSettingsTab) ? initialSettingsTab : "app"
   ));
   const { language, languageOptions, setLanguage, t } = useI18n();
+  const [draftSettings, setDraftSettings] = useState(() => cloneSettings(settings));
+  const [localDirty, setLocalDirty] = useState(false);
+  const lastIncomingSettingsRef = useRef(cloneSettings(settings));
   const planningReasoningLabel = language === "ko" ? "계획 추론" : "Planning Reasoning";
-
   const settingsTabs = [
-    { key: "app",       label: language === "ko" ? "애플리케이션" : "Application" },
-    { key: "execution", label: language === "ko" ? "실행 설정"   : "Execution" },
-    { key: "dashboard", label: language === "ko" ? "대시보드"    : "Dashboard" },
-    { key: "share",     label: language === "ko" ? "공유"        : "Share" },
+    { key: "app", label: language === "ko" ? "애플리케이션" : "Application" },
+    { key: "execution", label: language === "ko" ? "실행 설정" : "Execution" },
+    { key: "dashboard", label: language === "ko" ? "대시보드" : "Dashboard" },
+    { key: "share", label: language === "ko" ? "공유" : "Share" },
   ];
   const activeShare = shareDetail?.active_session || shareDetail?.project_active_session || null;
   const shareServer = shareDetail?.server || null;
-  const selectedProvider = normalizedModelProvider(settings);
-  const dashboardVisibility = normalizeDashboardVisibility(settings?.dashboard_visibility);
+  const selectedProvider = normalizedModelProvider(draftSettings);
+  const dashboardVisibility = normalizeDashboardVisibility(draftSettings?.dashboard_visibility);
   const runtimeBusy = busy;
-  const autoParallelWorkers = String(settings?.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
-  const comingSoonLabel = language === "ko" ? "추가 예정" : "Coming soon";
+  const autoParallelWorkers = String(draftSettings?.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
 
-  const PROVIDER_CATEGORIES = [
-    {
-      key: "closed",
-      label_ko: "클로즈드",
-      label_en: "Closed",
-      providers: [
-        { value: "openai",  label: "OpenAI" },
-        { value: "claude",  label: "Claude" },
-        { value: "gemini",  label: "Gemini" },
-      ],
-    },
-    {
-      key: "opensource",
-      label_ko: "오픈소스",
-      label_en: "OpenSource",
-      providers: [
-        { value: "qwen_code",   label: "Qwen Code" },
-        { value: "deepseek",    label: "DeepSeek" },
-        { value: "kimi",        label: "Kimi" },
-        { value: "minimax",     label: "MiniMax" },
-        { value: "glm",         label: "GLM" },
-        { value: "openrouter",  label: "OpenRouter" },
-        { value: "opencdk",     label: "OpenCDK" },
-      ],
-    },
-    {
-      key: "oss",
-      label_ko: "OSS",
-      label_en: "OSS",
-      providers: [
-        { value: "ollama",       label: "Ollama" },
-        { value: "local_openai", label: "Local OpenAI" },
-        { value: "oss",          label: "LM Studio / OSS" },
-      ],
-    },
-    {
-      key: "ensemble",
-      label_ko: "앙상블",
-      label_en: "Ensemble",
-      providers: [
-        { value: "ensemble", label: language === "ko" ? "Claude + GPT 앙상블" : "Claude + GPT Ensemble" },
-      ],
-    },
-  ];
+  useEffect(() => {
+    if (!sameSettingsSnapshot(settings, lastIncomingSettingsRef.current)) {
+      const nextSettings = cloneSettings(settings);
+      lastIncomingSettingsRef.current = nextSettings;
+      setDraftSettings(nextSettings);
+      setLocalDirty(false);
+    }
+  }, [settings]);
+
+  function updateDraftSettings(updater) {
+    setDraftSettings((current) => {
+      const nextDraft = typeof updater === "function" ? updater(current) : updater;
+      return cloneSettings(nextDraft);
+    });
+    setLocalDirty(true);
+  }
+
+  function handleSaveSettings() {
+    const nextSettings = cloneSettings(draftSettings);
+    if (typeof onSaveSettings === "function") {
+      startTransition(() => {
+        onSaveSettings(nextSettings);
+      });
+    } else if (typeof onChangeSettings === "function") {
+      startTransition(() => {
+        onChangeSettings(nextSettings);
+      });
+    }
+  }
 
   function categoryForProvider(provider) {
     for (const cat of PROVIDER_CATEGORIES) {
@@ -228,9 +281,9 @@ export function AppSettingsView({
         </div>
         <button
           className="toolbar-button toolbar-button--accent"
-          onClick={onSaveSettings}
+          onClick={handleSaveSettings}
           type="button"
-          disabled={busy || !dirty}
+          disabled={busy || !(localDirty || dirty)}
         >
           {t("action.saveProgramSettings")}
         </button>
@@ -274,23 +327,23 @@ export function AppSettingsView({
             </label>
 
             <ToggleRow
-              checked={settings.ui_theme === "light"}
-              onChange={(event) => onChangeSettings((current) => ({ ...current, ui_theme: event.target.checked ? "light" : "dark" }))}
+              checked={draftSettings.ui_theme === "light"}
+              onChange={(event) => updateDraftSettings((current) => ({ ...current, ui_theme: event.target.checked ? "light" : "dark" }))}
               label={t("option.lightMode")}
               hint={language === "ko" ? "밝은 배경의 라이트 테마로 전환" : "Switch to light background theme"}
             />
 
             <ToggleRow
-              checked={Boolean(settings.compact_mode)}
-              onChange={(event) => onChangeSettings((current) => ({ ...current, compact_mode: event.target.checked }))}
+              checked={Boolean(draftSettings.compact_mode)}
+              onChange={(event) => updateDraftSettings((current) => ({ ...current, compact_mode: event.target.checked }))}
               label={language === "ko" ? "컴팩트 모드" : "Compact Mode"}
               hint={language === "ko" ? "패널 크기와 여백을 줄여 정보 밀도 증가" : "Reduce panel sizes and padding for higher information density"}
             />
 
             <ToggleRow
-              checked={Boolean(settings.developer_mode)}
+              checked={Boolean(draftSettings.developer_mode)}
               onChange={(event) =>
-                onChangeSettings((current) => ({
+                updateDraftSettings((current) => ({
                   ...current,
                   developer_mode: event.target.checked,
                   save_project_logs: event.target.checked ? Boolean(current.save_project_logs) : false,
@@ -300,10 +353,10 @@ export function AppSettingsView({
               hint={language === "ko" ? "리포트 탭 및 추가 디버그 정보 표시" : "Show reports tab and extra debug info"}
             />
 
-            {Boolean(settings.developer_mode) ? (
+            {Boolean(draftSettings.developer_mode) ? (
               <ToggleRow
-                checked={Boolean(settings.save_project_logs)}
-                onChange={(event) => onChangeSettings((current) => ({ ...current, save_project_logs: event.target.checked }))}
+                checked={Boolean(draftSettings.save_project_logs)}
+                onChange={(event) => updateDraftSettings((current) => ({ ...current, save_project_logs: event.target.checked }))}
                 label={t("option.saveProjectLogs")}
                 hint={language === "ko" ? "각 단계의 실행 로그를 파일로 저장" : "Persist execution logs to disk for each step"}
               />
@@ -333,7 +386,7 @@ export function AppSettingsView({
                       type="checkbox"
                       checked={Boolean(dashboardVisibility[key])}
                       onChange={(event) =>
-                        onChangeSettings((current) => ({
+                        updateDraftSettings((current) => ({
                           ...current,
                           dashboard_visibility: {
                             ...normalizeDashboardVisibility(current?.dashboard_visibility),
@@ -370,13 +423,13 @@ export function AppSettingsView({
               {/* Category tabs */}
               <div className="provider-category-tabs">
                 {PROVIDER_CATEGORIES.map((cat) => (
-                  <button
-                    key={cat.key}
-                    className={`provider-cat-tab ${activeCategory === cat.key ? "active" : ""}`}
-                    onClick={() => {
-                      const first = cat.providers[0].value;
-                      onChangeSettings((current) => applyProviderDefaults(current, first));
-                    }}
+                      <button
+                        key={cat.key}
+                        className={`provider-cat-tab ${activeCategory === cat.key ? "active" : ""}`}
+                        onClick={() => {
+                          const first = cat.providers[0].value;
+                          updateDraftSettings((current) => applyProviderDefaults(current, first));
+                        }}
                     type="button"
                     disabled={runtimeBusy}
                   >
@@ -388,18 +441,19 @@ export function AppSettingsView({
               {/* Sub-provider buttons */}
               {activeCategory !== "ensemble" ? (
                 <div className="provider-sub-grid" style={{ marginTop: "8px" }}>
-                  {activeCategoryConfig.providers.map(({ value, label }) => {
+                  {activeCategoryConfig.providers.map(({ value, label, label_ko: labelKo }) => {
                     const installed = providerAvailable(value, codexStatus);
+                    const displayLabel = language === "ko" ? (labelKo || label) : label;
                     return (
                       <button
                         key={value}
                         className={`provider-sub-card ${selectedProvider === value ? "active" : ""}`}
-                        onClick={() => onChangeSettings((current) => applyProviderDefaults(current, value))}
+                        onClick={() => updateDraftSettings((current) => applyProviderDefaults(current, value))}
                         type="button"
                         disabled={runtimeBusy}
                         title={!installed ? providerStatusReason(value, codexStatus) : undefined}
                       >
-                        <span className="provider-sub-card__name">{label}</span>
+                        <span className="provider-sub-card__name">{displayLabel}</span>
                         {!installed ? (
                           <span className="provider-sub-card__badge">
                             {language === "ko" ? "미설치" : "not installed"}
@@ -436,8 +490,8 @@ export function AppSettingsView({
               <label className="field">
                 <span>{t("field.localProvider")}</span>
                 <select
-                  value={settings.local_model_provider || "ollama"}
-                  onChange={(event) => onChangeSettings((current) => ({ ...current, local_model_provider: event.target.value }))}
+                  value={draftSettings.local_model_provider || "ollama"}
+                  onChange={(event) => updateDraftSettings((current) => ({ ...current, local_model_provider: event.target.value }))}
                   disabled={runtimeBusy}
                 >
                   <option value="ollama">{t("option.localProviderOllama")}</option>
@@ -450,8 +504,8 @@ export function AppSettingsView({
               <label className="field">
                 <span>{t("field.providerBaseUrl")}</span>
                 <input
-                  value={settings.provider_base_url || defaultProviderBaseUrl(settings.model_provider)}
-                  onChange={(event) => onChangeSettings((current) => ({ ...current, provider_base_url: event.target.value }))}
+                  value={draftSettings.provider_base_url || defaultProviderBaseUrl(draftSettings.model_provider)}
+                  onChange={(event) => updateDraftSettings((current) => ({ ...current, provider_base_url: event.target.value }))}
                   disabled={runtimeBusy}
                 />
               </label>
@@ -461,8 +515,8 @@ export function AppSettingsView({
               <label className="field">
                 <span>{t("field.providerApiKeyEnv")}</span>
                 <input
-                  value={settings.provider_api_key_env || defaultProviderApiKeyEnv(settings.model_provider)}
-                  onChange={(event) => onChangeSettings((current) => ({ ...current, provider_api_key_env: event.target.value }))}
+                  value={draftSettings.provider_api_key_env || defaultProviderApiKeyEnv(draftSettings.model_provider)}
+                  onChange={(event) => updateDraftSettings((current) => ({ ...current, provider_api_key_env: event.target.value }))}
                   disabled={runtimeBusy}
                 />
                 <small className="field-hint">
@@ -475,9 +529,9 @@ export function AppSettingsView({
               <label className="field">
                 <span>{t("field.customModelSlug")}</span>
                 <input
-                  value={settings.model_slug_input || settings.model || ""}
+                  value={draftSettings.model_slug_input || draftSettings.model || ""}
                   onChange={(event) =>
-                    onChangeSettings((current) => {
+                    updateDraftSettings((current) => {
                       const nextModel = event.target.value.trim().toLowerCase();
                       return {
                         ...current,
@@ -498,8 +552,8 @@ export function AppSettingsView({
               <label className="field">
                 <span>{t("field.approvalMode")}</span>
                 <select
-                  value={settings.approval_mode || "never"}
-                  onChange={(event) => onChangeSettings((current) => ({ ...current, approval_mode: event.target.value }))}
+                  value={draftSettings.approval_mode || "never"}
+                  onChange={(event) => updateDraftSettings((current) => ({ ...current, approval_mode: event.target.value }))}
                   disabled={runtimeBusy}
                 >
                   <option value="never">never</option>
@@ -511,8 +565,8 @@ export function AppSettingsView({
               <label className="field">
                 <span>{t("field.sandboxMode")}</span>
                 <select
-                  value={settings.sandbox_mode || "danger-full-access"}
-                  onChange={(event) => onChangeSettings((current) => ({ ...current, sandbox_mode: event.target.value }))}
+                  value={draftSettings.sandbox_mode || "danger-full-access"}
+                  onChange={(event) => updateDraftSettings((current) => ({ ...current, sandbox_mode: event.target.value }))}
                   disabled={runtimeBusy}
                 >
                   <option value="danger-full-access">danger-full-access</option>
@@ -524,8 +578,8 @@ export function AppSettingsView({
               <label className="field">
                 <span>{t("field.workflowMode")}</span>
                 <select
-                  value={settings.workflow_mode || "standard"}
-                  onChange={(event) => onChangeSettings((current) => ({ ...current, workflow_mode: event.target.value }))}
+                  value={draftSettings.workflow_mode || "standard"}
+                  onChange={(event) => updateDraftSettings((current) => ({ ...current, workflow_mode: event.target.value }))}
                   disabled={busy}
                 >
                   <option value="standard">{t("option.workflowStandard")}</option>
@@ -536,8 +590,8 @@ export function AppSettingsView({
               <label className="field">
                 <span>{planningReasoningLabel}</span>
                 <select
-                  value={settings.planning_effort || settings.effort || "medium"}
-                  onChange={(event) => onChangeSettings((current) => ({ ...current, planning_effort: event.target.value }))}
+                  value={draftSettings.planning_effort || draftSettings.effort || "medium"}
+                  onChange={(event) => updateDraftSettings((current) => ({ ...current, planning_effort: event.target.value }))}
                   disabled={busy}
                 >
                   {REASONING_OPTIONS.map((effort) => (
@@ -553,9 +607,9 @@ export function AppSettingsView({
                 <input
                   type="number"
                   min="1"
-                  value={settings.checkpoint_interval_blocks || 1}
+                  value={draftSettings.checkpoint_interval_blocks || 1}
                   onChange={(event) =>
-                    onChangeSettings((current) => ({
+                    updateDraftSettings((current) => ({
                       ...current,
                       checkpoint_interval_blocks: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
                     }))
@@ -569,9 +623,9 @@ export function AppSettingsView({
                 <input
                   type="number"
                   min="1"
-                  value={settings.ml_max_cycles || 3}
+                  value={draftSettings.ml_max_cycles || 3}
                   onChange={(event) =>
-                    onChangeSettings((current) => ({
+                    updateDraftSettings((current) => ({
                       ...current,
                       ml_max_cycles: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
                     }))
@@ -590,7 +644,7 @@ export function AppSettingsView({
               <ToggleRow
                 checked={autoParallelWorkers}
                 onChange={(event) =>
-                  onChangeSettings((current) => ({
+                  updateDraftSettings((current) => ({
                     ...current,
                     parallel_worker_mode: event.target.checked ? "auto" : "manual",
                     parallel_workers: event.target.checked
@@ -607,11 +661,11 @@ export function AppSettingsView({
                 <label className="field">
                   <span>{t("field.parallelWorkers")}</span>
                   <input
-                    type="number"
-                    min="1"
-                    value={settings.parallel_workers > 0 ? settings.parallel_workers : 4}
-                    onChange={(event) =>
-                      onChangeSettings((current) => ({
+                  type="number"
+                  min="1"
+                  value={draftSettings.parallel_workers > 0 ? draftSettings.parallel_workers : 4}
+                  onChange={(event) =>
+                      updateDraftSettings((current) => ({
                         ...current,
                         parallel_workers: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
                       }))
@@ -623,12 +677,12 @@ export function AppSettingsView({
                 <label className="field">
                   <span>{t("field.parallelMemoryPerWorkerGiB")}</span>
                   <input
-                    type="number"
-                    min="0.1"
-                    step="0.1"
-                    value={settings.parallel_memory_per_worker_gib || 3}
-                    onChange={(event) =>
-                      onChangeSettings((current) => ({
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={draftSettings.parallel_memory_per_worker_gib || 3}
+                  onChange={(event) =>
+                      updateDraftSettings((current) => ({
                         ...current,
                         parallel_memory_per_worker_gib: normalizeMemoryBudgetGiB(
                           event.target.value,
@@ -643,11 +697,11 @@ export function AppSettingsView({
                 <label className="field">
                   <span>{t("field.backgroundConcurrencyLimit")}</span>
                   <input
-                    type="number"
-                    min="1"
-                    value={settings.background_concurrency_limit || 2}
-                    onChange={(event) =>
-                      onChangeSettings((current) => ({
+                  type="number"
+                  min="1"
+                  value={draftSettings.background_concurrency_limit || 2}
+                  onChange={(event) =>
+                      updateDraftSettings((current) => ({
                         ...current,
                         background_concurrency_limit: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
                       }))
@@ -658,8 +712,8 @@ export function AppSettingsView({
                 <label className="field">
                   <span>{t("field.codexPath")}</span>
                   <input
-                    value={settings.codex_path || defaultCodexPath(settings.model_provider)}
-                    onChange={(event) => onChangeSettings((current) => ({ ...current, codex_path: event.target.value }))}
+                    value={draftSettings.codex_path || defaultCodexPath(draftSettings.model_provider)}
+                    onChange={(event) => updateDraftSettings((current) => ({ ...current, codex_path: event.target.value }))}
                     disabled={runtimeBusy}
                   />
                 </label>
@@ -669,15 +723,15 @@ export function AppSettingsView({
             {/* Toggle options */}
             <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "4px" }}>
               <ToggleRow
-                checked={Boolean(settings.allow_push)}
-                onChange={(event) => onChangeSettings((current) => ({ ...current, allow_push: event.target.checked }))}
+                checked={Boolean(draftSettings.allow_push)}
+                onChange={(event) => updateDraftSettings((current) => ({ ...current, allow_push: event.target.checked }))}
                 label={t("option.allowPushAfterSafeRuns")}
                 disabled={runtimeBusy}
               />
               <ToggleRow
-                checked={Boolean(settings.require_checkpoint_approval)}
+                checked={Boolean(draftSettings.require_checkpoint_approval)}
                 onChange={(event) =>
-                  onChangeSettings((current) => ({
+                  updateDraftSettings((current) => ({
                     ...current,
                     require_checkpoint_approval: event.target.checked,
                   }))
@@ -760,4 +814,4 @@ export function AppSettingsView({
       </div>
     </section>
   );
-}
+}, appSettingsViewPropsEqual);

@@ -1,6 +1,7 @@
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
+import { arePropsEqualExceptFunctions } from "../../shallowProps";
 import { statusTone } from "../../utils";
 
 /* ── Rail icons ── */
@@ -185,40 +186,118 @@ function filterPreparedTree(node, normalizedQuery) {
   return null;
 }
 
-const TreeNode = memo(function TreeNode({ node, depth = 0, filter = "" }) {
-  const query = filter.trim().toLowerCase();
-  const [open, setOpen] = useState(depth < 1);
-  const isFolder = node.kind === "dir" || node.kind === "directory" || Boolean((node.children || []).length);
-  const children = node.children || [];
-  const visible = query ? true : open;
+const TREE_ROW_HEIGHT = 28;
+const TREE_OVERSCAN_ROWS = 10;
+const TREE_DEFAULT_VIEWPORT_HEIGHT = 420;
+
+function isTreeFolder(node = null) {
+  return node?.kind === "dir" || node?.kind === "directory" || Boolean((node?.children || []).length);
+}
+
+function defaultTreeExpanded(path = "", depth = 0) {
+  return depth < 1 || path === "/";
+}
+
+function buildVisibleTreeRows(nodes = [], expandedPaths = {}, normalizedQuery = "", depth = 0, rows = []) {
+  (nodes || []).forEach((node) => {
+    const isFolder = isTreeFolder(node);
+    const path = String(node?.path || `${node?.label || "node"}-${depth}`).trim();
+    const isExpanded = normalizedQuery ? true : expandedPaths[path] ?? defaultTreeExpanded(path, depth);
+    rows.push({
+      key: path || `${node?.label || "node"}-${depth}-${rows.length}`,
+      path,
+      label: node?.label || "",
+      kind: node?.kind || "file",
+      depth,
+      isFolder,
+      isExpanded,
+    });
+    if (isFolder && node?.children?.length && isExpanded) {
+      buildVisibleTreeRows(node.children, expandedPaths, normalizedQuery, depth + 1, rows);
+    }
+  });
+  return rows;
+}
+
+const WorkspaceTreeView = memo(function WorkspaceTreeView({
+  rows = [],
+  query = "",
+  onToggle = null,
+  language = "en",
+  emptyLabel = "",
+}) {
+  const containerRef = useRef(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(TREE_DEFAULT_VIEWPORT_HEIGHT);
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  const virtualizationEnabled = typeof window !== "undefined" && rows.length > 80;
 
   useEffect(() => {
-    if (query) {
-      setOpen(true);
+    if (!virtualizationEnabled || !containerRef.current || typeof ResizeObserver === "undefined") {
+      return undefined;
     }
-  }, [query]);
+    const node = containerRef.current;
+    const observer = new ResizeObserver((entries) => {
+      const nextHeight = Math.max(TREE_ROW_HEIGHT * 4, Math.round(entries[0]?.contentRect?.height || TREE_DEFAULT_VIEWPORT_HEIGHT));
+      setViewportHeight(nextHeight);
+    });
+    observer.observe(node);
+    setViewportHeight(Math.max(TREE_ROW_HEIGHT * 4, Math.round(node.clientHeight || TREE_DEFAULT_VIEWPORT_HEIGHT)));
+    return () => observer.disconnect();
+  }, [virtualizationEnabled]);
+
+  useEffect(() => {
+    setScrollTop(0);
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
+    }
+  }, [normalizedQuery]);
+
+  if (!rows.length) {
+    return (
+      <div className="empty-block">
+        <EmptyWorkspaceIcon />
+        <span>{emptyLabel}</span>
+      </div>
+    );
+  }
+
+  const totalHeight = rows.length * TREE_ROW_HEIGHT;
+  const startIndex = virtualizationEnabled ? Math.max(0, Math.floor(scrollTop / TREE_ROW_HEIGHT) - TREE_OVERSCAN_ROWS) : 0;
+  const visibleRowCount = virtualizationEnabled ? Math.ceil(viewportHeight / TREE_ROW_HEIGHT) + TREE_OVERSCAN_ROWS * 2 : rows.length;
+  const endIndex = Math.min(rows.length, startIndex + visibleRowCount);
+  const visibleRows = rows.slice(startIndex, endIndex);
+  const topOffset = startIndex * TREE_ROW_HEIGHT;
+  const bottomOffset = Math.max(0, totalHeight - topOffset - visibleRows.length * TREE_ROW_HEIGHT);
 
   return (
-    <div className="tree-node" style={{ "--tree-depth": depth }}>
-      <button
-        className={`tree-node__row tree-node__row--${node.kind || "file"} ${isFolder ? "tree-node__row--folder" : ""}`}
-        onClick={() => {
-          if (isFolder && !query) {
-            setOpen((current) => !current);
-          }
-        }}
-        type="button"
-      >
-        <span className="tree-node__prefix">{isFolder ? (visible ? "▾" : "▸") : "·"}</span>
-        <span>{node.label}</span>
-      </button>
-      {children.length && visible ? (
-        <div className="tree-node__children">
-          {children.map((child) => (
-            <TreeNode key={`${child.path}-${child.label}`} node={child} depth={depth + 1} filter={filter} />
-          ))}
-        </div>
-      ) : null}
+    <div
+      ref={containerRef}
+      className="sidebar-tree"
+      onScroll={virtualizationEnabled ? (event) => setScrollTop(event.currentTarget.scrollTop) : undefined}
+    >
+      <div style={{ paddingTop: `${topOffset}px`, paddingBottom: `${bottomOffset}px` }}>
+        {visibleRows.map((row) => (
+          <button
+            key={row.key}
+            className={`tree-node__row tree-node__row--${row.kind || "file"} ${row.isFolder ? "tree-node__row--folder" : ""}`}
+            onClick={() => {
+              if (row.isFolder && !normalizedQuery) {
+                onToggle?.(row.path, row.isExpanded);
+              }
+            }}
+            type="button"
+            style={{
+              paddingLeft: `${12 + row.depth * 16}px`,
+              minHeight: `${TREE_ROW_HEIGHT}px`,
+            }}
+            title={row.path || row.label}
+          >
+            <span className="tree-node__prefix">{row.isFolder ? (row.isExpanded ? "▾" : "▸") : "·"}</span>
+            <span>{row.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 });
@@ -660,7 +739,7 @@ function CheckpointsPanel({ checkpoints, visibleCheckpoints, language, t }) {
 }
 
 /* ── Main SidebarPane ── */
-export function SidebarPane({
+export const SidebarPane = memo(function SidebarPane({
   activeTab,
   onChangeTab,
   projects = [],
@@ -689,10 +768,10 @@ export function SidebarPane({
   planPrompt = "",
 }) {
   const { language, t } = useI18n();
-  const deferredProjectFilter = useDeferredValue(projectFilter);
   const workspaceTabActive = activeTab === "workspace";
   const deferredWorkspaceFilter = useDeferredValue(workspaceFilter);
   const workspaceFilterCacheRef = useRef(new Map());
+  const [expandedWorkspacePaths, setExpandedWorkspacePaths] = useState({});
   const normalizedWorkspaceTree = useMemo(
     () => (workspaceTabActive ? (workspaceTree || []).map((node) => normalizeTree(node)) : []),
     [workspaceTabActive, workspaceTree],
@@ -710,6 +789,9 @@ export function SidebarPane({
   }, [activeTab, checkpoints]);
 
   useEffect(() => { workspaceFilterCacheRef.current.clear(); }, [normalizedWorkspaceTree]);
+  useEffect(() => {
+    setExpandedWorkspacePaths({});
+  }, [normalizedWorkspaceTree]);
 
   const filteredWorkspaceTree = useMemo(() => {
     if (!workspaceTabActive) {
@@ -728,32 +810,10 @@ export function SidebarPane({
     workspaceFilterCacheRef.current.set(normalizedQuery, nextTree);
     return nextTree;
   }, [deferredWorkspaceFilter, normalizedWorkspaceTree, workspaceTabActive]);
-
-  const visibleProjects = useMemo(() => {
-    const query = deferredProjectFilter.trim().toLowerCase();
-    if (!query) {
-      return projects;
-    }
-    return (projects || []).filter((project) =>
-      [project.display_name, project.slug, project.status, project.detail, project.repo_path]
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [deferredProjectFilter, projects]);
-
-  const visibleHistoryProjects = useMemo(() => {
-    const query = deferredProjectFilter.trim().toLowerCase();
-    if (!query) {
-      return historyProjects;
-    }
-    return (historyProjects || []).filter((project) =>
-      [project.display_name, project.slug, project.status, project.detail, project.repo_path]
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [deferredProjectFilter, historyProjects]);
+  const flattenedWorkspaceRows = useMemo(
+    () => buildVisibleTreeRows(filteredWorkspaceTree, expandedWorkspacePaths, deferredWorkspaceFilter.trim().toLowerCase()),
+    [deferredWorkspaceFilter, expandedWorkspacePaths, filteredWorkspaceTree],
+  );
 
   const tabs = [
     ["workspace", <SidebarExplorerIcon key="workspace-icon" />, t("sidebar.explorer")],
@@ -797,8 +857,8 @@ export function SidebarPane({
               </button>
 
               <div className="sidebar-list">
-                {visibleProjects.length ? (
-                  visibleProjects.map((project) => {
+                {projects.length ? (
+                  projects.map((project) => {
                     const tone = statusTone(project?.status);
                     return (
                       <button
@@ -841,8 +901,8 @@ export function SidebarPane({
               />
 
               <div className="sidebar-list">
-                {visibleHistoryProjects.length ? (
-                  visibleHistoryProjects.map((project) => {
+                {historyProjects.length ? (
+                  historyProjects.map((project) => {
                     const tone = statusTone(project?.status);
                     return (
                       <button
@@ -885,18 +945,18 @@ export function SidebarPane({
                 placeholder={t("sidebar.searchFiles")}
               />
 
-              <div className="sidebar-tree">
-                {filteredWorkspaceTree.length ? (
-                  filteredWorkspaceTree.map((node) => (
-                    <TreeNode key={node.path} node={node} filter={deferredWorkspaceFilter} />
-                  ))
-                ) : (
-                  <div className="empty-block">
-                    <EmptyWorkspaceIcon />
-                    <span>{t("sidebar.emptyWorkspace")}</span>
-                  </div>
-                )}
-              </div>
+              <WorkspaceTreeView
+                rows={flattenedWorkspaceRows}
+                query={deferredWorkspaceFilter}
+                language={language}
+                emptyLabel={t("sidebar.emptyWorkspace")}
+                onToggle={(path, isExpanded) =>
+                  setExpandedWorkspacePaths((current) => ({
+                    ...current,
+                    [path]: !(current[path] ?? isExpanded),
+                  }))
+                }
+              />
             </>
           ) : null}
 
@@ -933,4 +993,4 @@ export function SidebarPane({
       ) : null}
     </aside>
   );
-}
+}, arePropsEqualExceptFunctions);

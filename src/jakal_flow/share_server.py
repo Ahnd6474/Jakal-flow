@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from ._version import __version__
+from .errors import HANDLED_OPERATION_EXCEPTIONS
 from .orchestrator import Orchestrator
 from .run_control import request_stop_after_current_step
 from .share import (
@@ -131,12 +132,12 @@ class ShareRemoteControlManager:
         project_dir = Path(str(payload.get("project_dir", "")).strip()).expanduser()
         try:
             run_command("run-plan", self.workspace_root, payload)
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
             orchestrator = Orchestrator(self.workspace_root)
             project = None
             try:
                 project = orchestrator.workspace.load_project_by_id(repo_id)
-            except Exception:
+            except (LookupError, ValueError, OSError):
                 project = orchestrator.local_project(project_dir) if str(project_dir) else None
             if project is not None:
                 self._append_project_event(

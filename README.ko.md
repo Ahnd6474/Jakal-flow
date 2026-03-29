@@ -90,9 +90,12 @@ workspace_root/
 
 이 구조 덕분에 멀티 리포지토리 이력과 추적 정보가 프로젝트별로 분리됩니다.
 
+Contract-wave 메타데이터는 각 프로젝트의 `state/` 와 `docs/` 아래에 유지되며, `SPINE.json`, `COMMON_REQUIREMENTS.json`, `CONTRACT_WAVE_AUDIT.jsonl`, `state/lineage_manifests/`, `docs/SHARED_CONTRACTS.md`를 포함합니다.
+
 ## 데스크톱 UI
 
 데스크톱 앱은 같은 Python 백엔드 위에 올라가는 React + Tauri 셸입니다.
+`Contracts` 사이드바에서는 shared-contract 상태를 확인하고, CRR을 resolve/reopen/edit/delete 하거나 spine checkpoint를 기록하며, 최근 contract-wave audit trail도 볼 수 있습니다.
 
 개발 실행:
 

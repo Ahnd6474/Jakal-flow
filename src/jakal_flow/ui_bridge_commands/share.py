@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from urllib.request import urlopen
 
 from .context import BridgeCommandContext, BridgeCommandHandler
+from ..errors import HANDLED_OPERATION_EXCEPTIONS
 from ..share import (
     DEFAULT_SHARE_HOST,
     DEFAULT_SHARE_PORT,
@@ -151,7 +152,7 @@ def build_share_command_handlers(
                     if public_url:
                         share_server_for_response["share_base_url"] = public_url
                         share_server_for_response["share_base_url_source"] = "quick_tunnel"
-                except Exception as exc:
+                except HANDLED_OPERATION_EXCEPTIONS as exc:
                     quick_tunnel_warning = str(exc).strip()
                     if project is not None:
                         append_ui_event(

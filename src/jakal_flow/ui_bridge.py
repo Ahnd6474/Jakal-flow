@@ -14,6 +14,7 @@ from typing import Any
 
 from .bridge_events import emit_bridge_event
 from .codex_app_server import fetch_codex_backend_snapshot
+from .errors import HANDLED_OPERATION_EXCEPTIONS
 from .failure_logs import write_runtime_failure_log
 from .model_constants import AUTO_MODEL_SLUG, DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER
 from .execution_control import EXECUTION_STOP_REGISTRY, execution_scope_id
@@ -91,6 +92,7 @@ _codex_snapshot_service = CodexBackendSnapshotService(
     fetcher=lambda codex_path="": fetch_codex_backend_snapshot(codex_path),
     ttl_seconds=CODEX_SNAPSHOT_TTL_SECONDS,
 )
+_orchestrator_cache: dict[str, Orchestrator] = {}
 
 
 def default_workspace_root() -> Path:
@@ -127,7 +129,14 @@ def bootstrap_payload(workspace_root: Path) -> dict[str, Any]:
 
 
 def orchestrator_for(workspace_root: Path) -> Orchestrator:
-    return Orchestrator(workspace_root)
+    resolved_root = workspace_root.expanduser().resolve()
+    cache_key = str(resolved_root)
+    cached = _orchestrator_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    orchestrator = Orchestrator(resolved_root)
+    _orchestrator_cache[cache_key] = orchestrator
+    return orchestrator
 
 
 def repo_root() -> Path:
@@ -416,7 +425,7 @@ def best_effort_project(
 ) -> ProjectContext | None:
     try:
         return resolve_project(orchestrator, payload)
-    except Exception:
+    except (KeyError, ValueError, FileNotFoundError):
         return None
 
 
@@ -528,7 +537,7 @@ def bridge_command_handlers() -> dict[str, Any]:
 def _payload_size_bytes(value: Any) -> int:
     try:
         return len(json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8"))
-    except Exception:
+    except (TypeError, ValueError):
         return 0
 
 
@@ -581,7 +590,7 @@ def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | No
                 detail_payload=detail_payload,
             )
         )
-    except Exception as exc:
+    except HANDLED_OPERATION_EXCEPTIONS as exc:
         write_runtime_failure_log(
             workspace_root,
             source="ui-bridge",
@@ -634,7 +643,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_command(args.command, Path(args.workspace_root).expanduser().resolve(), payload)
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0
-    except Exception as exc:
+    except HANDLED_OPERATION_EXCEPTIONS as exc:
         print(str(exc), file=sys.stderr)
         return 1
 

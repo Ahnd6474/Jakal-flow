@@ -400,6 +400,78 @@ test("ParallelRunControlView keeps reset available while generate-plan is runnin
   assert.doesNotMatch(resetMatch[0], /disabled=""/);
 });
 
+test("ParallelRunControlView shows failure reasons for failed blocks", async () => {
+  const html = await renderBundledComponent(
+    "parallel-run-control-failure-reason-render",
+    "./src/components/views/ParallelRunControlView.jsx",
+    "ParallelRunControlView",
+    {
+      detail: {
+        project: {
+          current_status: "failed",
+        },
+        runtime: {
+          execution_mode: "parallel",
+          effort: "medium",
+        },
+        runtime_insights: {
+          execution: {
+            remaining_seconds: 0,
+          },
+          parallel: {
+            recommended_workers: 1,
+            cpu_parallel_limit: 4,
+            cpu_logical_count: 16,
+            memory_parallel_limit: 4,
+            memory_available_bytes: 8589934592,
+          },
+        },
+      },
+      planDraft: {
+        project_prompt: "Ship the UI",
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          {
+            step_id: "ST1",
+            title: "Build",
+            display_description: "Build the screen",
+            codex_description: "Build the screen",
+            success_criteria: "Screen renders",
+            reasoning_effort: "high",
+            status: "failed",
+            notes: "python -m pytest exited with 1",
+            metadata: {
+              failure_reason_code: "verification_test_failed",
+              failure_type: "VerificationTestFailure",
+            },
+          },
+        ],
+      },
+      activeJob: null,
+      autoRunAfterPlan: false,
+      selectedStepId: "ST1",
+      busy: false,
+      onPromptChange: noop,
+      onGeneratePlan: noop,
+      onSavePlan: noop,
+      onResetPlan: noop,
+      onRunPlan: noop,
+      onRequestStop: noop,
+      onAutoRunAfterPlanChange: noop,
+      onSelectStep: noop,
+      onUpdateStepField: noop,
+      onSaveStepLocal: noop,
+      onAddStep: noop,
+      onDeleteStep: noop,
+    },
+  );
+
+  assert.match(html, /Failure Reason/);
+  assert.match(html, /Verification tests failed/);
+  assert.match(html, /verification_test_failed/);
+});
+
 test("CenterWorkspace upgrades legacy serial plans into the parallel execution tree view", async () => {
   const html = await renderBundledComponent(
     "center-workspace-render",
@@ -625,6 +697,63 @@ test("RightSidebarPane keeps the icon rail visible when the right panel is colla
   assert.doesNotMatch(html, /Hello from the right side\./);
 });
 
+test("RightSidebarPane keeps an out-of-catalog chat model visible in the selector", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-chat-custom-model-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      activeTab: "chat",
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+      },
+      planDraft: {
+        steps: [],
+      },
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.4-mini",
+          display_name: "GPT-5.4 Mini",
+          hidden: false,
+          provider: "openai",
+        },
+      ],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: null,
+      busy: false,
+      chat: {
+        sessions: [],
+        active_session_id: "",
+        messages: [],
+        summary_file: "",
+      },
+      chatSettings: {
+        chat_model_provider: "gemini",
+        chat_model: "gemini-legacy-lab",
+      },
+      selectedChatSessionId: "",
+      chatDraftSession: true,
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+      onChangeChatModelSelection: noop,
+    },
+  );
+
+  assert.match(html, /Chat model/);
+  assert.match(html, /gemini-legacy-lab/);
+  assert.match(html, /Gemini/);
+});
+
 test("RightSidebarPane renders assistant replies with safe markdown while keeping user text plain", async () => {
   const html = await renderBundledComponent(
     "right-sidebar-chat-markdown-render",
@@ -691,6 +820,32 @@ test("RightSidebarPane renders assistant replies with safe markdown while keepin
   assert.match(html, /sidebar-chat-bubble__content--plain/);
   assert.match(html, /Keep \*\*this\*\* plain\./);
   assert.doesNotMatch(html, /<strong>this<\/strong>/);
+});
+
+test("BottomToolPanel keeps JSON preview rendering lazy with an explicit full-toggle", async () => {
+  const html = await renderBundledComponent(
+    "bottom-tool-panel-json-preview-render",
+    "./src/components/layout/BottomToolPanel.jsx",
+    "BottomToolPanel",
+    {
+      activeTab: "json",
+      onChangeTab: noop,
+      data: {
+        event_json: {
+          project: {
+            repo_id: "repo-1",
+            status: "running",
+          },
+          logs: Array.from({ length: 50 }, (_, index) => `line-${index}`),
+        },
+      },
+      onHide: noop,
+    },
+  );
+
+  assert.match(html, /Show Full JSON/);
+  assert.match(html, /repo-1/);
+  assert.match(html, /line-0/);
 });
 
 test("CenterWorkspace shows estimated cost only for paid configured runtimes", async () => {
@@ -1550,6 +1705,42 @@ test("RunProgressPanel stays hidden while only a chat job is active", async () =
   );
 
   assert.equal(html.trim(), "");
+});
+
+test("StatusBar hides the live execution chip while only a chat job is active", async () => {
+  const html = await renderBundledComponent(
+    "status-bar-chat-hidden-render",
+    "./src/components/layout/StatusBar.jsx",
+    "StatusBar",
+    {
+      detail: {
+        project: {
+          branch: "main",
+          current_status: "plan_ready",
+        },
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          model_slug_input: "gpt-5.4",
+        },
+        runtime_insights: {
+          cost: {},
+        },
+      },
+      activeJob: {
+        status: "running",
+        command: "send-chat-message",
+      },
+      queuedJobs: [],
+      modelPresets: [],
+      onToggleBottom: noop,
+      bottomCollapsed: true,
+    },
+  );
+
+  assert.match(html, /main/);
+  assert.doesNotMatch(html, /live-dot-pulse/);
+  assert.doesNotMatch(html, /send-chat-message/);
 });
 
 test("SidebarPane renders a filtered workspace tree without unrelated nodes", async () => {

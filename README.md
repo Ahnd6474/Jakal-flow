@@ -90,9 +90,12 @@ workspace_root/
 
 This keeps multi-repository history and traceability separate by design.
 
+Contract-wave metadata stays inside each project's `state/` and `docs/` folders, including `SPINE.json`, `COMMON_REQUIREMENTS.json`, `CONTRACT_WAVE_AUDIT.jsonl`, `state/lineage_manifests/`, and `docs/SHARED_CONTRACTS.md`.
+
 ## Desktop UI
 
 The desktop app is a React + Tauri shell over the same Python backend.
+The `Contracts` sidebar surfaces shared-contract state, lets operators resolve/reopen/edit/delete CRRs, records spine checkpoints, and shows the recent contract-wave audit trail.
 
 Development:
 

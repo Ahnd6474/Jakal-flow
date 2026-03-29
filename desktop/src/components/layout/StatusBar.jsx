@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import {
@@ -30,7 +31,65 @@ function ModelIcon() {
   );
 }
 
-export function StatusBar({
+function sameQueuedJobs(previousJobs = [], nextJobs = []) {
+  if (previousJobs === nextJobs) {
+    return true;
+  }
+  if (!Array.isArray(previousJobs) || !Array.isArray(nextJobs) || previousJobs.length !== nextJobs.length) {
+    return false;
+  }
+  for (let index = 0; index < previousJobs.length; index += 1) {
+    const previousJob = previousJobs[index];
+    const nextJob = nextJobs[index];
+    if (
+      previousJob?.id !== nextJob?.id
+      || previousJob?.status !== nextJob?.status
+      || previousJob?.queue_position !== nextJob?.queue_position
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameModelPresets(previousPresets = [], nextPresets = []) {
+  if (previousPresets === nextPresets) {
+    return true;
+  }
+  if (!Array.isArray(previousPresets) || !Array.isArray(nextPresets) || previousPresets.length !== nextPresets.length) {
+    return false;
+  }
+  for (let index = 0; index < previousPresets.length; index += 1) {
+    const previousPreset = previousPresets[index];
+    const nextPreset = nextPresets[index];
+    if (
+      previousPreset?.preset_id !== nextPreset?.preset_id
+      || previousPreset?.summary !== nextPreset?.summary
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameRuntimeSummaryState(previousRuntime = null, nextRuntime = null) {
+  const previous = previousRuntime && typeof previousRuntime === "object" ? previousRuntime : {};
+  const next = nextRuntime && typeof nextRuntime === "object" ? nextRuntime : {};
+  return (
+    previous.model_provider === next.model_provider
+    && previous.local_model_provider === next.local_model_provider
+    && previous.model_preset === next.model_preset
+    && previous.model === next.model
+    && previous.workflow_mode === next.workflow_mode
+    && previous.parallel_worker_mode === next.parallel_worker_mode
+    && previous.parallel_workers === next.parallel_workers
+    && previous.effort_selection_mode === next.effort_selection_mode
+    && previous.effort === next.effort
+    && previous.use_fast_mode === next.use_fast_mode
+  );
+}
+
+export const StatusBar = memo(function StatusBar({
   detail,
   activeJob,
   queuedJobs,
@@ -107,4 +166,21 @@ export function StatusBar({
       </div>
     </footer>
   );
-}
+}, (previousProps, nextProps) => {
+  if (!sameQueuedJobs(previousProps.queuedJobs, nextProps.queuedJobs)) {
+    return false;
+  }
+  if (!sameModelPresets(previousProps.modelPresets, nextProps.modelPresets)) {
+    return false;
+  }
+  return (
+    previousProps.bottomCollapsed === nextProps.bottomCollapsed
+    && previousProps.detail?.project?.branch === nextProps.detail?.project?.branch
+    && previousProps.detail?.project?.current_status === nextProps.detail?.project?.current_status
+    && sameRuntimeSummaryState(previousProps.detail?.runtime, nextProps.detail?.runtime)
+    && previousProps.detail?.runtime_insights?.cost?.estimated_total_cost_usd === nextProps.detail?.runtime_insights?.cost?.estimated_total_cost_usd
+    && previousProps.activeJob?.id === nextProps.activeJob?.id
+    && previousProps.activeJob?.status === nextProps.activeJob?.status
+    && previousProps.activeJob?.command === nextProps.activeJob?.command
+  );
+});

@@ -55,6 +55,7 @@ import {
   projectFormFromDetail,
   projectStatusWithJob,
   runtimeSummary,
+  isChatCommand,
   QWEN_CODE_DEFAULT_MODEL,
   sanitizeProjectDetailForJobState,
   sanitizeProjectListForJobState,
@@ -65,6 +66,7 @@ import {
   statusTone,
   syncProgramSettingsModel,
   toolbarProgressCaptionDisplay,
+  visibleExecutionJob,
   workspaceStatsFromProjects,
 } from "../src/utils.js";
 
@@ -173,6 +175,24 @@ test("chat jobs do not affect execution status or progress", () => {
 
   assert.equal(progress.isActive, false);
   assert.equal(progress.command, "");
+});
+
+test("chat command helpers keep send-chat-message jobs out of execution widgets", () => {
+  const chatJob = {
+    id: "job-chat",
+    status: "running",
+    command: "send-chat-message",
+  };
+  const runJob = {
+    id: "job-run",
+    status: "running",
+    command: "run-plan",
+  };
+
+  assert.equal(isChatCommand("send-chat-message"), true);
+  assert.equal(isChatCommand("run-plan"), false);
+  assert.equal(visibleExecutionJob(chatJob), null);
+  assert.equal(visibleExecutionJob(runJob), runJob);
 });
 
 test("backgroundJobProjectKey normalizes workspace and project paths for deduping", () => {

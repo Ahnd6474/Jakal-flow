@@ -23,6 +23,17 @@ function sameProjectDetail(left, right) {
   return Boolean(leftRepoId) && leftRepoId === rightRepoId;
 }
 
+function projectEventMatchesDetail(detail = null, project = null) {
+  const detailRepoId = String(detail?.project?.repo_id || "").trim();
+  const eventRepoId = String(project?.repo_id || "").trim();
+  if (detailRepoId && eventRepoId) {
+    return detailRepoId === eventRepoId;
+  }
+  const detailProjectDir = String(detail?.project?.repo_path || "").trim();
+  const eventProjectDir = String(project?.project_dir || "").trim();
+  return Boolean(detailProjectDir) && Boolean(eventProjectDir) && detailProjectDir === eventProjectDir;
+}
+
 function workspaceTreeNodesEqual(leftNodes = [], rightNodes = []) {
   if (leftNodes === rightNodes) {
     return true;
@@ -379,6 +390,86 @@ export function applyProjectDetailListingState({
   setProjects(sanitizedProjects);
   setWorkspaceStats(workspaceStatsFromProjects(sanitizedProjects));
   return sanitizedProjects;
+}
+
+export function applyProjectEventListingState({
+  projects,
+  project,
+  runningJob = null,
+  setProjects,
+  setWorkspaceStats,
+}) {
+  const repoId = String(project?.repo_id || "").trim();
+  const projectDir = String(project?.project_dir || "").trim();
+  const status = String(project?.status || project?.project_status || "").trim();
+  if (!repoId && !projectDir && !status) {
+    return null;
+  }
+
+  let changed = false;
+  const nextProjects = (projects || []).map((item) => {
+    const sameRepoId = repoId && String(item?.repo_id || "").trim() === repoId;
+    const sameProjectDir = projectDir && String(item?.repo_path || "").trim() === projectDir;
+    if (!sameRepoId && !sameProjectDir) {
+      return item;
+    }
+    changed = true;
+    return {
+      ...item,
+      repo_id: repoId || item?.repo_id || "",
+      repo_path: projectDir || item?.repo_path || "",
+      status: status || item?.status || "",
+      detail: item?.detail || (projectDir ? `Path ${projectDir}` : ""),
+    };
+  });
+
+  if (!changed) {
+    return null;
+  }
+
+  const sanitizedProjects = sanitizeProjectListForJobState(nextProjects, runningJob);
+  setProjects(sanitizedProjects);
+  setWorkspaceStats(workspaceStatsFromProjects(sanitizedProjects));
+  return sanitizedProjects;
+}
+
+export function applyProjectEventDetailState(detail, project) {
+  if (!detail || !projectEventMatchesDetail(detail, project)) {
+    return null;
+  }
+  const nextStatus = String(project?.status || project?.project_status || "").trim();
+  const nextRepoPath = String(project?.project_dir || "").trim();
+  const currentStatus = String(detail?.project?.current_status || "").trim();
+  const currentRepoPath = String(detail?.project?.repo_path || "").trim();
+  if (!nextStatus && !nextRepoPath) {
+    return null;
+  }
+  if (nextStatus === currentStatus && (!nextRepoPath || nextRepoPath === currentRepoPath)) {
+    return detail;
+  }
+
+  const nextProject = {
+    ...(detail?.project || {}),
+    ...(nextStatus ? { current_status: nextStatus } : {}),
+    ...(nextRepoPath ? { repo_path: nextRepoPath } : {}),
+  };
+  const nextSnapshotProject = detail?.snapshot?.project
+    ? {
+        ...detail.snapshot.project,
+        ...(nextStatus ? { current_status: nextStatus } : {}),
+        ...(nextRepoPath ? { repo_path: nextRepoPath } : {}),
+      }
+    : detail?.snapshot?.project;
+  return {
+    ...detail,
+    project: nextProject,
+    snapshot: detail?.snapshot
+      ? {
+          ...detail.snapshot,
+          project: nextSnapshotProject,
+        }
+      : detail?.snapshot,
+  };
 }
 
 export function applyActiveJobState({

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
+import { arePropsEqualExceptFunctions } from "../../shallowProps";
 import {
   commandLabel,
   deriveExecutionProgress,
@@ -40,7 +41,37 @@ function runningStepLabels(steps = [], maxVisible = 3) {
   return `${labels.slice(0, maxVisible).join(", ")} +${labels.length - maxVisible}`;
 }
 
-export function RunProgressPanel({ detail, planDraft, activeJob }) {
+const ElapsedRuntimeChip = memo(function ElapsedRuntimeChip({ runningSteps = [], language = "en" }) {
+  const [nowTick, setNowTick] = useState(Date.now());
+
+  useEffect(() => {
+    if (!runningSteps.length) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [runningSteps.length]);
+
+  const runningStartTimes = useMemo(
+    () =>
+      runningSteps
+        .map((step) => Date.parse(String(step?.started_at || "")))
+        .filter((value) => Number.isFinite(value)),
+    [runningSteps],
+  );
+  const runningStepElapsedSeconds = runningStartTimes.length
+    ? Math.max(0, Math.round((nowTick - Math.min(...runningStartTimes)) / 1000))
+    : 0;
+
+  return (
+    <div className="metric-chip">
+      <ClockIcon />
+      <span>{formatDurationCompact(runningStepElapsedSeconds, language)}</span>
+    </div>
+  );
+});
+
+export const RunProgressPanel = memo(function RunProgressPanel({ detail, planDraft, activeJob }) {
   const { language, t } = useI18n();
   const progress = useMemo(
     () => deriveExecutionProgress(detail, planDraft, activeJob),
@@ -50,13 +81,6 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
   const executionEstimate = runtimeInsights?.execution || {};
   const costEstimate = runtimeInsights?.cost || {};
   const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
-  const [nowTick, setNowTick] = useState(Date.now());
-
-  useEffect(() => {
-    if (!progress.isActive) return undefined;
-    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [progress.isActive]);
 
   if (!progress.isActive) return null;
 
@@ -83,14 +107,6 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
     progress.phase === "planning" && progress.planningStageCount
       ? planningProgressCaptionDisplay(progress, language)
       : executionProgressCaptionDisplay(progress.plan, language);
-
-  const runningStartTimes = (progress.runningStepList || [])
-    .map((step) => Date.parse(String(step?.started_at || "")))
-    .filter((value) => Number.isFinite(value));
-
-  const runningStepElapsedSeconds = runningStartTimes.length
-    ? Math.max(0, Math.round((nowTick - Math.min(...runningStartTimes)) / 1000))
-    : 0;
 
   const badgeLabel =
     progress.phase === "planning"
@@ -167,10 +183,7 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
               </div>
             ) : null}
             {progress.phase !== "planning" ? (
-              <div className="metric-chip">
-                <ClockIcon />
-                <span>{formatDurationCompact(runningStepElapsedSeconds, language)}</span>
-              </div>
+              <ElapsedRuntimeChip runningSteps={progress.runningStepList || []} language={language} />
             ) : null}
             {progress.phase !== "planning" && executionEstimate.remaining_seconds ? (
               <div className="metric-chip metric-chip--dim">
@@ -232,4 +245,4 @@ export function RunProgressPanel({ detail, planDraft, activeJob }) {
       </section>
     </>
   );
-}
+}, arePropsEqualExceptFunctions);

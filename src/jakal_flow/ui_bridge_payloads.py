@@ -11,6 +11,7 @@ from typing import Any, Callable
 from .chat_sessions import chat_active_session_file, chat_payload, chat_sessions_registry_file
 from .codex_app_server import fetch_codex_backend_snapshot
 from .contract_wave import load_common_requirements_state, load_lineage_manifest_payloads, load_spine_state
+from .errors import ARTIFACT_READ_EXCEPTIONS
 from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER
 from .model_providers import normalize_local_model_provider, normalize_model_provider, provider_preset
 from .models import ExecutionPlanState, ProjectContext
@@ -20,12 +21,16 @@ from .share import project_share_config_payload, project_share_payload
 from .status_views import effective_project_status
 from .step_models import provider_statuses_payload
 from .utils import append_jsonl, compact_text, normalize_workflow_mode, now_utc_iso, read_json, read_jsonl_tail, read_last_jsonl, read_text, write_json
-from .workspace import LOCAL_PROJECT_LOG_DIRNAME, WorkspaceManager
+from .workspace import LOCAL_PROJECT_LOG_DIRNAME
 
 
-DETAIL_CACHE_VERSION = 12
-DETAIL_CACHE_VERSION = 12
+DETAIL_CACHE_VERSION = 14
+LIST_ITEM_CACHE_VERSION = 1
+WORKSPACE_LISTING_CACHE_VERSION = 1
 PROJECT_TREE_EXCLUDED_NAMES = frozenset({".git", LOCAL_PROJECT_LOG_DIRNAME})
+_DETAIL_BASE_PAYLOAD_MEMORY_CACHE: dict[str, tuple[int, str, dict[str, Any]]] = {}
+_LIST_ITEM_PAYLOAD_MEMORY_CACHE: dict[str, tuple[int, str, dict[str, Any]]] = {}
+_WORKSPACE_LISTING_MEMORY_CACHE: dict[str, tuple[int, str, dict[str, Any]]] = {}
 
 PLANNING_STAGE_DEFINITIONS = (
     {"key": "context_scan", "label": "Scan repository context"},
@@ -89,15 +94,13 @@ def _preview_tree_signature(path: Path, max_entries: int = 16, child_limit: int 
     return digest.hexdigest()
 
 
-def _workspace_share_signature(workspace_root: Path) -> str:
+def _project_share_payload_signature(project: ProjectContext) -> str:
     digest = hashlib.sha1()
-    manager = WorkspaceManager(workspace_root)
-    digest.update(_path_signature(manager.registry_file).encode("utf-8"))
-    digest.update(_path_signature(workspace_root / "share_sessions.json").encode("utf-8"))
-    digest.update(_path_signature(workspace_root / "share_session_events.jsonl").encode("utf-8"))
-    for project in manager.list_projects():
-        digest.update(project.metadata.repo_id.encode("utf-8"))
-        digest.update(_path_signature(project.paths.state_dir / "share_sessions.json").encode("utf-8"))
+    digest.update(_path_signature(project.paths.workspace_root / "share_sessions.json").encode("utf-8"))
+    digest.update(_path_signature(project.paths.state_dir / "share_sessions.json").encode("utf-8"))
+    digest.update(_path_signature(project.paths.workspace_root / "share_server.json").encode("utf-8"))
+    digest.update(_path_signature(project.paths.workspace_root / "public_tunnel.json").encode("utf-8"))
+    digest.update(_path_signature(project.paths.workspace_root / "share_server_config.json").encode("utf-8"))
     return digest.hexdigest()
 
 
@@ -122,6 +125,7 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
         project.paths.checkpoint_state_file,
         project.paths.spine_file,
         project.paths.common_requirements_file,
+        project.paths.contract_wave_audit_file,
         project.paths.ml_mode_state_file,
         project.paths.execution_flow_svg_file,
         chat_sessions_registry_file(project),
@@ -146,12 +150,13 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
                 project.paths.scope_guard_file,
                 project.paths.research_notes_file,
                 project.paths.shared_contracts_file,
+                project.paths.lineage_manifests_dir,
             ]
         )
     for path in tracked_files:
         digest.update(_path_signature(path).encode("utf-8"))
     if normalized_detail_level == "full":
-        digest.update(_workspace_share_signature(project.paths.workspace_root).encode("utf-8"))
+        digest.update(_project_share_payload_signature(project).encode("utf-8"))
         for path in [
             project.paths.repo_dir,
             project.paths.docs_dir,
@@ -427,14 +432,14 @@ def workspace_snapshot(statuses: list[str]) -> dict[str, Any]:
 def safe_json(path: Path, default: Any = None) -> Any:
     try:
         return read_json(path, default=default)
-    except Exception:
+    except ARTIFACT_READ_EXCEPTIONS:
         return default
 
 
 def safe_text(path: Path, default: str = "") -> str:
     try:
         return read_text(path, default=default)
-    except Exception:
+    except ARTIFACT_READ_EXCEPTIONS:
         return default
 
 
@@ -526,6 +531,10 @@ def _contract_wave_report_payload(context: ProjectContext) -> dict[str, Any]:
         load_lineage_manifest_payloads(context.paths),
         "created_at",
     )
+    audit_entries = _sort_payload_items(
+        read_jsonl_tail(context.paths.contract_wave_audit_file, 20),
+        "timestamp",
+    )
 
     manifest_summary = {
         "total": len(lineage_manifests),
@@ -561,6 +570,11 @@ def _contract_wave_report_payload(context: ProjectContext) -> dict[str, Any]:
             "resolved_items": resolved_requirements[:8],
             "json_text": preview_text(context.paths.common_requirements_file, default="{\n}\n", max_chars=4000),
             "path": str(context.paths.common_requirements_file),
+        },
+        "contract_wave_audit": {
+            "recent_items": audit_entries[:12],
+            "path": str(context.paths.contract_wave_audit_file),
+            "jsonl_text": preview_text(context.paths.contract_wave_audit_file, default="", max_chars=4000),
         },
         "shared_contracts_text": preview_text(
             context.paths.shared_contracts_file,
@@ -924,11 +938,75 @@ def build_activity_lines(
     return lines
 
 
-def project_list_item_payload(orchestrator: Orchestrator, project: ProjectContext) -> dict[str, Any]:
+def _list_item_cache_file(project: ProjectContext, *, archived: bool) -> Path:
+    suffix = "HISTORY" if archived else "ACTIVE"
+    return project.paths.state_dir / f"PROJECT_LIST_ITEM_CACHE_{suffix}.json"
+
+
+def _list_item_memory_cache_key(project: ProjectContext, *, archived: bool) -> str:
+    suffix = "history" if archived else "active"
+    return f"{project.paths.project_root.resolve()}|{suffix}"
+
+
+def _project_list_item_signature_from_registry_item(item: dict[str, Any]) -> str:
+    project_root = Path(str(item.get("project_root", "")).strip()).expanduser()
+    if not str(project_root).strip():
+        return "missing-project-root"
+    repo_kind = str(item.get("repo_kind", "")).strip().lower()
+    repo_path_text = str(item.get("repo_path", "")).strip()
+    repo_path = Path(repo_path_text).expanduser() if repo_path_text else None
+    digest = hashlib.sha1()
+    digest.update(str(project_root).encode("utf-8"))
+    digest.update(_path_signature(project_root / "metadata.json").encode("utf-8"))
+    digest.update(_path_signature(project_root / "project_config.json").encode("utf-8"))
+    digest.update(_path_signature(project_root / "state" / "LOOP_STATE.json").encode("utf-8"))
+    digest.update(_path_signature(project_root / "state" / "EXECUTION_PLAN.json").encode("utf-8"))
+    block_log_file = (
+        repo_path / LOCAL_PROJECT_LOG_DIRNAME / "blocks.jsonl"
+        if repo_kind == "local" and repo_path is not None
+        else project_root / "logs" / "blocks.jsonl"
+    )
+    digest.update(_path_signature(block_log_file).encode("utf-8"))
+    digest.update(_path_signature(project_root / "reports" / "CLOSEOUT_REPORT.docx").encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _workspace_listing_content_signature(orchestrator: Orchestrator) -> str:
+    registry = orchestrator.workspace._read_registry()
+    digest = hashlib.sha1()
+    digest.update(f"workspace-listing-v{WORKSPACE_LISTING_CACHE_VERSION}".encode("utf-8"))
+    digest.update(_path_signature(orchestrator.workspace.registry_file).encode("utf-8"))
+    for repo_id, item in sorted(registry.get("projects", {}).items(), key=lambda pair: str(pair[0])):
+        digest.update(str(repo_id).encode("utf-8"))
+        digest.update(_project_list_item_signature_from_registry_item(item).encode("utf-8"))
+    for archive_id, item in sorted(registry.get("history", {}).items(), key=lambda pair: str(pair[0])):
+        digest.update(str(archive_id).encode("utf-8"))
+        digest.update(_project_list_item_signature_from_registry_item(item).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _project_list_item_content_signature(project: ProjectContext, *, archived: bool) -> str:
+    digest = hashlib.sha1()
+    digest.update(f"list-item-v{LIST_ITEM_CACHE_VERSION}:{'history' if archived else 'active'}".encode("utf-8"))
+    digest.update(_path_signature(project.paths.metadata_file).encode("utf-8"))
+    digest.update(_path_signature(project.paths.project_config_file).encode("utf-8"))
+    digest.update(_path_signature(project.paths.loop_state_file).encode("utf-8"))
+    digest.update(_path_signature(project.paths.execution_plan_file).encode("utf-8"))
+    digest.update(_path_signature(project.paths.block_log_file).encode("utf-8"))
+    digest.update(_path_signature(project.paths.closeout_report_docx_file).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _build_project_list_item_payload(
+    orchestrator: Orchestrator,
+    project: ProjectContext,
+    *,
+    archived: bool,
+) -> dict[str, Any]:
     plan_state = orchestrator.load_execution_plan_state(project)
     current_status = effective_project_status(project.metadata.current_status, plan_state, project.loop_state)
     detail = project.metadata.origin_url or f"Branch {project.metadata.branch}"
-    return {
+    payload = {
         "repo_id": project.metadata.repo_id,
         "slug": project.metadata.slug,
         "display_name": project.metadata.display_name or project.metadata.slug,
@@ -947,24 +1025,77 @@ def project_list_item_payload(orchestrator: Orchestrator, project: ProjectContex
         "archive_id": project.metadata.archive_id or "",
         "archived_at": project.metadata.archived_at,
     }
+    if archived:
+        archived_at = project.metadata.archived_at or project.metadata.last_run_at or project.metadata.created_at
+        history_detail = archived_at
+        if project.metadata.repo_path:
+            history_detail = f"{project.metadata.repo_path} | {archived_at}"
+        payload.update(
+            {
+                "repo_id": project.metadata.archive_id or project.metadata.repo_id,
+                "detail": history_detail,
+                "archived": True,
+                "archive_id": project.metadata.archive_id or "",
+                "archived_at": archived_at,
+            }
+        )
+    return payload
+
+
+def _cached_project_list_item_payload(
+    orchestrator: Orchestrator,
+    project: ProjectContext,
+    *,
+    archived: bool,
+) -> dict[str, Any]:
+    content_signature = _project_list_item_content_signature(project, archived=archived)
+    memory_cache_key = _list_item_memory_cache_key(project, archived=archived)
+    memory_cached = _LIST_ITEM_PAYLOAD_MEMORY_CACHE.get(memory_cache_key)
+    if (
+        memory_cached is not None
+        and memory_cached[0] == LIST_ITEM_CACHE_VERSION
+        and memory_cached[1] == content_signature
+    ):
+        return deepcopy(memory_cached[2])
+    cache_file = _list_item_cache_file(project, archived=archived)
+    cached = read_json(cache_file, default=None)
+    if isinstance(cached, dict):
+        cached_signature = str(cached.get("content_signature", "")).strip()
+        cached_payload = cached.get("payload")
+        if (
+            int(cached.get("version", 0) or 0) == LIST_ITEM_CACHE_VERSION
+            and cached_signature == content_signature
+            and isinstance(cached_payload, dict)
+        ):
+            _LIST_ITEM_PAYLOAD_MEMORY_CACHE[memory_cache_key] = (
+                LIST_ITEM_CACHE_VERSION,
+                content_signature,
+                deepcopy(cached_payload),
+            )
+            return cached_payload
+    payload = _build_project_list_item_payload(orchestrator, project, archived=archived)
+    _LIST_ITEM_PAYLOAD_MEMORY_CACHE[memory_cache_key] = (
+        LIST_ITEM_CACHE_VERSION,
+        content_signature,
+        deepcopy(payload),
+    )
+    write_json(
+        cache_file,
+        {
+            "version": LIST_ITEM_CACHE_VERSION,
+            "content_signature": content_signature,
+            "payload": payload,
+        },
+    )
+    return payload
+
+
+def project_list_item_payload(orchestrator: Orchestrator, project: ProjectContext) -> dict[str, Any]:
+    return _cached_project_list_item_payload(orchestrator, project, archived=False)
 
 
 def history_list_item_payload(orchestrator: Orchestrator, project: ProjectContext) -> dict[str, Any]:
-    payload = project_list_item_payload(orchestrator, project)
-    archived_at = project.metadata.archived_at or project.metadata.last_run_at or project.metadata.created_at
-    detail = archived_at
-    if project.metadata.repo_path:
-        detail = f"{project.metadata.repo_path} | {archived_at}"
-    payload.update(
-        {
-            "repo_id": project.metadata.archive_id or project.metadata.repo_id,
-            "detail": detail,
-            "archived": True,
-            "archive_id": project.metadata.archive_id or "",
-            "archived_at": archived_at,
-        }
-    )
-    return payload
+    return _cached_project_list_item_payload(orchestrator, project, archived=True)
 
 
 def _build_project_detail_base_payload(
@@ -1031,7 +1162,12 @@ def _build_project_detail_base_payload(
             "timeline_markdown": "",
         }
         config = {}
-        chat = chat_payload(project, message_limit=40)
+        chat = chat_payload(
+            project,
+            message_limit=0,
+            include_messages=False,
+            include_summary=False,
+        )
         workspace_tree = []
         activity = build_activity_lines(project, plan_state, ui_events=ui_events)[:8]
         planning_progress = build_planning_progress(ui_events)
@@ -1112,6 +1248,7 @@ def _build_project_detail_base_payload(
             "ml_experiment_report_file": str(project.paths.ml_experiment_report_file),
             "spine_file": str(project.paths.spine_file),
             "common_requirements_file": str(project.paths.common_requirements_file),
+            "contract_wave_audit_file": str(project.paths.contract_wave_audit_file),
             "shared_contracts_file": str(project.paths.shared_contracts_file),
             "lineage_manifests_dir": str(project.paths.lineage_manifests_dir),
         },
@@ -1142,6 +1279,18 @@ def _cached_project_detail_base_payload(
     started_at = perf_counter()
     content_signature = project_detail_content_signature(project, normalized_detail_level)
     timings["content_signature_ms"] = round((perf_counter() - started_at) * 1000.0, 3)
+    memory_cache_key = f"{project.paths.project_root.resolve()}|{normalized_detail_level}"
+    memory_cached = _DETAIL_BASE_PAYLOAD_MEMORY_CACHE.get(memory_cache_key)
+    if (
+        memory_cached is not None
+        and memory_cached[0] == DETAIL_CACHE_VERSION
+        and memory_cached[1] == content_signature
+    ):
+        timings["cache_lookup_ms"] = 0.0
+        timings["cache_hit"] = True
+        timings["base_build_ms"] = 0.0
+        timings["cache_write_ms"] = 0.0
+        return deepcopy(memory_cached[2]), content_signature, True, timings
     cache_file = _detail_cache_file(project, normalized_detail_level)
     cache_lookup_started_at = perf_counter()
     cached = read_json(cache_file, default=None)
@@ -1153,7 +1302,12 @@ def _cached_project_detail_base_payload(
             and cached_signature == content_signature
             and isinstance(cached_payload, dict)
         ):
-            payload = deepcopy(cached_payload)
+            _DETAIL_BASE_PAYLOAD_MEMORY_CACHE[memory_cache_key] = (
+                DETAIL_CACHE_VERSION,
+                content_signature,
+                deepcopy(cached_payload),
+            )
+            payload = cached_payload
             payload["content_signature"] = content_signature
             payload["payload_cache_hit"] = True
             timings["cache_lookup_ms"] = round((perf_counter() - cache_lookup_started_at) * 1000.0, 3)
@@ -1167,6 +1321,11 @@ def _cached_project_detail_base_payload(
     timings["base_build_ms"] = round((perf_counter() - base_build_started_at) * 1000.0, 3)
     payload["content_signature"] = content_signature
     payload["payload_cache_hit"] = False
+    _DETAIL_BASE_PAYLOAD_MEMORY_CACHE[memory_cache_key] = (
+        DETAIL_CACHE_VERSION,
+        content_signature,
+        deepcopy(payload),
+    )
     cache_write_started_at = perf_counter()
     write_json(
         cache_file,
@@ -1178,7 +1337,7 @@ def _cached_project_detail_base_payload(
     )
     timings["cache_write_ms"] = round((perf_counter() - cache_write_started_at) * 1000.0, 3)
     timings["cache_hit"] = False
-    return deepcopy(payload), content_signature, False, timings
+    return payload, content_signature, False, timings
 
 
 def _finalize_project_detail_payload(
@@ -1188,7 +1347,7 @@ def _finalize_project_detail_payload(
     codex_status: dict[str, Any],
     payload_cache_hit: bool,
 ) -> dict[str, Any]:
-    payload = deepcopy(base_payload)
+    payload = base_payload
     payload["codex_status"] = codex_status
     payload["content_signature"] = content_signature
     payload["detail_signature"] = _detail_signature(content_signature, codex_status)
@@ -1250,12 +1409,27 @@ def project_detail_payload(
 
 
 def list_projects_payload(orchestrator: Orchestrator) -> dict[str, Any]:
+    memory_cache_key = str(orchestrator.workspace.workspace_root.resolve())
+    content_signature = _workspace_listing_content_signature(orchestrator)
+    memory_cached = _WORKSPACE_LISTING_MEMORY_CACHE.get(memory_cache_key)
+    if (
+        memory_cached is not None
+        and memory_cached[0] == WORKSPACE_LISTING_CACHE_VERSION
+        and memory_cached[1] == content_signature
+    ):
+        return deepcopy(memory_cached[2])
     projects = sorted(orchestrator.list_projects(), key=lambda item: item.metadata.created_at, reverse=True)
     project_payloads = [project_list_item_payload(orchestrator, project) for project in projects]
     history_projects = orchestrator.workspace.list_history_projects()
     history_payloads = [history_list_item_payload(orchestrator, project) for project in history_projects]
-    return {
+    payload = {
         "projects": project_payloads,
         "history": history_payloads,
         "workspace": workspace_snapshot([str(item.get("status", "")).strip() for item in project_payloads]),
     }
+    _WORKSPACE_LISTING_MEMORY_CACHE[memory_cache_key] = (
+        WORKSPACE_LISTING_CACHE_VERSION,
+        content_signature,
+        deepcopy(payload),
+    )
+    return payload

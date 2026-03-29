@@ -19,15 +19,15 @@ from .contract_wave import (
     load_lineage_manifests,
     manifest_summary_markdown,
     normalize_execution_step_policy,
+    persist_lineage_completion_artifacts,
     policy_summary,
-    save_lineage_manifest,
-    update_contract_wave_artifacts_for_completion,
 )
 from .environment import ensure_gitignore, ensure_virtualenv
 from . import execution_plan_support
 from .codex_runner import CodexRunner
+from .errors import HANDLED_OPERATION_EXCEPTIONS, PromotionRollbackError
 from .execution_control import ImmediateStopRequested
-from .git_ops import GitOps
+from .git_ops import GitCommandError, GitOps
 from .memory import MemoryStore
 from .model_providers import normalize_billing_mode, provider_preset, provider_supports_auto_model
 from .provider_fallbacks import (
@@ -179,6 +179,7 @@ class OrchestratorLineageMixin:
             lineage_state_file=state_dir / "LINEAGES.json",
             spine_file=state_dir / "SPINE.json",
             common_requirements_file=state_dir / "COMMON_REQUIREMENTS.json",
+            contract_wave_audit_file=state_dir / "CONTRACT_WAVE_AUDIT.jsonl",
             ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
             ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
             ml_experiment_reports_dir=state_dir / "ml_experiments",
@@ -420,7 +421,7 @@ class OrchestratorLineageMixin:
         except ImmediateStopRequested as exc:
             lineage_result["status"] = "paused"
             lineage_result["notes"] = str(exc).strip() or "Immediate stop requested."
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
             lineage_result["status"] = "failed"
             lineage_result["notes"] = str(exc).strip() or "Lineage worker failed."
         finally:
@@ -507,7 +508,7 @@ class OrchestratorLineageMixin:
         try:
             self.git.push(repo_dir, branch)
             return True, "pushed"
-        except Exception as exc:
+        except GitCommandError as exc:
             detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "unknown_error"
             return False, f"push_failed:{detail}"
     def _delete_remote_branch_if_present(
@@ -533,9 +534,27 @@ class OrchestratorLineageMixin:
         try:
             self.git.delete_remote_branch(repo_dir, remote_name, target_branch)
             return True, "deleted"
-        except Exception as exc:
+        except GitCommandError as exc:
             detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "unknown_error"
             return False, f"delete_failed:{detail}"
+    def _rollback_failed_promotion(
+        self,
+        context: ProjectContext,
+        safe_revision: str,
+        *,
+        failure_detail: str,
+    ) -> None:
+        target_revision = str(safe_revision or "").strip()
+        try:
+            self.git.hard_reset(context.paths.repo_dir, target_revision)
+        except GitCommandError as exc:
+            rollback_detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "unknown_error"
+            raise PromotionRollbackError(
+                f"Failed to restore safe revision {target_revision or 'unknown'} after promotion failure ({failure_detail or 'unknown_error'}): {rollback_detail}"
+            ) from exc
+        context.metadata.current_safe_revision = target_revision
+        context.loop_state.current_safe_revision = target_revision
+        context.loop_state.last_commit_hash = target_revision
     def _can_auto_promote_lineage_step(
         self,
         step: ExecutionStep,
@@ -563,9 +582,13 @@ class OrchestratorLineageMixin:
         try:
             self.git.merge_ff_only(context.paths.repo_dir, branch_name)
             integrated_revision = self.git.current_revision(context.paths.repo_dir)
-        except Exception as exc:
-            self.git.hard_reset(context.paths.repo_dir, base_safe_revision)
+        except GitCommandError as exc:
             detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "unknown_error"
+            self._rollback_failed_promotion(
+                context,
+                base_safe_revision,
+                failure_detail=f"merge_failed:{detail}",
+            )
             return False, f"merge_failed:{detail}", None
 
         context.metadata.current_safe_revision = integrated_revision
@@ -580,10 +603,11 @@ class OrchestratorLineageMixin:
         if pushed or push_reason == "already_up_to_date":
             return True, push_reason, integrated_revision
 
-        self.git.hard_reset(context.paths.repo_dir, base_safe_revision)
-        context.metadata.current_safe_revision = base_safe_revision
-        context.loop_state.current_safe_revision = base_safe_revision
-        context.loop_state.last_commit_hash = base_safe_revision
+        self._rollback_failed_promotion(
+            context,
+            base_safe_revision,
+            failure_detail=push_reason,
+        )
         return False, push_reason, None
     def _run_lineage_execution_batch(
         self,
@@ -673,7 +697,7 @@ class OrchestratorLineageMixin:
                     continue
                 try:
                     worker_contexts[step.step_id] = self._build_lineage_context(context, runtime, step, lineage)
-                except Exception as exc:
+                except HANDLED_OPERATION_EXCEPTIONS as exc:
                     result = self._lineage_worker_failure_result(
                         context=context,
                         lineages=lineages,
@@ -697,7 +721,7 @@ class OrchestratorLineageMixin:
                 for step in runnable_targets:
                     try:
                         result = self._run_lineage_step_worker(worker_contexts[step.step_id], step)
-                    except Exception as exc:
+                    except HANDLED_OPERATION_EXCEPTIONS as exc:
                         result = self._lineage_worker_failure_result(
                             context=context,
                             lineages=lineages,
@@ -731,7 +755,7 @@ class OrchestratorLineageMixin:
                             continue
                         try:
                             result = future.result()
-                        except Exception as exc:
+                        except HANDLED_OPERATION_EXCEPTIONS as exc:
                             result = self._lineage_worker_failure_result(
                                 context=context,
                                 lineages=lineages,
@@ -850,7 +874,7 @@ class OrchestratorLineageMixin:
                         assessment=assessment,
                         commit_hash=head_commit or str(worker_result.get("commit_hash") or "").strip(),
                     )
-                    _spine_state, _requirements_state, crr_record = update_contract_wave_artifacts_for_completion(
+                    _spine_state, _requirements_state, crr_record, manifest_path = persist_lineage_completion_artifacts(
                         context.paths,
                         step=step,
                         lineage_id=lineage.lineage_id,
@@ -862,7 +886,6 @@ class OrchestratorLineageMixin:
                         step_kind=self._step_kind(step),
                         current_spine_version=manifest.spine_version or current_spine_version(context.paths),
                     )
-                    manifest_path = save_lineage_manifest(context.paths, manifest)
                     worker_result["lineage_manifest"] = manifest.to_dict()
                     worker_result["lineage_manifest_file"] = str(manifest_path)
                     batch_manifests.append(manifest)
@@ -1130,6 +1153,7 @@ class OrchestratorLineageMixin:
             lineage_state_file=state_dir / "LINEAGES.json",
             spine_file=state_dir / "SPINE.json",
             common_requirements_file=state_dir / "COMMON_REQUIREMENTS.json",
+            contract_wave_audit_file=state_dir / "CONTRACT_WAVE_AUDIT.jsonl",
             ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
             ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
             ml_experiment_reports_dir=state_dir / "ml_experiments",

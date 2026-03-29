@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Any
 
 from .model_constants import (
@@ -17,6 +18,8 @@ from .model_constants import (
 )
 
 ALL_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"]
+_LOCAL_MODEL_CATALOG_TTL_SECONDS = 15.0
+_LOCAL_MODEL_CATALOG_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,7 +407,34 @@ def builtin_model_catalog() -> list[dict[str, Any]]:
     return entries
 
 
-def discover_local_model_catalog(third_party_root: Path | None = None) -> list[dict[str, Any]]:
+def _local_model_cache_key(third_party_root: Path | None = None) -> str:
+    if third_party_root is None:
+        return ""
+    try:
+        return str(third_party_root.resolve())
+    except OSError:
+        return str(third_party_root)
+
+
+def _clone_local_model_catalog(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [dict(item) for item in entries]
+
+
+def discover_local_model_catalog(
+    third_party_root: Path | None = None,
+    *,
+    force_refresh: bool = False,
+) -> list[dict[str, Any]]:
+    cache_key = _local_model_cache_key(third_party_root)
+    now = time.monotonic()
+    cached = _LOCAL_MODEL_CATALOG_CACHE.get(cache_key)
+    if (
+        not force_refresh
+        and cached is not None
+        and (now - cached[0]) <= _LOCAL_MODEL_CATALOG_TTL_SECONDS
+    ):
+        return _clone_local_model_catalog(cached[1])
+
     entries: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, str]] = set()
     for provider, model_name, source, installed in _iter_local_models(third_party_root=third_party_root):
@@ -432,7 +462,9 @@ def discover_local_model_catalog(third_party_root: Path | None = None) -> list[d
                 "installed": installed,
             }
         )
-    return sorted(entries, key=lambda item: (item["local_provider"], item["model"].lower()))
+    result = sorted(entries, key=lambda item: (item["local_provider"], item["model"].lower()))
+    _LOCAL_MODEL_CATALOG_CACHE[cache_key] = (time.monotonic(), result)
+    return _clone_local_model_catalog(result)
 
 
 def default_local_model(value: str, local_provider: str, third_party_root: Path | None = None) -> str:

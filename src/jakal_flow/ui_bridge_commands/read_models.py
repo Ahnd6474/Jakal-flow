@@ -46,6 +46,25 @@ def build_read_model_handlers(
             detail_level="core",
         )
 
+    def load_visible_project_state(ctx: BridgeCommandContext) -> dict[str, Any]:
+        refresh_codex_status = coerce_bool(ctx.payload.get("refresh_codex_status", False), False)
+        include_listing = coerce_bool(ctx.payload.get("include_listing", True), True)
+        detail_level = str(ctx.payload.get("detail_level", "core")).strip().lower() or "core"
+        detail: dict[str, Any] | None = None
+        if str(ctx.payload.get("repo_id", "")).strip() or str(ctx.payload.get("project_dir", "")).strip():
+            project = resolve_project(ctx.orchestrator, ctx.payload)
+            if refresh_codex_status:
+                codex_snapshot_service.invalidate(project.runtime.codex_path)
+            detail = ctx.detail_payload(
+                project,
+                refresh_codex_status=refresh_codex_status,
+                detail_level=detail_level,
+            )
+        return {
+            "listing": list_projects_payload(ctx.orchestrator) if include_listing else None,
+            "detail": detail,
+        }
+
     def load_project_history(ctx: BridgeCommandContext) -> dict[str, Any]:
         return history_payload(resolve_project(ctx.orchestrator, ctx.payload))
 
@@ -90,6 +109,7 @@ def build_read_model_handlers(
         "list-projects": lambda ctx: list_projects_payload(ctx.orchestrator),
         "load-project": load_project_detail,
         "load-project-core": load_project_core,
+        "load-visible-project-state": load_visible_project_state,
         "load-project-history": load_project_history,
         "load-history-entry": load_history_entry,
         "load-project-reports": load_project_reports,

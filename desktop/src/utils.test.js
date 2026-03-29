@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { canEditStep, jobHasNewerActiveReplacement } from "./utils.js";
+import { canEditStep, failureReasonCode, failureReasonLabel, jobHasNewerActiveReplacement } from "./utils.js";
 
 test("jobHasNewerActiveReplacement detects a newer active job for the same project", () => {
   const jobs = [
@@ -71,4 +71,34 @@ test("canEditStep still blocks failed steps while a run is active", () => {
     ),
     false,
   );
+});
+
+test("failureReasonLabel maps step metadata reason codes to readable labels", () => {
+  assert.equal(
+    failureReasonLabel(
+      {
+        metadata: {
+          failure_reason_code: "verification_test_failed",
+        },
+      },
+      "en",
+    ),
+    "Verification tests failed",
+  );
+  assert.equal(
+    failureReasonLabel(
+      {
+        metadata: {
+          failure_reason_code: "verification_test_failed",
+        },
+      },
+      "ko",
+    ),
+    "검증 테스트 실패",
+  );
+});
+
+test("failureReasonCode reads both top-level and step metadata reason codes", () => {
+  assert.equal(failureReasonCode({ failure_reason_code: "agent_pass_failed" }), "agent_pass_failed");
+  assert.equal(failureReasonCode({ metadata: { failure_reason_code: "parallel_merge_conflict" } }), "parallel_merge_conflict");
 });

@@ -11,6 +11,7 @@ from typing import Any
 
 from .bridge_contract import BRIDGE_PROTOCOL_VERSION, BridgeEnvelope, BridgeEvent, BridgeJobSnapshot
 from .bridge_events import BridgeEventSink, bridge_event_context
+from .errors import HANDLED_OPERATION_EXCEPTIONS, JSON_PARSE_EXCEPTIONS
 from .job_scheduler import (
     DEFAULT_MAX_CONCURRENT_JOBS,
     append_scheduler_event,
@@ -472,7 +473,7 @@ class BridgeServer:
         return event_payload
 
     def _should_emit_project_changed(self, command: str, result: Any) -> bool:
-        if command in {"bootstrap", "list-projects", "load-project"}:
+        if command in {"bootstrap", "list-projects", "load-project", "load-visible-project-state"}:
             return False
         if isinstance(result, dict) and result.get("emit_project_changed") is False:
             return False
@@ -503,7 +504,7 @@ class BridgeServer:
                         payload=self._infer_project_event_payload(command, workspace_root, payload, result),
                     )
                 )
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
             self._jobs.update(job_id, status="failed", error=str(exc).strip() or str(exc), result=None)
         finally:
             for snapshot in self._jobs.dequeue_startable_jobs(workspace_root):
@@ -609,13 +610,13 @@ class BridgeServer:
                 if not isinstance(params, dict):
                     raise ValueError("Bridge params must be a JSON object.")
                 self._handle_request(request_id, method, params)
-            except Exception as exc:
+            except HANDLED_OPERATION_EXCEPTIONS as exc:
                 request_id = ""
                 try:
                     parsed = parse_json_text(line)
                     if isinstance(parsed, dict):
                         request_id = str(parsed.get("id", "")).strip()
-                except Exception:
+                except JSON_PARSE_EXCEPTIONS:
                     request_id = ""
                 self._error_response(request_id, str(exc).strip() or str(exc))
         return 0

@@ -13,13 +13,22 @@ from jakal_flow.contract_wave import (
     build_lineage_manifest,
     classify_completed_lineage_step,
     current_spine_version,
+    delete_common_requirement,
+    delete_spine_checkpoint,
     load_common_requirements_state,
     load_lineage_manifests,
     load_spine_state,
     normalize_execution_step_policy,
+    persist_lineage_completion_artifacts,
+    record_manual_spine_checkpoint,
     save_lineage_manifest,
+    set_common_requirement_status,
+    update_common_requirement,
+    update_spine_checkpoint,
     update_contract_wave_artifacts_for_completion,
 )
+from jakal_flow.errors import ContractWavePersistenceError, PromotionRollbackError
+from jakal_flow.git_ops import GitCommandError
 from jakal_flow.models import ExecutionPlanState, ExecutionStep, LineageState, RuntimeOptions
 from jakal_flow.orchestrator import Orchestrator
 from jakal_flow.workspace import WorkspaceManager
@@ -223,6 +232,71 @@ class ContractWaveTests(unittest.TestCase):
         self.assertEqual(manifests[0].new_helpers_added, ["src/helpers/contract_helper.py"])
         self.assertEqual(manifests[0].promotion_class, "yellow")
 
+    def test_persist_lineage_completion_artifacts_rolls_back_when_manifest_write_fails(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_manifest_failure"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        manager = WorkspaceManager(workspace_root)
+        context = manager.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+
+        try:
+            step = normalize_execution_step_policy(
+                ExecutionStep(
+                    step_id="ST13",
+                    title="Contract manifest rollback",
+                    owned_paths=["src/contracts"],
+                    step_type="contract",
+                    scope_class="shared_reviewed",
+                    shared_contracts=["api.rollback"],
+                    shared_reviewed_paths=["src/shared"],
+                    spine_version=current_spine_version(context.paths),
+                )
+            )
+            assessment = classify_completed_lineage_step(
+                step,
+                changed_files=["src/contracts/rollback_contract.py", "src/shared/adapter.py"],
+                verification_passed=True,
+                batch_size=1,
+                child_count=0,
+            )
+            manifest = build_lineage_manifest(
+                lineage_id="LN13",
+                step=step,
+                changed_files=["src/contracts/rollback_contract.py", "src/shared/adapter.py"],
+                diff_entries=[("M", "src/contracts/rollback_contract.py")],
+                verification_command="python -m pytest tests/test_contracts.py",
+                verification_summary="contracts passed",
+                verification_passed=True,
+                assessment=assessment,
+                commit_hash="ln13-head",
+            )
+            with mock.patch(
+                "jakal_flow.contract_wave.save_lineage_manifest",
+                side_effect=ContractWavePersistenceError("manifest denied"),
+            ):
+                with self.assertRaisesRegex(ContractWavePersistenceError, "Contract-wave state was rolled back"):
+                    persist_lineage_completion_artifacts(
+                        context.paths,
+                        step=step,
+                        lineage_id="LN13",
+                        manifest=manifest,
+                        assessment=assessment,
+                    )
+            spine_state = load_spine_state(context.paths.spine_file)
+            common_state = load_common_requirements_state(context.paths.common_requirements_file)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(spine_state.current_version, DEFAULT_SPINE_VERSION)
+        self.assertEqual(spine_state.history, [])
+        self.assertEqual(common_state.open_requirements, [])
+
     def test_build_lineage_manifest_tracks_symbol_level_changes(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_symbols"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -321,6 +395,305 @@ class ContractWaveTests(unittest.TestCase):
         self.assertTrue(any("-function delete_user(user_id)" in item for item in manifest.public_symbol_changes))
         self.assertTrue(any("~function fetch_user(user_id) -> function fetch_user(user_id, include_profile)" in item for item in manifest.public_symbol_changes))
         self.assertTrue(any("+function format_contract(payload, version)" in item for item in manifest.helper_symbol_changes))
+
+    def test_set_common_requirement_status_moves_record_between_open_and_resolved(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_status_ops"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        manager = WorkspaceManager(workspace_root)
+        context = manager.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+        context.paths.common_requirements_file.write_text(
+            """{
+  "updated_at": "2026-03-29T00:00:00+00:00",
+  "open_requirements": [
+    {
+      "request_id": "CRR7",
+      "status": "open",
+      "created_at": "2026-03-29T00:00:00+00:00",
+      "title": "Shared adapter review",
+      "reason": "Touches shared adapter",
+      "promotion_class": "yellow",
+      "step_id": "ST2",
+      "lineage_id": "LN2",
+      "spine_version": "spine-v3",
+      "shared_contracts": ["api.payments"]
+    }
+  ],
+  "resolved_requirements": []
+}""",
+            encoding="utf-8",
+        )
+
+        try:
+            _spine, resolved_state, resolved = set_common_requirement_status(
+                context.paths,
+                request_id="CRR7",
+                status="resolved",
+                note="resolved by operator",
+            )
+            _spine, reopened_state, reopened = set_common_requirement_status(
+                context.paths,
+                request_id="CRR7",
+                status="open",
+                note="needs another pass",
+            )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(len(resolved_state.open_requirements), 0)
+        self.assertEqual(len(resolved_state.resolved_requirements), 1)
+        self.assertEqual(resolved.status, "resolved")
+        self.assertTrue(resolved.resolved_at)
+        self.assertIn("resolved by operator", resolved.notes)
+        self.assertEqual(len(reopened_state.open_requirements), 1)
+        self.assertEqual(len(reopened_state.resolved_requirements), 0)
+        self.assertEqual(reopened.status, "open")
+        self.assertIsNone(reopened.resolved_at)
+        self.assertIn("needs another pass", reopened.notes)
+
+    def test_record_manual_spine_checkpoint_updates_current_version_and_markdown(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_manual_checkpoint"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        manager = WorkspaceManager(workspace_root)
+        context = manager.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+
+        try:
+            spine_state, _requirements, checkpoint = record_manual_spine_checkpoint(
+                context.paths,
+                version="spine-v9",
+                notes="Operator checkpoint before integration review",
+                shared_contracts=["api.payments", "schema.invoice"],
+                touched_files=["src/shared/payment_adapter.py"],
+                step_id="ST-OPS",
+                lineage_id="LN-OPS",
+                commit_hash="ops-head",
+            )
+            shared_contracts_text = context.paths.shared_contracts_file.read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(spine_state.current_version, "spine-v9")
+        self.assertEqual(spine_state.history[-1].version, "spine-v9")
+        self.assertEqual(checkpoint.lineage_id, "LN-OPS")
+        self.assertIn("api.payments", checkpoint.shared_contracts)
+        self.assertIn("schema.invoice", shared_contracts_text)
+        self.assertIn("spine-v9", shared_contracts_text)
+        self.assertTrue(checkpoint.checkpoint_id)
+
+    def test_update_and_delete_common_requirement_write_audit_log(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_crr_mutations"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        manager = WorkspaceManager(workspace_root)
+        context = manager.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+        context.paths.common_requirements_file.write_text(
+            """{
+  "updated_at": "2026-03-29T00:00:00+00:00",
+  "open_requirements": [
+    {
+      "request_id": "CRR11",
+      "status": "open",
+      "created_at": "2026-03-29T00:00:00+00:00",
+      "title": "Old title",
+      "reason": "Old reason",
+      "promotion_class": "yellow",
+      "step_id": "ST11",
+      "lineage_id": "LN11",
+      "spine_version": "spine-v2",
+      "affected_paths": ["src/old.py"],
+      "shared_contracts": ["api.old"]
+    }
+  ],
+  "resolved_requirements": []
+}""",
+            encoding="utf-8",
+        )
+
+        try:
+            _spine, updated_state, updated = update_common_requirement(
+                context.paths,
+                request_id="CRR11",
+                title="Payments review",
+                reason="Updated shared adapter scope",
+                notes="operator edit",
+                affected_paths=["src/payments/adapter.py"],
+                shared_contracts=["api.payments"],
+                promotion_class="red",
+            )
+            _spine, deleted_state, deleted = delete_common_requirement(
+                context.paths,
+                request_id="CRR11",
+                note="duplicate request",
+            )
+            audit_text = context.paths.contract_wave_audit_file.read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(updated.title, "Payments review")
+        self.assertEqual(updated.reason, "Updated shared adapter scope")
+        self.assertEqual(updated.affected_paths, ["src/payments/adapter.py"])
+        self.assertEqual(updated.promotion_class, "red")
+        self.assertEqual(len(updated_state.open_requirements), 1)
+        self.assertEqual(len(deleted_state.open_requirements), 0)
+        self.assertEqual(deleted.request_id, "CRR11")
+        self.assertIn('"action": "update"', audit_text)
+        self.assertIn('"action": "delete"', audit_text)
+        self.assertIn('"entity_type": "common_requirement"', audit_text)
+
+    def test_update_and_delete_spine_checkpoint_write_audit_log(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_checkpoint_mutations"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        manager = WorkspaceManager(workspace_root)
+        context = manager.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+
+        try:
+            _spine, _requirements, checkpoint = record_manual_spine_checkpoint(
+                context.paths,
+                version="spine-v5",
+                notes="Initial note",
+                shared_contracts=["api.payments"],
+                touched_files=["src/payments/adapter.py"],
+                step_id="ST5",
+                lineage_id="LN5",
+                commit_hash="head-5",
+            )
+            _spine, updated_requirements, updated = update_spine_checkpoint(
+                context.paths,
+                checkpoint_id=checkpoint.checkpoint_id,
+                version="spine-v6",
+                notes="Edited note",
+                shared_contracts=["api.payments", "schema.invoice"],
+                touched_files=["src/payments/adapter.py", "src/schema/invoice.py"],
+                step_id="ST6",
+                lineage_id="LN6",
+                commit_hash="head-6",
+            )
+            _spine, deleted_requirements, deleted = delete_spine_checkpoint(
+                context.paths,
+                checkpoint_id=checkpoint.checkpoint_id,
+                note="superseded by later checkpoint",
+            )
+            audit_text = context.paths.contract_wave_audit_file.read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(updated.version, "spine-v6")
+        self.assertEqual(updated.lineage_id, "LN6")
+        self.assertIn("schema.invoice", updated.shared_contracts)
+        self.assertTrue(updated_requirements.updated_at)
+        self.assertEqual(deleted.checkpoint_id, checkpoint.checkpoint_id)
+        self.assertTrue(deleted_requirements.updated_at)
+        self.assertIn('"entity_type": "spine_checkpoint"', audit_text)
+        self.assertIn('"action": "update"', audit_text)
+        self.assertIn('"action": "delete"', audit_text)
+
+    def test_update_common_requirement_rolls_back_when_audit_append_fails(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_crr_audit_failure"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        manager = WorkspaceManager(workspace_root)
+        context = manager.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+        context.paths.common_requirements_file.write_text(
+            """{
+  "updated_at": "2026-03-29T00:00:00+00:00",
+  "open_requirements": [
+    {
+      "request_id": "CRR12",
+      "status": "open",
+      "created_at": "2026-03-29T00:00:00+00:00",
+      "title": "Original title",
+      "reason": "Original reason",
+      "promotion_class": "yellow",
+      "step_id": "ST12",
+      "lineage_id": "LN12",
+      "spine_version": "spine-v2",
+      "affected_paths": ["src/original.py"],
+      "shared_contracts": ["api.original"]
+    }
+  ],
+  "resolved_requirements": []
+}""",
+            encoding="utf-8",
+        )
+
+        try:
+            with mock.patch("jakal_flow.contract_wave.append_jsonl", side_effect=OSError("audit denied")):
+                with self.assertRaisesRegex(ContractWavePersistenceError, "State changes were rolled back"):
+                    update_common_requirement(
+                        context.paths,
+                        request_id="CRR12",
+                        title="Edited title",
+                        reason="Edited reason",
+                        shared_contracts=["api.edited"],
+                    )
+            requirements_state = load_common_requirements_state(context.paths.common_requirements_file)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(requirements_state.open_requirements[0].title, "Original title")
+        self.assertEqual(requirements_state.open_requirements[0].reason, "Original reason")
+        self.assertEqual(requirements_state.open_requirements[0].shared_contracts, ["api.original"])
+
+    def test_record_manual_spine_checkpoint_rolls_back_when_audit_append_fails(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_checkpoint_audit_failure"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        manager = WorkspaceManager(workspace_root)
+        context = manager.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+
+        try:
+            with mock.patch("jakal_flow.contract_wave.append_jsonl", side_effect=OSError("audit denied")):
+                with self.assertRaisesRegex(ContractWavePersistenceError, "State changes were rolled back"):
+                    record_manual_spine_checkpoint(
+                        context.paths,
+                        version="spine-v7",
+                        notes="checkpoint that should roll back",
+                        shared_contracts=["api.rollback"],
+                    )
+            spine_state = load_spine_state(context.paths.spine_file)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(spine_state.current_version, DEFAULT_SPINE_VERSION)
+        self.assertEqual(spine_state.history, [])
 
     def test_allocate_lineage_requires_explicit_join_for_multiple_dependencies(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_join_guard"
@@ -502,6 +875,53 @@ class ContractWaveTests(unittest.TestCase):
         mocked_reset.assert_called_once_with(context.paths.repo_dir, "safe-main")
         self.assertEqual(context.metadata.current_safe_revision, "safe-main")
         self.assertEqual(context.loop_state.current_safe_revision, "safe-main")
+
+    def test_promote_lineage_to_target_branch_raises_when_rollback_fails(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_promotion_rollback_failure"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        context = orchestrator.workspace.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+        context.metadata.current_safe_revision = "safe-main"
+        context.loop_state.current_safe_revision = "safe-main"
+        lineage = LineageState(
+            lineage_id="LN2",
+            branch_name="jakal-flow-lineage-ln2",
+            worktree_dir=temp_root / "ln2" / "repo",
+            project_root=temp_root / "ln2",
+            created_at="2026-03-29T00:00:00+00:00",
+            updated_at="2026-03-29T00:00:00+00:00",
+            head_commit="ln2-head",
+            safe_revision="ln2-head",
+        )
+
+        try:
+            with mock.patch.object(orchestrator.git, "merge_ff_only"), mock.patch.object(
+                orchestrator.git,
+                "current_revision",
+                return_value="main-promoted",
+            ), mock.patch.object(
+                orchestrator,
+                "_push_if_ready",
+                return_value=(False, "push_failed:network"),
+            ), mock.patch.object(
+                orchestrator.git,
+                "hard_reset",
+                side_effect=GitCommandError("reset failed"),
+            ):
+                with self.assertRaisesRegex(PromotionRollbackError, "Failed to restore safe revision"):
+                    orchestrator._promote_lineage_to_target_branch(context, lineage)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(context.metadata.current_safe_revision, "main-promoted")
+        self.assertEqual(context.loop_state.current_safe_revision, "main-promoted")
 
 
 if __name__ == "__main__":

@@ -29,6 +29,19 @@ export function bridgeEventProject(eventPayload) {
   };
 }
 
+function bridgeEventProjectKey(eventPayload) {
+  const project = bridgeEventProject(eventPayload);
+  const eventType = bridgeEventType(eventPayload);
+  if (!project || !eventType) {
+    return "";
+  }
+  return [
+    eventType,
+    String(project.repo_id || "").trim(),
+    String(project.project_dir || "").trim(),
+  ].join("|");
+}
+
 export function isJobUpdatedEvent(eventPayload) {
   return bridgeEventType(eventPayload) === BRIDGE_EVENTS.JOB_UPDATED;
 }
@@ -39,4 +52,28 @@ export function isProjectChangedEvent(eventPayload) {
 
 export function isProjectUiEvent(eventPayload) {
   return bridgeEventType(eventPayload) === BRIDGE_EVENTS.PROJECT_UI_EVENT;
+}
+
+export function compactBridgeEventQueue(events = []) {
+  const items = Array.isArray(events) ? events.filter(Boolean) : [];
+  if (items.length < 2) {
+    return items;
+  }
+  const compacted = [];
+  const projectEventIndexByKey = new Map();
+  items.forEach((eventPayload) => {
+    if (isProjectChangedEvent(eventPayload) || isProjectUiEvent(eventPayload)) {
+      const key = bridgeEventProjectKey(eventPayload);
+      if (key) {
+        const existingIndex = projectEventIndexByKey.get(key);
+        if (existingIndex !== undefined) {
+          compacted[existingIndex] = eventPayload;
+          return;
+        }
+        projectEventIndexByKey.set(key, compacted.length);
+      }
+    }
+    compacted.push(eventPayload);
+  });
+  return compacted;
 }

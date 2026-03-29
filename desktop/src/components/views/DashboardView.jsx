@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import {
@@ -59,7 +60,18 @@ function UsageIcon() {
   );
 }
 
-export function DashboardView({ detail, planDraft, modelPresets, modelCatalog, activeJob, programSettings }) {
+function dashboardViewPropsEqual(previousProps, nextProps) {
+  return (
+    previousProps.detail === nextProps.detail
+    && previousProps.planDraft === nextProps.planDraft
+    && previousProps.modelPresets === nextProps.modelPresets
+    && previousProps.modelCatalog === nextProps.modelCatalog
+    && previousProps.activeJob === nextProps.activeJob
+    && previousProps.programSettings === nextProps.programSettings
+  );
+}
+
+export const DashboardView = memo(function DashboardView({ detail, planDraft, modelPresets, modelCatalog, activeJob, programSettings }) {
   const { language, t } = useI18n();
   const executionJob = visibleExecutionJob(activeJob);
   const usage = detail?.snapshot?.recent_usage || {};
@@ -69,12 +81,25 @@ export function DashboardView({ detail, planDraft, modelPresets, modelCatalog, a
   const costEstimate = runtimeInsights?.cost || {};
   const parallelInsight = runtimeInsights?.parallel || {};
   const account = codexStatus.account || {};
-  const usageBuckets = codexUsageBuckets(codexStatus, language);
+  const usageBuckets = useMemo(
+    () => codexUsageBuckets(codexStatus, language),
+    [codexStatus, language],
+  );
   const dashboardVisibility = normalizeDashboardVisibility(programSettings?.dashboard_visibility);
   const livePlan = executionJob?.status === "running" && detail?.plan ? detail.plan : planDraft;
   const allSteps = livePlan?.steps || [];
-  const completedSteps = allSteps.filter((step) => step.status === "completed");
-  const pendingSteps = allSteps.filter((step) => step.status !== "completed");
+  const stepCounts = useMemo(() => {
+    let completed = 0;
+    let pending = 0;
+    for (const step of allSteps) {
+      if (step?.status === "completed") {
+        completed += 1;
+      } else {
+        pending += 1;
+      }
+    }
+    return { completed, pending };
+  }, [allSteps]);
   const projectStatus = detail?.project?.current_status || "idle";
   const parallelLimitValue = parallelWorkerLabel(parallelInsight.recommended_workers ?? 1, language);
   const parallelLimitDetails = parallelLimitDescription(parallelInsight, language);
@@ -83,36 +108,52 @@ export function DashboardView({ detail, planDraft, modelPresets, modelCatalog, a
   const activeStatus = displayStatus(activeStatusKey, language);
   const tone = statusTone(activeStatusKey);
 
-  const metricItems = [
-    { key: "remaining_steps", label: t("dashboard.remainingSteps"), value: pendingSteps.length, tone: "info" },
-    {
-      key: "checkpoint_pending",
-      label: t("dashboard.checkpointPending"),
-      value: detail?.checkpoints?.pending ? t("common.yes") : t("common.no"),
-      tone: detail?.checkpoints?.pending ? "warning" : "neutral",
-    },
-    { key: "input_tokens", label: t("dashboard.inputTokens"), value: (usage.input_tokens ?? 0).toLocaleString() },
-    { key: "output_tokens", label: t("dashboard.outputTokens"), value: (usage.output_tokens ?? 0).toLocaleString() },
-    {
-      key: "estimated_remaining",
-      label: t("dashboard.estimatedRemaining"),
-      value: formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language),
-      tone: "info",
-    },
-    ...(showEstimatedCost
-      ? [
-          { key: "estimated_cost", label: t("dashboard.estimatedCost"), value: formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language) },
-          { key: "actual_cost", label: t("dashboard.actualCost"), value: formatUsd(costEstimate?.recent?.estimated_cost_usd ?? 0, language) },
-        ]
-      : []),
-    { key: "codex_plan", label: t("dashboard.codexPlan"), value: account.plan_type || t("common.unavailable"), tone: "neutral" },
-    ...usageBuckets.map((bucket) => ({
-      key: `rate_limit_${bucket.key}`,
-      label: bucket.label,
-      value: rateLimitRemainingLabel(bucket.window, language),
-      tone: bucket.window && (bucket.window.remaining_percent ?? 0) < 25 ? "warning" : "success",
-    })),
-  ].filter((item) => dashboardVisibility[item.key] !== false);
+  const metricItems = useMemo(
+    () => [
+      { key: "remaining_steps", label: t("dashboard.remainingSteps"), value: stepCounts.pending, tone: "info" },
+      {
+        key: "checkpoint_pending",
+        label: t("dashboard.checkpointPending"),
+        value: detail?.checkpoints?.pending ? t("common.yes") : t("common.no"),
+        tone: detail?.checkpoints?.pending ? "warning" : "neutral",
+      },
+      { key: "input_tokens", label: t("dashboard.inputTokens"), value: (usage.input_tokens ?? 0).toLocaleString() },
+      { key: "output_tokens", label: t("dashboard.outputTokens"), value: (usage.output_tokens ?? 0).toLocaleString() },
+      {
+        key: "estimated_remaining",
+        label: t("dashboard.estimatedRemaining"),
+        value: formatDurationCompact(executionEstimate.remaining_seconds ?? 0, language),
+        tone: "info",
+      },
+      ...(showEstimatedCost
+        ? [
+            { key: "estimated_cost", label: t("dashboard.estimatedCost"), value: formatUsd(costEstimate.estimated_total_cost_usd ?? 0, language) },
+            { key: "actual_cost", label: t("dashboard.actualCost"), value: formatUsd(costEstimate?.recent?.estimated_cost_usd ?? 0, language) },
+          ]
+        : []),
+      { key: "codex_plan", label: t("dashboard.codexPlan"), value: account.plan_type || t("common.unavailable"), tone: "neutral" },
+      ...usageBuckets.map((bucket) => ({
+        key: `rate_limit_${bucket.key}`,
+        label: bucket.label,
+        value: rateLimitRemainingLabel(bucket.window, language),
+        tone: bucket.window && (bucket.window.remaining_percent ?? 0) < 25 ? "warning" : "success",
+      })),
+    ].filter((item) => dashboardVisibility[item.key] !== false),
+    [
+      account.plan_type,
+      costEstimate,
+      dashboardVisibility,
+      detail?.checkpoints?.pending,
+      executionEstimate.remaining_seconds,
+      language,
+      showEstimatedCost,
+      stepCounts.pending,
+      t,
+      usage.input_tokens,
+      usage.output_tokens,
+      usageBuckets,
+    ],
+  );
 
   return (
     <section className="workspace-view">
@@ -128,16 +169,16 @@ export function DashboardView({ detail, planDraft, modelPresets, modelCatalog, a
           <div className="dashboard-hero__left">
             <div className={`dashboard-hero__dot dashboard-hero__dot--${tone}`} />
             <div>
-              <span className="dashboard-hero__eyebrow">{language === "ko" ? "현재 상태" : "Current Status"}</span>
+              <span className="dashboard-hero__eyebrow">{language === "ko" ? "?꾩옱 ?곹깭" : "Current Status"}</span>
               <strong className="dashboard-hero__status">{activeStatus}</strong>
             </div>
           </div>
           {allSteps.length > 0 ? (
             <div className="dashboard-hero__right">
               <span className="dashboard-hero__progress-label">
-                {completedSteps.length}/{allSteps.length} {language === "ko" ? "단계 완료" : "steps done"}
+                {stepCounts.completed}/{allSteps.length} {language === "ko" ? "?④퀎 ?꾨즺" : "steps done"}
               </span>
-              <ProgressBar completed={completedSteps.length} total={allSteps.length} tone={tone} />
+              <ProgressBar completed={stepCounts.completed} total={allSteps.length} tone={tone} />
             </div>
           ) : null}
         </div>
@@ -160,7 +201,7 @@ export function DashboardView({ detail, planDraft, modelPresets, modelCatalog, a
                 <strong>{t("dashboard.runtime")}</strong>
               </div>
               <div className="dashboard-detail-list">
-                <div className="dashboard-detail-row"><span>{language === "ko" ? "모델" : "Model"}</span><strong>{runtimeSummary(detail?.runtime || {}, modelPresets, language, modelCatalog)}</strong></div>
+                <div className="dashboard-detail-row"><span>{language === "ko" ? "紐⑤뜽" : "Model"}</span><strong>{runtimeSummary(detail?.runtime || {}, modelPresets, language, modelCatalog)}</strong></div>
                 <div className="dashboard-detail-row"><span>{t("field.parallelWorkers")}</span><strong>{parallelLimitValue}</strong></div>
                 <div className="dashboard-detail-row"><span>{t("run.parallelLimit")}</span><strong>{parallelLimitDetails}</strong></div>
                 <div className="dashboard-detail-row"><span>{t("run.estimatedTotal")}</span><strong>{formatDurationCompact(executionEstimate.estimated_total_seconds ?? 0, language)}</strong></div>
@@ -196,4 +237,4 @@ export function DashboardView({ detail, planDraft, modelPresets, modelCatalog, a
       ) : null}
     </section>
   );
-}
+}, dashboardViewPropsEqual);

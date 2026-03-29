@@ -1,7 +1,81 @@
-import { useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
+import { arePropsEqualExceptFunctions } from "../../shallowProps";
 import { codexUsageBuckets, formatUsd, rateLimitRemainingLabel, rateLimitWindowSummary, shouldShowEstimatedCost, statusTone } from "../../utils";
+
+const JSON_PREVIEW_MAX_CHARS = 24000;
+const JSON_PREVIEW_MAX_DEPTH = 4;
+const JSON_PREVIEW_MAX_ITEMS = 20;
+
+function buildJsonPreview(value, depth = 0) {
+  if (depth >= JSON_PREVIEW_MAX_DEPTH) {
+    return Array.isArray(value) ? `[${Array.isArray(value) ? value.length : 0} items]` : "[Object]";
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, JSON_PREVIEW_MAX_ITEMS).map((item) => buildJsonPreview(item, depth + 1));
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value).slice(0, JSON_PREVIEW_MAX_ITEMS);
+    return entries.reduce((result, [key, item]) => {
+      result[key] = buildJsonPreview(item, depth + 1);
+      return result;
+    }, {});
+  }
+  return value;
+}
+
+function scheduleJsonFormatting(callback) {
+  if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+    const handle = window.requestIdleCallback(callback, { timeout: 200 });
+    return () => window.cancelIdleCallback(handle);
+  }
+  const handle = window.setTimeout(callback, 80);
+  return () => window.clearTimeout(handle);
+}
+
+const LazyJsonPanel = memo(function LazyJsonPanel({ eventJson = null }) {
+  const [showFullJson, setShowFullJson] = useState(false);
+  const [formattedJson, setFormattedJson] = useState("");
+  const previewPayload = useMemo(() => buildJsonPreview(eventJson || {}), [eventJson]);
+  const previewJson = useMemo(() => JSON.stringify(previewPayload, null, 2), [previewPayload]);
+
+  useEffect(() => {
+    setShowFullJson(false);
+    setFormattedJson("");
+  }, [eventJson]);
+
+  useEffect(() => {
+    if (!showFullJson) {
+      return undefined;
+    }
+    const cancelFormatting = scheduleJsonFormatting(() => {
+      try {
+        setFormattedJson(JSON.stringify(eventJson || {}, null, 2));
+      } catch {
+        setFormattedJson(String(eventJson || ""));
+      }
+    });
+    return cancelFormatting;
+  }, [eventJson, showFullJson]);
+
+  const visibleJson = showFullJson
+    ? (formattedJson || "Formatting JSON...")
+    : previewJson.length > JSON_PREVIEW_MAX_CHARS
+      ? `${previewJson.slice(0, JSON_PREVIEW_MAX_CHARS)}\n...`
+      : previewJson;
+
+  return (
+    <div className="tool-window__body tool-window__body--log">
+      <div className="action-row" style={{ marginBottom: "8px" }}>
+        <button className="toolbar-button toolbar-button--ghost" onClick={() => setShowFullJson((current) => !current)} type="button">
+          {showFullJson ? "Show Preview" : "Show Full JSON"}
+        </button>
+      </div>
+      <pre>{visibleJson}</pre>
+    </div>
+  );
+});
 
 function ToolTab({ value, activeTab, onChange, label }) {
   return (
@@ -11,7 +85,7 @@ function ToolTab({ value, activeTab, onChange, label }) {
   );
 }
 
-export function BottomToolPanel({ activeTab, onChangeTab, data, onHide }) {
+export const BottomToolPanel = memo(function BottomToolPanel({ activeTab, onChangeTab, data, onHide }) {
   const tokenUsage = data?.token_usage || {};
   const codexStatus = data?.codex_status || {};
   const runtimeInsights = data?.runtime_insights || {};
@@ -19,10 +93,6 @@ export function BottomToolPanel({ activeTab, onChangeTab, data, onHide }) {
   const account = codexStatus.account || {};
   const gitStatus = data?.git_status || {};
   const testRuns = data?.test_runs || [];
-  const serializedEventJson = useMemo(
-    () => (activeTab === "json" ? JSON.stringify(data?.event_json || {}, null, 2) : ""),
-    [activeTab, data?.event_json],
-  );
   const { language, t } = useI18n();
   const usageBuckets = codexUsageBuckets(codexStatus, language);
   const showEstimatedCost = shouldShowEstimatedCost(data?.runtime || {}, costEstimate);
@@ -55,9 +125,7 @@ export function BottomToolPanel({ activeTab, onChangeTab, data, onHide }) {
       </div>
 
       {activeTab === "json" ? (
-        <div className="tool-window__body tool-window__body--log">
-          <pre>{serializedEventJson}</pre>
-        </div>
+        <LazyJsonPanel eventJson={data?.event_json || {}} />
       ) : null}
 
       {activeTab === "tokens" ? (
@@ -172,4 +240,4 @@ export function BottomToolPanel({ activeTab, onChangeTab, data, onHide }) {
       ) : null}
     </section>
   );
-}
+}, arePropsEqualExceptFunctions);

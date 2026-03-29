@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 import os
 from pathlib import Path
 import re
 import shutil
+import time
 from typing import Any, Callable
 
 from .codex_app_server import fetch_codex_backend_snapshot, resolve_codex_path
@@ -42,6 +44,8 @@ _UI_PATH_PREFIXES = (
     "website/",
 )
 _UI_SUFFIXES = (".css", ".scss", ".sass", ".less", ".jsx", ".tsx", ".html")
+_PROVIDER_STATUSES_CACHE_TTL_SECONDS = 10.0
+_provider_statuses_cache_no_fetch: tuple[float, dict[str, dict[str, Any]]] | None = None
 _UI_KEYWORD_PATTERN = re.compile(
     r"\b("
     r"ui|ux|frontend|react|tauri|desktop|screen|layout|style|styling|theme|component|"
@@ -102,6 +106,11 @@ def resolve_step_model_choice(step: ExecutionStep, runtime: RuntimeOptions) -> S
 def provider_statuses_payload(
     fetch_snapshot: Callable[[str], Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    global _provider_statuses_cache_no_fetch
+    if fetch_snapshot is None and _provider_statuses_cache_no_fetch is not None:
+        checked_at, cached_statuses = _provider_statuses_cache_no_fetch
+        if (time.monotonic() - checked_at) <= _PROVIDER_STATUSES_CACHE_TTL_SECONDS:
+            return deepcopy(cached_statuses)
     fetch = fetch_snapshot
     snapshots = {
         "openai": _snapshot_to_dict(fetch(default_codex_path("openai"))) if callable(fetch) else {},
@@ -134,6 +143,8 @@ def provider_statuses_payload(
         ),
     }
     statuses["ensemble"] = _ensemble_provider_status(statuses)
+    if fetch_snapshot is None:
+        _provider_statuses_cache_no_fetch = (time.monotonic(), deepcopy(statuses))
     return statuses
 
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { BottomToolPanel } from "./components/layout/BottomToolPanel";
 import { CenterWorkspace } from "./components/layout/CenterWorkspace";
 import { CommandPalette } from "./components/layout/CommandPalette";
@@ -32,6 +32,16 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [rightTab, setRightTab] = useState("chat");
   const lastShiftRef = useRef(0);
+  const controllerCommandRef = useRef({
+    setCenterTab: controller.setCenterTab,
+    setSidebarTab: controller.setSidebarTab,
+    setBottomCollapsed: controller.setBottomCollapsed,
+    setRightCollapsed: controller.setRightCollapsed,
+    generatePlan: controller.generatePlan,
+    runPlan: controller.runPlan,
+    forceRefresh: controller.forceRefresh,
+    startNewProject: controller.startNewProject,
+  });
 
   const keybindingActionsRef = useRef({
     setCenterTab: controller.setCenterTab,
@@ -49,6 +59,28 @@ export default function App() {
       toggleRight: () => controller.setRightCollapsed((v) => !v),
     };
   }, [controller.setCenterTab, controller.setSidebarTab, controller.setBottomCollapsed, controller.setRightCollapsed]);
+
+  useEffect(() => {
+    controllerCommandRef.current = {
+      setCenterTab: controller.setCenterTab,
+      setSidebarTab: controller.setSidebarTab,
+      setBottomCollapsed: controller.setBottomCollapsed,
+      setRightCollapsed: controller.setRightCollapsed,
+      generatePlan: controller.generatePlan,
+      runPlan: controller.runPlan,
+      forceRefresh: controller.forceRefresh,
+      startNewProject: controller.startNewProject,
+    };
+  }, [
+    controller.forceRefresh,
+    controller.generatePlan,
+    controller.runPlan,
+    controller.setBottomCollapsed,
+    controller.setCenterTab,
+    controller.setRightCollapsed,
+    controller.setSidebarTab,
+    controller.startNewProject,
+  ]);
 
   /* Theme */
   useEffect(() => {
@@ -161,6 +193,8 @@ export default function App() {
   );
 
   const detail = controller.projectDetail;
+  const deferredDetail = useDeferredValue(detail);
+  const deferredPlanDraft = useDeferredValue(controller.planDraft);
   const sidebarOpen = Boolean(controller.sidebarTab);
   const rightOpen = !controller.rightCollapsed;
   const sidebarStyle = sidebarOpen ? { width: controller.sidebarWidth, flex: `0 0 ${controller.sidebarWidth}px` } : undefined;
@@ -186,23 +220,32 @@ export default function App() {
     },
     [controller.setSelectedStepId],
   );
+  const handleOpenSettings = useCallback(() => {
+    controller.setCenterTab("app-settings");
+  }, [controller.setCenterTab]);
+  const handleToggleBottom = useCallback(() => {
+    controller.setBottomCollapsed((value) => !value);
+  }, [controller.setBottomCollapsed]);
+  const handleCloseCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(false);
+  }, []);
 
   const paletteActions = useMemo(() => [
-    { id: "tab-run", label: t("tab.flow"), shortcut: "Ctrl+1", category: "Tab", keywords: "run flow execution", onExecute: () => controller.setCenterTab("run") },
-    { id: "tab-config", label: t("tab.config"), shortcut: "Ctrl+2", category: "Tab", keywords: "config settings project", onExecute: () => controller.setCenterTab("config") },
-    { id: "tab-dashboard", label: t("tab.dashboard"), shortcut: "Ctrl+3", category: "Tab", keywords: "dashboard metrics", onExecute: () => controller.setCenterTab("dashboard") },
-    { id: "tab-history", label: t("tab.history"), shortcut: "Ctrl+5", category: "Tab", keywords: "history runs", onExecute: () => controller.setCenterTab("history") },
-    { id: "tab-settings", label: t("toolbar.programSettings"), shortcut: "Ctrl+6", category: "Tab", keywords: "settings preferences program", onExecute: () => controller.setCenterTab("app-settings") },
-    { id: "sidebar-workspace", label: t("sidebar.explorer"), shortcut: "Alt+1", category: "Sidebar", keywords: "explorer files workspace", onExecute: () => controller.setSidebarTab((c) => nextSidebarTab(c, "workspace")) },
-    { id: "sidebar-plans", label: t("sidebar.checkpoints"), shortcut: "Alt+2", category: "Sidebar", keywords: "checkpoints plans", onExecute: () => controller.setSidebarTab((c) => nextSidebarTab(c, "plans")) },
-    { id: "sidebar-reservations", label: "Job Queue", shortcut: "Alt+3", category: "Sidebar", keywords: "reservations queue jobs", onExecute: () => controller.setSidebarTab((c) => nextSidebarTab(c, "reservations")) },
-    { id: "toggle-bottom", label: "Toggle Bottom Panel", shortcut: "Alt+B", category: "Panel", keywords: "bottom tool panel logs json tokens", onExecute: () => controller.setBottomCollapsed((v) => !v) },
-    { id: "toggle-right", label: "Toggle Inspector", shortcut: "Alt+R", category: "Panel", keywords: "right inspector details", onExecute: () => controller.setRightCollapsed((v) => !v) },
-    { id: "generate-plan", label: t("action.generatePlan"), category: "Action", keywords: "generate plan ai", onExecute: () => controller.generatePlan() },
-    { id: "run-plan", label: t("action.runRemaining"), category: "Action", keywords: "run execute remaining", onExecute: () => controller.runPlan() },
-    { id: "refresh", label: t("action.refresh"), category: "Action", keywords: "refresh reload", onExecute: () => controller.forceRefresh() },
-    { id: "new-project", label: t("action.new"), category: "Action", keywords: "new project create", onExecute: () => controller.startNewProject() },
-  ], [t, controller.setCenterTab, controller.setSidebarTab, controller.setBottomCollapsed, controller.setRightCollapsed, controller.generatePlan, controller.runPlan, controller.forceRefresh, controller.startNewProject]);
+    { id: "tab-run", label: t("tab.flow"), shortcut: "Ctrl+1", category: "Tab", keywords: "run flow execution", onExecute: () => controllerCommandRef.current.setCenterTab("run") },
+    { id: "tab-config", label: t("tab.config"), shortcut: "Ctrl+2", category: "Tab", keywords: "config settings project", onExecute: () => controllerCommandRef.current.setCenterTab("config") },
+    { id: "tab-dashboard", label: t("tab.dashboard"), shortcut: "Ctrl+3", category: "Tab", keywords: "dashboard metrics", onExecute: () => controllerCommandRef.current.setCenterTab("dashboard") },
+    { id: "tab-history", label: t("tab.history"), shortcut: "Ctrl+5", category: "Tab", keywords: "history runs", onExecute: () => controllerCommandRef.current.setCenterTab("history") },
+    { id: "tab-settings", label: t("toolbar.programSettings"), shortcut: "Ctrl+6", category: "Tab", keywords: "settings preferences program", onExecute: () => controllerCommandRef.current.setCenterTab("app-settings") },
+    { id: "sidebar-workspace", label: t("sidebar.explorer"), shortcut: "Alt+1", category: "Sidebar", keywords: "explorer files workspace", onExecute: () => controllerCommandRef.current.setSidebarTab((current) => nextSidebarTab(current, "workspace")) },
+    { id: "sidebar-plans", label: t("sidebar.checkpoints"), shortcut: "Alt+2", category: "Sidebar", keywords: "checkpoints plans", onExecute: () => controllerCommandRef.current.setSidebarTab((current) => nextSidebarTab(current, "plans")) },
+    { id: "sidebar-reservations", label: "Job Queue", shortcut: "Alt+3", category: "Sidebar", keywords: "reservations queue jobs", onExecute: () => controllerCommandRef.current.setSidebarTab((current) => nextSidebarTab(current, "reservations")) },
+    { id: "toggle-bottom", label: "Toggle Bottom Panel", shortcut: "Alt+B", category: "Panel", keywords: "bottom tool panel logs json tokens", onExecute: () => controllerCommandRef.current.setBottomCollapsed((value) => !value) },
+    { id: "toggle-right", label: "Toggle Inspector", shortcut: "Alt+R", category: "Panel", keywords: "right inspector details", onExecute: () => controllerCommandRef.current.setRightCollapsed((value) => !value) },
+    { id: "generate-plan", label: t("action.generatePlan"), category: "Action", keywords: "generate plan ai", onExecute: () => controllerCommandRef.current.generatePlan() },
+    { id: "run-plan", label: t("action.runRemaining"), category: "Action", keywords: "run execute remaining", onExecute: () => controllerCommandRef.current.runPlan() },
+    { id: "refresh", label: t("action.refresh"), category: "Action", keywords: "refresh reload", onExecute: () => controllerCommandRef.current.forceRefresh() },
+    { id: "new-project", label: t("action.new"), category: "Action", keywords: "new project create", onExecute: () => controllerCommandRef.current.startNewProject() },
+  ], [t]);
 
   return (
     <main className={`ide-shell ${compact ? "ide-shell--compact" : ""}`.trim()}>
@@ -227,7 +270,7 @@ export default function App() {
         }
         shareBusy={controller.shareBusy}
         onRefresh={controller.forceRefresh}
-        onOpenSettings={() => controller.setCenterTab("app-settings")}
+        onOpenSettings={handleOpenSettings}
         onGeneratePlan={controller.generatePlan}
         onRunPlan={controller.runPlan}
         onApproveCheckpoint={controller.approveCheckpoint}
@@ -262,8 +305,8 @@ export default function App() {
             onChangeTab={(nextTab) =>
               controller.setSidebarTab((currentTab) => nextSidebarTab(currentTab, nextTab))
             }
-            projects={controller.projects}
-            historyProjects={controller.historyProjects}
+            projects={controller.filteredProjects}
+            historyProjects={controller.filteredHistoryProjects}
             selectedProjectId={controller.selectedProjectId}
             selectedHistoryId={controller.selectedHistoryId}
             loadingProjectId={controller.loadingProjectId}
@@ -277,9 +320,9 @@ export default function App() {
             onArchiveProject={controller.archiveProjectById}
             onDeleteProject={controller.deleteProjectById}
             onDeleteHistoryEntry={controller.deleteHistoryEntry}
-            workspaceTree={detail?.workspace_tree}
-            checkpoints={detail?.checkpoints}
-            github={detail?.github}
+            workspaceTree={deferredDetail?.workspace_tree}
+            checkpoints={deferredDetail?.checkpoints}
+            github={deferredDetail?.github}
             planPrompt={controller.planDraft?.project_prompt || ""}
             onOpenFolder={controller.openRepoInFolder}
             onOpenVsCode={controller.openRepoInVsCode}
@@ -364,7 +407,7 @@ export default function App() {
                 <BottomToolPanel
                   activeTab={controller.bottomTab}
                   onChangeTab={controller.setBottomTab}
-                  data={detail}
+                  data={deferredDetail}
                   onHide={() => controller.setBottomCollapsed(true)}
                 />
               </div>
@@ -384,15 +427,15 @@ export default function App() {
             activeTab={rightTab}
             collapsed={!rightOpen}
             onChangeTab={handleRightTabChange}
-            detail={detail}
-            planDraft={controller.planDraft}
+            detail={deferredDetail}
+            planDraft={deferredPlanDraft}
             selectedStepId={controller.selectedStepId}
             modelPresets={controller.modelPresets}
             form={controller.projectForm}
             activeJob={controller.activeJob}
             busy={controller.busy}
             onChangeForm={controller.setProjectForm}
-            chat={detail?.chat}
+            chat={deferredDetail?.chat}
             selectedChatSessionId={controller.selectedChatSessionId}
             chatDraftSession={controller.chatDraftSession}
             onSelectChatSession={controller.loadChatSession}
@@ -401,6 +444,10 @@ export default function App() {
             onResolveCommonRequirement={controller.resolveCommonRequirement}
             onReopenCommonRequirement={controller.reopenCommonRequirement}
             onRecordSpineCheckpoint={controller.recordSpineCheckpoint}
+            onUpdateCommonRequirement={controller.updateCommonRequirement}
+            onDeleteCommonRequirement={controller.deleteCommonRequirement}
+            onUpdateSpineCheckpoint={controller.updateSpineCheckpoint}
+            onDeleteSpineCheckpoint={controller.deleteSpineCheckpoint}
           />
         </div>
       </div>
@@ -412,13 +459,13 @@ export default function App() {
         queuedJobs={controller.queuedJobs}
         modelPresets={controller.modelPresets}
         bottomCollapsed={controller.bottomCollapsed}
-        onToggleBottom={() => controller.setBottomCollapsed((v) => !v)}
+        onToggleBottom={handleToggleBottom}
       />
 
       {/* ── Command palette (Double Shift / Ctrl+Shift+A) ── */}
       <CommandPalette
         open={commandPaletteOpen}
-        onClose={() => setCommandPaletteOpen(false)}
+        onClose={handleCloseCommandPalette}
         actions={paletteActions}
       />
     </main>

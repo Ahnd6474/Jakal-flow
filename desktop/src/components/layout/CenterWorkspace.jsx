@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, lazy, memo, useEffect } from "react";
 import { useI18n } from "../../i18n";
 
 /* ── Tab icons ── */
@@ -150,7 +150,94 @@ function WorkspaceTab({ value, activeTab, onChange, onPrefetch, label }) {
   );
 }
 
-export function CenterWorkspace({
+function sameQueuedJobs(previousJobs = [], nextJobs = []) {
+  if (previousJobs === nextJobs) {
+    return true;
+  }
+  if (!Array.isArray(previousJobs) || !Array.isArray(nextJobs) || previousJobs.length !== nextJobs.length) {
+    return false;
+  }
+  for (let index = 0; index < previousJobs.length; index += 1) {
+    const previousJob = previousJobs[index];
+    const nextJob = nextJobs[index];
+    if (
+      previousJob?.id !== nextJob?.id
+      || previousJob?.status !== nextJob?.status
+      || previousJob?.queue_position !== nextJob?.queue_position
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function centerWorkspacePropsEqual(previousProps, nextProps) {
+  if (previousProps.activeTab !== nextProps.activeTab) {
+    return false;
+  }
+  const previousDeveloperMode = Boolean(previousProps.programSettings?.developer_mode);
+  const nextDeveloperMode = Boolean(nextProps.programSettings?.developer_mode);
+  if (previousDeveloperMode !== nextDeveloperMode) {
+    return false;
+  }
+
+  switch (nextProps.activeTab) {
+    case "run":
+      return (
+        previousProps.detail === nextProps.detail
+        && previousProps.planDraft === nextProps.planDraft
+        && previousProps.activeJob === nextProps.activeJob
+        && previousProps.autoRunAfterPlan === nextProps.autoRunAfterPlan
+        && previousProps.selectedStepId === nextProps.selectedStepId
+        && previousProps.form === nextProps.form
+        && previousProps.busy === nextProps.busy
+        && previousProps.canRequestStop === nextProps.canRequestStop
+        && previousProps.canCancelReservation === nextProps.canCancelReservation
+        && sameQueuedJobs(previousProps.queuedJobs, nextProps.queuedJobs)
+      );
+    case "dashboard":
+      return (
+        previousProps.detail === nextProps.detail
+        && previousProps.planDraft === nextProps.planDraft
+        && previousProps.programSettings === nextProps.programSettings
+        && previousProps.modelPresets === nextProps.modelPresets
+        && previousProps.modelCatalog === nextProps.modelCatalog
+        && previousProps.activeJob === nextProps.activeJob
+      );
+    case "reports":
+      return previousProps.detail?.reports === nextProps.detail?.reports;
+    case "history":
+      return (
+        previousProps.selectedHistoryId === nextProps.selectedHistoryId
+        && previousProps.historyDetail === nextProps.historyDetail
+        && previousProps.detail === nextProps.detail
+        && previousProps.busy === nextProps.busy
+      );
+    case "config":
+      return (
+        previousProps.form === nextProps.form
+        && previousProps.modelPresets === nextProps.modelPresets
+        && previousProps.modelCatalog === nextProps.modelCatalog
+        && previousProps.detail?.codex_status === nextProps.detail?.codex_status
+        && previousProps.busy === nextProps.busy
+        && previousProps.activeJob === nextProps.activeJob
+      );
+    case "app-settings":
+      return (
+        previousProps.programSettings === nextProps.programSettings
+        && previousProps.detail?.codex_status === nextProps.detail?.codex_status
+        && previousProps.shareSettings === nextProps.shareSettings
+        && previousProps.workspaceShareDetail === nextProps.workspaceShareDetail
+        && previousProps.busy === nextProps.busy
+        && previousProps.shareBusy === nextProps.shareBusy
+        && previousProps.programSettingsDirty === nextProps.programSettingsDirty
+      );
+    default:
+      return false;
+  }
+}
+
+export const CenterWorkspace = memo(function CenterWorkspace({
   activeTab,
   onChangeTab,
   detail,
@@ -277,7 +364,6 @@ export function CenterWorkspace({
             codexStatus={detail?.codex_status}
             planDraft={planDraft}
             activeJob={activeJob}
-            shareSettings={shareSettings}
             autoRunAfterPlan={autoRunAfterPlan}
             selectedStepId={selectedStepId}
             form={form}
@@ -295,10 +381,6 @@ export function CenterWorkspace({
             onRunManualMerger={onRunManualMerger}
             onRequestStop={onRequestStop}
             onCancelQueuedJob={onCancelQueuedJob}
-            onGenerateShareLink={onGenerateShareLink}
-            onCopyShareLink={onCopyShareLink}
-            onRevokeShareLink={onRevokeShareLink}
-            onChangeShareSettings={onChangeShareSettings}
             onAutoRunAfterPlanChange={onChangeAutoRunAfterPlan}
             onSelectStep={onSelectStep}
             onUpdateStepField={onUpdateStepField}
@@ -357,4 +439,4 @@ export function CenterWorkspace({
       </Suspense>
     </section>
   );
-}
+}, centerWorkspacePropsEqual);

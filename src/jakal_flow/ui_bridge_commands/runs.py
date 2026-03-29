@@ -7,6 +7,7 @@ from ..chat_sessions import (
     resolve_chat_session,
     save_chat_message,
 )
+from ..errors import HANDLED_OPERATION_EXCEPTIONS
 from ..parallel_resources import build_parallel_resource_plan
 from ..utils import normalize_workflow_mode, read_json
 from .context import BridgeCommandContext, BridgeCommandHandler
@@ -129,7 +130,7 @@ def build_run_command_handlers(
                         branch=branch,
                         origin_url=origin_url,
                     )
-                except Exception as exc:
+                except HANDLED_OPERATION_EXCEPTIONS as exc:
                     raise_closeout_failure(ctx, project_dir, exc)
                 event_message, event_details = closeout_finished_event_payload(next_project, next_saved)
                 append_ui_event(
@@ -397,7 +398,7 @@ def build_run_command_handlers(
                     branch=branch,
                     origin_url=origin_url,
                 )
-            except Exception as exc:
+            except HANDLED_OPERATION_EXCEPTIONS as exc:
                 raise_closeout_failure(ctx, project_dir, exc)
             event_message, event_details = closeout_finished_event_payload(project, saved)
             append_ui_event(
@@ -434,7 +435,7 @@ def build_run_command_handlers(
                 branch=branch,
                 origin_url=origin_url,
             )
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
             latest_project = ctx.orchestrator.local_project(project_dir)
             if latest_project is not None:
                 append_ui_event(
@@ -477,7 +478,7 @@ def build_run_command_handlers(
                 branch=branch,
                 origin_url=origin_url,
             )
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
             latest_project = ctx.orchestrator.local_project(project_dir)
             if latest_project is not None:
                 append_ui_event(
@@ -596,7 +597,7 @@ def build_run_command_handlers(
                     },
                 )
                 detail = ctx.detail_payload(project)
-            except Exception as exc:
+            except HANDLED_OPERATION_EXCEPTIONS as exc:
                 error = str(exc).strip() or "Manual debugger recovery failed."
                 assistant_text = error
                 append_ui_event(
@@ -633,7 +634,7 @@ def build_run_command_handlers(
                     },
                 )
                 detail = ctx.detail_payload(project)
-            except Exception as exc:
+            except HANDLED_OPERATION_EXCEPTIONS as exc:
                 error = str(exc).strip() or "Manual merger recovery failed."
                 assistant_text = error
                 append_ui_event(

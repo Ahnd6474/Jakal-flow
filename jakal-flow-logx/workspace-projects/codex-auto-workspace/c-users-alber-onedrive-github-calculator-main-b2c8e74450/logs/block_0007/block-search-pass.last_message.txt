@@ -1,5 +1,0 @@
-Integrated matrix mode into the shared shell in [App.tsx](C:/Users/alber/OneDrive/문서/GitHub/calculator/src/app/App.tsx) and [MatrixWorkbench.tsx](C:/Users/alber/OneDrive/문서/GitHub/calculator/src/features/matrix/MatrixWorkbench.tsx). Matrix drafts now round-trip through the persisted workspace state, matrix results feed the shared result panel/history/memory flow, and matrix executions include elapsed metadata so the four modes behave consistently.
-
-Added a jsdom integration test in [appFlow.test.ts](C:/Users/alber/OneDrive/문서/GitHub/calculator/tests/integration/appFlow.test.ts) for cross-mode matrix persistence and shared history capture. Replaced the placeholder [README.md](C:/Users/alber/OneDrive/문서/GitHub/calculator/README.md) with verified setup, architecture, numerical methods, precision behavior, limitations, and non-goals.
-
-Verification passed with `npm run typecheck`, `npx vitest run tests/integration/appFlow.test.ts`, and `python -m pytest`.

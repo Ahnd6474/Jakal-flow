@@ -6,8 +6,9 @@ from pathlib import Path
 import re
 from typing import Any
 
+from .errors import ContractWaveLookupError, ContractWavePersistenceError, ContractWaveValidationError
 from .models import ExecutionStep, ProjectPaths
-from .utils import ensure_dir, now_utc_iso, read_json, write_json, write_text
+from .utils import append_jsonl, ensure_dir, now_utc_iso, read_json, write_json, write_text
 
 STEP_TYPES = {"contract", "feature", "integration", "debug", "closeout"}
 SCOPE_CLASSES = {"hard_owned", "shared_reviewed", "free_owned"}
@@ -15,6 +16,7 @@ PROMOTION_CLASSES = {"green", "yellow", "red"}
 DEFAULT_SPINE_VERSION = "spine-v1"
 DEFAULT_VERIFICATION_PROFILE = "default"
 _SYMBOLIC_SOURCE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx"}
+_UNCHANGED = object()
 
 
 def _normalize(value: Any) -> Any:
@@ -254,6 +256,7 @@ class PromotionAssessment:
 
 @dataclass(slots=True)
 class SpineCheckpoint:
+    checkpoint_id: str
     version: str
     created_at: str
     step_id: str = ""
@@ -268,9 +271,16 @@ class SpineCheckpoint:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SpineCheckpoint":
+        created_at = str(data.get("created_at", "")).strip() or now_utc_iso()
+        version = str(data.get("version", "")).strip() or DEFAULT_SPINE_VERSION
         return cls(
-            version=str(data.get("version", "")).strip() or DEFAULT_SPINE_VERSION,
-            created_at=str(data.get("created_at", "")).strip() or now_utc_iso(),
+            checkpoint_id=_checkpoint_id_value(
+                str(data.get("checkpoint_id", "")).strip(),
+                version=version,
+                created_at=created_at,
+            ),
+            version=version,
+            created_at=created_at,
             step_id=str(data.get("step_id", "")).strip(),
             lineage_id=str(data.get("lineage_id", "")).strip(),
             commit_hash=str(data.get("commit_hash", "")).strip(),
@@ -465,6 +475,91 @@ def _persist_contract_wave_artifacts(
     return spine_state, requirements_state
 
 
+def _clone_spine_state(state: SpineState) -> SpineState:
+    return SpineState.from_dict(state.to_dict())
+
+
+def _clone_common_requirements_state(state: CommonRequirementsState) -> CommonRequirementsState:
+    return CommonRequirementsState.from_dict(state.to_dict())
+
+
+def snapshot_contract_wave_artifacts(paths: ProjectPaths) -> tuple[SpineState, CommonRequirementsState]:
+    ensure_contract_wave_artifacts(paths)
+    return (
+        _clone_spine_state(load_spine_state(paths.spine_file)),
+        _clone_common_requirements_state(load_common_requirements_state(paths.common_requirements_file)),
+    )
+
+
+def restore_contract_wave_artifacts(
+    paths: ProjectPaths,
+    *,
+    spine_state: SpineState,
+    requirements_state: CommonRequirementsState,
+) -> tuple[SpineState, CommonRequirementsState]:
+    try:
+        return _persist_contract_wave_artifacts(
+            paths,
+            spine_state=_clone_spine_state(spine_state),
+            requirements_state=_clone_common_requirements_state(requirements_state),
+        )
+    except OSError as exc:
+        raise ContractWavePersistenceError("Failed to restore contract-wave state artifacts.") from exc
+
+
+def _persist_contract_wave_mutation(
+    paths: ProjectPaths,
+    *,
+    spine_state: SpineState,
+    requirements_state: CommonRequirementsState,
+    rollback_spine_state: SpineState,
+    rollback_requirements_state: CommonRequirementsState,
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None = None,
+    note: str = "",
+) -> tuple[SpineState, CommonRequirementsState]:
+    normalized_entity_type = str(entity_type or "").strip() or "contract_wave"
+    normalized_entity_id = str(entity_id or "").strip() or "unknown"
+    try:
+        _persist_contract_wave_artifacts(
+            paths,
+            spine_state=spine_state,
+            requirements_state=requirements_state,
+        )
+    except OSError as exc:
+        raise ContractWavePersistenceError(
+            f"Failed to persist contract-wave state for {normalized_entity_type} {normalized_entity_id}."
+        ) from exc
+    try:
+        _log_contract_wave_audit(
+            paths,
+            action=action,
+            entity_type=normalized_entity_type,
+            entity_id=normalized_entity_id,
+            before=before,
+            after=after,
+            note=note,
+        )
+    except OSError as exc:
+        try:
+            _persist_contract_wave_artifacts(
+                paths,
+                spine_state=_clone_spine_state(rollback_spine_state),
+                requirements_state=_clone_common_requirements_state(rollback_requirements_state),
+            )
+        except OSError as rollback_exc:
+            raise ContractWavePersistenceError(
+                f"Failed to append contract-wave audit for {normalized_entity_type} {normalized_entity_id}, and rollback also failed."
+            ) from rollback_exc
+        raise ContractWavePersistenceError(
+            f"Failed to append contract-wave audit for {normalized_entity_type} {normalized_entity_id}. State changes were rolled back."
+        ) from exc
+    return spine_state, requirements_state
+
+
 def _append_note(existing: str, note: str) -> str:
     normalized_existing = str(existing or "").strip()
     normalized_note = str(note or "").strip()
@@ -473,6 +568,15 @@ def _append_note(existing: str, note: str) -> str:
     if not normalized_existing:
         return normalized_note
     return f"{normalized_existing} | {normalized_note}"
+
+
+def _checkpoint_id_value(explicit: str, *, version: str, created_at: str) -> str:
+    normalized_explicit = str(explicit or "").strip()
+    if normalized_explicit:
+        return normalized_explicit
+    compact_version = re.sub(r"[^a-z0-9]+", "-", str(version or "").strip().lower()).strip("-") or "spine"
+    compact_created_at = "".join(char for char in str(created_at or "").strip() if char.isdigit())[:14] or "00000000000000"
+    return f"{compact_version}-{compact_created_at}"
 
 
 def _collect_shared_contract_names(spine_state: SpineState, requirements_state: CommonRequirementsState) -> list[str]:
@@ -547,6 +651,8 @@ def ensure_contract_wave_artifacts(paths: ProjectPaths) -> None:
         save_spine_state(paths.spine_file, default_spine_state())
     if not paths.common_requirements_file.exists():
         save_common_requirements_state(paths.common_requirements_file, default_common_requirements_state())
+    if not paths.contract_wave_audit_file.exists():
+        paths.contract_wave_audit_file.write_text("", encoding="utf-8")
     if not paths.shared_contracts_file.exists():
         write_text(
             paths.shared_contracts_file,
@@ -569,6 +675,151 @@ def _advance_spine_version(current_version: str) -> str:
     return f"{normalized}-1"
 
 
+def _log_contract_wave_audit(
+    paths: ProjectPaths,
+    *,
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None = None,
+    note: str = "",
+) -> None:
+    append_jsonl(
+        paths.contract_wave_audit_file,
+        {
+            "timestamp": now_utc_iso(),
+            "action": str(action or "").strip().lower(),
+            "entity_type": str(entity_type or "").strip().lower(),
+            "entity_id": str(entity_id or "").strip(),
+            "note": str(note or "").strip(),
+            "before": before or {},
+            "after": after or {},
+        },
+    )
+
+
+def _reconcile_spine_current_version(spine_state: SpineState) -> SpineState:
+    spine_state.current_version = spine_state.history[-1].version if spine_state.history else DEFAULT_SPINE_VERSION
+    spine_state.updated_at = now_utc_iso()
+    return spine_state
+
+
+def _find_common_requirement(
+    requirements_state: CommonRequirementsState,
+    request_id: str,
+) -> tuple[str, list[CommonRequirementRecord], int, CommonRequirementRecord]:
+    normalized_request_id = str(request_id or "").strip()
+    for bucket_name, items in (
+        ("open", requirements_state.open_requirements),
+        ("resolved", requirements_state.resolved_requirements),
+    ):
+        for index, item in enumerate(items):
+            if item.request_id == normalized_request_id:
+                return bucket_name, items, index, item
+    raise ContractWaveLookupError(f"Unknown common requirement request: {normalized_request_id}")
+
+
+def _find_spine_checkpoint(
+    spine_state: SpineState,
+    checkpoint_id: str,
+) -> tuple[int, SpineCheckpoint]:
+    normalized_checkpoint_id = str(checkpoint_id or "").strip()
+    for index, item in enumerate(spine_state.history):
+        if item.checkpoint_id == normalized_checkpoint_id:
+            return index, item
+    raise ContractWaveLookupError(f"Unknown spine checkpoint: {normalized_checkpoint_id}")
+
+
+def update_common_requirement(
+    paths: ProjectPaths,
+    *,
+    request_id: str,
+    title: object = _UNCHANGED,
+    reason: object = _UNCHANGED,
+    notes: object = _UNCHANGED,
+    affected_paths: object = _UNCHANGED,
+    shared_contracts: object = _UNCHANGED,
+    promotion_class: object = _UNCHANGED,
+    step_id: object = _UNCHANGED,
+    lineage_id: object = _UNCHANGED,
+    spine_version: object = _UNCHANGED,
+) -> tuple[SpineState, CommonRequirementsState, CommonRequirementRecord]:
+    ensure_contract_wave_artifacts(paths)
+    spine_state = load_spine_state(paths.spine_file)
+    requirements_state = load_common_requirements_state(paths.common_requirements_file)
+    rollback_spine_state = _clone_spine_state(spine_state)
+    rollback_requirements_state = _clone_common_requirements_state(requirements_state)
+    _bucket_name, _items, index, record = _find_common_requirement(requirements_state, request_id)
+    before = record.to_dict()
+    updated = CommonRequirementRecord.from_dict(before)
+    if title is not _UNCHANGED:
+        updated.title = str(title or "").strip()
+    if reason is not _UNCHANGED:
+        updated.reason = str(reason or "").strip()
+    if notes is not _UNCHANGED:
+        updated.notes = str(notes or "").strip()
+    if affected_paths is not _UNCHANGED:
+        updated.affected_paths = _normalize_paths(affected_paths)
+    if shared_contracts is not _UNCHANGED:
+        updated.shared_contracts = _normalize_strings(shared_contracts)
+    if promotion_class is not _UNCHANGED:
+        updated.promotion_class = _normalize_choice(promotion_class, PROMOTION_CLASSES, updated.promotion_class or "yellow")
+    if step_id is not _UNCHANGED:
+        updated.step_id = str(step_id or "").strip()
+    if lineage_id is not _UNCHANGED:
+        updated.lineage_id = str(lineage_id or "").strip()
+    if spine_version is not _UNCHANGED:
+        updated.spine_version = str(spine_version or "").strip() or DEFAULT_SPINE_VERSION
+    if record.status == "open":
+        requirements_state.open_requirements[index] = updated
+    else:
+        requirements_state.resolved_requirements[index] = updated
+    requirements_state.updated_at = now_utc_iso()
+    _persist_contract_wave_mutation(
+        paths,
+        spine_state=spine_state,
+        requirements_state=requirements_state,
+        rollback_spine_state=rollback_spine_state,
+        rollback_requirements_state=rollback_requirements_state,
+        action="update",
+        entity_type="common_requirement",
+        entity_id=updated.request_id,
+        before=before,
+        after=updated.to_dict(),
+    )
+    return spine_state, requirements_state, updated
+
+
+def delete_common_requirement(
+    paths: ProjectPaths,
+    *,
+    request_id: str,
+    note: str = "",
+) -> tuple[SpineState, CommonRequirementsState, CommonRequirementRecord]:
+    ensure_contract_wave_artifacts(paths)
+    spine_state = load_spine_state(paths.spine_file)
+    requirements_state = load_common_requirements_state(paths.common_requirements_file)
+    rollback_spine_state = _clone_spine_state(spine_state)
+    rollback_requirements_state = _clone_common_requirements_state(requirements_state)
+    bucket_name, items, index, record = _find_common_requirement(requirements_state, request_id)
+    removed = items.pop(index)
+    requirements_state.updated_at = now_utc_iso()
+    _persist_contract_wave_mutation(
+        paths,
+        spine_state=spine_state,
+        requirements_state=requirements_state,
+        rollback_spine_state=rollback_spine_state,
+        rollback_requirements_state=rollback_requirements_state,
+        action="delete",
+        entity_type="common_requirement",
+        entity_id=removed.request_id,
+        before=removed.to_dict(),
+        note=note or f"removed from {bucket_name}",
+    )
+    return spine_state, requirements_state, removed
+
+
 def set_common_requirement_status(
     paths: ProjectPaths,
     *,
@@ -579,13 +830,16 @@ def set_common_requirement_status(
     ensure_contract_wave_artifacts(paths)
     normalized_request_id = str(request_id or "").strip()
     if not normalized_request_id:
-        raise ValueError("request_id is required.")
+        raise ContractWaveValidationError("request_id is required.")
     normalized_status = str(status or "").strip().lower()
     if normalized_status not in {"open", "resolved"}:
-        raise ValueError("status must be 'open' or 'resolved'.")
+        raise ContractWaveValidationError("status must be 'open' or 'resolved'.")
     spine_state = load_spine_state(paths.spine_file)
     requirements_state = load_common_requirements_state(paths.common_requirements_file)
+    rollback_spine_state = _clone_spine_state(spine_state)
+    rollback_requirements_state = _clone_common_requirements_state(requirements_state)
     timestamp = now_utc_iso()
+    before_state = None
 
     if normalized_status == "resolved":
         source = requirements_state.open_requirements
@@ -602,7 +856,8 @@ def set_common_requirement_status(
             continue
         remaining.append(item)
     if record is None:
-        raise KeyError(f"Unknown common requirement request: {normalized_request_id}")
+        raise ContractWaveLookupError(f"Unknown common requirement request: {normalized_request_id}")
+    before_state = record.to_dict()
 
     if normalized_status == "resolved":
         record.status = "resolved"
@@ -617,7 +872,19 @@ def set_common_requirement_status(
         requirements_state.resolved_requirements = remaining
         target.append(record)
     requirements_state.updated_at = timestamp
-    _persist_contract_wave_artifacts(paths, spine_state=spine_state, requirements_state=requirements_state)
+    _persist_contract_wave_mutation(
+        paths,
+        spine_state=spine_state,
+        requirements_state=requirements_state,
+        rollback_spine_state=rollback_spine_state,
+        rollback_requirements_state=rollback_requirements_state,
+        action="status",
+        entity_type="common_requirement",
+        entity_id=record.request_id,
+        before=before_state,
+        after=record.to_dict(),
+        note=note,
+    )
     return spine_state, requirements_state, record
 
 
@@ -635,9 +902,12 @@ def record_manual_spine_checkpoint(
     ensure_contract_wave_artifacts(paths)
     spine_state = load_spine_state(paths.spine_file)
     requirements_state = load_common_requirements_state(paths.common_requirements_file)
+    rollback_spine_state = _clone_spine_state(spine_state)
+    rollback_requirements_state = _clone_common_requirements_state(requirements_state)
     timestamp = now_utc_iso()
     checkpoint_version = str(version or "").strip() or spine_state.current_version or DEFAULT_SPINE_VERSION
     checkpoint = SpineCheckpoint(
+        checkpoint_id=_checkpoint_id_value("", version=checkpoint_version, created_at=timestamp),
         version=checkpoint_version,
         created_at=timestamp,
         step_id=str(step_id or "").strip(),
@@ -651,8 +921,102 @@ def record_manual_spine_checkpoint(
     spine_state.updated_at = timestamp
     spine_state.history.append(checkpoint)
     requirements_state.updated_at = timestamp
-    _persist_contract_wave_artifacts(paths, spine_state=spine_state, requirements_state=requirements_state)
+    _persist_contract_wave_mutation(
+        paths,
+        spine_state=spine_state,
+        requirements_state=requirements_state,
+        rollback_spine_state=rollback_spine_state,
+        rollback_requirements_state=rollback_requirements_state,
+        action="create",
+        entity_type="spine_checkpoint",
+        entity_id=checkpoint.checkpoint_id,
+        before={},
+        after=checkpoint.to_dict(),
+        note=checkpoint.notes,
+    )
     return spine_state, requirements_state, checkpoint
+
+
+def update_spine_checkpoint(
+    paths: ProjectPaths,
+    *,
+    checkpoint_id: str,
+    version: object = _UNCHANGED,
+    notes: object = _UNCHANGED,
+    shared_contracts: object = _UNCHANGED,
+    touched_files: object = _UNCHANGED,
+    step_id: object = _UNCHANGED,
+    lineage_id: object = _UNCHANGED,
+    commit_hash: object = _UNCHANGED,
+) -> tuple[SpineState, CommonRequirementsState, SpineCheckpoint]:
+    ensure_contract_wave_artifacts(paths)
+    spine_state = load_spine_state(paths.spine_file)
+    requirements_state = load_common_requirements_state(paths.common_requirements_file)
+    rollback_spine_state = _clone_spine_state(spine_state)
+    rollback_requirements_state = _clone_common_requirements_state(requirements_state)
+    index, checkpoint = _find_spine_checkpoint(spine_state, checkpoint_id)
+    before = checkpoint.to_dict()
+    updated = SpineCheckpoint.from_dict(before)
+    if version is not _UNCHANGED:
+        updated.version = str(version or "").strip() or DEFAULT_SPINE_VERSION
+    if notes is not _UNCHANGED:
+        updated.notes = str(notes or "").strip()
+    if shared_contracts is not _UNCHANGED:
+        updated.shared_contracts = _normalize_strings(shared_contracts)
+    if touched_files is not _UNCHANGED:
+        updated.touched_files = _normalize_paths(touched_files)
+    if step_id is not _UNCHANGED:
+        updated.step_id = str(step_id or "").strip()
+    if lineage_id is not _UNCHANGED:
+        updated.lineage_id = str(lineage_id or "").strip()
+    if commit_hash is not _UNCHANGED:
+        updated.commit_hash = str(commit_hash or "").strip()
+    spine_state.history[index] = updated
+    _reconcile_spine_current_version(spine_state)
+    requirements_state.updated_at = spine_state.updated_at
+    _persist_contract_wave_mutation(
+        paths,
+        spine_state=spine_state,
+        requirements_state=requirements_state,
+        rollback_spine_state=rollback_spine_state,
+        rollback_requirements_state=rollback_requirements_state,
+        action="update",
+        entity_type="spine_checkpoint",
+        entity_id=updated.checkpoint_id,
+        before=before,
+        after=updated.to_dict(),
+    )
+    return spine_state, requirements_state, updated
+
+
+def delete_spine_checkpoint(
+    paths: ProjectPaths,
+    *,
+    checkpoint_id: str,
+    note: str = "",
+) -> tuple[SpineState, CommonRequirementsState, SpineCheckpoint]:
+    ensure_contract_wave_artifacts(paths)
+    spine_state = load_spine_state(paths.spine_file)
+    requirements_state = load_common_requirements_state(paths.common_requirements_file)
+    rollback_spine_state = _clone_spine_state(spine_state)
+    rollback_requirements_state = _clone_common_requirements_state(requirements_state)
+    index, checkpoint = _find_spine_checkpoint(spine_state, checkpoint_id)
+    removed = spine_state.history.pop(index)
+    _reconcile_spine_current_version(spine_state)
+    requirements_state.updated_at = spine_state.updated_at
+    _persist_contract_wave_mutation(
+        paths,
+        spine_state=spine_state,
+        requirements_state=requirements_state,
+        rollback_spine_state=rollback_spine_state,
+        rollback_requirements_state=rollback_requirements_state,
+        action="delete",
+        entity_type="spine_checkpoint",
+        entity_id=removed.checkpoint_id,
+        before=removed.to_dict(),
+        note=note,
+    )
+    return spine_state, requirements_state, removed
 
 
 def classify_completed_lineage_step(
@@ -827,7 +1191,7 @@ def _extract_python_symbol_inventory(text: str) -> dict[str, str]:
             for base in node.bases:
                 try:
                     bases.append(ast.unparse(base))
-                except Exception:
+                except (AttributeError, TypeError, ValueError):
                     continue
             suffix = f"({', '.join(bases)})" if bases else ""
             inventory[node.name] = f"class {node.name}{suffix}"
@@ -998,8 +1362,48 @@ def _manifest_file(paths: ProjectPaths, manifest: LineageManifest) -> Path:
 def save_lineage_manifest(paths: ProjectPaths, manifest: LineageManifest) -> Path:
     ensure_contract_wave_artifacts(paths)
     target = _manifest_file(paths, manifest)
-    write_json(target, manifest.to_dict())
+    try:
+        write_json(target, manifest.to_dict())
+    except OSError as exc:
+        raise ContractWavePersistenceError(
+            f"Failed to persist lineage manifest {manifest.manifest_id or manifest.step_id or 'unknown'}."
+        ) from exc
     return target
+
+
+def persist_lineage_completion_artifacts(
+    paths: ProjectPaths,
+    *,
+    step: ExecutionStep,
+    lineage_id: str,
+    manifest: LineageManifest,
+    assessment: PromotionAssessment,
+) -> tuple[SpineState, CommonRequirementsState, CommonRequirementRecord | None, Path]:
+    rollback_spine_state, rollback_requirements_state = snapshot_contract_wave_artifacts(paths)
+    try:
+        spine_state, requirements_state, crr_record = update_contract_wave_artifacts_for_completion(
+            paths,
+            step=step,
+            lineage_id=lineage_id,
+            manifest=manifest,
+            assessment=assessment,
+        )
+        manifest_path = save_lineage_manifest(paths, manifest)
+    except ContractWavePersistenceError as exc:
+        try:
+            restore_contract_wave_artifacts(
+                paths,
+                spine_state=rollback_spine_state,
+                requirements_state=rollback_requirements_state,
+            )
+        except ContractWavePersistenceError as rollback_exc:
+            raise ContractWavePersistenceError(
+                f"Failed to persist lineage completion artifacts for {lineage_id or step.step_id}, and rollback also failed."
+            ) from rollback_exc
+        raise ContractWavePersistenceError(
+            f"Failed to persist lineage completion artifacts for {lineage_id or step.step_id}. Contract-wave state was rolled back."
+        ) from exc
+    return spine_state, requirements_state, crr_record, manifest_path
 
 
 def load_lineage_manifests(paths: ProjectPaths, *, lineage_id: str = "") -> list[LineageManifest]:
@@ -1107,6 +1511,7 @@ def update_contract_wave_artifacts_for_completion(
         spine_state.current_version = next_version
         spine_state.history.append(
             SpineCheckpoint(
+                checkpoint_id=_checkpoint_id_value("", version=next_version, created_at=timestamp),
                 version=next_version,
                 created_at=timestamp,
                 step_id=step.step_id,

@@ -13,6 +13,13 @@ from .commit_naming import build_commit_descriptor, build_initial_commit_descrip
 from .environment import ensure_gitignore, ensure_virtualenv
 from . import execution_plan_support
 from .codex_runner import CodexRunner
+from .errors import (
+    AgentPassExecutionError,
+    MergeConflictStateError,
+    MissingRecoveryArtifactsError,
+    ParallelMergeConflictError,
+    VerificationTestFailure,
+)
 from .execution_control import ImmediateStopRequested
 from .git_ops import GitOps
 from .memory import MemoryStore
@@ -558,7 +565,9 @@ class OrchestratorRecoveryMixin:
         else:
             failing_pass_entry = self._latest_failed_pass_entry(context, bundle_json)
             if failing_pass_entry is None:
-                raise RuntimeError("No failed verification log or Codex pass diagnostics are available for manual debugger recovery.")
+                raise MissingRecoveryArtifactsError(
+                    "No failed verification log or Codex pass diagnostics are available for manual debugger recovery."
+                )
             failing_test_result, failing_pass_name = self._test_run_result_from_pass_entry(context, bundle_json, failing_pass_entry)
         selected_task = str(bundle_json.get("selected_task", "")).strip()
         recovery_steps = self._manual_recovery_steps(
@@ -605,6 +614,11 @@ class OrchestratorRecoveryMixin:
         )
         failure_summary = self._manual_debugger_failure_message(run_result, test_result)
         if run_result.returncode != 0 or test_result is None or test_result.returncode != 0:
+            failure = (
+                AgentPassExecutionError(failure_summary)
+                if run_result.returncode != 0 or test_result is None
+                else VerificationTestFailure(failure_summary)
+            )
             rollback_status = "manual_recovery_failed"
             self._log_pass_result(
                 context=context,
@@ -635,8 +649,8 @@ class OrchestratorRecoveryMixin:
             latest_failure_status = read_json(context.paths.reports_dir / "latest_pr_failure_status.json", default={})
             failure_report = str(latest_failure_status.get("report_markdown_file", "")).strip() if isinstance(latest_failure_status, dict) else ""
             if failure_report:
-                raise RuntimeError(f"{failure_summary} Failure report: {failure_report}")
-            raise RuntimeError(failure_summary)
+                raise type(failure)(f"{failure_summary} Failure report: {failure_report}")
+            raise failure
         self._log_pass_result(
             context=context,
             reporter=reporter,
@@ -673,7 +687,7 @@ class OrchestratorRecoveryMixin:
         plan_state = self.load_execution_plan_state(context)
         conflicted_files = self.git.conflicted_files(context.paths.repo_dir)
         if not conflicted_files:
-            raise RuntimeError("No active git conflict is available for manual merger recovery.")
+            raise MergeConflictStateError("No active git conflict is available for manual merger recovery.")
 
         bundle_json = self._latest_failure_bundle_json(context)
         selected_task = str(bundle_json.get("selected_task", "")).strip()
@@ -721,6 +735,7 @@ class OrchestratorRecoveryMixin:
         )
         failure_summary = self._manual_merger_failure_message(run_result, success)
         if run_result.returncode != 0 or not success:
+            failure = AgentPassExecutionError(failure_summary) if run_result.returncode != 0 else ParallelMergeConflictError(failure_summary)
             rollback_status = "manual_recovery_failed"
             self._log_pass_result(
                 context=context,
@@ -746,8 +761,8 @@ class OrchestratorRecoveryMixin:
             latest_failure_status = read_json(context.paths.reports_dir / "latest_pr_failure_status.json", default={})
             failure_report = str(latest_failure_status.get("report_markdown_file", "")).strip() if isinstance(latest_failure_status, dict) else ""
             if failure_report:
-                raise RuntimeError(f"{failure_summary} Failure report: {failure_report}")
-            raise RuntimeError(failure_summary)
+                raise type(failure)(f"{failure_summary} Failure report: {failure_report}")
+            raise failure
         self._log_pass_result(
             context=context,
             reporter=reporter,

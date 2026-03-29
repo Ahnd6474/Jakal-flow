@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 import shutil
@@ -19,33 +20,77 @@ class WorkspaceManager:
         self.workspace_root = workspace_root.resolve()
         self.projects_root = self.workspace_root / "projects"
         self.history_root = self.workspace_root / "history"
+        self._registry_cache_token: tuple[int, int, int] | None = None
+        self._registry_cache_value: dict[str, dict[str, dict[str, str]]] | None = None
+        self._project_context_cache: dict[str, tuple[tuple[tuple[int, int, int], ...], ProjectContext]] = {}
 
     @property
     def registry_file(self) -> Path:
         return self.workspace_root / "registry.json"
 
+    @staticmethod
+    def _path_cache_token(path: Path) -> tuple[int, int, int]:
+        try:
+            stat_result = path.stat()
+        except OSError:
+            return (0, 0, 0)
+        return (1, int(stat_result.st_mtime_ns), int(stat_result.st_size))
+
+    @staticmethod
+    def _project_cache_key(project_root: Path) -> str:
+        return str(project_root.resolve())
+
+    def _project_context_signature(self, paths: ProjectPaths) -> tuple[tuple[int, int, int], ...]:
+        return (
+            self._path_cache_token(paths.metadata_file),
+            self._path_cache_token(paths.project_config_file),
+            self._path_cache_token(paths.loop_state_file),
+        )
+
+    def _cache_project_context(self, context: ProjectContext) -> None:
+        cache_key = self._project_cache_key(context.paths.project_root)
+        self._project_context_cache[cache_key] = (
+            self._project_context_signature(context.paths),
+            deepcopy(context),
+        )
+
+    def _invalidate_project_context_cache(self, project_root: Path | None = None) -> None:
+        if project_root is None:
+            self._project_context_cache.clear()
+            return
+        self._project_context_cache.pop(self._project_cache_key(project_root), None)
+
     def _empty_registry(self) -> dict[str, dict[str, dict[str, str]]]:
         return {"projects": {}, "history": {}}
 
     def _read_registry(self) -> dict[str, dict[str, dict[str, str]]]:
+        cache_token = self._path_cache_token(self.registry_file)
+        if self._registry_cache_token == cache_token and self._registry_cache_value is not None:
+            return deepcopy(self._registry_cache_value)
         raw = read_json(self.registry_file, default=self._empty_registry())
         if not isinstance(raw, dict):
-            return self._empty_registry()
+            normalized = self._empty_registry()
+            self._registry_cache_token = cache_token
+            self._registry_cache_value = deepcopy(normalized)
+            return normalized
         projects = raw.get("projects", {})
         history = raw.get("history", {})
-        return {
+        normalized = {
             "projects": projects if isinstance(projects, dict) else {},
             "history": history if isinstance(history, dict) else {},
         }
+        self._registry_cache_token = cache_token
+        self._registry_cache_value = deepcopy(normalized)
+        return normalized
 
     def _write_registry(self, registry: dict[str, dict[str, dict[str, str]]]) -> None:
-        write_json(
-            self.registry_file,
-            {
-                "projects": registry.get("projects", {}),
-                "history": registry.get("history", {}),
-            },
-        )
+        normalized = {
+            "projects": registry.get("projects", {}),
+            "history": registry.get("history", {}),
+        }
+        write_json(self.registry_file, normalized)
+        self._registry_cache_token = self._path_cache_token(self.registry_file)
+        self._registry_cache_value = deepcopy(normalized)
 
     def ensure_workspace(self) -> None:
         ensure_dir(self.projects_root)
@@ -133,6 +178,13 @@ class WorkspaceManager:
         if resolved_source == resolved_target:
             return
         self._merge_logs_directory(source_logs_dir, target_logs_dir)
+        if source_logs_dir.exists():
+            try:
+                next(source_logs_dir.iterdir())
+            except StopIteration:
+                source_logs_dir.rmdir()
+            except OSError:
+                pass
 
     def _migrate_local_project_logs(self, project_root: Path, repo_dir: Path) -> None:
         self.migrate_logs_dir(project_root.resolve() / "logs", self.repo_logs_dir(repo_dir))
@@ -176,6 +228,7 @@ class WorkspaceManager:
             lineage_state_file=state_dir / "LINEAGES.json",
             spine_file=state_dir / "SPINE.json",
             common_requirements_file=state_dir / "COMMON_REQUIREMENTS.json",
+            contract_wave_audit_file=state_dir / "CONTRACT_WAVE_AUDIT.jsonl",
             ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
             ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
             ml_experiment_reports_dir=state_dir / "ml_experiments",
@@ -320,6 +373,7 @@ class WorkspaceManager:
         write_json(context.paths.metadata_file, context.metadata.to_dict())
         write_json(context.paths.project_config_file, context.runtime.to_dict())
         write_json(context.paths.loop_state_file, context.loop_state.to_dict())
+        self._cache_project_context(context)
 
     def _managed_root_is_within(self, project_root: Path, expected_parent: Path) -> bool:
         resolved_root = project_root.resolve()
@@ -327,6 +381,7 @@ class WorkspaceManager:
         return resolved_root != resolved_parent and resolved_parent in resolved_root.parents
 
     def _rebind_context_root(self, context: ProjectContext, project_root: Path) -> ProjectContext:
+        previous_root = context.paths.project_root
         resolved_root = project_root.resolve()
         context.metadata.project_root = resolved_root
         context.paths = self.build_paths_from_root(resolved_root)
@@ -336,12 +391,15 @@ class WorkspaceManager:
             self._migrate_local_project_logs(resolved_root, context.metadata.repo_path)
         else:
             context.metadata.repo_path = context.paths.repo_dir
+        self._invalidate_project_context_cache(previous_root)
+        self._invalidate_project_context_cache(resolved_root)
         return context
 
     def _remove_managed_project_root(self, project_root: Path, expected_parent: Path) -> None:
         resolved_root = project_root.resolve()
         if not self._managed_root_is_within(resolved_root, expected_parent):
             raise RuntimeError(f"Refusing to delete unexpected project root: {resolved_root}")
+        self._invalidate_project_context_cache(resolved_root)
         remove_tree(resolved_root)
 
     def _active_registry_item(self, context: ProjectContext) -> dict[str, str]:
@@ -438,7 +496,22 @@ class WorkspaceManager:
 
     def load_project_from_root(self, project_root: Path) -> ProjectContext:
         paths = self.build_paths_from_root(project_root)
-        metadata_data = read_json(paths.metadata_file)
+        metadata_data = None
+        legacy_logs_dir = paths.project_root / "logs"
+        if legacy_logs_dir.exists():
+            metadata_data = read_json(paths.metadata_file)
+            if isinstance(metadata_data, dict) and str(metadata_data.get("repo_kind", "remote")).strip() == "local":
+                repo_path_hint = Path(str(metadata_data.get("repo_path", "")).strip())
+                paths.repo_dir = repo_path_hint
+                paths = self._apply_local_repo_log_paths(paths, repo_path_hint)
+                self._migrate_local_project_logs(paths.project_root, repo_path_hint)
+        cache_key = self._project_cache_key(paths.project_root)
+        signature = self._project_context_signature(paths)
+        cached = self._project_context_cache.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            return deepcopy(cached[1])
+        if metadata_data is None:
+            metadata_data = read_json(paths.metadata_file)
         runtime_data = read_json(paths.project_config_file)
         loop_state_data = read_json(paths.loop_state_file)
         if not metadata_data or not runtime_data or not loop_state_data:
@@ -487,7 +560,9 @@ class WorkspaceManager:
             pending_checkpoint_approval=loop_state_data.get("pending_checkpoint_approval", False),
             counters=replace(LoopCounters(), **counters_data),
         )
-        return ProjectContext(metadata=metadata, runtime=runtime, paths=paths, loop_state=loop_state)
+        context = ProjectContext(metadata=metadata, runtime=runtime, paths=paths, loop_state=loop_state)
+        self._project_context_cache[cache_key] = (signature, deepcopy(context))
+        return context
 
     def find_project(self, repo_url: str, branch: str) -> ProjectContext | None:
         self.ensure_workspace()

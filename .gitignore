@@ -36,3 +36,12 @@ junit.xml
 junit-*.xml
 test-results/
 chat_sessions/
+.tmp_invalid_join_plan_test/
+.tmp_manual_debugger_missing_artifacts_test/
+.tmp_manual_debugger_pass_fallback_test/
+.tmp_manual_merger_missing_conflict_test/
+
+# Local assistant state and ad-hoc scratch artifacts
+.claude/
+.tub/
+/.tmp_*

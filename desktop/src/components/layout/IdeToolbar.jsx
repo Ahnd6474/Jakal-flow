@@ -218,6 +218,51 @@ const MemoProjectSelector = memo(ProjectSelector, (prevProps, nextProps) => {
   return true;
 });
 
+function sameToolbarProjects(previousProjects = [], nextProjects = []) {
+  if (previousProjects === nextProjects) {
+    return true;
+  }
+  if (!Array.isArray(previousProjects) || !Array.isArray(nextProjects) || previousProjects.length !== nextProjects.length) {
+    return false;
+  }
+  for (let index = 0; index < previousProjects.length; index += 1) {
+    const previousProject = previousProjects[index];
+    const nextProject = nextProjects[index];
+    if (
+      previousProject?.repo_id !== nextProject?.repo_id
+      || previousProject?.display_name !== nextProject?.display_name
+      || previousProject?.status !== nextProject?.status
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function planToolbarSignature(plan = null) {
+  const normalizedPlan = plan && typeof plan === "object" ? plan : {};
+  const steps = Array.isArray(normalizedPlan.steps) ? normalizedPlan.steps : [];
+  return [
+    String(normalizedPlan.closeout_status || ""),
+    steps.map((step) => {
+      const dependencies = Array.isArray(step?.depends_on) ? step.depends_on.join(",") : "";
+      return [step?.step_id || "", step?.status || "", dependencies].join(":");
+    }).join("|"),
+  ].join("|");
+}
+
+function samePlanningProgress(previousProgress = null, nextProgress = null) {
+  if (previousProgress === nextProgress) {
+    return true;
+  }
+  return (
+    String(previousProgress?.status || previousProgress?.planningStatus || "") === String(nextProgress?.status || nextProgress?.planningStatus || "")
+    && String(previousProgress?.current_stage || previousProgress?.currentStage || "") === String(nextProgress?.current_stage || nextProgress?.currentStage || "")
+    && Number(previousProgress?.current_stage_index ?? previousProgress?.currentStageIndex ?? 0) === Number(nextProgress?.current_stage_index ?? nextProgress?.currentStageIndex ?? 0)
+    && Number(previousProgress?.total_stages ?? previousProgress?.totalStages ?? 0) === Number(nextProgress?.total_stages ?? nextProgress?.totalStages ?? 0)
+  );
+}
+
 function RemoteLinkIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -244,7 +289,7 @@ function GithubIcon() {
   );
 }
 
-export function IdeToolbar({
+export const IdeToolbar = memo(function IdeToolbar({
   projects,
   selectedProjectId,
   onSelectProject,
@@ -436,4 +481,25 @@ export function IdeToolbar({
       </div>
     </header>
   );
-}
+}, (previousProps, nextProps) => {
+  if (!sameToolbarProjects(previousProps.projects, nextProps.projects)) {
+    return false;
+  }
+  return (
+    previousProps.selectedProjectId === nextProps.selectedProjectId
+    && previousProps.pendingCheckpoint?.checkpoint_id === nextProps.pendingCheckpoint?.checkpoint_id
+    && previousProps.busy === nextProps.busy
+    && previousProps.activeCenterTab === nextProps.activeCenterTab
+    && previousProps.projectPath === nextProps.projectPath
+    && previousProps.githubUrl === nextProps.githubUrl
+    && previousProps.shareUrl === nextProps.shareUrl
+    && previousProps.shareBusy === nextProps.shareBusy
+    && previousProps.activeJob?.id === nextProps.activeJob?.id
+    && previousProps.activeJob?.status === nextProps.activeJob?.status
+    && previousProps.activeJob?.command === nextProps.activeJob?.command
+    && previousProps.projectDetail?.project?.current_status === nextProps.projectDetail?.project?.current_status
+    && samePlanningProgress(previousProps.projectDetail?.planning_progress, nextProps.projectDetail?.planning_progress)
+    && planToolbarSignature(previousProps.planDraft) === planToolbarSignature(nextProps.planDraft)
+    && planToolbarSignature(previousProps.projectDetail?.plan) === planToolbarSignature(nextProps.projectDetail?.plan)
+  );
+});

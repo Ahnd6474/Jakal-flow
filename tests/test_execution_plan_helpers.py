@@ -15,6 +15,16 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jakal_flow.environment import ensure_gitignore
+from jakal_flow.errors import (
+    AgentPassExecutionError,
+    ExecutionPreflightError,
+    MergeConflictStateError,
+    MissingRecoveryArtifactsError,
+    ParallelExecutionFailure,
+    ParallelMergeConflictError,
+    VerificationTestFailure,
+    execution_failure_from_reason,
+)
 from jakal_flow.execution_control import ImmediateStopRequested
 from jakal_flow.memory import MemoryStore
 from jakal_flow.model_selection import (
@@ -74,6 +84,23 @@ from jakal_flow.utils import append_jsonl, read_json, read_jsonl_tail, read_last
 
 
 class ExecutionPlanHelperTests(unittest.TestCase):
+    def test_execution_failure_from_reason_maps_known_failure_codes(self) -> None:
+        cases = {
+            "preflight_failed": ExecutionPreflightError,
+            "agent_pass_failed": AgentPassExecutionError,
+            "verification_test_failed": VerificationTestFailure,
+            "parallel_execution_failed": ParallelExecutionFailure,
+            "parallel_merge_conflict": ParallelMergeConflictError,
+            "recovery_artifacts_missing": MissingRecoveryArtifactsError,
+            "merge_conflict_state_invalid": MergeConflictStateError,
+        }
+
+        for reason_code, failure_type in cases.items():
+            with self.subTest(reason_code=reason_code):
+                failure = execution_failure_from_reason(reason_code, "demo failure")
+                self.assertIsInstance(failure, failure_type)
+                self.assertEqual(failure.reason_code, reason_code)
+
     def test_legacy_codex_auto_namespace_is_removed(self) -> None:
         with self.assertRaises(ModuleNotFoundError):
             __import__("codex_auto.planning")
@@ -2356,6 +2383,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual(step.status, "failed")
         self.assertIn("Please set an Auth method", step.notes)
+        self.assertEqual(step.metadata["failure_type"], "ExecutionPreflightError")
+        self.assertEqual(step.metadata["failure_reason_code"], "preflight_failed")
         self.assertEqual(context.metadata.current_status, "failed")
 
     def test_parallel_step_worker_fails_fast_when_gemini_auth_is_missing(self) -> None:
@@ -2403,6 +2432,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "failed")
         self.assertIn("Please set an Auth method", result["notes"])
+        self.assertEqual(result["failure_type"], "ExecutionPreflightError")
+        self.assertEqual(result["failure_reason_code"], "preflight_failed")
 
     def test_run_saved_execution_step_pauses_when_immediate_stop_is_requested(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_immediate_stop_test"
@@ -2475,6 +2506,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                     "status": "rolled_back",
                     "commit_hashes": [],
                     "test_summary": f"attempt {attempt_index} failed",
+                    "failure_type": "AgentPassExecutionError",
+                    "failure_reason_code": "agent_pass_failed",
                 },
             )
 
@@ -2513,6 +2546,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(suppression_flags, [True, False])
         self.assertEqual(step.status, "failed")
         self.assertEqual(step.notes, "attempt 2 failed")
+        self.assertEqual(step.metadata["failure_type"], "AgentPassExecutionError")
+        self.assertEqual(step.metadata["failure_reason_code"], "agent_pass_failed")
         self.assertEqual(context.metadata.current_status, "failed")
 
     def test_execute_verified_repo_pass_keeps_failure_reason_in_notes(self) -> None:
@@ -2583,6 +2618,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("AssertionError: experiment2 failed", str(pass_result["notes"]))
         self.assertIn("rolled back", str(pass_result["notes"]))
         self.assertIsInstance(pass_result["test_result"], TestRunResult)
+        self.assertEqual(pass_result["failure_type"], "VerificationTestFailure")
+        self.assertEqual(pass_result["failure_reason_code"], "verification_test_failed")
         self.assertIsNotNone(logged_test)
         self.assertEqual(logged_test["failure_reason"], "AssertionError: experiment2 failed")
         mocked_reset.assert_called_once_with(repo_dir, "safe-revision")
@@ -2659,8 +2696,74 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(block_entry["status"], "rolled_back")
         self.assertIn("Codex pass failed and changes were rolled back", block_entry["test_summary"])
         self.assertIn("Please set an Auth method", block_entry["test_summary"])
+        self.assertEqual(block_entry["failure_type"], "AgentPassExecutionError")
+        self.assertEqual(block_entry["failure_reason_code"], "agent_pass_failed")
         mocked_report_failure.assert_called_once()
         self.assertIn("Please set an Auth method", mocked_report_failure.call_args.kwargs["summary"])
+
+    def test_run_manual_debugger_recovery_raises_missing_recovery_artifacts_error(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_manual_debugger_missing_artifacts_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Manual debugger missing artifacts",
+                    default_test_command="python -m pytest",
+                    steps=[],
+                ),
+            )
+
+            with self.assertRaises(MissingRecoveryArtifactsError):
+                orchestrator.run_manual_debugger_recovery(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+    def test_run_manual_merger_recovery_raises_merge_conflict_state_error(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_manual_merger_missing_conflict_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Manual merger missing conflict",
+                    default_test_command="python -m pytest",
+                    steps=[],
+                ),
+            )
+
+            with self.assertRaises(MergeConflictStateError):
+                orchestrator.run_manual_merger_recovery(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
 
     def test_execute_pass_invokes_debugger_with_failure_logs_and_recovers(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_debugger_test"

@@ -21,6 +21,17 @@ from .contract_wave import (
 from .environment import ensure_gitignore, ensure_virtualenv
 from . import execution_plan_support
 from .codex_runner import CodexRunner
+from .errors import (
+    AgentPassExecutionError,
+    ExecutionFailure,
+    ExecutionPreflightError,
+    HANDLED_OPERATION_EXCEPTIONS,
+    ParallelExecutionFailure,
+    ParallelMergeConflictError,
+    VerificationTestFailure,
+    execution_failure_from_reason,
+    failure_log_fields,
+)
 from .execution_control import ImmediateStopRequested
 from .git_ops import GitOps
 from .memory import MemoryStore
@@ -95,6 +106,56 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         self.workspace = WorkspaceManager(workspace_root)
         self.git = GitOps()
         self.verification = VerificationRunner()
+        self._execution_plan_state_cache: dict[str, tuple[tuple[object, ...], ExecutionPlanState]] = {}
+
+    @staticmethod
+    def _path_cache_token(path: Path) -> tuple[int, int, int]:
+        try:
+            stat_result = path.stat()
+        except OSError:
+            return (0, 0, 0)
+        return (1, int(stat_result.st_mtime_ns), int(stat_result.st_size))
+
+    def _execution_plan_cache_key(self, context: ProjectContext) -> str:
+        return str(context.paths.project_root.resolve())
+
+    def _execution_plan_cache_signature(self, context: ProjectContext) -> tuple[object, ...]:
+        return (
+            self._path_cache_token(context.paths.execution_plan_file),
+            str(context.runtime.workflow_mode or "").strip(),
+            str(context.runtime.execution_mode or "").strip(),
+            str(context.runtime.test_cmd or "").strip(),
+            str(context.runtime.effort or "").strip(),
+        )
+
+    def _cache_execution_plan_state(self, context: ProjectContext, state: ExecutionPlanState) -> None:
+        self._execution_plan_state_cache[self._execution_plan_cache_key(context)] = (
+            self._execution_plan_cache_signature(context),
+            deepcopy(state),
+        )
+
+    def _step_metadata_copy(self, step: ExecutionStep) -> dict[str, object]:
+        return deepcopy(step.metadata) if isinstance(step.metadata, dict) else {}
+
+    def _set_step_failure_metadata(self, step: ExecutionStep, error: BaseException | None) -> None:
+        metadata = self._step_metadata_copy(step)
+        metadata.update(failure_log_fields(error))
+        step.metadata = metadata
+
+    def _clear_step_failure_metadata(self, step: ExecutionStep) -> None:
+        metadata = self._step_metadata_copy(step)
+        metadata.pop("failure_type", None)
+        metadata.pop("failure_reason_code", None)
+        step.metadata = metadata
+
+    def _set_step_failure_from_worker_result(self, step: ExecutionStep, worker_result: dict[str, object]) -> None:
+        reason_code = str(worker_result.get("failure_reason_code") or "").strip() or None
+        summary = str(worker_result.get("test_summary") or worker_result.get("notes") or "").strip() or "Parallel worker failed."
+        failure = execution_failure_from_reason(reason_code, summary)
+        failure_type = str(worker_result.get("failure_type") or "").strip()
+        if failure_type and not reason_code:
+            failure = ExecutionFailure(summary, reason_code=failure.reason_code)
+        self._set_step_failure_metadata(step, failure)
 
     def setup_local_project(
         self,
@@ -489,14 +550,23 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
 
 
     def load_execution_plan_state(self, context: ProjectContext) -> ExecutionPlanState:
+        cache_key = self._execution_plan_cache_key(context)
+        cache_signature = self._execution_plan_cache_signature(context)
+        cached = self._execution_plan_state_cache.get(cache_key)
+        if cached is not None and cached[0] == cache_signature:
+            cached_state = deepcopy(cached[1])
+            if not self._closeout_run_is_stale(context, cached_state):
+                return cached_state
         payload = read_json(context.paths.execution_plan_file, default=None)
         if not isinstance(payload, dict):
-            return ExecutionPlanState(
+            state = ExecutionPlanState(
                 workflow_mode=normalize_workflow_mode(context.runtime.workflow_mode),
                 default_test_command=context.runtime.test_cmd,
                 last_updated_at=now_utc_iso(),
                 steps=[],
             )
+            self._cache_execution_plan_state(context, state)
+            return state
         state = ExecutionPlanState.from_dict(payload)
         state.workflow_mode = normalize_workflow_mode(state.workflow_mode or context.runtime.workflow_mode)
         state.execution_mode = self._normalize_execution_mode(state.execution_mode or context.runtime.execution_mode)
@@ -509,6 +579,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         for step in state.steps:
             step.reasoning_effort = normalize_reasoning_effort(step.reasoning_effort, fallback=fallback_effort)
         self._recover_stale_closeout_state(context, state)
+        self._cache_execution_plan_state(context, state)
         return state
 
     def _stale_closeout_note(self, context: ProjectContext, plan_state: ExecutionPlanState) -> str:
@@ -604,6 +675,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         write_text(context.paths.checkpoint_timeline_file, checkpoint_timeline_markdown(checkpoints))
         flow_title = state.plan_title or context.metadata.display_name or context.metadata.slug
         write_text(context.paths.execution_flow_svg_file, execution_plan_svg(f"{flow_title} execution flow", state.steps, state.execution_mode))
+        self._cache_execution_plan_state(context, state)
         return state
 
     def pending_execution_batches(self, plan_state: ExecutionPlanState) -> list[list[ExecutionStep]]:
@@ -800,15 +872,17 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         )
         preflight_error = self._execution_runtime_preflight_error(context, step_runtime)
         if preflight_error:
+            failure = ExecutionPreflightError(preflight_error)
             for step in plan_state.steps:
                 if step.step_id == target_step.step_id:
                     step.status = "failed"
                     step.completed_at = None
                     step.commit_hash = None
-                    step.notes = preflight_error
+                    step.notes = str(failure)
+                    self._set_step_failure_metadata(step, failure)
                 elif step.status == "running":
                     step.status = "paused"
-            context.loop_state.stop_reason = preflight_error
+            context.loop_state.stop_reason = str(failure)
             context.metadata.current_status = "failed"
             context.metadata.last_run_at = now_utc_iso()
             plan_state.default_test_command = runtime.test_cmd
@@ -822,6 +896,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 step.status = "running"
                 step.started_at = step.started_at or now_utc_iso()
                 step.notes = ""
+                self._clear_step_failure_metadata(step)
             elif step.status == "running":
                 step.status = "paused"
         context.metadata.current_status = f"running:{target_step.step_id.lower()}"
@@ -860,15 +935,23 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 if isinstance(commit_hashes, list) and commit_hashes:
                     target_step.commit_hash = str(commit_hashes[-1])
                 target_step.notes = str(latest_block.get("test_summary", "")).strip()
+                self._clear_step_failure_metadata(target_step)
                 context.metadata.current_status = self._status_from_plan_state(plan_state)
             else:
                 target_step.status = "failed"
                 failure_summary = ""
+                failure: ExecutionFailure | None = None
                 if latest_block:
                     failure_summary = str(latest_block.get("test_summary", "")).strip()
+                    failure = execution_failure_from_reason(
+                        str(latest_block.get("failure_reason_code", "")).strip() or None,
+                        failure_summary,
+                    )
                 if not failure_summary:
                     failure_summary = str(context.loop_state.stop_reason or f"Step execution failed after {attempt_count} attempt(s).").strip()
-                target_step.notes = failure_summary or "Step execution failed."
+                failure = failure or ExecutionFailure(failure_summary or "Step execution failed.")
+                target_step.notes = str(failure)
+                self._set_step_failure_metadata(target_step, failure)
                 context.metadata.current_status = "failed"
             self._collect_ml_step_report(context, target_step)
         except ImmediateStopRequested as exc:
@@ -877,13 +960,18 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
             target_step.completed_at = None
             target_step.commit_hash = None
             target_step.notes = str(exc).strip() or "Immediate stop requested."
+            self._clear_step_failure_metadata(target_step)
             context.metadata.current_status = self._status_from_plan_state(plan_state)
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
+            failure = exc if isinstance(exc, ExecutionFailure) else ExecutionFailure(str(exc).strip() or "Step execution failed.")
             target_step.status = "failed"
-            target_step.notes = str(exc).strip() or "Step execution failed."
+            target_step.notes = str(failure)
+            self._set_step_failure_metadata(target_step, failure)
             self._collect_ml_step_report(context, target_step)
             context.metadata.current_status = "failed"
-            raise
+            if failure is exc:
+                raise
+            raise failure from exc
         finally:
             context.runtime = previous_runtime
             self.save_execution_plan_state(context, plan_state)
@@ -1198,7 +1286,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                                 merged_commit_hashes.append(merge_commit_hash)
                                 merged_commit_by_step_id[result_step_id] = merge_commit_hash
                                 continue
-                        raise RuntimeError(
+                        raise ParallelMergeConflictError(
                             f"Parallel merge conflict while cherry-picking {worker_commit}: {', '.join(conflicted_files) or merge_result.stderr.strip() or 'unknown conflict'}"
                         )
                 except ImmediateStopRequested as exc:
@@ -1213,7 +1301,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                         step.commit_hash = None
                         step.notes = batch_summary
                     context.metadata.current_status = self._status_from_plan_state(plan_state)
-                except Exception as exc:
+                except HANDLED_OPERATION_EXCEPTIONS as exc:
                     self.git.abort_cherry_pick(context.paths.repo_dir)
                     self.git.hard_reset(context.paths.repo_dir, base_revision)
                     rollback_status = "serial_recovery_after_merge_failure"
@@ -1531,6 +1619,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 step.status = "running"
                 step.started_at = step.started_at or started_at
                 step.notes = ""
+                self._clear_step_failure_metadata(step)
             elif step.status == "running":
                 step.status = "paused"
         plan_state.default_test_command = runtime.test_cmd
@@ -1548,6 +1637,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         self.workspace.save_project(context)
         attempt_limit = max(1, int(runtime.regression_limit or 1))
         last_failure_note = ""
+        last_failure_exc: ExecutionFailure | None = None
 
         for attempt_index in range(1, attempt_limit + 1):
             integration_info: dict[str, object] | None = None
@@ -1644,7 +1734,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                             self.workspace.save_project(integration_context)
                             merge_block_index += 1
                             continue
-                    raise RuntimeError(
+                    raise ParallelMergeConflictError(
                         f"{target_step.step_id} failed while merging {lineage.lineage_id}: "
                         f"{', '.join(conflicted_files) or merge_result.stderr.strip() or 'unknown conflict'}"
                     )
@@ -1673,6 +1763,14 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                     target_step.notes = result_step.notes or (
                         "Immediate stop requested." if interrupted else "Join execution failed."
                     )
+                    if interrupted:
+                        self._clear_step_failure_metadata(target_step)
+                    else:
+                        result_reason_code = str((result_step.metadata or {}).get("failure_reason_code", "")).strip() or None
+                        self._set_step_failure_metadata(
+                            target_step,
+                            execution_failure_from_reason(result_reason_code, target_step.notes),
+                        )
                     saved = self.save_execution_plan_state(context, plan_state)
                     self.workspace.save_project(context)
                     return context, saved, target_step
@@ -1697,6 +1795,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 refreshed_step.completed_at = result_step.completed_at or now_utc_iso()
                 refreshed_step.commit_hash = integrated_revision
                 refreshed_step.notes = result_step.notes or "Join step completed successfully."
+                self._clear_step_failure_metadata(refreshed_step)
                 if not pushed and push_reason not in {"already_up_to_date"}:
                     refreshed_step.notes = f"{refreshed_step.notes} (push skipped: {push_reason})"
                 if pushed or push_reason == "already_up_to_date":
@@ -1737,10 +1836,11 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 target_step.completed_at = None
                 target_step.commit_hash = None
                 target_step.notes = str(exc).strip() or "Immediate stop requested."
+                self._clear_step_failure_metadata(target_step)
                 saved = self.save_execution_plan_state(context, plan_state)
                 self.workspace.save_project(context)
                 return context, saved, target_step
-            except Exception as exc:
+            except HANDLED_OPERATION_EXCEPTIONS as exc:
                 if integration_context is not None:
                     self.git.abort_cherry_pick(integration_context.paths.repo_dir)
                     self.git.hard_reset(integration_context.paths.repo_dir, pre_join_safe_revision)
@@ -1749,13 +1849,17 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 self.git.hard_reset(context.paths.repo_dir, pre_join_safe_revision)
                 context.metadata.current_safe_revision = pre_join_safe_revision
                 context.loop_state.current_safe_revision = pre_join_safe_revision
-                last_failure_note = str(exc).strip() or "Join execution failed."
+                last_failure_exc = exc if isinstance(exc, ExecutionFailure) else ParallelExecutionFailure(
+                    str(exc).strip() or "Join execution failed."
+                )
+                last_failure_note = str(last_failure_exc)
                 if attempt_index >= attempt_limit:
                     context.metadata.current_status = "failed"
                     target_step.status = "failed"
                     target_step.completed_at = None
                     target_step.commit_hash = None
                     target_step.notes = last_failure_note
+                    self._set_step_failure_metadata(target_step, last_failure_exc)
                     saved = self.save_execution_plan_state(context, plan_state)
                     self.workspace.save_project(context)
                     return context, saved, target_step
@@ -1765,6 +1869,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 target_step.notes = (
                     f"Retrying join attempt {attempt_index + 1} of {attempt_limit} after failure: {last_failure_note}"
                 )
+                self._clear_step_failure_metadata(target_step)
                 context.metadata.current_status = f"running:retry-{target_step.step_id.lower()}"
                 context.metadata.last_run_at = now_utc_iso()
                 plan_state = self.save_execution_plan_state(context, plan_state)
@@ -1777,6 +1882,10 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         target_step.completed_at = None
         target_step.commit_hash = None
         target_step.notes = last_failure_note or "Join execution failed."
+        self._set_step_failure_metadata(
+            target_step,
+            last_failure_exc or ParallelExecutionFailure(target_step.notes),
+        )
         saved = self.save_execution_plan_state(context, plan_state)
         self.workspace.save_project(context)
         return context, saved, target_step
@@ -2396,6 +2505,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
             lineage_state_file=state_dir / "LINEAGES.json",
             spine_file=state_dir / "SPINE.json",
             common_requirements_file=state_dir / "COMMON_REQUIREMENTS.json",
+            contract_wave_audit_file=state_dir / "CONTRACT_WAVE_AUDIT.jsonl",
             ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
             ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
             ml_experiment_reports_dir=state_dir / "ml_experiments",
@@ -2509,6 +2619,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
 
         if result_status == "completed":
             step.status = success_status
+            self._clear_step_failure_metadata(step)
             if success_status == "completed":
                 step.completed_at = synced_at
                 step.commit_hash = worker_commit or None
@@ -2523,12 +2634,17 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
             step.completed_at = None
             step.commit_hash = None
             step.notes = worker_note or "Immediate stop requested."
+            self._clear_step_failure_metadata(step)
             context.metadata.current_status = self._status_from_plan_state(plan_state)
         else:
             step.status = failure_status
             step.completed_at = None
             step.commit_hash = None
             step.notes = worker_note or ("Parallel worker recovery pending." if failure_status == "pending" else "Parallel worker failed.")
+            if failure_status == "pending":
+                self._clear_step_failure_metadata(step)
+            else:
+                self._set_step_failure_from_worker_result(step, worker_result)
             context.metadata.current_status = failure_project_status
 
         context.metadata.last_run_at = synced_at
@@ -2601,11 +2717,13 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 step.commit_hash = str(merged_commit_by_step_id.get(step.step_id, "") or "").strip() or None
                 worker_note = str(worker_result.get("test_summary") or "").strip()
                 step.notes = worker_note or completed_note
+                self._clear_step_failure_metadata(step)
                 continue
             step.status = "failed"
             step.completed_at = None
             step.commit_hash = None
             step.notes = str(worker_result.get("notes") or "Parallel worker failed.").strip() or "Parallel worker failed."
+            self._set_step_failure_from_worker_result(step, worker_result)
 
     def _refresh_ordered_targets(
         self,
@@ -2660,7 +2778,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                     allow_push=False,
                     final_failure_reports=False,
                 )
-            except Exception as exc:
+            except HANDLED_OPERATION_EXCEPTIONS as exc:
                 deferred_note = (
                     f"{str(exc).strip() or 'Automatic serial recovery failed.'} "
                     "Automatic recovery deferred this step for retry."
@@ -2762,9 +2880,11 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         worker_runtime = self._build_parallel_worker_runtime(runtime, step)
         preflight_error = self._execution_runtime_preflight_error(context, worker_runtime)
         if preflight_error:
+            failure = ExecutionPreflightError(preflight_error)
             worker_result["status"] = "failed"
-            worker_result["notes"] = preflight_error
-            worker_result["test_summary"] = preflight_error
+            worker_result["notes"] = str(failure)
+            worker_result["test_summary"] = str(failure)
+            worker_result.update(failure_log_fields(failure))
             return worker_result
         try:
             worker_info = self._build_parallel_worker_context(context, runtime, step, base_revision, batch_token, worker_index)
@@ -2812,15 +2932,23 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                     "pass_log": latest_pass,
                     "block_log": latest_block,
                     "test_summary": str(latest_block.get("test_summary") or "").strip(),
+                    "failure_type": str(latest_block.get("failure_type") or latest_pass.get("failure_type") or "").strip(),
+                    "failure_reason_code": str(
+                        latest_block.get("failure_reason_code") or latest_pass.get("failure_reason_code") or ""
+                    ).strip(),
                     "ml_report_payload": read_json(worker_context.paths.ml_step_report_file, default={}),
                 }
             )
         except ImmediateStopRequested as exc:
             worker_result["status"] = "paused"
             worker_result["notes"] = str(exc).strip() or "Immediate stop requested."
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
+            failure = exc if isinstance(exc, ExecutionFailure) else ParallelExecutionFailure(
+                str(exc).strip() or "Parallel worker failed."
+            )
             worker_result["status"] = "failed"
-            worker_result["notes"] = str(exc).strip() or "Parallel worker failed."
+            worker_result["notes"] = str(failure)
+            worker_result.update(failure_log_fields(failure))
         return worker_result
 
     def _parallel_worker_summary(
@@ -2936,11 +3064,13 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         changed_files = sorted(set(run_result.changed_files))
         success = False
         notes = ""
+        failure: ExecutionFailure | None = None
 
         if run_result.returncode != 0:
             self.git.hard_reset(context.paths.repo_dir, safe_revision)
             rollback_status = "rolled_back_to_safe_revision"
-            notes = self._codex_failure_note(task_name, run_result)
+            failure = AgentPassExecutionError(self._codex_failure_note(task_name, run_result))
+            notes = str(failure)
         else:
             try:
                 test_result = self._run_test_command(context, block_index, pass_type)
@@ -2951,7 +3081,10 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
             if test_result.returncode != 0:
                 self.git.hard_reset(context.paths.repo_dir, safe_revision)
                 rollback_status = "rolled_back_to_safe_revision"
-                notes = self._rolled_back_test_failure_note(test_result, fallback_task_name=task_name)
+                failure = VerificationTestFailure(
+                    self._rolled_back_test_failure_note(test_result, fallback_task_name=task_name)
+                )
+                notes = str(failure)
             else:
                 if self.git.has_changes(context.paths.repo_dir):
                     commit_descriptor = build_commit_descriptor(context, pass_type, task_name)
@@ -2983,6 +3116,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
             "changed_files": changed_files,
             "rollback_status": rollback_status,
             "safe_revision": commit_hash or safe_revision,
+            **failure_log_fields(failure),
         }
 
     def _record_repo_pass(
@@ -3005,6 +3139,8 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         rollback_status = str(pass_result.get("rollback_status") or "not_needed")
         changed_files = list(pass_result.get("changed_files") or [])
         success = bool(pass_result.get("success"))
+        failure_type = str(pass_result.get("failure_type") or "").strip()
+        failure_reason_code = str(pass_result.get("failure_reason_code") or "").strip()
         reporter.log_pass(
             {
                 "repository_id": context.metadata.repo_id,
@@ -3022,6 +3158,14 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 "commit_hash": commit_hash,
                 "rollback_status": rollback_status,
                 "search_enabled": False,
+                **(
+                    {
+                        "failure_type": failure_type,
+                        "failure_reason_code": failure_reason_code,
+                    }
+                    if failure_type
+                    else {}
+                ),
                 **(extra_pass_fields or {}),
             }
         )
@@ -3036,6 +3180,14 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 "test_summary": str(pass_result.get("notes") or "").strip(),
                 "commit_hashes": [str(commit_hash)] if commit_hash else [],
                 "rollback_status": rollback_status,
+                **(
+                    {
+                        "failure_type": failure_type,
+                        "failure_reason_code": failure_reason_code,
+                    }
+                    if failure_type
+                    else {}
+                ),
                 **(extra_block_fields or {}),
             }
         )
@@ -3094,7 +3246,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 task_name=optimization_task,
                 safe_revision=safe_revision,
             )
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
             self.git.hard_reset(context.paths.repo_dir, safe_revision)
             pass_result = {
                 "success": False,
@@ -3267,7 +3419,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
             plan_state.closeout_completed_at = None
             plan_state.closeout_commit_hash = None
             plan_state.closeout_notes = str(exc).strip() or "Immediate stop requested."
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
             plan_state.closeout_status = "failed"
             plan_state.closeout_notes = str(exc).strip() or "Closeout failed."
             raise
@@ -3354,7 +3506,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
             context.loop_state.current_safe_revision = safe_revision
             self.workspace.save_project(context)
             return context
-        except Exception as exc:
+        except HANDLED_OPERATION_EXCEPTIONS as exc:
             context.metadata.last_run_at = now_utc_iso()
             context.metadata.current_status = "init_failed"
             write_text(context.paths.reports_dir / "init_error.txt", str(exc).strip() + "\n")
@@ -3771,11 +3923,12 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         block_changed_files.extend(search_pass.changed_files)
         if search_tests is None:
             regression_failure = search_pass.returncode == 0
-            failure_summary = (
-                "Search-enabled Codex pass regressed tests and was rolled back."
+            failure = (
+                VerificationTestFailure("Search-enabled Codex pass regressed tests and was rolled back.")
                 if regression_failure
-                else self._codex_failure_note(selected_task, search_pass)
+                else AgentPassExecutionError(self._codex_failure_note(selected_task, search_pass))
             )
+            failure_summary = str(failure)
             if regression_failure:
                 context.loop_state.counters.regression_failures += 1
                 context.loop_state.stop_reason = self._stop_reason(context)
@@ -3805,6 +3958,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                     "test_summary": failure_summary,
                     "commit_hashes": [],
                     "rollback_status": "rolled_back_to_safe_revision",
+                    **failure_log_fields(failure),
                 }
             )
             if not suppress_failure_reporting:

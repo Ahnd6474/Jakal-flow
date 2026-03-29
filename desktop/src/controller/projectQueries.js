@@ -89,20 +89,19 @@ export async function fetchProjectHistory(bridgeRequest, repoId, workspaceRoot) 
 }
 
 export async function refreshVisibleProjectState(bridgeRequest, workspaceRoot, repoId, options = {}) {
-  const refreshListing = options.refreshListing ?? true;
-  const listingPromise = refreshListing ? loadProjectListing(bridgeRequest, workspaceRoot) : Promise.resolve(null);
-  if (!repoId) {
-    return {
-      listing: await listingPromise,
-      detail: null,
-    };
-  }
-
-  const detailPromise = fetchProjectDetail(bridgeRequest, repoId, workspaceRoot, options);
-  const [listing, detail] = await Promise.all([listingPromise, detailPromise]);
+  const result = await bridgeRequest(
+    BRIDGE_COMMANDS.LOAD_VISIBLE_PROJECT_STATE,
+    {
+      ...(repoId ? { repo_id: repoId } : {}),
+      refresh_codex_status: options.refreshCodexStatus ?? false,
+      detail_level: options.detailLevel ?? "core",
+      include_listing: options.refreshListing ?? true,
+    },
+    workspaceRoot || null,
+  );
   return {
-    listing,
-    detail,
+    listing: result?.listing || null,
+    detail: result?.detail || null,
   };
 }
 

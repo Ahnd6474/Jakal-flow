@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import { ExecutionFlowChart } from "../common/ExecutionFlowChart";
@@ -10,6 +10,8 @@ import {
   DEEPSEEK_DEFAULT_MODEL,
   commandLabel,
   effectiveStepStatus,
+  failureReasonCode,
+  failureReasonLabel,
   formatDurationCompact,
   formatUsd,
   GEMINI_DEFAULT_MODEL,
@@ -218,6 +220,60 @@ const PROVIDER_SHORT = {
   glm: "GLM", openrouter: "OpenRouter", opencdk: "CDK", local_openai: "Local", oss: "OSS",
 };
 
+const RUN_PROVIDER_OPTIONS = [
+  ["ensemble", "option.providerEnsemble"],
+  ["openai", "Codex CLI"],
+  ["claude", "Claude Code"],
+  ["gemini", "Gemini CLI"],
+  ["ollama", "Ollama"],
+  ["qwen_code", "Qwen Code"],
+  ["deepseek", "DeepSeek via Claude Code"],
+  ["kimi", "Kimi"],
+  ["minimax", "MiniMax via Claude Code"],
+  ["glm", "GLM via Claude Code"],
+  ["openrouter", "OpenRouter"],
+  ["opencdk", "OpenCDK"],
+  ["local_openai", "Local OpenAI-Compatible"],
+  ["oss", "LM Studio / Local OSS"],
+];
+
+function sameQueuedJobs(previousJobs = [], nextJobs = []) {
+  if (previousJobs === nextJobs) {
+    return true;
+  }
+  if (!Array.isArray(previousJobs) || !Array.isArray(nextJobs) || previousJobs.length !== nextJobs.length) {
+    return false;
+  }
+  for (let index = 0; index < previousJobs.length; index += 1) {
+    const previousJob = previousJobs[index];
+    const nextJob = nextJobs[index];
+    if (
+      previousJob?.id !== nextJob?.id
+      || previousJob?.status !== nextJob?.status
+      || previousJob?.queue_position !== nextJob?.queue_position
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function parallelRunControlViewPropsEqual(previousProps, nextProps) {
+  return (
+    previousProps.detail === nextProps.detail
+    && previousProps.codexStatus === nextProps.codexStatus
+    && previousProps.planDraft === nextProps.planDraft
+    && previousProps.activeJob === nextProps.activeJob
+    && previousProps.autoRunAfterPlan === nextProps.autoRunAfterPlan
+    && previousProps.selectedStepId === nextProps.selectedStepId
+    && previousProps.form === nextProps.form
+    && previousProps.busy === nextProps.busy
+    && previousProps.canRequestStop === nextProps.canRequestStop
+    && previousProps.canCancelReservation === nextProps.canCancelReservation
+    && sameQueuedJobs(previousProps.queuedJobs, nextProps.queuedJobs)
+  );
+}
+
 function modelChipLabel(form, detail) {
   const model = String(form?.runtime?.model || form?.runtime?.model_slug_input || detail?.runtime?.model || "").trim();
   const provider = String(form?.runtime?.model_provider || detail?.runtime?.model_provider || "openai").trim().toLowerCase();
@@ -358,7 +414,7 @@ function reservationProjectLabel(job, fallbackLabel) {
 }
 
 /* ── Main view ── */
-export function ParallelRunControlView({
+export const ParallelRunControlView = memo(function ParallelRunControlView({
   detail,
   codexStatus,
   planDraft,
@@ -389,22 +445,10 @@ export function ParallelRunControlView({
 }) {
   const { language, t } = useI18n();
   const promptRef = useRef(null);
-  const providerOptions = [
-    ["ensemble", t("option.providerEnsemble")],
-    ["openai", "Codex CLI"],
-    ["claude", "Claude Code"],
-    ["gemini", "Gemini CLI"],
-    ["ollama", "Ollama"],
-    ["qwen_code", "Qwen Code"],
-    ["deepseek", "DeepSeek via Claude Code"],
-    ["kimi", "Kimi"],
-    ["minimax", "MiniMax via Claude Code"],
-    ["glm", "GLM via Claude Code"],
-    ["openrouter", "OpenRouter"],
-    ["opencdk", "OpenCDK"],
-    ["local_openai", "Local OpenAI-Compatible"],
-    ["oss", "LM Studio / Local OSS"],
-  ];
+  const providerOptions = useMemo(
+    () => RUN_PROVIDER_OPTIONS.map(([value, label]) => [value, label === "option.providerEnsemble" ? t("option.providerEnsemble") : label]),
+    [t],
+  );
 
   const livePlan = activeJob?.status === "running" && detail?.plan ? detail.plan : planDraft;
   const promptValue = livePlan?.project_prompt || "";
@@ -448,6 +492,8 @@ export function ParallelRunControlView({
   const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", executionJob);
   const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
   const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
+  const selectedStepFailureReason = failureReasonLabel(selectedStep, language);
+  const selectedStepFailureCode = failureReasonCode(selectedStep);
   const closeoutStatus = String(livePlan?.closeout_status || "not_started").trim().toLowerCase();
   const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
   const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
@@ -640,6 +686,13 @@ export function ParallelRunControlView({
               <div className="field field--wide"><span>{t("field.description")}</span><p>{selectedStep.display_description || t("run.noSummary")}</p></div>
               {selectedStep.deadline_at ? <div className="field field--wide"><span>{language === "ko" ? "마감" : "Deadline"}</span><p>{selectedStep.deadline_at}</p></div> : null}
               <div className="field field--wide"><span>{t("field.dependsOn")}</span><p>{(selectedStep.depends_on || []).join(", ") || t("common.none")}</p></div>
+              {String(selectedStepStatus || "").trim().toLowerCase().includes("failed") && selectedStepFailureReason ? (
+                <div className="field field--wide">
+                  <span>{language === "ko" ? "실패 사유" : "Failure Reason"}</span>
+                  <p>{selectedStepFailureReason}</p>
+                  {selectedStepFailureCode ? <small className="field-hint"><code>{selectedStepFailureCode}</code></small> : null}
+                </div>
+              ) : null}
               {selectedStep.notes ? <div className="field field--wide"><span>{t("common.status")}</span><p>{selectedStep.notes}</p></div> : null}
               {selectedStep.step_id === CLOSEOUT_STEP_ID ? (
                 <div className="field field--wide">
@@ -701,6 +754,15 @@ export function ParallelRunControlView({
               <label className="field field--wide"><span>{t("field.description")}</span><textarea value={selectedStep.display_description || ""} onChange={(event) => onUpdateStepField("display_description", event.target.value)} disabled={!editableStep} style={{ minHeight: "56px" }} /></label>
               <label className="field field--wide"><span>{t("field.codexInstruction")}</span><textarea value={selectedStep.codex_description || ""} onChange={(event) => onUpdateStepField("codex_description", event.target.value)} disabled={!editableStep} style={{ minHeight: "56px" }} /></label>
               <label className="field field--wide"><span>{t("field.successCriteria")}</span><textarea value={selectedStep.success_criteria || ""} onChange={(event) => onUpdateStepField("success_criteria", event.target.value)} disabled={!editableStep} style={{ minHeight: "48px" }} /></label>
+
+              {String(selectedStepStatus || "").trim().toLowerCase().includes("failed") && selectedStepFailureReason ? (
+                <div className="field field--wide">
+                  <span>{language === "ko" ? "실패 사유" : "Failure Reason"}</span>
+                  <p>{selectedStepFailureReason}</p>
+                  {selectedStepFailureCode ? <small className="field-hint"><code>{selectedStepFailureCode}</code></small> : null}
+                </div>
+              ) : null}
+              {selectedStep.notes ? <div className="field field--wide"><span>{t("common.status")}</span><p>{selectedStep.notes}</p></div> : null}
 
               <div className="action-row field--wide" style={{ paddingTop: "6px", borderTop: "1px solid var(--border)" }}>
                 <button className="toolbar-btn toolbar-btn--accent" onClick={onSaveStepLocal} type="button" disabled={busy}><SaveIcon /><span>{t("action.saveLocal")}</span></button>
@@ -773,4 +835,4 @@ export function ParallelRunControlView({
       </div>
     </section>
   );
-}
+}, parallelRunControlViewPropsEqual);

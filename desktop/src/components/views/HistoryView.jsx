@@ -1,6 +1,6 @@
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { statusTone } from "../../utils";
+import { failureReasonLabel, statusTone } from "../../utils";
 
 function HistoryRow({ title, tone, lines }) {
   const { t } = useI18n();
@@ -36,6 +36,7 @@ export function HistoryView({ detail, busy = false, onDeleteHistoryEntry = null 
         <span className={`status-badge status-badge--${statusTone(block.status)}`}>{displayStatus(block.status, language)}</span>
       </div>
       <span>{block.selected_task || t("history.noTaskTitle")}</span>
+      {failureReasonLabel(block, language) ? <span>{language === "ko" ? `실패 사유: ${failureReasonLabel(block, language)}` : `Failure reason: ${failureReasonLabel(block, language)}`}</span> : null}
       <span>{block.test_summary || t("history.noTestSummary")}</span>
     </div>
   ));

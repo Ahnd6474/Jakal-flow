@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { useI18n } from "../../i18n";
 import {
   AUTO_REASONING_OPTION,
@@ -151,7 +152,35 @@ function modelReasoningSummary(entry, language) {
   return `Supported reasoning: ${labels} | default: ${defaultLabel}`;
 }
 
-export function ConfigEditorView({
+const CONFIG_PROVIDER_OPTIONS = [
+  ["openai", "Codex CLI"],
+  ["ensemble", "option.providerEnsemble"],
+  ["claude", "Claude Code"],
+  ["gemini", "Gemini CLI"],
+  ["ollama", "Ollama"],
+  ["qwen_code", "Qwen Code"],
+  ["deepseek", "DeepSeek via Claude Code"],
+  ["kimi", "Kimi"],
+  ["minimax", "MiniMax via Claude Code"],
+  ["glm", "GLM via Claude Code"],
+  ["openrouter", "OpenRouter"],
+  ["opencdk", "OpenCDK"],
+  ["local_openai", "Local OpenAI-Compatible"],
+  ["oss", "LM Studio / Local OSS"],
+];
+
+function configEditorViewPropsEqual(previousProps, nextProps) {
+  return (
+    previousProps.form === nextProps.form
+    && previousProps.modelPresets === nextProps.modelPresets
+    && previousProps.modelCatalog === nextProps.modelCatalog
+    && previousProps.codexStatus === nextProps.codexStatus
+    && previousProps.busy === nextProps.busy
+    && previousProps.activeJob === nextProps.activeJob
+  );
+}
+
+export const ConfigEditorView = memo(function ConfigEditorView({
   form,
   modelPresets,
   modelCatalog,
@@ -173,28 +202,25 @@ export function ConfigEditorView({
   const selectedProvider = normalizedModelProvider(runtime);
   const providerHasCatalog = providerSupportsCatalog(selectedProvider);
   const providerHasAutoModel = providerSupportsAutoModel(selectedProvider);
-  const scopedModelCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
+  const scopedModelCatalog = useMemo(
+    () => filterModelCatalogByProvider(modelCatalog, runtime),
+    [modelCatalog, runtime],
+  );
   const selectedModel = runtime.model || defaultModelForRuntime(modelCatalog, runtime) || (providerHasAutoModel ? "auto" : "");
   const autoParallelWorkers = String(runtime.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
-  const selectedCatalogEntry = findModelCatalogEntry(scopedModelCatalog, selectedModel);
-  const supportedEfforts = configReasoningOptions(scopedModelCatalog, selectedModel, runtime.effort || "medium");
+  const selectedCatalogEntry = useMemo(
+    () => findModelCatalogEntry(scopedModelCatalog, selectedModel),
+    [scopedModelCatalog, selectedModel],
+  );
+  const supportedEfforts = useMemo(
+    () => configReasoningOptions(scopedModelCatalog, selectedModel, runtime.effort || "medium"),
+    [scopedModelCatalog, selectedModel, runtime.effort],
+  );
   const selectedEffort = selectedConfigReasoning(scopedModelCatalog, runtime);
-  const providerOptions = [
-    ["openai", "Codex CLI"],
-    ["ensemble", t("option.providerEnsemble")],
-    ["claude", "Claude Code"],
-    ["gemini", "Gemini CLI"],
-    ["ollama", "Ollama"],
-    ["qwen_code", "Qwen Code"],
-    ["deepseek", "DeepSeek via Claude Code"],
-    ["kimi", "Kimi"],
-    ["minimax", "MiniMax via Claude Code"],
-    ["glm", "GLM via Claude Code"],
-    ["openrouter", "OpenRouter"],
-    ["opencdk", "OpenCDK"],
-    ["local_openai", "Local OpenAI-Compatible"],
-    ["oss", "LM Studio / Local OSS"],
-  ];
+  const providerOptions = useMemo(
+    () => CONFIG_PROVIDER_OPTIONS.map(([value, label]) => [value, label === "option.providerEnsemble" ? t("option.providerEnsemble") : label]),
+    [t],
+  );
 
   const planningRuntime =
     selectedProvider === "ensemble"
@@ -205,38 +231,74 @@ export function ConfigEditorView({
           model_slug_input: runtime.ensemble_openai_model || runtime.model_slug_input || runtime.model || "",
         }
       : runtime;
-  const planningCatalog = filterModelCatalogByProvider(modelCatalog, planningRuntime);
+  const planningCatalog = useMemo(
+    () => filterModelCatalogByProvider(modelCatalog, planningRuntime),
+    [modelCatalog, planningRuntime],
+  );
   const planningModel = planningRuntime.model || planningRuntime.model_slug_input || defaultModelForRuntime(modelCatalog, planningRuntime) || selectedModel;
-  const planningEntry = findModelCatalogEntry(planningCatalog, planningModel);
-  const planningSupportedEfforts = (
-    planningEntry?.supported_reasoning_efforts?.length
-      ? planningEntry.supported_reasoning_efforts
-      : REASONING_OPTIONS
-  ).filter((effort) => REASONING_OPTIONS.includes(effort));
-  const planningSelectedEffort = clampReasoningEffort(
-    planningCatalog,
-    planningModel,
-    runtime.planning_effort || runtime.effort || "medium",
-    runtime.effort || "medium",
+  const planningEntry = useMemo(
+    () => findModelCatalogEntry(planningCatalog, planningModel),
+    [planningCatalog, planningModel],
+  );
+  const planningSupportedEfforts = useMemo(
+    () => (
+      planningEntry?.supported_reasoning_efforts?.length
+        ? planningEntry.supported_reasoning_efforts
+        : REASONING_OPTIONS
+    ).filter((effort) => REASONING_OPTIONS.includes(effort)),
+    [planningEntry],
+  );
+  const planningSelectedEffort = useMemo(
+    () => clampReasoningEffort(
+      planningCatalog,
+      planningModel,
+      runtime.planning_effort || runtime.effort || "medium",
+      runtime.effort || "medium",
+    ),
+    [planningCatalog, planningModel, runtime.effort, runtime.planning_effort],
   );
 
   const ensembleClaudeRuntime = { ...runtime, model_provider: "claude", model: runtime.ensemble_claude_model || "" };
-  const ensembleClaudeCatalog = filterModelCatalogByProvider(modelCatalog, ensembleClaudeRuntime);
-  const ensembleClaudeModel = runtime.ensemble_claude_model || defaultModelForRuntime(modelCatalog, ensembleClaudeRuntime) || "";
-  const ensembleClaudeEntry = findModelCatalogEntry(ensembleClaudeCatalog, ensembleClaudeModel);
-
-  const visibleModels = (scopedModelCatalog || []).filter(
-    (item) => item && item.model && (item.model !== "auto" || selectedModel === "auto"),
+  const ensembleClaudeCatalog = useMemo(
+    () => filterModelCatalogByProvider(modelCatalog, ensembleClaudeRuntime),
+    [modelCatalog, ensembleClaudeRuntime],
   );
-  const allModels = visibleModels.length
-    ? visibleModels
-    : [{ model: selectedModel || "", display_name: selectedCatalogEntry?.display_name || selectedModel || t("common.none"), hidden: false }];
-  const selectedModelOption =
-    selectedModel && !allModels.some((item) => item?.model === selectedModel)
-      ? { model: selectedModel, display_name: selectedCatalogEntry?.display_name || selectedModel || t("common.none"), hidden: false }
-      : null;
-  const recommendedModels = [...(selectedModelOption ? [selectedModelOption] : []), ...allModels.filter((item) => !item.hidden)];
-  const additionalModels = allModels.filter((item) => item.hidden);
+  const ensembleClaudeModel = runtime.ensemble_claude_model || defaultModelForRuntime(modelCatalog, ensembleClaudeRuntime) || "";
+  const ensembleClaudeEntry = useMemo(
+    () => findModelCatalogEntry(ensembleClaudeCatalog, ensembleClaudeModel),
+    [ensembleClaudeCatalog, ensembleClaudeModel],
+  );
+
+  const visibleModels = useMemo(
+    () => (scopedModelCatalog || []).filter(
+      (item) => item && item.model && (item.model !== "auto" || selectedModel === "auto"),
+    ),
+    [scopedModelCatalog, selectedModel],
+  );
+  const allModels = useMemo(
+    () => (
+      visibleModels.length
+        ? visibleModels
+        : [{ model: selectedModel || "", display_name: selectedCatalogEntry?.display_name || selectedModel || t("common.none"), hidden: false }]
+    ),
+    [selectedCatalogEntry?.display_name, selectedModel, t, visibleModels],
+  );
+  const selectedModelOption = useMemo(
+    () => (
+      selectedModel && !allModels.some((item) => item?.model === selectedModel)
+        ? { model: selectedModel, display_name: selectedCatalogEntry?.display_name || selectedModel || t("common.none"), hidden: false }
+        : null
+    ),
+    [allModels, selectedCatalogEntry?.display_name, selectedModel, t],
+  );
+  const recommendedModels = useMemo(
+    () => [...(selectedModelOption ? [selectedModelOption] : []), ...allModels.filter((item) => !item.hidden)],
+    [allModels, selectedModelOption],
+  );
+  const additionalModels = useMemo(
+    () => allModels.filter((item) => item.hidden),
+    [allModels],
+  );
 
   function applyModelChange(nextModel, nextEffort = null) {
     const nextRuntime = applyConfigRuntimeModelSelection(runtime, scopedModelCatalog, nextModel, nextEffort);
@@ -775,5 +837,5 @@ export function ConfigEditorView({
       </div>
     </section>
   );
-}
+}, configEditorViewPropsEqual);
 

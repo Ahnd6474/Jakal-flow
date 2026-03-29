@@ -372,6 +372,33 @@ export function programSettingsFromRuntime(runtime) {
   return settings;
 }
 
+function dashboardVisibilityEqual(left = null, right = null) {
+  const leftVisibility = normalizeDashboardVisibility(left);
+  const rightVisibility = normalizeDashboardVisibility(right);
+  return Object.keys(DEFAULT_DASHBOARD_VISIBILITY).every(
+    (key) => leftVisibility[key] === rightVisibility[key],
+  );
+}
+
+export function programSettingsEqual(left = null, right = null) {
+  const leftSettings = left && typeof left === "object" ? left : {};
+  const rightSettings = right && typeof right === "object" ? right : {};
+  for (const key of PROGRAM_RUNTIME_KEYS) {
+    if (!Object.is(leftSettings[key], rightSettings[key])) {
+      return false;
+    }
+  }
+  for (const key of PROGRAM_UI_KEYS) {
+    if (key === "dashboard_visibility") {
+      continue;
+    }
+    if (!Object.is(leftSettings[key], rightSettings[key])) {
+      return false;
+    }
+  }
+  return dashboardVisibilityEqual(leftSettings.dashboard_visibility, rightSettings.dashboard_visibility);
+}
+
 export function applyProgramSettings(runtime, programSettings) {
   const normalizedSettings = programSettingsFromRuntime(programSettings);
   const runtimeSettings = PROGRAM_RUNTIME_KEYS.reduce((settings, key) => {
@@ -2014,6 +2041,7 @@ export function planStepsWithCloseout(plan, labels = {}) {
     metadata: {
       system_step: true,
       system_step_kind: "closeout",
+      ...(status === "failed" ? { failure_reason_code: "closeout_failed" } : {}),
     },
   });
   return steps;
@@ -2287,4 +2315,72 @@ export function statusTone(status) {
     return "warning";
   }
   return "neutral";
+}
+
+const FAILURE_REASON_LABELS = {
+  preflight_failed: {
+    en: "Preflight failed",
+    ko: "실행 준비 실패",
+  },
+  agent_pass_failed: {
+    en: "Agent pass failed",
+    ko: "에이전트 실행 실패",
+  },
+  verification_test_failed: {
+    en: "Verification tests failed",
+    ko: "검증 테스트 실패",
+  },
+  parallel_execution_failed: {
+    en: "Parallel execution failed",
+    ko: "병렬 실행 실패",
+  },
+  parallel_merge_conflict: {
+    en: "Parallel merge conflict",
+    ko: "병렬 병합 충돌",
+  },
+  recovery_artifacts_missing: {
+    en: "Recovery artifacts missing",
+    ko: "복구 아티팩트 없음",
+  },
+  merge_conflict_state_invalid: {
+    en: "No active merge conflict",
+    ko: "활성 병합 충돌 없음",
+  },
+  closeout_failed: {
+    en: "Closeout failed",
+    ko: "클로즈아웃 실패",
+  },
+};
+
+function failureReasonLabelForCode(reasonCode, language = "en") {
+  const normalized = String(reasonCode || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  const labels = FAILURE_REASON_LABELS[normalized];
+  if (labels) {
+    return language === "ko" ? labels.ko : labels.en;
+  }
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export function failureReasonCode(value = null) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  if (typeof value.failure_reason_code === "string") {
+    return value.failure_reason_code.trim().toLowerCase();
+  }
+  if (typeof value?.metadata?.failure_reason_code === "string") {
+    return value.metadata.failure_reason_code.trim().toLowerCase();
+  }
+  return "";
+}
+
+export function failureReasonLabel(value = null, language = "en") {
+  return failureReasonLabelForCode(failureReasonCode(value), language);
 }

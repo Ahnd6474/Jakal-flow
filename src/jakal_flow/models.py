@@ -238,6 +238,7 @@ class ProjectPaths:
     lineage_state_file: Path
     spine_file: Path
     common_requirements_file: Path
+    contract_wave_audit_file: Path
     ml_mode_state_file: Path
     ml_step_report_file: Path
     ml_experiment_reports_dir: Path

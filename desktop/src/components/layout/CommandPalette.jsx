@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 
 function SearchIcon() {
@@ -11,15 +11,38 @@ function SearchIcon() {
 }
 
 function matchScore(text, query) {
-  const lowerText = text.toLowerCase();
-  const lowerQuery = query.toLowerCase();
+  const lowerText = String(text || "").toLowerCase();
+  const lowerQuery = String(query || "").toLowerCase();
   if (lowerText === lowerQuery) return 100;
   if (lowerText.startsWith(lowerQuery)) return 80;
   if (lowerText.includes(lowerQuery)) return 60;
   return 0;
 }
 
-export function CommandPalette({
+function sameActions(previousActions = [], nextActions = []) {
+  if (previousActions === nextActions) {
+    return true;
+  }
+  if (!Array.isArray(previousActions) || !Array.isArray(nextActions) || previousActions.length !== nextActions.length) {
+    return false;
+  }
+  for (let index = 0; index < previousActions.length; index += 1) {
+    const previousAction = previousActions[index];
+    const nextAction = nextActions[index];
+    if (
+      previousAction?.id !== nextAction?.id
+      || previousAction?.label !== nextAction?.label
+      || previousAction?.shortcut !== nextAction?.shortcut
+      || previousAction?.category !== nextAction?.category
+      || previousAction?.keywords !== nextAction?.keywords
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export const CommandPalette = memo(function CommandPalette({
   open,
   onClose,
   actions,
@@ -28,15 +51,23 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const inputRef = useRef(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const indexedActions = useMemo(
+    () => (actions || []).map((action) => ({
+      ...action,
+      labelText: String(action?.label || "").toLowerCase(),
+      keywordsText: String(action?.keywords || "").toLowerCase(),
+    })),
+    [actions],
+  );
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return actions;
+    if (!query.trim()) return indexedActions;
     const q = query.trim();
-    return actions
-      .map((action) => ({ ...action, score: Math.max(matchScore(action.label, q), matchScore(action.keywords || "", q)) }))
+    return indexedActions
+      .map((action) => ({ ...action, score: Math.max(matchScore(action.labelText, q), matchScore(action.keywordsText, q)) }))
       .filter((action) => action.score > 0)
       .sort((a, b) => b.score - a.score);
-  }, [query, actions]);
+  }, [indexedActions, query]);
 
   useEffect(() => {
     if (open) {
@@ -130,4 +161,7 @@ export function CommandPalette({
       </div>
     </>
   );
-}
+}, (previousProps, nextProps) => (
+  previousProps.open === nextProps.open
+  && sameActions(previousProps.actions, nextProps.actions)
+));

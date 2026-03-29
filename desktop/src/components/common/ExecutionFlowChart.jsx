@@ -1,6 +1,6 @@
 import { memo, useId, useMemo } from "react";
 import { displayStatus } from "../../locale";
-import { effectiveStepStatus, statusTone } from "../../utils";
+import { effectiveStepStatus, failureReasonLabel, statusTone } from "../../utils";
 
 const FONT_FAMILY = '"Segoe UI", "Malgun Gothic", sans-serif';
 const BOX_WIDTH = 220;
@@ -19,6 +19,8 @@ const PALETTE = {
   warning: { fill: "#422006", stroke: "#f59e0b", text: "#fef3c7", meta: "#fcd34d" },
   danger: { fill: "#450a0a", stroke: "#ef4444", text: "#fee2e2", meta: "#fca5a5" },
 };
+const TOPOLOGY_CACHE_LIMIT = 24;
+const chartTopologyCache = new Map();
 
 function compactChartText(value, maxChars) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -119,7 +121,17 @@ function orthogonalPath(startX, startY, endX, endY) {
   return `M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}`;
 }
 
-function buildChartData(steps = [], projectStatus = "", language = "en") {
+function chartTopologySignature(steps = []) {
+  return (steps || [])
+    .map((step) => [
+      step?.step_id || "",
+      (step?.depends_on || []).join(","),
+      (step?.owned_paths || []).length,
+    ].join("|"))
+    .join("::");
+}
+
+function buildChartTopology(steps = []) {
   const levels = buildChartLevels(steps);
   const positions = new Map();
   const maxRows = Math.max(1, ...levels.map((level) => level.length));
@@ -150,24 +162,18 @@ function buildChartData(steps = [], projectStatus = "", language = "en") {
     .filter((step) => positions.has(step.step_id))
     .map((step) => {
       const { x, y } = positions.get(step.step_id);
-      const stepStatus = effectiveStepStatus(step, projectStatus);
-      const tone = statusTone(stepStatus);
-      const palette = PALETTE[tone] || PALETTE.neutral;
-      const detailSource =
-        step.display_description ||
-        step.success_criteria ||
-        ((step.depends_on || []).length ? (step.depends_on || []).join(", ") : "") ||
-        ((step.owned_paths || []).length ? `${step.owned_paths.length} owned path(s)` : "No summary");
+      const failureReason = failureReasonLabel(step, "en");
       return {
         step,
         x,
         y,
-        stepStatus,
-        tone,
-        palette,
         titleLines: wrapChartText(step.title, 24, 2),
-        detailLines: wrapChartText(detailSource, 28, 2),
-        statusLabel: displayStatus(stepStatus, language),
+        detailSource:
+          failureReason ||
+          step.display_description ||
+          step.success_criteria ||
+          ((step.depends_on || []).length ? (step.depends_on || []).join(", ") : "") ||
+          ((step.owned_paths || []).length ? `${step.owned_paths.length} owned path(s)` : "No summary"),
       };
     });
 
@@ -250,6 +256,49 @@ function buildChartData(steps = [], projectStatus = "", language = "en") {
   };
 }
 
+function getChartTopology(steps = []) {
+  const signature = chartTopologySignature(steps);
+  const cached = chartTopologyCache.get(signature);
+  if (cached) {
+    return cached;
+  }
+  const topology = buildChartTopology(steps);
+  if (chartTopologyCache.size >= TOPOLOGY_CACHE_LIMIT) {
+    const oldestKey = chartTopologyCache.keys().next().value;
+    chartTopologyCache.delete(oldestKey);
+  }
+  chartTopologyCache.set(signature, topology);
+  return topology;
+}
+
+function buildChartData(steps = [], projectStatus = "", language = "en") {
+  const topology = getChartTopology(steps);
+  return {
+    ...topology,
+    nodes: topology.nodes.map((node) => {
+      const stepStatus = effectiveStepStatus(node.step, projectStatus);
+      const tone = statusTone(stepStatus);
+      const palette = PALETTE[tone] || PALETTE.neutral;
+      const failureReason = failureReasonLabel(node.step, language);
+      return {
+        ...node,
+        stepStatus,
+        tone,
+        palette,
+        detailLines: wrapChartText(
+          String(stepStatus || "").trim().toLowerCase().includes("failed")
+            ? failureReason || node.step.notes || node.detailSource
+            : node.detailSource,
+          28,
+          2,
+        ),
+        statusLabel: displayStatus(stepStatus, language),
+        failureReason,
+      };
+    }),
+  };
+}
+
 function ExecutionFlowChartComponent({ steps = [], projectStatus = "", language = "en", selectedStepId = "", onSelectStep = null }) {
   const arrowId = useId().replace(/:/g, "-");
   const chart = useMemo(() => buildChartData(steps, projectStatus, language), [steps, projectStatus, language]);
@@ -326,7 +375,7 @@ function ExecutionFlowChartComponent({ steps = [], projectStatus = "", language 
                 onClick={() => onSelectStep?.(node.step.step_id)}
                 style={{ cursor: onSelectStep ? "pointer" : "default" }}
               >
-                <title>{`${node.step.step_id}: ${node.step.title}`}</title>
+                <title>{`${node.step.step_id}: ${node.step.title}${node.failureReason ? `\nFailure: ${node.failureReason}` : ""}`}</title>
                 <rect
                   x={node.x}
                   y={node.y}
