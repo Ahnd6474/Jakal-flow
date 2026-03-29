@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openInSystem } from "../../api";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";

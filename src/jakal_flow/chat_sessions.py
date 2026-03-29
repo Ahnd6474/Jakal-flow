@@ -14,7 +14,9 @@ from .codex_runner import CodexRunner
 from .execution_control import execution_scope_id, run_subprocess_capture
 from .models import ExecutionPlanState, ProjectContext
 from .model_providers import normalize_model_provider
+from .platform_defaults import default_codex_path
 from .planning import load_source_prompt_template
+from .runtime_config import runtime_from_payload
 from .step_models import provider_execution_preflight_error
 from .utils import append_text, compact_text, decode_process_output, ensure_dir, now_utc_iso, parse_json_text, read_text, sanitized_subprocess_env, write_text
 
@@ -694,6 +696,21 @@ def _chat_run_error_message(error_text: str, diagnostics: dict[str, Any] | None 
     return compact_text(combined, max_chars=1400) or "Conversation mode could not produce a reply."
 
 
+def _normalize_conversation_reply_text(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+
+    # Conversation mode should stay readable in the desktop pane.
+    cleaned = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", lambda match: match.group(1).strip(), cleaned)
+    cleaned = re.sub(r"^\s{0,3}#{1,6}\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\*\*(.+?)\*\*", lambda match: match.group(1).strip(), cleaned)
+    cleaned = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", lambda match: match.group(1).strip(), cleaned)
+    cleaned = re.sub(r"^\s*[-*]\s+", "- ", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 def _conversation_context(context: ProjectContext) -> ProjectContext:
     raw_chat_provider = str(getattr(context.runtime, "chat_model_provider", "") or "").strip().lower()
     raw_chat_model = str(getattr(context.runtime, "chat_model", "") or "").strip().lower()
@@ -828,6 +845,7 @@ def execute_conversation_turn(
         prompt=prompt,
         session_id=session.session_id,
     )
+    assistant_text = _normalize_conversation_reply_text(assistant_text)
     error = ""
     role = "assistant"
     if returncode != 0 or not assistant_text:
