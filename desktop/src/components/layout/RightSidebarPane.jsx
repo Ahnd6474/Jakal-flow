@@ -4,46 +4,46 @@ import { displayStatus } from "../../locale";
 import { effectiveStepStatus, reasoningEffortLabel, runtimeSummary, statusTone } from "../../utils";
 import { openInSystem } from "../../api";
 
-/* ── Icons ── */
-function SendIcon() {
+/* ── Rail icons (16×16) ── */
+function RailChatIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function ChatIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="13" height="13">
+    <svg aria-hidden="true" className="sidebar-icon__svg" viewBox="0 0 24 24" fill="none">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-function TerminalIcon() {
+function RailTerminalIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="13" height="13">
+    <svg aria-hidden="true" className="sidebar-icon__svg" viewBox="0 0 24 24" fill="none">
       <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" strokeWidth="1.6" />
       <path d="M6 9l4 3-4 3M13 15h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-function FilesIcon() {
+function RailFilesIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="13" height="13">
+    <svg aria-hidden="true" className="sidebar-icon__svg" viewBox="0 0 24 24" fill="none">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
       <polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   );
 }
 
-function InspectorIcon() {
+function RailInspectorIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="13" height="13">
+    <svg aria-hidden="true" className="sidebar-icon__svg" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
       <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -138,7 +138,7 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
   const { language, t } = useI18n();
   const [activeTab, setActiveTab] = useState("chat");
 
-  /* Chat state (local – no backend connection yet) */
+  /* Chat state */
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
   const chatBottomRef = useRef(null);
@@ -161,12 +161,10 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
   const webpagePath = String(detail?.reports?.webpage_path || detail?.files?.webpage_file || "").trim();
   const mlReportPath = String(detail?.files?.ml_experiment_report_file || "").trim();
 
-  /* Scroll chat to bottom on new messages */
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  /* Scroll output to bottom on new output */
   useEffect(() => {
     if (activeTab === "output" && outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
@@ -194,290 +192,295 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
   const hasOutput = Boolean(processOutput);
   const hasFiles = Boolean(closeoutPath || wordPath || pptPath || webpagePath || mlReportPath);
 
+  const railTabs = [
+    {
+      id: "chat",
+      icon: <RailChatIcon />,
+      title: language === "ko" ? "AI 채팅" : "AI Chat",
+      dot: false,
+    },
+    {
+      id: "output",
+      icon: <RailTerminalIcon />,
+      title: language === "ko" ? "프로세스 출력" : "Process Output",
+      dot: hasOutput,
+    },
+    {
+      id: "files",
+      icon: <RailFilesIcon />,
+      title: language === "ko" ? "보고서 및 파일" : "Reports & Files",
+      dot: hasFiles,
+    },
+    {
+      id: "inspector",
+      icon: <RailInspectorIcon />,
+      title: "Inspector",
+      dot: false,
+    },
+  ];
+
   return (
     <aside className="details-pane rsb">
-      {/* ── Tab bar ── */}
-      <div className="rsb-tabbar">
-        <div className="tool-tabs">
-          <button
-            className={`tool-tab rsb-tab${activeTab === "chat" ? " active" : ""}`}
-            onClick={() => setActiveTab("chat")}
-            type="button"
-            title={language === "ko" ? "AI 채팅" : "AI Chat"}
-          >
-            <ChatIcon />
-            <span>{language === "ko" ? "채팅" : "Chat"}</span>
-          </button>
-          <button
-            className={`tool-tab rsb-tab${activeTab === "output" ? " active" : ""}`}
-            onClick={() => setActiveTab("output")}
-            type="button"
-            title={language === "ko" ? "프로세스 출력" : "Process Output"}
-          >
-            <TerminalIcon />
-            <span>Output</span>
-            {hasOutput ? <span className="details-output-dot" /> : null}
-          </button>
-          <button
-            className={`tool-tab rsb-tab${activeTab === "files" ? " active" : ""}`}
-            onClick={() => setActiveTab("files")}
-            type="button"
-            title={language === "ko" ? "보고서 및 파일" : "Reports & Files"}
-          >
-            <FilesIcon />
-            <span>{language === "ko" ? "파일" : "Files"}</span>
-            {hasFiles ? <span className="rsb-files-dot" /> : null}
-          </button>
-          <button
-            className={`tool-tab rsb-tab${activeTab === "inspector" ? " active" : ""}`}
-            onClick={() => setActiveTab("inspector")}
-            type="button"
-            title="Inspector"
-          >
-            <InspectorIcon />
-            <span>Info</span>
-          </button>
-        </div>
-      </div>
+      {/* ── Content panel (left portion) ── */}
+      <div className="rsb-panel">
 
-      {/* ── Chat tab ── */}
-      {activeTab === "chat" ? (
-        <div className="rsb-chat">
-          <div className="rsb-chat__messages">
-            {chatMessages.length === 0 ? (
-              <div className="rsb-chat__empty">
-                <ChatIcon />
-                <p>{language === "ko" ? "AI에게 메시지를 보내 실행을 안내하세요." : "Send a message to guide the AI during execution."}</p>
-              </div>
-            ) : (
-              chatMessages.map((msg) => (
-                <div key={msg.id} className={`sidebar-chat-bubble sidebar-chat-bubble--${msg.role}`}>
-                  <span className="sidebar-chat-bubble__role">
-                    {msg.role === "user" ? (language === "ko" ? "나" : "You") : "AI"}
-                  </span>
-                  <p>{msg.text}</p>
+        {/* ── Chat tab ── */}
+        {activeTab === "chat" ? (
+          <div className="rsb-chat">
+            <div className="rsb-chat__messages">
+              {chatMessages.length === 0 ? (
+                <div className="rsb-chat__empty">
+                  <RailChatIcon />
+                  <p>{language === "ko" ? "AI에게 메시지를 보내 실행을 안내하세요." : "Send a message to guide the AI during execution."}</p>
                 </div>
-              ))
-            )}
-            <div ref={chatBottomRef} />
-          </div>
-
-          <div className="rsb-chat__input-area">
-            <textarea
-              className="sidebar-chat-input rsb-chat__textarea"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={handleChatKeyDown}
-              placeholder={language === "ko" ? "메시지 입력... (Enter로 전송)" : "Type a message… (Enter to send)"}
-              disabled={busy}
-              rows={3}
-            />
-            <button
-              className="sidebar-chat-send rsb-chat__send-btn"
-              onClick={handleSendChat}
-              type="button"
-              disabled={busy || !chatInput.trim()}
-              title={language === "ko" ? "전송" : "Send"}
-            >
-              <SendIcon />
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {/* ── Output tab ── */}
-      {activeTab === "output" ? (
-        <div className="details-output-panel rsb-output">
-          {processOutput ? (
-            <pre ref={outputRef} className="details-output-pre">{processOutput}</pre>
-          ) : (
-            <div className="details-output-empty">
-              <TerminalIcon />
-              <span>{language === "ko" ? "아직 출력이 없습니다." : "No output yet."}</span>
+              ) : (
+                chatMessages.map((msg) => (
+                  <div key={msg.id} className={`sidebar-chat-bubble sidebar-chat-bubble--${msg.role}`}>
+                    <span className="sidebar-chat-bubble__role">
+                      {msg.role === "user" ? (language === "ko" ? "나" : "You") : "AI"}
+                    </span>
+                    <p>{msg.text}</p>
+                  </div>
+                ))
+              )}
+              <div ref={chatBottomRef} />
             </div>
-          )}
-        </div>
-      ) : null}
 
-      {/* ── Files tab ── */}
-      {activeTab === "files" ? (
-        <div className="rsb-files">
-          <div className="rsb-files__section-label">
-            {language === "ko" ? "보고서 및 출력물" : "Reports & Outputs"}
+            <div className="rsb-chat__input-area">
+              <textarea
+                className="sidebar-chat-input rsb-chat__textarea"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={handleChatKeyDown}
+                placeholder={language === "ko" ? "메시지 입력... (Enter로 전송)" : "Type a message… (Enter to send)"}
+                disabled={busy}
+                rows={3}
+              />
+              <button
+                className="sidebar-chat-send rsb-chat__send-btn"
+                onClick={handleSendChat}
+                type="button"
+                disabled={busy || !chatInput.trim()}
+                title={language === "ko" ? "전송" : "Send"}
+              >
+                <SendIcon />
+              </button>
+            </div>
           </div>
+        ) : null}
 
-          <ReportFileCard
-            title={language === "ko" ? "클로즈아웃 보고서" : "Closeout Report"}
-            kind="Markdown"
-            icon={<MarkdownDocIcon />}
-            path={closeoutPath}
-            available={Boolean(detail?.reports?.closeout_report_text && closeoutPath)}
-            onOpen={handleOpenFile}
-            language={language}
-          />
-          <ReportFileCard
-            title="Word Report"
-            kind=".docx"
-            icon={<WordDocIcon />}
-            path={wordPath}
-            available={Boolean(wordPath)}
-            onOpen={handleOpenFile}
-            language={language}
-          />
-          <ReportFileCard
-            title="PowerPoint"
-            kind=".pptx"
-            icon={<PptDocIcon />}
-            path={pptPath}
-            available={Boolean(pptPath)}
-            onOpen={handleOpenFile}
-            language={language}
-          />
-          {webpagePath ? (
+        {/* ── Output tab ── */}
+        {activeTab === "output" ? (
+          <div className="details-output-panel rsb-output">
+            {processOutput ? (
+              <pre ref={outputRef} className="details-output-pre">{processOutput}</pre>
+            ) : (
+              <div className="details-output-empty">
+                <RailTerminalIcon />
+                <span>{language === "ko" ? "아직 출력이 없습니다." : "No output yet."}</span>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {/* ── Files tab ── */}
+        {activeTab === "files" ? (
+          <div className="rsb-files">
+            <div className="rsb-files__section-label">
+              {language === "ko" ? "보고서 및 출력물" : "Reports & Outputs"}
+            </div>
+
             <ReportFileCard
-              title="Webpage"
-              kind=".html"
-              icon={<WebDocIcon />}
-              path={webpagePath}
-              available={true}
-              onOpen={handleOpenFile}
-              language={language}
-            />
-          ) : null}
-          {mlReportPath ? (
-            <ReportFileCard
-              title="ML Experiment Report"
+              title={language === "ko" ? "클로즈아웃 보고서" : "Closeout Report"}
               kind="Markdown"
               icon={<MarkdownDocIcon />}
-              path={mlReportPath}
-              available={true}
+              path={closeoutPath}
+              available={Boolean(detail?.reports?.closeout_report_text && closeoutPath)}
               onOpen={handleOpenFile}
               language={language}
             />
-          ) : null}
+            <ReportFileCard
+              title="Word Report"
+              kind=".docx"
+              icon={<WordDocIcon />}
+              path={wordPath}
+              available={Boolean(wordPath)}
+              onOpen={handleOpenFile}
+              language={language}
+            />
+            <ReportFileCard
+              title="PowerPoint"
+              kind=".pptx"
+              icon={<PptDocIcon />}
+              path={pptPath}
+              available={Boolean(pptPath)}
+              onOpen={handleOpenFile}
+              language={language}
+            />
+            {webpagePath ? (
+              <ReportFileCard
+                title="Webpage"
+                kind=".html"
+                icon={<WebDocIcon />}
+                path={webpagePath}
+                available={true}
+                onOpen={handleOpenFile}
+                language={language}
+              />
+            ) : null}
+            {mlReportPath ? (
+              <ReportFileCard
+                title="ML Experiment Report"
+                kind="Markdown"
+                icon={<MarkdownDocIcon />}
+                path={mlReportPath}
+                available={true}
+                onOpen={handleOpenFile}
+                language={language}
+              />
+            ) : null}
 
-          {detail?.reports?.latest_failure?.artifact_files?.length ? (
-            <>
-              <div className="rsb-files__section-label" style={{ marginTop: "12px" }}>
-                {language === "ko" ? "실패 아티팩트" : "Failure Artifacts"}
-              </div>
-              {(detail.reports.latest_failure.artifact_files || []).slice(0, 6).map((p) => (
-                <div key={p} className="rsb-artifact-row">
-                  <span className="rsb-artifact-row__path" title={p}>{p}</span>
-                  <button
-                    className="rsb-file-card__open-btn"
-                    onClick={() => handleOpenFile(p)}
-                    type="button"
-                    title={language === "ko" ? "열기" : "Open"}
-                  >
-                    <OpenFolderIcon />
-                  </button>
+            {detail?.reports?.latest_failure?.artifact_files?.length ? (
+              <>
+                <div className="rsb-files__section-label" style={{ marginTop: "12px" }}>
+                  {language === "ko" ? "실패 아티팩트" : "Failure Artifacts"}
                 </div>
-              ))}
-            </>
-          ) : null}
-        </div>
-      ) : null}
+                {(detail.reports.latest_failure.artifact_files || []).slice(0, 6).map((p) => (
+                  <div key={p} className="rsb-artifact-row">
+                    <span className="rsb-artifact-row__path" title={p}>{p}</span>
+                    <button
+                      className="rsb-file-card__open-btn"
+                      onClick={() => handleOpenFile(p)}
+                      type="button"
+                      title={language === "ko" ? "열기" : "Open"}
+                    >
+                      <OpenFolderIcon />
+                    </button>
+                  </div>
+                ))}
+              </>
+            ) : null}
+          </div>
+        ) : null}
 
-      {/* ── Inspector tab ── */}
-      {activeTab === "inspector" ? (
-        <div className="rsb-inspector">
-          <section className="details-card">
-            <div className="details-card__header">
-              <strong>{t("common.project")}</strong>
-              <span className={`status-badge status-badge--${statusTone(detail?.project?.current_status)}`}>
-                {displayStatus(detail?.project?.current_status || "idle", language)}
-              </span>
-            </div>
-            <dl className="details-list">
-              <div>
-                <dt>{t("common.name")}</dt>
-                <dd>{detail?.project?.display_name || detail?.project?.slug || t("project.none")}</dd>
-              </div>
-              <div>
-                <dt>{t("common.branch")}</dt>
-                <dd>{detail?.project?.branch || t("common.unknown")}</dd>
-              </div>
-              <div>
-                <dt>Path</dt>
-                <dd>{detail?.project?.repo_path || t("common.unknown")}</dd>
-              </div>
-              <div>
-                <dt>Model</dt>
-                <dd>{runtimeSummary(detail?.runtime || {}, modelPresets)}</dd>
-              </div>
-              <div>
-                <dt>Revision</dt>
-                <dd>{detail?.project?.current_safe_revision || "—"}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section className="details-card">
-            <div className="details-card__header">
-              <strong>Step</strong>
-              <span className={`status-badge status-badge--${statusTone(selectedStepStatus)}`}>
-                {selectedStep ? displayStatus(selectedStepStatus, language) : "—"}
-              </span>
-            </div>
-            {selectedStep ? (
-              <div className="details-text">
-                <strong>{selectedStep.step_id}: {selectedStep.title}</strong>
-                <p style={{ margin: "4px 0", color: "var(--text-muted)" }}>{selectedStep.display_description}</p>
-                <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
-                  Effort: {reasoningEffortLabel(selectedStep.reasoning_effort || detail?.runtime?.effort || "high")}
-                </p>
-                {selectedStep.success_criteria ? (
-                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>{selectedStep.success_criteria}</p>
-                ) : null}
-                {selectedStep.deadline_at ? (
-                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
-                    Deadline: {selectedStep.deadline_at}
-                  </p>
-                ) : null}
-              </div>
-            ) : (
-              <div className="details-text" style={{ color: "var(--text-dim)", fontSize: "11px" }}>
-                {language === "ko" ? "스텝을 선택하면 여기에 표시됩니다." : "Select a step to inspect."}
-              </div>
-            )}
-          </section>
-
-          {pendingCheckpoint ? (
+        {/* ── Inspector tab ── */}
+        {activeTab === "inspector" ? (
+          <div className="rsb-inspector">
             <section className="details-card">
               <div className="details-card__header">
-                <strong>Checkpoint</strong>
-                <span className={`status-badge status-badge--${statusTone(pendingCheckpoint.status)}`}>
-                  {displayStatus(pendingCheckpoint.status || "pending", language)}
+                <strong>{t("common.project")}</strong>
+                <span className={`status-badge status-badge--${statusTone(detail?.project?.current_status)}`}>
+                  {displayStatus(detail?.project?.current_status || "idle", language)}
                 </span>
               </div>
-              <div className="details-text">
-                <strong>{pendingCheckpoint.checkpoint_id}</strong>
-                {pendingCheckpoint.title ? <p style={{ margin: "4px 0" }}>{pendingCheckpoint.title}</p> : null}
-                <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
-                  Block {pendingCheckpoint.target_block}
-                </p>
-                {pendingCheckpoint.deadline_at ? (
-                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
-                    Deadline: {pendingCheckpoint.deadline_at}
-                  </p>
-                ) : null}
-              </div>
+              <dl className="details-list">
+                <div>
+                  <dt>{t("common.name")}</dt>
+                  <dd>{detail?.project?.display_name || detail?.project?.slug || t("project.none")}</dd>
+                </div>
+                <div>
+                  <dt>{t("common.branch")}</dt>
+                  <dd>{detail?.project?.branch || t("common.unknown")}</dd>
+                </div>
+                <div>
+                  <dt>Path</dt>
+                  <dd>{detail?.project?.repo_path || t("common.unknown")}</dd>
+                </div>
+                <div>
+                  <dt>Model</dt>
+                  <dd>{runtimeSummary(detail?.runtime || {}, modelPresets)}</dd>
+                </div>
+                <div>
+                  <dt>Revision</dt>
+                  <dd>{detail?.project?.current_safe_revision || "—"}</dd>
+                </div>
+              </dl>
             </section>
-          ) : null}
 
-          {detail?.reports?.closeout_report_text ? (
             <section className="details-card">
               <div className="details-card__header">
-                <strong>Report</strong>
+                <strong>Step</strong>
+                <span className={`status-badge status-badge--${statusTone(selectedStepStatus)}`}>
+                  {selectedStep ? displayStatus(selectedStepStatus, language) : "—"}
+                </span>
               </div>
-              <div className="details-text">
-                <pre style={{ whiteSpace: "pre-wrap", fontSize: "11px" }}>{detail.reports.closeout_report_text}</pre>
-              </div>
+              {selectedStep ? (
+                <div className="details-text">
+                  <strong>{selectedStep.step_id}: {selectedStep.title}</strong>
+                  <p style={{ margin: "4px 0", color: "var(--text-muted)" }}>{selectedStep.display_description}</p>
+                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                    Effort: {reasoningEffortLabel(selectedStep.reasoning_effort || detail?.runtime?.effort || "high")}
+                  </p>
+                  {selectedStep.success_criteria ? (
+                    <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>{selectedStep.success_criteria}</p>
+                  ) : null}
+                  {selectedStep.deadline_at ? (
+                    <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                      Deadline: {selectedStep.deadline_at}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="details-text" style={{ color: "var(--text-dim)", fontSize: "11px" }}>
+                  {language === "ko" ? "스텝을 선택하면 여기에 표시됩니다." : "Select a step to inspect."}
+                </div>
+              )}
             </section>
-          ) : null}
-        </div>
-      ) : null}
+
+            {pendingCheckpoint ? (
+              <section className="details-card">
+                <div className="details-card__header">
+                  <strong>Checkpoint</strong>
+                  <span className={`status-badge status-badge--${statusTone(pendingCheckpoint.status)}`}>
+                    {displayStatus(pendingCheckpoint.status || "pending", language)}
+                  </span>
+                </div>
+                <div className="details-text">
+                  <strong>{pendingCheckpoint.checkpoint_id}</strong>
+                  {pendingCheckpoint.title ? <p style={{ margin: "4px 0" }}>{pendingCheckpoint.title}</p> : null}
+                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                    Block {pendingCheckpoint.target_block}
+                  </p>
+                  {pendingCheckpoint.deadline_at ? (
+                    <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                      Deadline: {pendingCheckpoint.deadline_at}
+                    </p>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+
+            {detail?.reports?.closeout_report_text ? (
+              <section className="details-card">
+                <div className="details-card__header">
+                  <strong>Report</strong>
+                </div>
+                <div className="details-text">
+                  <pre style={{ whiteSpace: "pre-wrap", fontSize: "11px" }}>{detail.reports.closeout_report_text}</pre>
+                </div>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+
+      </div>
+
+      {/* ── Icon rail (right edge, mirrors left sidebar rail) ── */}
+      <div className="rsb-rail">
+        {railTabs.map(({ id, icon, title, dot }) => (
+          <button
+            key={id}
+            className={`sidebar-icon${activeTab === id ? " active" : ""}`}
+            onClick={() => setActiveTab(id)}
+            title={title}
+            type="button"
+            aria-pressed={activeTab === id}
+          >
+            {icon}
+            {dot ? <span className="rsb-rail__dot" /> : null}
+          </button>
+        ))}
+      </div>
     </aside>
   );
 }

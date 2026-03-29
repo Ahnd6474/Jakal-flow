@@ -132,16 +132,18 @@ function ProjectSelector({ projects, selectedProjectId, onSelectProject = () => 
     setOpen(false);
   }
 
+  const selectedTone = selectedProject ? statusTone(selectedProject.status) : "neutral";
+
   return (
     <div className="project-selector" ref={containerRef}>
       <button
-        className="project-selector__btn"
+        className="project-selector__btn project-selector__btn--icon"
         onClick={() => setOpen((v) => !v)}
         type="button"
-        title={selectProjectLabel}
+        title={selectedProject?.display_name || selectProjectPlaceholder}
       >
-        <span>{selectedProject?.display_name || selectProjectPlaceholder}</span>
-        <ChevronDown />
+        <FolderIcon />
+        <span className={`chip-dot chip-dot--${selectedTone}`} />
       </button>
 
       {open ? (

@@ -74,9 +74,9 @@ export default function App() {
         return;
       }
 
-      /* Alt+1..4 → sidebar tool windows */
-      if (event.altKey && !event.ctrlKey && !event.metaKey && event.key >= "1" && event.key <= "4") {
-        const sidebarTabs = ["projects", "workspace", "plans", "reservations"];
+      /* Alt+1..3 → sidebar tool windows */
+      if (event.altKey && !event.ctrlKey && !event.metaKey && event.key >= "1" && event.key <= "3") {
+        const sidebarTabs = ["workspace", "plans", "reservations"];
         const target = sidebarTabs[Number.parseInt(event.key, 10) - 1];
         setSidebarTab((current) => nextSidebarTab(current, target));
         event.preventDefault();
