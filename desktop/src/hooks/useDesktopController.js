@@ -512,7 +512,6 @@ export function useDesktopController() {
 
     async function loadSelectedProject() {
       try {
-        setLoadingProjectId(selectedProjectId);
         const detail = await fetchProjectDetail(bridgeRequest, selectedProjectId, workspaceRoot, {
           refreshCodexStatus: false,
           detailLevel: wantsExpandedDetail ? "full" : "core",
@@ -522,9 +521,6 @@ export function useDesktopController() {
         }
         applyProjectDetail(detail);
       } catch (error) {
-        if (!cancelled) {
-          setLoadingProjectId("");
-        }
         if (!cancelled && !pendingAction) {
           setMessage(messagePayload("error", String(error)));
         }
