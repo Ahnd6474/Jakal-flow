@@ -17,6 +17,11 @@ from .execution_control import ImmediateStopRequested
 from .git_ops import GitOps
 from .memory import MemoryStore
 from .model_providers import normalize_billing_mode, provider_preset, provider_supports_auto_model
+from .provider_fallbacks import (
+    build_provider_fallback_runtimes,
+    is_provider_fallbackable_error,
+    is_quota_exhaustion_error,
+)
 from .model_selection import normalize_reasoning_effort
 from .models import CandidateTask, Checkpoint, CodexRunResult, ExecutionPlanState, ExecutionStep, LineageState, LoopState, MLExperimentRecord, MLModeState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions, TestRunResult
 from .optimization import scan_optimization_candidates
@@ -249,8 +254,9 @@ class Orchestrator:
                     "agent_label": "Planner Agent A",
                 },
             )
-            decomposition_result = runner.run_pass(
+            decomposition_result = self._run_pass_with_provider_fallback(
                 context=context,
+                runner=runner,
                 prompt=decomposition_prompt,
                 pass_type="plan-agent-a-decomposition",
                 block_index=max(0, context.loop_state.block_index),
@@ -296,8 +302,9 @@ class Orchestrator:
                 "agent_label": "Planner Agent B",
             },
         )
-        result = runner.run_pass(
+        result = self._run_pass_with_provider_fallback(
             context=context,
+            runner=runner,
             prompt=prompt,
             pass_type="plan-agent-b-packing",
             block_index=max(0, context.loop_state.block_index),
@@ -3059,83 +3066,47 @@ class Orchestrator:
         nested = str(payload.get("message", "")).strip()
         return nested or message
 
-    def _is_auto_provider_fallback_error(self, detail: str) -> bool:
-        lowered = str(detail or "").strip().lower()
-        if not lowered:
-            return False
-        markers = (
-            "please set an auth method",
-            "authentication failed",
-            "invalid api key",
-            "unauthorized",
-            "not authenticated",
-            "login required",
-            "exhausted your capacity",
-            "quota will reset",
-            "rate limit",
-            "resource exhausted",
-            "too many requests",
-        )
-        return any(marker in lowered for marker in markers)
-
-    def _openai_fallback_model(self, runtime: RuntimeOptions) -> str:
-        candidate = normalize_step_model(str(getattr(runtime, "ensemble_openai_model", "") or ""))
-        if candidate:
-            return candidate
-        current_provider = normalize_step_model_provider(str(getattr(runtime, "model_provider", "") or ""))
-        if current_provider in {"openai", "ensemble"}:
-            candidate = normalize_step_model(str(getattr(runtime, "model", "") or getattr(runtime, "model_slug_input", "")))
-            if candidate:
-                return candidate
-        return "auto"
-
-    def _auto_provider_fallback_runtime(
+    def _runtime_error_run_result(
         self,
-        runtime: RuntimeOptions,
-        execution_step: ExecutionStep | None,
-        failure_detail: str,
-        provider_selection_source: str = "",
-    ) -> RuntimeOptions | None:
-        selection_source = str(provider_selection_source or "").strip().lower()
-        if selection_source not in {"auto", "manual"}:
-            selection_source = self._execution_step_model_selection_source(execution_step)
-        if selection_source != "auto":
-            return None
-        current_provider = normalize_step_model_provider(str(getattr(runtime, "model_provider", "") or ""))
-        if current_provider != "gemini":
-            return None
-        if not self._is_auto_provider_fallback_error(failure_detail):
-            return None
-
-        fallback_provider = "openai"
-        fallback_model = self._openai_fallback_model(runtime)
-        if provider_supports_auto_model(fallback_provider) and fallback_model == "auto":
-            fallback_model_preset = str(getattr(runtime, "model_preset", "") or "").strip().lower() or (
-                "auto"
-                if normalize_reasoning_effort(str(getattr(runtime, "effort", "") or ""), fallback="medium") == "medium"
-                else normalize_reasoning_effort(str(getattr(runtime, "effort", "") or ""), fallback="medium")
-            )
-        else:
-            fallback_model_preset = ""
-        preset = provider_preset(fallback_provider)
-        return RuntimeOptions.from_dict(
-            {
-                **runtime.to_dict(),
-                "model_provider": fallback_provider,
-                "provider_base_url": preset.default_base_url,
-                "provider_api_key_env": preset.default_api_key_env,
-                "billing_mode": normalize_billing_mode("", fallback_provider, fallback=preset.default_billing_mode),
-                "codex_path": default_codex_path(fallback_provider),
-                "model": fallback_model,
-                "model_slug_input": fallback_model,
-                "model_preset": fallback_model_preset,
-                "model_selection_mode": "slug",
-                "effort_selection_mode": (
-                    "auto"
-                    if provider_supports_auto_model(fallback_provider) and fallback_model == "auto"
-                    else "explicit"
-                ),
-            }
+        *,
+        context: ProjectContext,
+        pass_type: str,
+        block_index: int,
+        search_enabled: bool,
+        error_detail: str,
+    ) -> CodexRunResult:
+        pass_slug = str(pass_type or "codex-pass").replace(" ", "_").replace("/", "_")
+        block_dir = ensure_dir(context.paths.logs_dir / f"block_{block_index:04d}")
+        diagnostics = {
+            "attempt_count": 1,
+            "unexpected_token_detected": False,
+            "recovered_after_retry": False,
+            "attempts": [
+                {
+                    "attempt": 1,
+                    "returncode": 1,
+                    "unexpected_token_detected": False,
+                    "stdout_excerpt": "",
+                    "stderr_excerpt": compact_text(str(error_detail or "").strip(), 500),
+                    "last_message_excerpt": "",
+                    "duration_seconds": 0.0,
+                }
+            ],
+            "synthetic_runtime_error": True,
+        }
+        return CodexRunResult(
+            pass_type=pass_type,
+            prompt_file=block_dir / f"{pass_slug}.prompt.md",
+            output_file=block_dir / f"{pass_slug}.last_message.txt",
+            event_file=block_dir / f"{pass_slug}.events.jsonl",
+            returncode=1,
+            search_enabled=search_enabled,
+            changed_files=[],
+            usage={},
+            last_message=None,
+            attempt_count=1,
+            duration_seconds=0.0,
+            diagnostics=diagnostics,
         )
 
     def _provider_fallback_pass_name(self, pass_name: str, provider: str) -> str:
@@ -3143,7 +3114,35 @@ class Orchestrator:
         provider_slug = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in str(provider or "").strip().lower()).strip("-") or "fallback"
         return f"{normalized_pass_name}-fallback-{provider_slug}"
 
-    def _retry_run_with_auto_provider_fallback(
+    def _merge_provider_fallback_result(
+        self,
+        *,
+        base_result: CodexRunResult,
+        primary_result: CodexRunResult,
+        total_attempt_count: int,
+        from_provider: str,
+        to_provider: str,
+        trigger_detail: str,
+        chain: list[dict[str, object]],
+    ) -> CodexRunResult:
+        merged_diagnostics = deepcopy(base_result.diagnostics) if isinstance(base_result.diagnostics, dict) else {}
+        merged_diagnostics["provider_fallback"] = {
+            "used": True,
+            "from_provider": from_provider,
+            "to_provider": to_provider,
+            "trigger_detail": trigger_detail,
+            "previous_returncode": primary_result.returncode,
+            "previous_attempt_count": primary_result.attempt_count,
+            "previous_diagnostics": deepcopy(primary_result.diagnostics)
+            if isinstance(primary_result.diagnostics, dict)
+            else primary_result.diagnostics,
+            "chain": chain,
+        }
+        base_result.attempt_count = total_attempt_count
+        base_result.diagnostics = merged_diagnostics
+        return base_result
+
+    def _retry_run_with_provider_fallback(
         self,
         *,
         context: ProjectContext,
@@ -3155,48 +3154,178 @@ class Orchestrator:
         run_result: CodexRunResult,
         execution_step: ExecutionStep | None,
         provider_selection_source: str = "",
+        reasoning_effort: str | None = None,
     ) -> CodexRunResult:
         failure_detail = self._run_result_failure_detail(run_result)
-        fallback_runtime = self._auto_provider_fallback_runtime(
-            context.runtime,
-            execution_step,
-            failure_detail,
-            provider_selection_source=provider_selection_source,
-        )
-        if fallback_runtime is None:
+        if not is_quota_exhaustion_error(failure_detail):
             return run_result
 
         primary_runtime = context.runtime
         from_provider = normalize_step_model_provider(str(getattr(primary_runtime, "model_provider", "") or "")) or str(getattr(primary_runtime, "model_provider", "") or "").strip() or "unknown"
-        to_provider = normalize_step_model_provider(str(getattr(fallback_runtime, "model_provider", "") or "")) or str(getattr(fallback_runtime, "model_provider", "") or "").strip() or "unknown"
-        self.git.hard_reset(context.paths.repo_dir, safe_revision)
-        context.runtime = fallback_runtime
-        fallback_runner = CodexRunner(context.runtime.codex_path)
+        fallback_runtimes = build_provider_fallback_runtimes(primary_runtime, current_provider=from_provider)
+        if not fallback_runtimes:
+            return run_result
+
+        total_attempt_count = run_result.attempt_count
+        fallback_chain: list[dict[str, object]] = []
+        last_result = run_result
+
+        for fallback_runtime in fallback_runtimes:
+            to_provider = normalize_step_model_provider(str(getattr(fallback_runtime, "model_provider", "") or "")) or str(getattr(fallback_runtime, "model_provider", "") or "").strip() or "unknown"
+            if safe_revision:
+                self.git.hard_reset(context.paths.repo_dir, safe_revision)
+            context.runtime = fallback_runtime
+            fallback_runner = CodexRunner(context.runtime.codex_path)
+            try:
+                candidate_result = fallback_runner.run_pass(
+                    context=context,
+                    prompt=prompt,
+                    pass_type=self._provider_fallback_pass_name(pass_name, to_provider),
+                    block_index=block_index,
+                    search_enabled=search_enabled,
+                    reasoning_effort=reasoning_effort,
+                )
+            except ImmediateStopRequested:
+                if safe_revision:
+                    self.git.hard_reset(context.paths.repo_dir, safe_revision)
+                raise
+            except RuntimeError as exc:
+                error_detail = str(exc or "").strip()
+                candidate_result = self._runtime_error_run_result(
+                    context=context,
+                    pass_type=self._provider_fallback_pass_name(pass_name, to_provider),
+                    block_index=block_index,
+                    search_enabled=search_enabled,
+                    error_detail=error_detail,
+                )
+                total_attempt_count += candidate_result.attempt_count
+                fallback_chain.append(
+                    {
+                        "provider": to_provider,
+                        "model": str(getattr(fallback_runtime, "model", "") or "").strip(),
+                        "local_model_provider": str(getattr(fallback_runtime, "local_model_provider", "") or "").strip(),
+                        "returncode": candidate_result.returncode,
+                        "attempt_count": candidate_result.attempt_count,
+                        "trigger_detail": error_detail,
+                    }
+                )
+                last_result = candidate_result
+                if is_provider_fallbackable_error(error_detail):
+                    continue
+                context.runtime = primary_runtime
+                return self._merge_provider_fallback_result(
+                    base_result=candidate_result,
+                    primary_result=run_result,
+                    total_attempt_count=total_attempt_count,
+                    from_provider=from_provider,
+                    to_provider=to_provider,
+                    trigger_detail=failure_detail,
+                    chain=fallback_chain,
+                )
+
+            total_attempt_count += candidate_result.attempt_count
+            candidate_detail = self._run_result_failure_detail(candidate_result)
+            fallback_chain.append(
+                {
+                    "provider": to_provider,
+                    "model": str(getattr(fallback_runtime, "model", "") or "").strip(),
+                    "local_model_provider": str(getattr(fallback_runtime, "local_model_provider", "") or "").strip(),
+                    "returncode": candidate_result.returncode,
+                    "attempt_count": candidate_result.attempt_count,
+                    "trigger_detail": candidate_detail,
+                }
+            )
+            last_result = candidate_result
+            if candidate_result.returncode == 0:
+                return self._merge_provider_fallback_result(
+                    base_result=candidate_result,
+                    primary_result=run_result,
+                    total_attempt_count=total_attempt_count,
+                    from_provider=from_provider,
+                    to_provider=to_provider,
+                    trigger_detail=failure_detail,
+                    chain=fallback_chain,
+                )
+            if not is_provider_fallbackable_error(candidate_detail):
+                context.runtime = primary_runtime
+                return self._merge_provider_fallback_result(
+                    base_result=candidate_result,
+                    primary_result=run_result,
+                    total_attempt_count=total_attempt_count,
+                    from_provider=from_provider,
+                    to_provider=to_provider,
+                    trigger_detail=failure_detail,
+                    chain=fallback_chain,
+                )
+
+        context.runtime = primary_runtime
+        return self._merge_provider_fallback_result(
+            base_result=last_result,
+            primary_result=run_result,
+            total_attempt_count=total_attempt_count,
+            from_provider=from_provider,
+            to_provider=str(fallback_chain[-1]["provider"]) if fallback_chain else from_provider,
+            trigger_detail=failure_detail,
+            chain=fallback_chain,
+        )
+
+    def _run_pass_with_provider_fallback(
+        self,
+        *,
+        context: ProjectContext,
+        runner: CodexRunner,
+        prompt: str,
+        pass_type: str,
+        block_index: int,
+        search_enabled: bool,
+        safe_revision: str = "",
+        execution_step: ExecutionStep | None = None,
+        provider_selection_source: str = "",
+        reasoning_effort: str | None = None,
+    ) -> CodexRunResult:
+        active_runner = runner
+        runner_codex_path = getattr(active_runner, "codex_path", None)
+        if isinstance(runner_codex_path, str) and runner_codex_path.strip() != str(getattr(context.runtime, "codex_path", "") or "").strip():
+            active_runner = CodexRunner(context.runtime.codex_path)
         try:
-            fallback_result = fallback_runner.run_pass(
+            run_result = active_runner.run_pass(
                 context=context,
                 prompt=prompt,
-                pass_type=self._provider_fallback_pass_name(pass_name, to_provider),
+                pass_type=pass_type,
                 block_index=block_index,
                 search_enabled=search_enabled,
+                reasoning_effort=reasoning_effort,
             )
         except ImmediateStopRequested:
-            self.git.hard_reset(context.paths.repo_dir, safe_revision)
+            if safe_revision:
+                self.git.hard_reset(context.paths.repo_dir, safe_revision)
             raise
+        except RuntimeError as exc:
+            error_detail = str(exc or "").strip()
+            if not is_quota_exhaustion_error(error_detail):
+                raise
+            run_result = self._runtime_error_run_result(
+                context=context,
+                pass_type=pass_type,
+                block_index=block_index,
+                search_enabled=search_enabled,
+                error_detail=error_detail,
+            )
 
-        fallback_result.attempt_count += run_result.attempt_count
-        fallback_diagnostics = deepcopy(fallback_result.diagnostics) if isinstance(fallback_result.diagnostics, dict) else {}
-        fallback_diagnostics["provider_fallback"] = {
-            "used": True,
-            "from_provider": from_provider,
-            "to_provider": to_provider,
-            "trigger_detail": failure_detail,
-            "previous_returncode": run_result.returncode,
-            "previous_attempt_count": run_result.attempt_count,
-            "previous_diagnostics": deepcopy(run_result.diagnostics) if isinstance(run_result.diagnostics, dict) else run_result.diagnostics,
-        }
-        fallback_result.diagnostics = fallback_diagnostics
-        return fallback_result
+        if run_result.returncode == 0:
+            return run_result
+        return self._retry_run_with_provider_fallback(
+            context=context,
+            prompt=prompt,
+            pass_name=pass_type,
+            block_index=block_index,
+            search_enabled=search_enabled,
+            safe_revision=safe_revision,
+            run_result=run_result,
+            execution_step=execution_step,
+            provider_selection_source=provider_selection_source,
+            reasoning_effort=reasoning_effort,
+        )
 
     def _parallel_worker_plan(self, runtime: RuntimeOptions):
         return build_parallel_resource_plan(
@@ -3740,29 +3869,17 @@ class Orchestrator:
         task_name: str,
         safe_revision: str,
     ) -> dict[str, object]:
-        try:
-            run_result = runner.run_pass(
-                context=context,
-                prompt=prompt,
-                pass_type=pass_type,
-                block_index=block_index,
-                search_enabled=False,
-            )
-        except ImmediateStopRequested:
-            self.git.hard_reset(context.paths.repo_dir, safe_revision)
-            raise
-        if run_result.returncode != 0:
-            run_result = self._retry_run_with_auto_provider_fallback(
-                context=context,
-                prompt=prompt,
-                pass_name=pass_type,
-                block_index=block_index,
-                search_enabled=False,
-                safe_revision=safe_revision,
-                run_result=run_result,
-                execution_step=None,
-                provider_selection_source="auto",
-            )
+        run_result = self._run_pass_with_provider_fallback(
+            context=context,
+            runner=runner,
+            prompt=prompt,
+            pass_type=pass_type,
+            block_index=block_index,
+            search_enabled=False,
+            safe_revision=safe_revision,
+            execution_step=None,
+            provider_selection_source="auto",
+        )
         run_result.changed_files = self.git.changed_files(context.paths.repo_dir)
 
         commit_hash: str | None = None
@@ -5093,12 +5210,14 @@ class Orchestrator:
             template_text=debugger_prompt_template,
         )
         try:
-            run_result = runner.run_pass(
+            run_result = self._run_pass_with_provider_fallback(
                 context=context,
+                runner=runner,
                 prompt=prompt,
                 pass_type=debug_pass_name,
                 block_index=block_index,
                 search_enabled=False,
+                execution_step=execution_step,
             )
             run_result.changed_files = self.git.changed_files(context.paths.repo_dir)
             if run_result.returncode != 0:
@@ -5180,12 +5299,14 @@ class Orchestrator:
             template_text=merger_prompt_template,
         )
         try:
-            run_result = runner.run_pass(
+            run_result = self._run_pass_with_provider_fallback(
                 context=context,
+                runner=runner,
                 prompt=prompt,
                 pass_type=merge_pass_name,
                 block_index=block_index,
                 search_enabled=False,
+                execution_step=execution_step,
             )
             run_result.changed_files = self.git.changed_files(context.paths.repo_dir)
             if run_result.returncode != 0:
@@ -5746,28 +5867,16 @@ class Orchestrator:
             execution_step=execution_step,
             template_text=execution_prompt_template,
         )
-        try:
-            run_result = runner.run_pass(
-                context=context,
-                prompt=prompt,
-                pass_type=pass_name,
-                block_index=block_index,
-                search_enabled=search_enabled,
-            )
-        except ImmediateStopRequested:
-            self.git.hard_reset(context.paths.repo_dir, safe_revision)
-            raise
-        if run_result.returncode != 0:
-            run_result = self._retry_run_with_auto_provider_fallback(
-                context=context,
-                prompt=prompt,
-                pass_name=pass_name,
-                block_index=block_index,
-                search_enabled=search_enabled,
-                safe_revision=safe_revision,
-                run_result=run_result,
-                execution_step=execution_step,
-            )
+        run_result = self._run_pass_with_provider_fallback(
+            context=context,
+            runner=runner,
+            prompt=prompt,
+            pass_type=pass_name,
+            block_index=block_index,
+            search_enabled=search_enabled,
+            safe_revision=safe_revision,
+            execution_step=execution_step,
+        )
         run_result.changed_files = self.git.changed_files(context.paths.repo_dir)
         if run_result.returncode != 0:
             self.git.hard_reset(context.paths.repo_dir, safe_revision)
@@ -6121,8 +6230,9 @@ class Orchestrator:
     ) -> str:
         runner = CodexRunner(runtime.codex_path)
         prompt = bootstrap_plan_prompt(context, repo_inputs, user_prompt)
-        result = runner.run_pass(
+        result = self._run_pass_with_provider_fallback(
             context=context,
+            runner=runner,
             prompt=prompt,
             pass_type="init-project-plan",
             block_index=0,
@@ -6195,8 +6305,9 @@ class Orchestrator:
             memory_context=memory_context,
             max_items=max_items,
         )
-        result = runner.run_pass(
+        result = self._run_pass_with_provider_fallback(
             context=context,
+            runner=runner,
             prompt=prompt,
             pass_type="plan-work-breakdown",
             block_index=max(0, context.loop_state.block_index),

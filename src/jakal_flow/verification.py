@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import platform
-import subprocess
 import sys
 from pathlib import Path
 from time import monotonic
 
 from .execution_control import execution_scope_id, run_subprocess_capture
 from .models import ProjectContext, TestRunResult
+from .errors import SubprocessTimeoutError
+from .subprocess_utils import run_subprocess
 from .utils import compact_text, decode_process_output, ensure_dir, now_utc_iso, read_json, read_text, sanitized_subprocess_env, write_json, write_text
 
 RELEVANT_ENV_FILES = (
@@ -27,6 +28,7 @@ RELEVANT_ENV_FILES = (
     "Gemfile.lock",
     "composer.lock",
 )
+GIT_FINGERPRINT_TIMEOUT_SECONDS = 20.0
 
 
 class VerificationRunner:
@@ -180,22 +182,30 @@ class VerificationRunner:
         return digest.hexdigest()
 
     def _compute_state_fingerprint(self, repo_dir: Path) -> str:
-        head_result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo_dir,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            head_result = run_subprocess(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_dir,
+                capture_output=True,
+                check=False,
+                timeout_seconds=GIT_FINGERPRINT_TIMEOUT_SECONDS,
+            )
+        except (OSError, SubprocessTimeoutError):
+            return self._fallback_tree_fingerprint(repo_dir)
         head_revision = decode_process_output(head_result.stdout).strip() if head_result.returncode == 0 else ""
         if not head_revision:
             return self._fallback_tree_fingerprint(repo_dir)
 
-        status_result = subprocess.run(
-            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-            cwd=repo_dir,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            status_result = run_subprocess(
+                ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+                cwd=repo_dir,
+                capture_output=True,
+                check=False,
+                timeout_seconds=GIT_FINGERPRINT_TIMEOUT_SECONDS,
+            )
+        except (OSError, SubprocessTimeoutError):
+            return self._fallback_tree_fingerprint(repo_dir)
         if status_result.returncode != 0:
             return self._fallback_tree_fingerprint(repo_dir)
 

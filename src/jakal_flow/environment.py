@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
-from .utils import decode_process_output
+from .subprocess_utils import run_subprocess
+from .utils import decode_process_output, write_text
+
+
+VENV_CREATION_TIMEOUT_SECONDS = 300.0
 
 
 DEFAULT_GITIGNORE_ENTRIES = [
@@ -26,7 +29,13 @@ def ensure_virtualenv(project_dir: Path, python_executable: str | None = None) -
     if venv_dir.exists():
         return venv_dir
     command = [python_executable or sys.executable, "-m", "venv", str(venv_dir)]
-    completed = subprocess.run(command, cwd=project_dir, capture_output=True, check=False)
+    completed = run_subprocess(
+        command,
+        cwd=project_dir,
+        capture_output=True,
+        check=False,
+        timeout_seconds=VENV_CREATION_TIMEOUT_SECONDS,
+    )
     if completed.returncode != 0:
         stderr = decode_process_output(completed.stderr).strip()
         raise RuntimeError(f"Failed to create .venv in {project_dir}: {stderr or completed.returncode}")
@@ -51,5 +60,5 @@ def ensure_gitignore(project_dir: Path, entries: list[str] | None = None) -> boo
     elif new_lines[-1].strip():
         new_lines.append("")
     new_lines.extend(additions)
-    gitignore_path.write_text("\n".join(new_lines).rstrip() + "\n", encoding="utf-8")
+    write_text(gitignore_path, "\n".join(new_lines).rstrip() + "\n")
     return True

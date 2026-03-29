@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jakal-flow"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Production-oriented multi-repository Codex CLI orchestrator"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,6 +19,9 @@ jakal-flow-ui-bridge = "jakal_flow.ui_bridge:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[tool.setuptools.dynamic]
+version = {attr = "jakal_flow._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

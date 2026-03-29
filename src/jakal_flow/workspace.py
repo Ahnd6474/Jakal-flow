@@ -8,6 +8,7 @@ from uuid import uuid4
 from .bridge_events import emit_bridge_event
 from .models import LoopCounters, LoopState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions
 from .parallel_resources import normalize_parallel_worker_mode
+from .runtime_config import runtime_from_payload
 from .utils import ensure_dir, now_utc_iso, read_json, remove_tree, stable_repo_identity, write_json
 
 LOCAL_PROJECT_LOG_DIRNAME = "jakal-flow-logs"
@@ -461,12 +462,7 @@ class WorkspaceManager:
             self._migrate_local_project_logs(paths.project_root, metadata.repo_path)
         else:
             metadata.repo_path = paths.repo_dir
-        if "parallel_worker_mode" not in runtime_data and "parallel_workers" in runtime_data:
-            runtime_data["parallel_worker_mode"] = "manual"
-        runtime_data["parallel_worker_mode"] = normalize_parallel_worker_mode(runtime_data.get("parallel_worker_mode", "auto"))
-        if "planning_effort" not in runtime_data:
-            runtime_data["planning_effort"] = runtime_data.get("effort", "")
-        runtime = RuntimeOptions.from_dict(runtime_data)
+        runtime = runtime_from_payload(runtime_data)
         counters_data = loop_state_data.get("counters", {})
         loop_state = LoopState(
             repo_id=loop_state_data["repo_id"],

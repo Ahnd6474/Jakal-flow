@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import stat
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -40,9 +41,32 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
-def write_text(path: Path, content: str) -> None:
+def _atomic_write_bytes(path: Path, content: bytes) -> None:
     ensure_dir(path.parent)
-    path.write_text(content, encoding="utf-8")
+    temp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            delete=False,
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temp_path = handle.name
+        os.replace(temp_path, path)
+    finally:
+        if temp_path:
+            try:
+                Path(temp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def write_text(path: Path, content: str) -> None:
+    _atomic_write_bytes(path, content.encode("utf-8"))
 
 
 def append_text(path: Path, content: str) -> None:
@@ -58,8 +82,7 @@ def read_text(path: Path, default: str = "") -> str:
 
 
 def write_json(path: Path, data: Any) -> None:
-    ensure_dir(path.parent)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    _atomic_write_bytes(path, json.dumps(data, indent=2, sort_keys=True).encode("utf-8"))
 
 
 def read_json(path: Path, default: Any = None) -> Any:

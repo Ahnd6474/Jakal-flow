@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 from .models import CommandResult
+from .subprocess_utils import run_subprocess
 from .utils import decode_process_output, remove_tree
 
 
@@ -14,6 +14,7 @@ class GitCommandError(RuntimeError):
 
 UNTRACKED_OVERWRITE_MARKER = "The following untracked working tree files would be overwritten by merge:"
 MISSING_REGISTERED_WORKTREE_MARKER = "is a missing but already registered worktree"
+GIT_COMMAND_TIMEOUT_SECONDS = 600.0
 
 
 class GitOps:
@@ -52,12 +53,13 @@ class GitOps:
         if env:
             process_env = os.environ.copy()
             process_env.update(env)
-        completed = subprocess.run(
+        completed = run_subprocess(
             command,
             cwd=cwd,
             capture_output=True,
             check=False,
             env=process_env,
+            timeout_seconds=GIT_COMMAND_TIMEOUT_SECONDS,
         )
         stdout = decode_process_output(completed.stdout)
         stderr = decode_process_output(completed.stderr)
