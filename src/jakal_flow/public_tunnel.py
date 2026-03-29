@@ -11,7 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .process_supervisor import hidden_window_creationflags, hidden_window_startupinfo, terminate_process
 from .errors import SubprocessTimeoutError
-from .subprocess_utils import run_subprocess, terminate_process_handle
+from .subprocess_utils import run_subprocess, terminate_process_handle, windows_process_is_running
 from .utils import append_jsonl, decode_process_output, now_utc_iso, read_json, write_json
 
 
@@ -68,9 +68,19 @@ def process_is_running(pid: int) -> bool:
                 timeout_seconds=PROCESS_QUERY_TIMEOUT_SECS,
             )
         except (OSError, SubprocessTimeoutError):
-            return False
-        stdout = decode_process_output(completed.stdout)
-        return f"{pid}" in stdout
+            completed = None
+        else:
+            stdout = decode_process_output(completed.stdout)
+            if f"{pid}" in stdout:
+                return True
+            stderr = decode_process_output(completed.stderr)
+            tasklist_message = f"{stdout}\n{stderr}".lower()
+            if completed.returncode == 0 and "access denied" not in tasklist_message:
+                return False
+        fallback = windows_process_is_running(pid)
+        if fallback is not None:
+            return fallback
+        return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

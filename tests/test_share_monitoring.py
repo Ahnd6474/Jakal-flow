@@ -257,6 +257,19 @@ class ShareMonitoringTests(unittest.TestCase):
 
         self.assertTrue(process_is_running(4321))
 
+    @mock.patch("jakal_flow.share.os.name", "nt")
+    @mock.patch("jakal_flow.share.windows_process_is_running", return_value=True)
+    @mock.patch("jakal_flow.share.subprocess.run")
+    def test_process_is_running_falls_back_when_tasklist_access_is_denied(
+        self,
+        run_mock: mock.Mock,
+        fallback_mock: mock.Mock,
+    ) -> None:
+        run_mock.return_value = mock.Mock(returncode=1, stdout=b"", stderr=b"ERROR: Access denied")
+
+        self.assertTrue(process_is_running(4321))
+        fallback_mock.assert_called_once_with(4321)
+
     def test_session_creation_revokes_previous_active_session(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

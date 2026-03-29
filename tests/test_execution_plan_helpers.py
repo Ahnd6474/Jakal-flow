@@ -57,7 +57,9 @@ from jakal_flow.planning import (
     load_reference_guide_text,
     load_source_prompt_template,
     load_step_execution_prompt_template,
+    debugger_prompt,
     implementation_prompt,
+    merger_prompt,
     parse_execution_plan_response,
     prompt_to_plan_decomposition_prompt,
     prompt_to_execution_plan_prompt,
@@ -4359,12 +4361,16 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("do not emit bash heredocs", ml_step_template.lower())
         self.assertIn("Do not edit README.md during normal execution steps.", ml_step_template)
         self.assertEqual(DEBUGGER_PROMPT_FILENAME, DEBUGGER_PARALLEL_PROMPT_FILENAME)
+        self.assertIn("{agents_summary}", parallel_debugger_template)
         self.assertIn("{step_metadata}", parallel_debugger_template)
         self.assertIn("step_metadata.step_kind", parallel_debugger_template)
         self.assertIn("{owned_paths}", parallel_debugger_template)
         self.assertIn("merged parallel batch", parallel_debugger_template)
         self.assertIn("cherry-pick conflict", parallel_debugger_template)
+        self.assertIn("do not emit bash heredocs", parallel_debugger_template.lower())
+        self.assertIn("If a repo-relative path is missing", parallel_debugger_template)
         self.assertIn("Do not edit README.md during debugger recovery.", parallel_debugger_template)
+        self.assertIn("{agents_summary}", parallel_merger_template)
         self.assertIn("{merge_targets}", parallel_merger_template)
         self.assertIn("integration worktree", parallel_merger_template)
         self.assertIn("git worktree list", parallel_merger_template)
@@ -4372,6 +4378,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("Failing merge context", parallel_merger_template)
         self.assertIn("adjacent compatibility breakage", parallel_merger_template)
         self.assertIn("adjacent integration touchpoints", parallel_merger_template)
+        self.assertIn("do not emit bash heredocs", parallel_merger_template.lower())
+        self.assertIn("If a repo-relative path is missing", parallel_merger_template)
         self.assertIn("Do not edit README.md during merge recovery.", parallel_merger_template)
         self.assertEqual(load_plan_decomposition_prompt_template("serial"), parallel_decomposition_template)
         self.assertEqual(load_plan_decomposition_prompt_template("parallel"), parallel_decomposition_template)
@@ -4532,6 +4540,87 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("Keep changes scoped to src only.", prompt)
         self.assertIn("do not emit bash heredocs", prompt.lower())
         self.assertIn("Do not probe parent directories outside the managed repo", prompt)
+
+    def test_debugger_and_merger_prompts_embed_agents_summary_and_path_guards(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_recovery_prompt_guidance_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        repo_dir = temp_root / "repo"
+        managed_docs = temp_root / "managed-docs"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        managed_docs.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "AGENTS.md").write_text("Keep recovery edits inside owned paths.", encoding="utf-8")
+        (managed_docs / "PLAN.md").write_text("Plan snapshot", encoding="utf-8")
+        (managed_docs / "MID_TERM_PLAN.md").write_text("Mid term", encoding="utf-8")
+        (managed_docs / "SCOPE_GUARD.md").write_text("Scope guard", encoding="utf-8")
+        (managed_docs / "RESEARCH_NOTES.md").write_text("Research notes", encoding="utf-8")
+
+        context = SimpleNamespace(
+            paths=SimpleNamespace(
+                repo_dir=repo_dir,
+                docs_dir=managed_docs,
+                plan_file=managed_docs / "PLAN.md",
+                mid_term_plan_file=managed_docs / "MID_TERM_PLAN.md",
+                scope_guard_file=managed_docs / "SCOPE_GUARD.md",
+                research_notes_file=managed_docs / "RESEARCH_NOTES.md",
+                ml_step_report_file=managed_docs / "ML_STEP_REPORT.json",
+                ml_experiment_report_file=managed_docs / "ML_EXPERIMENT_REPORT.md",
+            ),
+            runtime=SimpleNamespace(
+                workflow_mode="standard",
+                execution_mode="parallel",
+                test_cmd="python -m pytest",
+                extra_prompt="",
+            ),
+        )
+        candidate = CandidateTask(
+            candidate_id="cand-1",
+            title="Recover integration flow",
+            rationale="Diagnose the concrete failure before editing.",
+            plan_refs=[],
+            score=1.0,
+        )
+        step = ExecutionStep(
+            step_id="ST2",
+            title="Recover integration flow",
+            display_description="Repair the failing integration slice.",
+            codex_description="Inspect the failing paths and repair the narrow integration issue.",
+            test_command="python -m pytest",
+            owned_paths=["src/jakal_flow"],
+        )
+
+        try:
+            debug_prompt = debugger_prompt(
+                context,
+                candidate,
+                memory_context="None.",
+                failing_pass_name="parallel-batch-merge-debug",
+                failing_test_summary="Missing file",
+                failing_test_stdout="",
+                failing_test_stderr="Cannot find path",
+                execution_step=step,
+            )
+            merge_prompt = merger_prompt(
+                context,
+                candidate,
+                memory_context="None.",
+                failing_command="git cherry-pick --continue",
+                failing_summary="Merge conflict",
+                failing_stdout="",
+                failing_stderr="Cannot find path",
+                merge_targets=["ST1", "ST2"],
+                execution_step=step,
+            )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertIn("Keep recovery edits inside owned paths.", debug_prompt)
+        self.assertIn("do not emit bash heredocs", debug_prompt.lower())
+        self.assertIn("If a repo-relative path is missing", debug_prompt)
+        self.assertIn("Do not probe parent directories outside the managed repo", debug_prompt)
+        self.assertIn("Keep recovery edits inside owned paths.", merge_prompt)
+        self.assertIn("do not emit bash heredocs", merge_prompt.lower())
+        self.assertIn("If a repo-relative path is missing", merge_prompt)
+        self.assertIn("Do not probe parent directories outside the managed repo", merge_prompt)
 
     def test_scan_repository_inputs_compacts_large_docs_inventory(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_large_docs_summary_test"

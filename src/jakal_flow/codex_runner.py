@@ -84,13 +84,14 @@ class CodexRunner:
         started_monotonic = time.monotonic()
         scope_id = execution_scope_id(context)
         with self._execution_layout(context, output_file) as execution_layout:
+            runtime_prompt = self._execution_prompt(formatted_prompt, context, execution_layout)
             command = self._build_command(
                 context,
                 backend=backend,
                 output_file=execution_layout.output_file,
                 search_enabled=search_enabled,
                 reasoning_effort=reasoning_effort,
-                prompt_text=formatted_prompt,
+                prompt_text=runtime_prompt,
                 execution_layout=execution_layout,
             )
             for attempt_index in range(1, self._TRANSIENT_RETRY_LIMIT + 2):
@@ -105,7 +106,7 @@ class CodexRunner:
                     scope_id=scope_id,
                     label=f"{backend.title()} {pass_type}",
                     cwd=execution_layout.repo_dir,
-                    input_bytes=None if backend in {"claude", "qwen"} else formatted_prompt.encode("utf-8"),
+                    input_bytes=None if backend in {"claude", "qwen"} else runtime_prompt.encode("utf-8"),
                     env=child_env,
                 )
                 stdout = decode_process_output(completed.stdout)
@@ -554,6 +555,54 @@ class CodexRunner:
 
     def _execution_paths_need_alias(self, *paths: Path) -> bool:
         return any(self._path_needs_alias(path) for path in paths)
+
+    def _execution_prompt(
+        self,
+        prompt_text: str,
+        context: ProjectContext,
+        execution_layout: _CLIExecutionLayout,
+    ) -> str:
+        if execution_layout.repo_dir == context.paths.repo_dir:
+            return prompt_text
+        rewritten = prompt_text
+        for source, target in self._prompt_path_replacements(context, execution_layout):
+            rewritten = rewritten.replace(source, target)
+        return rewritten
+
+    def _prompt_path_replacements(
+        self,
+        context: ProjectContext,
+        execution_layout: _CLIExecutionLayout,
+    ) -> list[tuple[str, str]]:
+        path_pairs = [
+            (context.paths.docs_dir, execution_layout.docs_dir),
+            (context.paths.memory_dir, execution_layout.memory_dir),
+            (context.paths.state_dir, execution_layout.state_dir),
+            (context.paths.repo_dir, execution_layout.repo_dir),
+        ]
+        replacements: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for source_path, target_path in sorted(path_pairs, key=lambda item: len(str(item[0])), reverse=True):
+            for source_text, target_text in self._path_text_variants(source_path, target_path):
+                if source_text in seen or source_text == target_text:
+                    continue
+                seen.add(source_text)
+                replacements.append((source_text, target_text))
+        return replacements
+
+    def _path_text_variants(self, source_path: Path, target_path: Path) -> list[tuple[str, str]]:
+        variants: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for source_text, target_text in (
+            (str(source_path), str(target_path)),
+            (source_path.as_posix(), target_path.as_posix()),
+        ):
+            pair = (source_text, target_text)
+            if not source_text or pair in seen:
+                continue
+            seen.add(pair)
+            variants.append(pair)
+        return variants
 
     def _path_needs_alias(self, path: Path) -> bool:
         raw = str(path)
