@@ -2362,6 +2362,45 @@ select:focus {
 }
 
 /* ── Sidebar chat ── */
+.sidebar-chat-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 0;
+  flex-shrink: 0;
+}
+
+.sidebar-chat-session-select {
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+  padding: 7px 9px;
+}
+
+.sidebar-chat-new {
+  flex-shrink: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-alt);
+  color: var(--text);
+}
+
+.sidebar-chat-summary-path {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+  flex-shrink: 0;
+}
+
+.sidebar-chat-summary-path strong {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .sidebar-chat-messages {
   flex: 1;
   min-height: 0;
@@ -2435,11 +2474,90 @@ select:focus {
   border-bottom-left-radius: 2px;
 }
 
+.sidebar-chat-composer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-chat-modebar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 0;
+}
+
+.sidebar-chat-mode-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-chat-plus {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-alt);
+  color: var(--text);
+}
+
+.sidebar-chat-plus svg {
+  width: 14px;
+  height: 14px;
+}
+
+.sidebar-chat-mode-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-elevated);
+  z-index: 4;
+}
+
+.sidebar-chat-mode-menu button {
+  justify-content: flex-start;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+}
+
+.sidebar-chat-mode-menu button:hover {
+  background: var(--bg-panel-hover);
+}
+
+.sidebar-chat-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.sidebar-chat-mode-chip--active {
+  color: var(--text);
+  background: rgba(95, 151, 214, 0.12);
+  border-color: rgba(95, 151, 214, 0.38);
+}
+
 .sidebar-chat-input-row {
   display: flex;
   gap: 6px;
-  padding: 8px 10px;
-  border-top: 1px solid var(--border);
+  padding: 8px 10px 10px;
   flex-shrink: 0;
   align-items: flex-end;
 }

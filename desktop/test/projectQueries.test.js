@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  fetchProjectChat,
   fetchProjectCheckpoints,
   fetchProjectHistory,
   fetchProjectReports,
@@ -159,6 +160,20 @@ test("project supplement fetches wrap partial bridge payloads for detail merging
   const calls = [];
   const bridgeRequest = async (command, payload, workspaceRoot) => {
     calls.push({ command, payload, workspaceRoot });
+    if (command === "load-project-chat") {
+      return {
+        chat: {
+          sessions: [{ session_id: "chat-1" }],
+          active_session_id: "chat-1",
+          active_session: { session_id: "chat-1" },
+          messages: [{ message_id: "msg-1", role: "assistant", text: "hello" }],
+          summary_text: "summary",
+          summary_file: "/workspace/chat.summary.txt",
+          transcript_file: "/workspace/chat.transcript.txt",
+          draft_session: false,
+        },
+      };
+    }
     if (command === "load-project-reports") {
       return { closeout_report_text: "done" };
     }
@@ -174,6 +189,19 @@ test("project supplement fetches wrap partial bridge payloads for detail merging
     throw new Error(`Unexpected command: ${command}`);
   };
 
+  assert.deepEqual(await fetchProjectChat(bridgeRequest, "demo", "/workspace", { sessionId: "chat-1" }), {
+    chat: {
+      sessions: [{ session_id: "chat-1" }],
+      active_session_id: "chat-1",
+      active_session: { session_id: "chat-1" },
+      messages: [{ message_id: "msg-1", role: "assistant", text: "hello" }],
+      summary_text: "summary",
+      summary_file: "/workspace/chat.summary.txt",
+      transcript_file: "/workspace/chat.transcript.txt",
+      draft_session: false,
+    },
+    loaded_sections: { chat: true },
+  });
   assert.deepEqual(await fetchProjectReports(bridgeRequest, "demo", "/workspace"), {
     reports: { closeout_report_text: "done" },
     loaded_sections: { reports: true },
@@ -191,6 +219,11 @@ test("project supplement fetches wrap partial bridge payloads for detail merging
     loaded_sections: { history: true },
   });
   assert.deepEqual(calls, [
+    {
+      command: "load-project-chat",
+      payload: { repo_id: "demo", session_id: "chat-1" },
+      workspaceRoot: "/workspace",
+    },
     {
       command: "load-project-reports",
       payload: { repo_id: "demo" },

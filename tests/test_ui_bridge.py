@@ -2834,6 +2834,293 @@ class UIBridgeTests(unittest.TestCase):
             self.assertTrue(any("manual-merger-started" in line for line in detail["activity"]))
             self.assertTrue(any("manual-merger-finished" in line for line in detail["activity"]))
 
+    def test_load_project_chat_returns_chat_section_without_project_change_marker(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Chat Read Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            result = run_command(
+                "load-project-chat",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                },
+            )
+
+            self.assertEqual(result["loaded_sections"], {"chat": True})
+            self.assertFalse(result["emit_project_changed"])
+            self.assertEqual(result["chat"]["sessions"], [])
+            self.assertEqual(result["chat"]["active_session_id"], "")
+            self.assertTrue(result["chat"]["draft_session"])
+
+    def test_send_chat_message_conversation_persists_txt_session_artifacts(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Chat Conversation Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            project_root = Path(detail["project"]["project_root"])
+            core_cache = project_root / "state" / "PROJECT_DETAIL_CACHE_CORE.json"
+            cache_mtime = core_cache.stat().st_mtime_ns if core_cache.exists() else None
+
+            with mock.patch("jakal_flow.chat_sessions._run_conversation_reply", return_value=(0, "Conversation reply.")):
+                result = run_command(
+                    "send-chat-message",
+                    workspace_root,
+                    {
+                        **payload,
+                        "repo_id": detail["project"]["repo_id"],
+                        "message": "Summarize the current repository state.",
+                        "chat_mode": "conversation",
+                    },
+                )
+
+            self.assertEqual(result["chat_mode"], "conversation")
+            self.assertEqual(result["error"], "")
+            self.assertFalse(result["emit_project_changed"])
+            self.assertEqual(result["chat"]["active_session_id"], result["chat"]["active_session"]["session_id"])
+            self.assertEqual([item["role"] for item in result["chat"]["messages"]], ["user", "assistant"])
+            self.assertEqual(result["chat"]["messages"][-1]["text"], "Conversation reply.")
+
+            summary_path = Path(result["chat"]["summary_file"])
+            transcript_path = Path(result["chat"]["transcript_file"])
+            registry_path = project_root / "state" / "CHAT_SESSIONS.txt"
+            active_path = project_root / "state" / "CHAT_ACTIVE_SESSION.txt"
+
+            self.assertTrue(summary_path.exists())
+            self.assertTrue(transcript_path.exists())
+            self.assertTrue(registry_path.exists())
+            self.assertTrue(active_path.exists())
+            self.assertEqual(summary_path.suffix, ".txt")
+            self.assertEqual(transcript_path.suffix, ".txt")
+            self.assertIn("Summarize the current repository state.", transcript_path.read_text(encoding="utf-8"))
+            self.assertIn("Conversation reply.", transcript_path.read_text(encoding="utf-8"))
+            self.assertIn("Rolling Summary", summary_path.read_text(encoding="utf-8"))
+
+            if cache_mtime is not None:
+                self.assertEqual(core_cache.stat().st_mtime_ns, cache_mtime)
+
+    def test_send_chat_message_debugger_routes_message_into_manual_recovery(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Chat Debugger Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+            plan_payload = {
+                "plan_title": "Chat Debugger Demo",
+                "project_prompt": "Recover the failing step manually.",
+                "summary": "One failed step remains.",
+                "workflow_mode": "standard",
+                "execution_mode": "parallel",
+                "default_test_command": "python -m unittest",
+                "steps": [
+                    {
+                        "step_id": "ST1",
+                        "title": "Recover backend",
+                        "display_description": "Repair the backend.",
+                        "codex_description": "Repair the backend.",
+                        "success_criteria": "Tests pass",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "status": "failed",
+                    }
+                ],
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            captured: dict[str, str] = {}
+
+            def fake_run_manual_debugger_recovery(self, project_dir, runtime, branch="main", origin_url=""):
+                captured["extra_prompt"] = runtime.extra_prompt
+                context = self.local_project(project_dir)
+                assert context is not None
+                return context, self.load_execution_plan_state(context), {
+                    "pass_name": "block-search-debug",
+                    "summary": "Recovered via chat.",
+                    "commit_hash": "abc123",
+                }
+
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()), mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.run_manual_debugger_recovery",
+                new=fake_run_manual_debugger_recovery,
+            ):
+                result = run_command(
+                    "send-chat-message",
+                    workspace_root,
+                    {
+                        **payload,
+                        "repo_id": detail["project"]["repo_id"],
+                        "plan": plan_payload,
+                        "message": "Focus on the latest failing backend test.",
+                        "chat_mode": "debugger",
+                    },
+                )
+
+            self.assertEqual(captured["extra_prompt"], "Focus on the latest failing backend test.")
+            self.assertEqual(result["chat_mode"], "debugger")
+            self.assertEqual(result["error"], "")
+            self.assertTrue(result["emit_project_changed"])
+            self.assertIn("detail", result)
+            self.assertIsNotNone(result["detail"])
+            self.assertEqual(result["chat"]["active_session"]["last_mode"], "debugger")
+            self.assertEqual(result["chat"]["messages"][0]["role"], "user")
+            self.assertEqual(result["chat"]["messages"][-1]["role"], "assistant")
+            self.assertIn("Manual debugger finished.", result["chat"]["messages"][-1]["text"])
+
+    def test_send_chat_message_merger_routes_message_into_manual_recovery(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Chat Merger Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+            plan_payload = {
+                "plan_title": "Chat Merger Demo",
+                "project_prompt": "Resolve the merge conflict manually.",
+                "summary": "Two failed slices remain.",
+                "workflow_mode": "standard",
+                "execution_mode": "parallel",
+                "default_test_command": "python -m unittest",
+                "steps": [
+                    {
+                        "step_id": "ST1",
+                        "title": "Frontend slice",
+                        "display_description": "Finish the frontend slice.",
+                        "codex_description": "Finish the frontend slice.",
+                        "success_criteria": "Frontend slice is integrated",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "status": "failed",
+                    },
+                    {
+                        "step_id": "ST2",
+                        "title": "Backend slice",
+                        "display_description": "Finish the backend slice.",
+                        "codex_description": "Finish the backend slice.",
+                        "success_criteria": "Backend slice is integrated",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "status": "failed",
+                    },
+                ],
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            captured: dict[str, str] = {}
+
+            def fake_run_manual_merger_recovery(self, project_dir, runtime, branch="main", origin_url=""):
+                captured["extra_prompt"] = runtime.extra_prompt
+                context = self.local_project(project_dir)
+                assert context is not None
+                return context, self.load_execution_plan_state(context), {
+                    "pass_name": "parallel-batch-merger",
+                    "summary": "Merged via chat.",
+                    "commit_hash": "def456",
+                }
+
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()), mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.run_manual_merger_recovery",
+                new=fake_run_manual_merger_recovery,
+            ):
+                result = run_command(
+                    "send-chat-message",
+                    workspace_root,
+                    {
+                        **payload,
+                        "repo_id": detail["project"]["repo_id"],
+                        "plan": plan_payload,
+                        "message": "Merge the recovered slices into the main line.",
+                        "chat_mode": "merger",
+                    },
+                )
+
+            self.assertEqual(captured["extra_prompt"], "Merge the recovered slices into the main line.")
+            self.assertEqual(result["chat_mode"], "merger")
+            self.assertEqual(result["error"], "")
+            self.assertTrue(result["emit_project_changed"])
+            self.assertIn("detail", result)
+            self.assertIsNotNone(result["detail"])
+            self.assertEqual(result["chat"]["active_session"]["last_mode"], "merger")
+            self.assertEqual(result["chat"]["messages"][0]["role"], "user")
+            self.assertEqual(result["chat"]["messages"][-1]["role"], "assistant")
+            self.assertIn("Manual merger finished.", result["chat"]["messages"][-1]["text"])
+
     def test_run_plan_routes_single_hybrid_task_batches_through_lineage_execution(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

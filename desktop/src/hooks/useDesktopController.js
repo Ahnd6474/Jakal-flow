@@ -763,11 +763,22 @@ export function useDesktopController() {
             });
           }
           if (!["queued", "running"].includes(jobStatus) && !cancelled && !supersededByActiveJob) {
-            if (job.result?.error) {
-              setMessage(messagePayload("error", String(job.result.error)));
-            } else {
-              setMessage(null);
-            }
+            setMessage(
+              jobStatus === "failed"
+                ? messagePayload(
+                    "error",
+                    String(
+                      job.error
+                        || job.result?.error
+                        || translate(language, "message.commandFailed", {
+                          command: commandLabel(job.command, language),
+                        }),
+                    ),
+                  )
+                : job.result?.error
+                  ? messagePayload("error", String(job.result.error))
+                  : null,
+            );
           }
           return;
         }

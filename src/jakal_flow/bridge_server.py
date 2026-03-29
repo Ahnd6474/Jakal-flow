@@ -447,6 +447,9 @@ class BridgeServer:
         request_payload = payload if isinstance(payload, dict) else {}
         if isinstance(result, dict):
             project = result.get("project")
+            if not isinstance(project, dict):
+                detail = result.get("detail")
+                project = detail.get("project") if isinstance(detail, dict) else None
             if isinstance(project, dict):
                 event_payload["project"] = {
                     "repo_id": str(project.get("repo_id", "")).strip(),
@@ -468,6 +471,13 @@ class BridgeServer:
             }
         return event_payload
 
+    def _should_emit_project_changed(self, command: str, result: Any) -> bool:
+        if command in {"bootstrap", "list-projects", "load-project"}:
+            return False
+        if isinstance(result, dict) and result.get("emit_project_changed") is False:
+            return False
+        return True
+
     def _start_job_thread(self, job_id: str) -> None:
         request = self._jobs.request_for(job_id)
         if request is None:
@@ -485,13 +495,14 @@ class BridgeServer:
             with bridge_event_context(self._event_sink):
                 result = run_command(command, workspace_root, payload)
             self._jobs.update(job_id, status="completed", error=None, result=result if isinstance(result, dict) else {})
-            self._send_envelope(
-                BridgeEnvelope(
-                    kind="event",
-                    event="project.changed",
-                    payload=self._infer_project_event_payload(command, workspace_root, payload, result),
+            if self._should_emit_project_changed(command, result):
+                self._send_envelope(
+                    BridgeEnvelope(
+                        kind="event",
+                        event="project.changed",
+                        payload=self._infer_project_event_payload(command, workspace_root, payload, result),
+                    )
                 )
-            )
         except Exception as exc:
             self._jobs.update(job_id, status="failed", error=str(exc).strip() or str(exc), result=None)
         finally:
@@ -518,7 +529,7 @@ class BridgeServer:
             with bridge_event_context(self._event_sink):
                 result = run_command(command, workspace_root, payload)
             self._send_envelope(BridgeEnvelope(kind="response", id=request_id, ok=True, result=result if isinstance(result, dict) else {}))
-            if command not in {"bootstrap", "list-projects", "load-project"}:
+            if self._should_emit_project_changed(command, result):
                 self._send_envelope(
                     BridgeEnvelope(
                         kind="event",
