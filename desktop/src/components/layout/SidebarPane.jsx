@@ -756,12 +756,9 @@ export function SidebarPane({
   }, [deferredProjectFilter, historyProjects]);
 
   const tabs = [
-    ["projects", <SidebarProjectsIcon key="projects-icon" />, t("common.project")],
-    ["history", <SidebarHistoryIcon key="history-icon" />, t("tab.history")],
     ["workspace", <SidebarExplorerIcon key="workspace-icon" />, t("sidebar.explorer")],
     ["plans", <SidebarCheckpointsIcon key="plans-icon" />, t("sidebar.checkpoints")],
     ["reservations", <SidebarReservationIcon key="reservations-icon" />, language === "ko" ? "예약" : "Queue"],
-    ["chat", <SidebarChatIcon key="chat-icon" />, language === "ko" ? "AI 채팅" : "AI Chat"],
   ];
 
   return (

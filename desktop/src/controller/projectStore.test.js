@@ -203,7 +203,7 @@ test("applyProjectDetailState preserves a manually cleared step selection on sam
   assert.equal(capturedSelectedStepId, "");
 });
 
-test("applyProjectDetailState selects the first pending step when switching to a different project", () => {
+test("applyProjectDetailState keeps the step editor closed when switching to a different project", () => {
   let capturedSelectedStepId = "__unset__";
 
   applyProjectDetailState({
@@ -256,5 +256,5 @@ test("applyProjectDetailState selects the first pending step when switching to a
     },
   });
 
-  assert.equal(capturedSelectedStepId, "ST10");
+  assert.equal(capturedSelectedStepId, "");
 });

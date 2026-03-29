@@ -499,6 +499,72 @@ test("CenterWorkspace renders the parallel execution flow chart for parallel pla
   assert.doesNotMatch(html, /Layer 1/);
 });
 
+test("CenterWorkspace keeps the step editor hidden until a block is selected", async () => {
+  const html = await renderBundledComponent(
+    "parallel-workspace-no-selection-render",
+    "./src/components/layout/CenterWorkspace.jsx",
+    "CenterWorkspace",
+    baseWorkspaceProps({
+      selectedStepId: "",
+    }),
+  );
+
+  assert.doesNotMatch(html, /Depends On/);
+  assert.doesNotMatch(html, /Owned Paths/);
+  assert.doesNotMatch(html, /Save Local/);
+});
+
+test("RightSidebarPane renders the project chat on the right rail by default", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-chat-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+        runtime: {
+          effort: "medium",
+        },
+      },
+      planDraft: {
+        steps: [],
+      },
+      selectedStepId: "",
+      modelPresets: [],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: null,
+      busy: false,
+      chat: {
+        sessions: [
+          { session_id: "chat-1", title: "Release", message_count: 2 },
+        ],
+        active_session_id: "chat-1",
+        messages: [
+          { message_id: "msg-1", role: "assistant", text: "Hello from the right side." },
+        ],
+        summary_file: "C:/demo/chat.summary.txt",
+      },
+      selectedChatSessionId: "chat-1",
+      chatDraftSession: false,
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+    },
+  );
+
+  assert.match(html, /AI Chat/);
+  assert.match(html, /Release/);
+  assert.match(html, /Hello from the right side\./);
+  assert.match(html, /chat\.summary\.txt/);
+});
+
 test("CenterWorkspace shows estimated cost only for paid configured runtimes", async () => {
   const html = await renderBundledComponent(
     "parallel-workspace-paid-cost-render",

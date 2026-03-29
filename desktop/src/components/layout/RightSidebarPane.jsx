@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { openInSystem } from "../../api";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import { effectiveStepStatus, reasoningEffortLabel, runtimeSummary, statusTone } from "../../utils";
-import { openInSystem } from "../../api";
 
 function RailChatIcon() {
   return (
@@ -43,6 +43,14 @@ function SendIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -104,7 +112,7 @@ function OutputCard({ icon, title, description, enabled, checked, onChange, busy
         <div className="output-card__title">
           <strong>{title}</strong>
           {comingSoon ? (
-            <span className="output-card__badge">{language === "ko" ? "추가 예정" : "Coming soon"}</span>
+            <span className="output-card__badge">{language === "ko" ? "Coming soon" : "Coming soon"}</span>
           ) : null}
         </div>
         <p className="output-card__desc">{description}</p>
@@ -135,23 +143,23 @@ function ReportFileCard({ title, kind, icon, path, available, onOpen, language }
           <span className="rsb-file-card__path" title={path}>{path}</span>
         ) : (
           <span className="rsb-file-card__path rsb-file-card__path--empty">
-            {language === "ko" ? "아직 생성되지 않음" : "Not generated yet"}
+            {language === "ko" ? "Not generated yet" : "Not generated yet"}
           </span>
         )}
       </div>
       <div className="rsb-file-card__actions">
         <span className={`status-badge status-badge--${available ? "success" : "neutral"}`}>
-          {available ? (language === "ko" ? "준비됨" : "Ready") : (language === "ko" ? "대기" : "Pending")}
+          {available ? (language === "ko" ? "Ready" : "Ready") : (language === "ko" ? "Pending" : "Pending")}
         </span>
         {available && path ? (
           <button
             className="rsb-file-card__open-btn"
             onClick={() => onOpen(path)}
             type="button"
-            title={language === "ko" ? "파일 열기" : "Open file"}
+            title={language === "ko" ? "Open file" : "Open file"}
           >
             <OpenFolderIcon />
-            <span>{language === "ko" ? "열기" : "Open"}</span>
+            <span>{language === "ko" ? "Open" : "Open"}</span>
           </button>
         ) : null}
       </div>
@@ -159,12 +167,283 @@ function ReportFileCard({ title, kind, icon, path, available, onOpen, language }
   );
 }
 
-export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPresets, form, activeJob, busy, onChangeForm }) {
+function ProjectChatPane({
+  chat,
+  selectedChatSessionId,
+  chatDraftSession,
+  onSelectChatSession,
+  onStartNewChatSession,
+  onSendChatMessage,
+  busy,
+  language,
+}) {
+  const sessions = Array.isArray(chat?.sessions) ? chat.sessions : [];
+  const remoteMessages = Array.isArray(chat?.messages) ? chat.messages : [];
+  const activeSessionId = String(selectedChatSessionId || chat?.active_session_id || "").trim();
+  const summaryFile = String(chat?.summary_file || "").trim();
+  const [input, setInput] = useState("");
+  const [pendingMode, setPendingMode] = useState("conversation");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [localMessages, setLocalMessages] = useState(remoteMessages);
+  const bottomRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    setLocalMessages(remoteMessages);
+  }, [remoteMessages, activeSessionId, chatDraftSession]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [localMessages]);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event) {
+      if (!menuRef.current?.contains(event.target)) {
+        setMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [menuOpen]);
+
+  function roleLabel(role) {
+    if (role === "user") {
+      return language === "ko" ? "You" : "You";
+    }
+    if (role === "system") {
+      return language === "ko" ? "System" : "System";
+    }
+    return "AI";
+  }
+
+  function modeLabel(mode) {
+    if (mode === "debugger") {
+      return language === "ko" ? "Debugger" : "Debugger";
+    }
+    if (mode === "merger") {
+      return language === "ko" ? "Merger" : "Merger";
+    }
+    return language === "ko" ? "Conversation" : "Conversation";
+  }
+
+  function sessionLabel(session) {
+    const title = String(session?.title || "").trim() || (language === "ko" ? "Conversation" : "Conversation");
+    const count = Number.parseInt(String(session?.message_count || 0), 10) || 0;
+    return `${title} · ${count}`;
+  }
+
+  function handleSend() {
+    const text = input.trim();
+    if (!text || busy) {
+      return;
+    }
+    const mode = pendingMode;
+    setLocalMessages((prev) => [
+      ...prev,
+      {
+        role: "user",
+        text,
+        mode,
+        status: "pending",
+        message_id: `local-${Date.now()}`,
+      },
+    ]);
+    setInput("");
+    setPendingMode("conversation");
+    setMenuOpen(false);
+    void Promise.resolve(onSendChatMessage?.(text, mode)).catch(() => {});
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleSend();
+    }
+  }
+
+  function handleSessionChange(event) {
+    const nextSessionId = String(event.target.value || "").trim();
+    if (!nextSessionId) {
+      onStartNewChatSession?.();
+      return;
+    }
+    void Promise.resolve(onSelectChatSession?.(nextSessionId)).catch(() => {});
+  }
+
+  const selectedSessionValue = chatDraftSession ? "" : activeSessionId;
+
+  return (
+    <div className="rsb-chat">
+      <div className="sidebar-panel__header" style={{ padding: "10px 10px 0" }}>
+        <strong>{language === "ko" ? "AI Chat" : "AI Chat"}</strong>
+        <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
+          {language === "ko" ? "Conversation or manual recovery" : "Conversation or manual recovery"}
+        </span>
+      </div>
+
+      <div className="sidebar-chat-toolbar" style={{ padding: "0 10px" }}>
+        <select
+          className="sidebar-chat-session-select"
+          value={selectedSessionValue}
+          onChange={handleSessionChange}
+          disabled={busy}
+        >
+          <option value="">{language === "ko" ? "New conversation" : "New conversation"}</option>
+          {sessions.map((session) => (
+            <option key={session.session_id} value={session.session_id}>
+              {sessionLabel(session)}
+            </option>
+          ))}
+        </select>
+        <button
+          className="sidebar-chat-new"
+          onClick={() => {
+            setPendingMode("conversation");
+            setMenuOpen(false);
+            onStartNewChatSession?.();
+          }}
+          type="button"
+          disabled={busy}
+        >
+          {language === "ko" ? "New" : "New"}
+        </button>
+      </div>
+
+      <div className="sidebar-chat-summary-path" style={{ margin: "0 10px" }}>
+        <strong>{language === "ko" ? "Summary txt" : "Summary txt"}</strong>
+        <span title={summaryFile || ""}>
+          {summaryFile || (language === "ko" ? "Created after the first message." : "Created after the first message.")}
+        </span>
+      </div>
+
+      <div className="sidebar-chat-messages rsb-chat__messages">
+        {localMessages.length === 0 ? (
+          <div className="sidebar-chat-empty">
+            <RailChatIcon />
+            <span>
+              {language === "ko"
+                ? "Send a message to continue the session from the saved txt history."
+                : "Send a message to continue the session from the saved txt history."}
+            </span>
+          </div>
+        ) : (
+          localMessages.map((msg, index) => (
+            <div
+              key={msg.message_id || msg.id || `${msg.role || "assistant"}-${index}`}
+              className={`sidebar-chat-bubble sidebar-chat-bubble--${msg.role || "assistant"}`}
+            >
+              <span className="sidebar-chat-bubble__role">
+                {roleLabel(msg.role)}
+                {msg.mode && String(msg.mode).trim().toLowerCase() !== "conversation" ? ` · ${modeLabel(msg.mode)}` : ""}
+              </span>
+              <p>{msg.text}</p>
+            </div>
+          ))
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="sidebar-chat-composer">
+        <div className="sidebar-chat-modebar" ref={menuRef}>
+          <div className="sidebar-chat-mode-picker">
+            <button
+              className="sidebar-chat-plus"
+              onClick={() => setMenuOpen((current) => !current)}
+              type="button"
+              disabled={busy}
+              title={language === "ko" ? "Choose debugger or merger" : "Choose debugger or merger"}
+            >
+              <PlusIcon />
+            </button>
+            {menuOpen ? (
+              <div className="sidebar-chat-mode-menu">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingMode("debugger");
+                    setMenuOpen(false);
+                  }}
+                >
+                  {modeLabel("debugger")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingMode("merger");
+                    setMenuOpen(false);
+                  }}
+                >
+                  {modeLabel("merger")}
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          {pendingMode === "conversation" ? (
+            <span className="sidebar-chat-mode-chip">
+              {language === "ko" ? "Default: conversation" : "Default: conversation"}
+            </span>
+          ) : (
+            <button
+              className="sidebar-chat-mode-chip sidebar-chat-mode-chip--active"
+              onClick={() => setPendingMode("conversation")}
+              type="button"
+            >
+              {language === "ko" ? "Next send:" : "Next send:"} {modeLabel(pendingMode)}
+            </button>
+          )}
+        </div>
+
+        <div className="sidebar-chat-input-row">
+          <textarea
+            className="sidebar-chat-input"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={language === "ko" ? "Type a message... (Enter to send)" : "Type a message... (Enter to send)"}
+            disabled={busy}
+            rows={2}
+          />
+          <button
+            className="sidebar-chat-send"
+            onClick={handleSend}
+            type="button"
+            disabled={busy || !input.trim()}
+            title={language === "ko" ? "Send" : "Send"}
+          >
+            <SendIcon />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function RightSidebarPane({
+  detail,
+  planDraft,
+  selectedStepId,
+  modelPresets,
+  form,
+  activeJob,
+  busy,
+  onChangeForm,
+  chat,
+  selectedChatSessionId,
+  chatDraftSession,
+  onSelectChatSession,
+  onStartNewChatSession,
+  onSendChatMessage,
+}) {
   const { language, t } = useI18n();
   const [activeTab, setActiveTab] = useState("chat");
-  const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState([]);
-  const chatBottomRef = useRef(null);
   const outputRef = useRef(null);
 
   const processOutput = detail?.subprocess_output || detail?.agent_output || detail?.process_log || "";
@@ -185,28 +464,10 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
   const mlReportPath = String(detail?.files?.ml_experiment_report_file || "").trim();
 
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
-
-  useEffect(() => {
     if (activeTab === "output" && outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
   }, [processOutput, activeTab]);
-
-  function handleSendChat() {
-    const text = chatInput.trim();
-    if (!text) return;
-    setChatMessages((current) => [...current, { role: "user", text, id: Date.now() }]);
-    setChatInput("");
-  }
-
-  function handleChatKeyDown(event) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      handleSendChat();
-    }
-  }
 
   function handleOpenFile(path) {
     if (path) {
@@ -221,19 +482,19 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
     {
       id: "chat",
       icon: <RailChatIcon />,
-      title: language === "ko" ? "AI 채팅" : "AI Chat",
+      title: language === "ko" ? "AI Chat" : "AI Chat",
       dot: false,
     },
     {
       id: "output",
       icon: <RailTerminalIcon />,
-      title: language === "ko" ? "프로세스 출력" : "Process Output",
+      title: language === "ko" ? "Process Output" : "Process Output",
       dot: hasOutput,
     },
     {
       id: "files",
       icon: <RailFilesIcon />,
-      title: language === "ko" ? "보고서 및 파일" : "Reports & Files",
+      title: language === "ko" ? "Reports & Files" : "Reports & Files",
       dot: hasFiles,
     },
     {
@@ -248,47 +509,16 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
     <aside className="details-pane rsb">
       <div className="rsb-panel">
         {activeTab === "chat" ? (
-          <div className="rsb-chat">
-            <div className="rsb-chat__messages">
-              {chatMessages.length === 0 ? (
-                <div className="rsb-chat__empty">
-                  <RailChatIcon />
-                  <p>{language === "ko" ? "실행 중 AI에게 전달할 메시지를 남길 수 있습니다." : "Send a message to guide the AI during execution."}</p>
-                </div>
-              ) : (
-                chatMessages.map((message) => (
-                  <div key={message.id} className={`sidebar-chat-bubble sidebar-chat-bubble--${message.role}`}>
-                    <span className="sidebar-chat-bubble__role">
-                      {message.role === "user" ? (language === "ko" ? "나" : "You") : "AI"}
-                    </span>
-                    <p>{message.text}</p>
-                  </div>
-                ))
-              )}
-              <div ref={chatBottomRef} />
-            </div>
-
-            <div className="rsb-chat__input-area">
-              <textarea
-                className="sidebar-chat-input rsb-chat__textarea"
-                value={chatInput}
-                onChange={(event) => setChatInput(event.target.value)}
-                onKeyDown={handleChatKeyDown}
-                placeholder={language === "ko" ? "메시지 입력... (Enter 전송)" : "Type a message... (Enter to send)"}
-                disabled={busy}
-                rows={3}
-              />
-              <button
-                className="sidebar-chat-send rsb-chat__send-btn"
-                onClick={handleSendChat}
-                type="button"
-                disabled={busy || !chatInput.trim()}
-                title={language === "ko" ? "전송" : "Send"}
-              >
-                <SendIcon />
-              </button>
-            </div>
-          </div>
+          <ProjectChatPane
+            chat={chat}
+            selectedChatSessionId={selectedChatSessionId}
+            chatDraftSession={chatDraftSession}
+            onSelectChatSession={onSelectChatSession}
+            onStartNewChatSession={onStartNewChatSession}
+            onSendChatMessage={onSendChatMessage}
+            busy={busy}
+            language={language}
+          />
         ) : null}
 
         {activeTab === "output" ? (
@@ -298,7 +528,7 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
             ) : (
               <div className="details-output-empty">
                 <RailTerminalIcon />
-                <span>{language === "ko" ? "아직 출력이 없습니다." : "No output yet."}</span>
+                <span>{language === "ko" ? "No output yet." : "No output yet."}</span>
               </div>
             )}
           </div>
@@ -307,14 +537,14 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
         {activeTab === "files" ? (
           <div className="rsb-files">
             <div className="rsb-files__section-label">
-              {language === "ko" ? "문서 생성" : "Document Generation"}
+              {language === "ko" ? "Document Generation" : "Document Generation"}
             </div>
 
             <div className="rsb-files__generation">
               <OutputCard
                 icon={<WordDocIcon />}
                 title="Word Report"
-                description={language === "ko" ? "실행 결과를 Word(.docx) 보고서로 저장합니다." : "Save execution results as a Word (.docx) report."}
+                description={language === "ko" ? "Save execution results as a Word (.docx) report." : "Save execution results as a Word (.docx) report."}
                 enabled={Boolean(onChangeForm)}
                 checked={Boolean(form?.runtime?.generate_word_report)}
                 onChange={(event) =>
@@ -330,7 +560,7 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
               <OutputCard
                 icon={<PptDocIcon />}
                 title="PowerPoint"
-                description={language === "ko" ? "결과 슬라이드를 PowerPoint로 자동 생성합니다." : "Auto-generate result slides as a PowerPoint presentation."}
+                description={language === "ko" ? "Auto-generate result slides as a PowerPoint presentation." : "Auto-generate result slides as a PowerPoint presentation."}
                 enabled={false}
                 checked={false}
                 onChange={() => {}}
@@ -340,8 +570,8 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
               />
               <OutputCard
                 icon={<WebDocIcon />}
-                title={language === "ko" ? "웹사이트" : "Website"}
-                description={language === "ko" ? "결과를 정적 HTML 사이트로 내보냅니다." : "Export results as a static HTML website."}
+                title={language === "ko" ? "Website" : "Website"}
+                description={language === "ko" ? "Export results as a static HTML website." : "Export results as a static HTML website."}
                 enabled={false}
                 checked={false}
                 onChange={() => {}}
@@ -352,11 +582,11 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
             </div>
 
             <div className="rsb-files__section-label">
-              {language === "ko" ? "보고서 및 출력물" : "Reports & Outputs"}
+              {language === "ko" ? "Reports & Outputs" : "Reports & Outputs"}
             </div>
 
             <ReportFileCard
-              title={language === "ko" ? "클로즈아웃 보고서" : "Closeout Report"}
+              title={language === "ko" ? "Closeout Report" : "Closeout Report"}
               kind="Markdown"
               icon={<MarkdownDocIcon />}
               path={closeoutPath}
@@ -408,7 +638,7 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
             {detail?.reports?.latest_failure?.artifact_files?.length ? (
               <>
                 <div className="rsb-files__section-label" style={{ marginTop: "12px" }}>
-                  {language === "ko" ? "실패 산출물" : "Failure Artifacts"}
+                  {language === "ko" ? "Failure Artifacts" : "Failure Artifacts"}
                 </div>
                 {(detail.reports.latest_failure.artifact_files || []).slice(0, 6).map((path) => (
                   <div key={path} className="rsb-artifact-row">
@@ -417,7 +647,7 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
                       className="rsb-file-card__open-btn"
                       onClick={() => handleOpenFile(path)}
                       type="button"
-                      title={language === "ko" ? "열기" : "Open"}
+                      title={language === "ko" ? "Open" : "Open"}
                     >
                       <OpenFolderIcon />
                     </button>
@@ -456,7 +686,7 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
                 </div>
                 <div>
                   <dt>Revision</dt>
-                  <dd>{detail?.project?.current_safe_revision || "—"}</dd>
+                  <dd>{detail?.project?.current_safe_revision || "-"}</dd>
                 </div>
               </dl>
             </section>
@@ -465,7 +695,7 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
               <div className="details-card__header">
                 <strong>Step</strong>
                 <span className={`status-badge status-badge--${statusTone(selectedStepStatus)}`}>
-                  {selectedStep ? displayStatus(selectedStepStatus, language) : "—"}
+                  {selectedStep ? displayStatus(selectedStepStatus, language) : "-"}
                 </span>
               </div>
               {selectedStep ? (
@@ -486,7 +716,7 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
                 </div>
               ) : (
                 <div className="details-text" style={{ color: "var(--text-dim)", fontSize: "11px" }}>
-                  {language === "ko" ? "단계를 선택하면 여기에 표시됩니다." : "Select a step to inspect."}
+                  {language === "ko" ? "Select a block to inspect." : "Select a block to inspect."}
                 </div>
               )}
             </section>
@@ -502,9 +732,11 @@ export function RightSidebarPane({ detail, planDraft, selectedStepId, modelPrese
                 <div className="details-text">
                   <strong>{pendingCheckpoint.checkpoint_id}</strong>
                   {pendingCheckpoint.title ? <p style={{ margin: "4px 0" }}>{pendingCheckpoint.title}</p> : null}
-                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
-                    Block {pendingCheckpoint.target_block}
-                  </p>
+                  {pendingCheckpoint.target_block ? (
+                    <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                      Block {pendingCheckpoint.target_block}
+                    </p>
+                  ) : null}
                   {pendingCheckpoint.deadline_at ? (
                     <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
                       Deadline: {pendingCheckpoint.deadline_at}

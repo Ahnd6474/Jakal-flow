@@ -161,13 +161,17 @@ function ProjectSelector({ projects, selectedProjectId, onSelectProject = () => 
         type="button"
         title={selectedProjectName}
       >
-        <FolderIcon />
-        <span className="project-selector__btn-copy">
-          <span className="project-selector__btn-label">{selectProjectLabel}</span>
-          <strong className="project-selector__btn-name">{selectedProjectName}</strong>
+        <span className="project-selector__btn-main">
+          <FolderIcon />
+          <span className="project-selector__btn-copy">
+            <span className="project-selector__btn-label">{selectProjectLabel}</span>
+            <strong className="project-selector__btn-name">{selectedProjectName}</strong>
+          </span>
         </span>
-        <span className={`chip-dot chip-dot--${selectedTone}`} />
-        {open ? <ChevronDown /> : <ChevronRight />}
+        <span className="project-selector__btn-trailing">
+          <span className={`chip-dot chip-dot--${selectedTone}`} />
+          {open ? <ChevronDown /> : <ChevronRight />}
+        </span>
       </button>
 
       {open ? (

@@ -158,12 +158,14 @@ pre {
   background: var(--toolbar-surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .ide-toolbar__group {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .ide-toolbar__group--grow {
@@ -1795,12 +1797,13 @@ pre {
 /* ── Project selector (toolbar) ── */
 .project-selector {
   position: relative;
-  flex-shrink: 0;
+  flex: 0 1 320px;
+  min-width: 0;
 }
 
 .project-selector--primary {
-  min-width: 240px;
-  max-width: 340px;
+  min-width: 220px;
+  max-width: 320px;
 }
 
 .project-selector__btn {
@@ -1818,6 +1821,8 @@ pre {
   white-space: nowrap;
   max-width: 180px;
   overflow: hidden;
+  min-width: 0;
+  text-align: left;
 }
 
 .project-selector__btn--primary {
@@ -1830,6 +1835,23 @@ pre {
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-panel-alt));
   border-color: rgba(95, 151, 214, 0.28);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.project-selector__btn-main,
+.project-selector__btn-trailing {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.project-selector__btn-main {
+  gap: 8px;
+  flex: 1;
+}
+
+.project-selector__btn-trailing {
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .project-selector__btn:hover {
@@ -1879,6 +1901,7 @@ pre {
   width: 12px;
   height: 12px;
   color: var(--text-dim);
+  flex-shrink: 0;
 }
 
 .project-selector__dropdown {
@@ -1886,8 +1909,9 @@ pre {
   top: calc(100% + 4px);
   left: 0;
   z-index: 200;
-  min-width: 200px;
-  max-width: 280px;
+  width: 100%;
+  min-width: 220px;
+  max-width: 320px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 6px;

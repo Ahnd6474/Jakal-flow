@@ -3,7 +3,6 @@ import {
   blankProjectForm,
   cloneValue,
   detailApplySignature,
-  firstSelectableStepId,
   mergeProjectDetailCodexStatus,
   projectFormFromDetail,
   sanitizeProjectDetailForJobState,
@@ -391,7 +390,6 @@ export function applyProjectDetailState({
   );
   const sameProject = sameProjectDetail(normalizedDetail, state.projectDetail);
   refs.lastAppliedDetailSignatureRef.current = applySignature;
-  const selectableStepId = firstSelectableStepId(normalizedDetail.plan);
   setters.transition(() => {
     setters.setProjectDetail(normalizedDetail);
     setters.setModelCatalog(normalizedDetail?.codex_status?.model_catalog || state.modelCatalog);
@@ -414,10 +412,7 @@ export function applyProjectDetailState({
         if (currentStep && currentStep.status !== "completed") {
           return currentStepId;
         }
-        if (sameProject && !currentStepId) {
-          return "";
-        }
-        return selectableStepId;
+        return "";
       });
       setters.setPlanDirty(false);
     }

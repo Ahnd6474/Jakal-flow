@@ -32,7 +32,6 @@ import {
   buildRunPlanPayloadFromDetail,
   cloneValue,
   commandLabel,
-  firstSelectableStepId,
   inheritProjectIdentityForm,
   isDuplicateProjectJobError,
   jobHasNewerActiveReplacement,
@@ -191,7 +190,7 @@ export function useDesktopController() {
   }, [centerTab, setCenterTab]);
 
   useEffect(() => {
-    if (["github", "projects", "history"].includes(sidebarTab)) {
+    if (["github", "projects", "history", "chat"].includes(sidebarTab)) {
       setSidebarTab("workspace");
     }
   }, [sidebarTab, setSidebarTab]);
@@ -1092,7 +1091,7 @@ export function useDesktopController() {
         setPlanDraft(cloneValue(planDraft));
       } else {
         setPlanDraft(cloneValue(detail.plan));
-        setSelectedStepId(firstSelectableStepId(detail.plan));
+        setSelectedStepId("");
       }
       setPlanDirty(preserveLocalPlan);
       await refreshProjects();
@@ -1350,7 +1349,7 @@ export function useDesktopController() {
       setModelCatalog(detail?.codex_status?.model_catalog || []);
       setShareSettings(shareSettingsFromDetail(detail));
       setPlanDraft(cloneValue(detail.plan));
-      setSelectedStepId(firstSelectableStepId(detail.plan));
+      setSelectedStepId("");
       setPlanDirty(false);
       await refreshProjects();
       setMessage(messagePayload("success", translate(language, "message.planSaved")));
