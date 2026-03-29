@@ -529,19 +529,6 @@ export function SidebarPane({
     return nextTree;
   }, [deferredWorkspaceFilter, normalizedWorkspaceTree, workspaceTabActive]);
 
-  const visibleProjects = useMemo(() => {
-    const query = deferredProjectFilter.trim().toLowerCase();
-    if (!query) {
-      return projects;
-    }
-    return (projects || []).filter((project) =>
-      [project.display_name, project.slug, project.status, project.detail, project.repo_path]
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [deferredProjectFilter, projects]);
-
   const visibleHistoryProjects = useMemo(() => {
     const query = deferredProjectFilter.trim().toLowerCase();
     if (!query) {
@@ -556,7 +543,6 @@ export function SidebarPane({
   }, [deferredProjectFilter, historyProjects]);
 
   const tabs = [
-    ["projects", <SidebarProjectsIcon key="projects-icon" />, t("common.project")],
     ["workspace", <SidebarExplorerIcon key="workspace-icon" />, t("sidebar.explorer")],
     ["plans", <SidebarCheckpointsIcon key="plans-icon" />, t("sidebar.checkpoints")],
     ["reservations", <SidebarReservationIcon key="reservations-icon" />, language === "ko" ? "예약" : "Queue"],
@@ -568,66 +554,6 @@ export function SidebarPane({
 
       {activeTab ? (
         <div className="sidebar-panel">
-
-          {activeTab === "projects" ? (
-            <>
-              <div className="sidebar-panel__header">
-                <strong>{t("common.project")}</strong>
-              </div>
-
-              {planPrompt ? (
-                <div className="sidebar-prompt-card">
-                  <span className="sidebar-prompt-card__label">
-                    {language === "ko" ? "프롬프트" : "Prompt"}
-                  </span>
-                  <p className="sidebar-prompt-card__text">
-                    {planPrompt.length > 120 ? `${planPrompt.slice(0, 120)}\u2026` : planPrompt}
-                  </p>
-                </div>
-              ) : null}
-
-              <SearchInput
-                value={projectFilter}
-                onChange={onProjectFilterChange}
-                placeholder={t("sidebar.searchProjects")}
-              />
-
-              <button className="sidebar-add-btn" onClick={onNewProject} type="button">
-                <PlusIcon />
-                <span>{t("action.new")}</span>
-              </button>
-
-              <div className="sidebar-list">
-                {visibleProjects.length ? (
-                  visibleProjects.map((project) => {
-                    const tone = statusTone(project?.status);
-                    return (
-                      <button
-                        key={project.repo_id || project.display_name}
-                        className={`sidebar-project sidebar-project--${tone} ${project.repo_id === selectedProjectId ? "selected" : ""} ${project.repo_id === loadingProjectId ? "loading" : ""}`.trim()}
-                        onClick={() => onSelectProject(project.repo_id)}
-                        type="button"
-                      >
-                        <div className="sidebar-project__fill" />
-                        <div className="sidebar-project__title">
-                          <strong>{project.display_name || project.slug || t("common.unknown")}</strong>
-                          <span className={`status-badge status-badge--${tone} sidebar-project__status`}>
-                            {displayStatus(project.status, language)}
-                          </span>
-                        </div>
-                        {project.detail ? <span className="sidebar-project__detail" title={project.detail}>{project.detail}</span> : null}
-                      </button>
-                    );
-                  })
-                ) : (
-                  <div className="empty-block">
-                    <EmptyProjectsIcon />
-                    <span>{t("sidebar.emptyProjects")}</span>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : null}
 
           {activeTab === "history" ? (
             <>

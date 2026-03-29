@@ -110,7 +110,7 @@ export function useDesktopController() {
 
   const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "run");
   const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
-  const [sidebarTab, setSidebarTab] = usePersistentState("jakal-flow:sidebar-tab", "projects");
+  const [sidebarTab, setSidebarTab] = usePersistentState("jakal-flow:sidebar-tab-v2", "workspace");
   const [bottomCollapsed, setBottomCollapsed] = usePersistentState("jakal-flow:bottom-collapsed", false);
   const [bottomHeight, setBottomHeight] = usePersistentState("jakal-flow:bottom-height", 250);
   const [rightCollapsed, setRightCollapsed] = usePersistentState("jakal-flow:right-panel-v2", false);
