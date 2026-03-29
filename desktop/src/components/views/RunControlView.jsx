@@ -13,7 +13,7 @@ import {
   KIMI_DEFAULT_MODEL,
   MINIMAX_DEFAULT_MODEL,
   planStepsWithCloseout,
-  providerAvailable,
+  providerUsable,
   providerStatusReason,
   projectStatusWithJob,
   QWEN_CODE_DEFAULT_MODEL,
@@ -383,17 +383,17 @@ export function RunControlView({
                   <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStep}>
                     <option value="">{autoProviderLabel(language)}</option>
                     {providerOptions.map(([value, label]) => (
-                      <option
-                        key={value}
-                        value={value}
-                        disabled={!providerAvailable(value, codexStatus)}
+                        <option
+                          key={value}
+                          value={value}
+                        disabled={!providerUsable(value, codexStatus)}
                         title={providerStatusReason(value, codexStatus)}
                       >
                         {label}
                       </option>
                     ))}
                   </select>
-                  {selectedStep.model_provider && !providerAvailable(selectedStep.model_provider, codexStatus) && providerStatusReason(selectedStep.model_provider, codexStatus) ? (
+                  {selectedStep.model_provider && !providerUsable(selectedStep.model_provider, codexStatus) && providerStatusReason(selectedStep.model_provider, codexStatus) ? (
                     <small className="muted">{providerStatusReason(selectedStep.model_provider, codexStatus)}</small>
                   ) : null}
                 </label>

@@ -36,10 +36,10 @@ class ProviderPreset:
 PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     "ensemble": ProviderPreset(
         provider="ensemble",
-        display_name="GPT + Gemini + Claude Ensemble",
+        display_name="Claude + GPT Ensemble",
         description=(
-            "Use Codex CLI as the primary planner and general executor while allowing per-step routing "
-            "to Claude Code or Gemini CLI when the plan pins those backends."
+            "Use Codex CLI (GPT) as the primary planner and general executor while routing "
+            "specific steps to Claude Code when the plan pins that backend."
         ),
         default_api_key_env="OPENAI_API_KEY",
         default_billing_mode=BILLING_MODE_INCLUDED,

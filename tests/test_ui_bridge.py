@@ -32,6 +32,7 @@ from jakal_flow.step_models import (
     KIMI_DEFAULT_MODEL,
     MINIMAX_DEFAULT_MODEL,
     QWEN_CODE_DEFAULT_MODEL,
+    provider_execution_preflight_error,
     provider_statuses_payload,
 )
 from jakal_flow.utils import read_jsonl
@@ -561,6 +562,86 @@ class UIBridgeTests(unittest.TestCase):
         self.assertTrue(statuses["claude"]["usable"])
         self.assertTrue(statuses["deepseek"]["available"])
         self.assertTrue(statuses["ensemble"]["available"])
+
+    def test_provider_statuses_payload_marks_openai_unusable_when_quota_is_exhausted(self) -> None:
+        fake_snapshot = mock.Mock(
+            to_dict=mock.Mock(
+                return_value={
+                    "available": True,
+                    "account": {"authenticated": True},
+                    "rate_limits": {
+                        "default_limit_id": "codex",
+                        "items": [
+                            {
+                                "limit_id": "codex",
+                                "primary": {
+                                    "remaining_percent": 0,
+                                    "used_percent": 100,
+                                    "resets_at": "2026-03-30T00:00:00+00:00",
+                                },
+                            }
+                        ],
+                    },
+                    "error": "",
+                }
+            )
+        )
+        with mock.patch(
+            "jakal_flow.step_models._command_available",
+            side_effect=lambda command: str(command).strip().lower() == "codex.cmd",
+        ), mock.patch(
+            "jakal_flow.step_models._openai_auth_env_configured",
+            return_value=False,
+        ), mock.patch(
+            "jakal_flow.step_models._claude_auth_env_configured",
+            return_value=False,
+        ), mock.patch(
+            "jakal_flow.step_models._gemini_auth_env_configured",
+            return_value=False,
+        ), mock.patch(
+            "jakal_flow.step_models._gemini_settings_file_configured",
+            return_value=False,
+        ), mock.patch(
+            "jakal_flow.step_models.discover_local_model_catalog",
+            return_value=[],
+        ):
+            statuses = provider_statuses_payload(fetch_snapshot=lambda _command: fake_snapshot)
+
+        self.assertTrue(statuses["openai"]["available"])
+        self.assertFalse(statuses["openai"]["usable"])
+        self.assertEqual(statuses["openai"]["quota_available"], False)
+        self.assertIn("quota window is exhausted", statuses["openai"]["reason"].lower())
+
+    def test_provider_execution_preflight_error_blocks_openai_when_quota_is_exhausted(self) -> None:
+        fake_snapshot = mock.Mock(
+            to_dict=mock.Mock(
+                return_value={
+                    "available": True,
+                    "account": {"authenticated": True},
+                    "rate_limits": {
+                        "default_limit_id": "codex",
+                        "items": [
+                            {
+                                "limit_id": "codex",
+                                "primary": {
+                                    "remaining_percent": 0,
+                                    "used_percent": 100,
+                                    "resets_at": "2026-03-30T00:00:00+00:00",
+                                },
+                            }
+                        ],
+                    },
+                    "error": "",
+                }
+            )
+        )
+        with mock.patch("jakal_flow.step_models._command_available", return_value=True), mock.patch(
+            "jakal_flow.step_models.fetch_codex_backend_snapshot",
+            return_value=fake_snapshot,
+        ):
+            error = provider_execution_preflight_error("openai", codex_path="codex.cmd")
+
+        self.assertIn("quota window is exhausted", error.lower())
 
     def test_bootstrap_payload_includes_provider_statuses(self) -> None:
         with TemporaryTestDir() as temp_dir, mock.patch(

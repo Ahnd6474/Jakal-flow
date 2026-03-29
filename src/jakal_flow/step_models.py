@@ -199,6 +199,15 @@ def provider_execution_preflight_error(
     provider_api_key_env: str = "",
 ) -> str:
     normalized_provider = normalize_step_model_provider(provider)
+    if normalized_provider == "openai":
+        resolved_codex_path = str(codex_path or default_codex_path("openai")).strip() or default_codex_path("openai")
+        if not _command_available(resolved_codex_path):
+            return ""
+        snapshot = _snapshot_to_dict(fetch_codex_backend_snapshot(resolved_codex_path))
+        quota_available, quota_reason = _openai_quota_status(snapshot)
+        if quota_available is False:
+            return quota_reason or "Codex CLI is authenticated but no OpenAI quota is currently available."
+        return ""
     if normalized_provider != "gemini":
         return ""
     resolved_codex_path = str(codex_path or default_codex_path("gemini")).strip() or default_codex_path("gemini")
@@ -207,6 +216,71 @@ def provider_execution_preflight_error(
     if _gemini_runtime_auth_configured(repo_dir=repo_dir, provider_api_key_env=provider_api_key_env):
         return ""
     return _gemini_auth_error_message()
+
+
+def _openai_quota_status(snapshot: dict[str, Any]) -> tuple[bool | None, str]:
+    default_item = _openai_default_rate_limit_item(snapshot)
+    if not default_item:
+        return None, ""
+    primary_window = default_item.get("primary")
+    primary_status = _quota_window_status(primary_window, "current Codex quota window")
+    if primary_status is not None:
+        return primary_status
+    secondary_window = default_item.get("secondary")
+    secondary_status = _quota_window_status(secondary_window, "extended Codex quota window")
+    if secondary_status is not None:
+        return secondary_status
+    credits = default_item.get("credits")
+    if isinstance(credits, dict):
+        if bool(credits.get("unlimited")) or bool(credits.get("has_credits")):
+            return True, ""
+        balance = str(credits.get("balance", "")).strip()
+        if balance:
+            return False, f"Codex CLI is authenticated but no OpenAI credits are available (balance: {balance})."
+        return False, "Codex CLI is authenticated but no OpenAI credits are available."
+    return None, ""
+
+
+def _openai_default_rate_limit_item(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    rate_limits = snapshot.get("rate_limits")
+    if not isinstance(rate_limits, dict):
+        return None
+    raw_items = rate_limits.get("items")
+    if not isinstance(raw_items, list):
+        return None
+    items = [item for item in raw_items if isinstance(item, dict)]
+    if not items:
+        return None
+    default_limit_id = str(rate_limits.get("default_limit_id", "")).strip().lower()
+    if default_limit_id:
+        for item in items:
+            if str(item.get("limit_id", "")).strip().lower() == default_limit_id:
+                return item
+    for item in items:
+        haystack = f"{item.get('limit_id', '')} {item.get('limit_name', '')}".strip().lower()
+        if "codex" in haystack:
+            return item
+    return items[0]
+
+
+def _quota_window_status(window: Any, label: str) -> tuple[bool, str] | None:
+    if not isinstance(window, dict):
+        return None
+    remaining = _coerce_nonnegative_int(window.get("remaining_percent"))
+    if remaining > 0:
+        return True, ""
+    reset_at = str(window.get("resets_at", "")).strip()
+    if reset_at:
+        return False, f"Codex CLI is authenticated but the {label} is exhausted. Resets at {reset_at}."
+    return False, f"Codex CLI is authenticated but the {label} is exhausted."
+
+
+def _coerce_nonnegative_int(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
 
 
 def _general_provider_choice(runtime: RuntimeOptions) -> tuple[str, str]:
@@ -307,12 +381,17 @@ def _provider_status_from_snapshot(provider: str, snapshot: dict[str, Any]) -> d
     account = snapshot.get("account", {}) if isinstance(snapshot.get("account", {}), dict) else {}
     available = _command_available(default_codex_path(provider))
     default_model = _provider_default_model(provider)
+    quota_available: bool | None = None
+    quota_reason = ""
 
     if provider == "openai":
         configured = _openai_auth_env_configured() or bool(account.get("authenticated"))
-        usable = available and configured
+        quota_available, quota_reason = _openai_quota_status(snapshot)
+        usable = available and configured and quota_available is not False
         if usable:
             reason = "Codex CLI is available for planning and general execution."
+        elif available and configured and quota_available is False:
+            reason = quota_reason or "Codex CLI is authenticated but no OpenAI quota is currently available."
         elif available:
             reason = "Codex CLI is installed but OpenAI authentication is not configured."
         else:
@@ -380,6 +459,8 @@ def _provider_status_from_snapshot(provider: str, snapshot: dict[str, Any]) -> d
         "available": available,
         "configured": configured,
         "usable": usable,
+        "quota_available": quota_available,
+        "quota_reason": quota_reason,
         "default_model": default_model,
         "codex_path": default_codex_path(provider),
         "reason": str(reason or "").strip(),

@@ -46,6 +46,7 @@ import {
   progressCaption,
   programSettingsFromRuntime,
   providerAvailable,
+  providerUsable,
   providerStatusReason,
   providerSupportsCatalog,
   projectJobFromJobs,
@@ -462,6 +463,8 @@ test("provider availability helpers read provider statuses from codex payloads",
 
   assert.equal(providerAvailable("claude", codexStatus), false);
   assert.equal(providerAvailable("gemini", codexStatus), true);
+  assert.equal(providerUsable("claude", codexStatus), false);
+  assert.equal(providerUsable("gemini", codexStatus), true);
   assert.equal(providerStatusReason("claude", codexStatus), "Claude Code is not installed.");
 });
 

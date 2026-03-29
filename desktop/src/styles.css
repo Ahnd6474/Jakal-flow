@@ -2913,3 +2913,162 @@ select:focus {
   color: var(--text-dim);
   font-size: 12px;
 }
+
+/* ── Provider category selector ────────────────────────────── */
+
+.provider-category-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.provider-cat-tab {
+  flex: 1;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+  white-space: nowrap;
+}
+
+.provider-cat-tab:hover:not(:disabled) {
+  background: var(--bg-panel-hover);
+  color: var(--text);
+}
+
+.provider-cat-tab.active {
+  background: var(--bg-active);
+  color: var(--text);
+  border: 1px solid var(--bg-accent-strong);
+}
+
+.provider-cat-tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.provider-sub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 6px;
+}
+
+.provider-sub-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.provider-sub-card:hover:not(:disabled) {
+  background: var(--bg-panel-hover);
+  color: var(--text);
+}
+
+.provider-sub-card.active {
+  border-color: var(--bg-accent-strong);
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.provider-sub-card:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.provider-sub-card__name {
+  font-weight: 600;
+}
+
+.provider-sub-card__badge {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.provider-ensemble-info {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+
+.provider-ensemble-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.provider-ensemble-badge span:not(.provider-ensemble-plus) {
+  padding: 3px 10px;
+  border-radius: 6px;
+}
+
+.provider-ensemble-badge span:first-child {
+  background: rgba(103, 168, 255, 0.15);
+  color: #7ab8ff;
+}
+
+.provider-ensemble-badge span:last-child {
+  background: rgba(134, 241, 198, 0.12);
+  color: var(--info);
+}
+
+.provider-ensemble-plus {
+  color: var(--text-dim);
+  font-size: 16px;
+  font-weight: 300;
+}
+
+/* ── Ensemble label row in ConfigEditor ─────────────────────── */
+
+.ensemble-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.ensemble-pill {
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ensemble-pill--gpt {
+  background: rgba(103, 168, 255, 0.15);
+  color: #7ab8ff;
+}
+
+.ensemble-pill--claude {
+  background: rgba(134, 241, 198, 0.12);
+  color: var(--info);
+}
+
+.ensemble-plus {
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 300;
+}

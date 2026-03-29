@@ -11,6 +11,7 @@ import {
   normalizeMemoryBudgetGiB,
   normalizedModelProvider,
   providerAvailable,
+  providerUsable,
   providerStatusReason,
   providerSupportsAutoModel,
   providerSupportsCatalog,
@@ -198,11 +199,6 @@ export function ConfigEditorView({
     runtime.effort || "medium",
   );
 
-  const ensembleGeminiRuntime = { ...runtime, model_provider: "gemini", model: runtime.ensemble_gemini_model || "" };
-  const ensembleGeminiCatalog = filterModelCatalogByProvider(modelCatalog, ensembleGeminiRuntime);
-  const ensembleGeminiModel = runtime.ensemble_gemini_model || defaultModelForRuntime(modelCatalog, ensembleGeminiRuntime) || "";
-  const ensembleGeminiEntry = findModelCatalogEntry(ensembleGeminiCatalog, ensembleGeminiModel);
-
   const ensembleClaudeRuntime = { ...runtime, model_provider: "claude", model: runtime.ensemble_claude_model || "" };
   const ensembleClaudeCatalog = filterModelCatalogByProvider(modelCatalog, ensembleClaudeRuntime);
   const ensembleClaudeModel = runtime.ensemble_claude_model || defaultModelForRuntime(modelCatalog, ensembleClaudeRuntime) || "";
@@ -237,7 +233,7 @@ export function ConfigEditorView({
     }
   }
 
-  const providerUnavailable = !providerAvailable(selectedProvider, codexStatus);
+  const providerUnavailable = !providerUsable(selectedProvider, codexStatus);
   const providerReason = providerStatusReason(selectedProvider, codexStatus);
 
   return (
@@ -654,23 +650,28 @@ export function ConfigEditorView({
             {/* Ensemble sub-models */}
             {selectedProvider === "ensemble" ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "8px", borderTop: "1px solid var(--border)", paddingTop: "10px" }}>
+                <div className="ensemble-label-row">
+                  <span className="ensemble-pill ensemble-pill--gpt">GPT</span>
+                  <span className="ensemble-plus">+</span>
+                  <span className="ensemble-pill ensemble-pill--claude">Claude</span>
+                </div>
                 <label className="field">
-                  <span>{language === "ko" ? "Gemini 모델" : "Gemini Model"}</span>
+                  <span>{language === "ko" ? "GPT 모델 (계획 · 실행)" : "GPT Model (planning · execution)"}</span>
                   <select
-                    value={ensembleGeminiModel}
-                    onChange={(event) => applyRuntimePatch({ ensemble_gemini_model: event.target.value })}
+                    value={planningModel}
+                    onChange={(event) => applyRuntimePatch({ ensemble_openai_model: event.target.value })}
                     disabled={busy}
                   >
-                    {ensembleGeminiCatalog.map((item) => (
+                    {planningCatalog.map((item) => (
                       <option key={item.model} value={item.model}>{item.display_name || item.model}</option>
                     ))}
                   </select>
-                  {modelReasoningSummary(ensembleGeminiEntry, language) ? (
-                    <small className="field-hint">{modelReasoningSummary(ensembleGeminiEntry, language)}</small>
+                  {modelReasoningSummary(planningEntry, language) ? (
+                    <small className="field-hint">{modelReasoningSummary(planningEntry, language)}</small>
                   ) : null}
                 </label>
                 <label className="field">
-                  <span>{language === "ko" ? "Claude 모델" : "Claude Model"}</span>
+                  <span>{language === "ko" ? "Claude 모델 (특정 단계)" : "Claude Model (specific steps)"}</span>
                   <select
                     value={ensembleClaudeModel}
                     onChange={(event) => applyRuntimePatch({ ensemble_claude_model: event.target.value })}

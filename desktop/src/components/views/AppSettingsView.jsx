@@ -7,6 +7,7 @@ import {
   normalizeMemoryBudgetGiB,
   normalizeDashboardVisibility,
   providerAvailable,
+  providerUsable,
   providerStatusReason,
   programSettingsAllowsModelSlugInput,
   REASONING_OPTIONS,
@@ -124,21 +125,59 @@ export function AppSettingsView({
   const autoParallelWorkers = String(settings?.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
   const comingSoonLabel = language === "ko" ? "추가 예정" : "Coming soon";
 
-  const providerOptions = [
-    { value: "openai", label: "GPT Codex only", enabled: true },
-    { value: "ensemble", label: t("option.providerEnsemble"), enabled: false },
-    { value: "claude", label: "Claude Code", enabled: false },
-    { value: "gemini", label: "Gemini CLI", enabled: false },
-    { value: "qwen_code", label: "Qwen Code", enabled: false },
-    { value: "deepseek", label: "DeepSeek via Claude Code", enabled: false },
-    { value: "kimi", label: "Kimi", enabled: false },
-    { value: "minimax", label: "MiniMax via Claude Code", enabled: false },
-    { value: "glm", label: "GLM via Claude Code", enabled: false },
-    { value: "openrouter", label: t("option.providerOpenRouter"), enabled: false },
-    { value: "opencdk", label: t("option.providerOpenCDK"), enabled: false },
-    { value: "local_openai", label: t("option.providerLocalCompatible"), enabled: false },
-    { value: "oss", label: t("option.providerOSS"), enabled: false },
+  const PROVIDER_CATEGORIES = [
+    {
+      key: "closed",
+      label_ko: "클로즈드",
+      label_en: "Closed",
+      providers: [
+        { value: "openai",  label: "OpenAI" },
+        { value: "claude",  label: "Claude" },
+        { value: "gemini",  label: "Gemini" },
+      ],
+    },
+    {
+      key: "opensource",
+      label_ko: "오픈소스",
+      label_en: "OpenSource",
+      providers: [
+        { value: "qwen_code",   label: "Qwen Code" },
+        { value: "deepseek",    label: "DeepSeek" },
+        { value: "kimi",        label: "Kimi" },
+        { value: "minimax",     label: "MiniMax" },
+        { value: "glm",         label: "GLM" },
+        { value: "openrouter",  label: "OpenRouter" },
+        { value: "opencdk",     label: "OpenCDK" },
+      ],
+    },
+    {
+      key: "oss",
+      label_ko: "OSS",
+      label_en: "OSS",
+      providers: [
+        { value: "local_openai", label: "Local OpenAI" },
+        { value: "oss",          label: "Ollama / OSS" },
+      ],
+    },
+    {
+      key: "ensemble",
+      label_ko: "앙상블",
+      label_en: "Ensemble",
+      providers: [
+        { value: "ensemble", label: language === "ko" ? "Claude + GPT 앙상블" : "Claude + GPT Ensemble" },
+      ],
+    },
   ];
+
+  function categoryForProvider(provider) {
+    for (const cat of PROVIDER_CATEGORIES) {
+      if (cat.providers.some((p) => p.value === provider)) return cat.key;
+    }
+    return "closed";
+  }
+
+  const activeCategory = categoryForProvider(selectedProvider);
+  const activeCategoryConfig = PROVIDER_CATEGORIES.find((c) => c.key === activeCategory);
 
   const dashboardOptions = [
     ["status", t("common.status")],
@@ -158,7 +197,7 @@ export function AppSettingsView({
     ["word_report_card", t("reports.closeoutReport")],
   ];
 
-  const providerUnavailable = !providerAvailable(selectedProvider, codexStatus);
+  const providerUnavailable = !providerUsable(selectedProvider, codexStatus);
   const providerReason = providerStatusReason(selectedProvider, codexStatus);
 
   return (
@@ -276,42 +315,68 @@ export function AppSettingsView({
               description={language === "ko" ? "AI 모델, 병렬 실행, 체크포인트 설정" : "AI model provider, parallel execution and checkpoint settings"}
             />
 
-            <div className="info-callout" style={{ marginTop: "10px" }}>
-              <InfoIcon />
-              <span>{language === "ko" ? "프로그램 설정에서는 현재 GPT Codex only만 사용할 수 있습니다. 다른 제공자는 추가 예정입니다." : "Program Settings currently supports GPT Codex only. Other providers are listed as coming soon."}</span>
-            </div>
+            {/* Provider category selector */}
+            <div style={{ marginTop: "10px" }}>
+              <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block", marginBottom: "6px" }}>
+                {t("field.modelProvider")}
+              </span>
 
-            {/* Provider select */}
-            <div style={{ marginTop: "4px" }}>
-              <label className="field">
-                <span>{t("field.modelProvider")}</span>
-                <select
-                  value={settings.model_provider || "openai"}
-                  onChange={(event) =>
-                    onChangeSettings((current) => ({
-                      ...applyProviderDefaults(current, event.target.value),
-                    }))
-                  }
-                  disabled={runtimeBusy}
-                >
-                  {providerOptions.map(({ value, label, enabled }) => {
-                    const isInstalled = providerAvailable(value, codexStatus);
-                    const disabled = !enabled || !isInstalled;
-                    const reason = !enabled ? comingSoonLabel : providerStatusReason(value, codexStatus);
-                    const suffix = !enabled ? ` (${comingSoonLabel})` : !isInstalled ? " (unavailable)" : "";
+              {/* Category tabs */}
+              <div className="provider-category-tabs">
+                {PROVIDER_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.key}
+                    className={`provider-cat-tab ${activeCategory === cat.key ? "active" : ""}`}
+                    onClick={() => {
+                      const first = cat.providers[0].value;
+                      onChangeSettings((current) => applyProviderDefaults(current, first));
+                    }}
+                    type="button"
+                    disabled={runtimeBusy}
+                  >
+                    {language === "ko" ? cat.label_ko : cat.label_en}
+                  </button>
+                ))}
+              </div>
+
+              {/* Sub-provider buttons */}
+              {activeCategory !== "ensemble" ? (
+                <div className="provider-sub-grid" style={{ marginTop: "8px" }}>
+                  {activeCategoryConfig.providers.map(({ value, label }) => {
+                    const installed = providerAvailable(value, codexStatus);
                     return (
-                    <option
-                      key={value}
-                      value={value}
-                      disabled={disabled}
-                      title={reason}
-                    >
-                      {label}{suffix}
-                    </option>
+                      <button
+                        key={value}
+                        className={`provider-sub-card ${selectedProvider === value ? "active" : ""}`}
+                        onClick={() => onChangeSettings((current) => applyProviderDefaults(current, value))}
+                        type="button"
+                        disabled={runtimeBusy}
+                        title={!installed ? providerStatusReason(value, codexStatus) : undefined}
+                      >
+                        <span className="provider-sub-card__name">{label}</span>
+                        {!installed ? (
+                          <span className="provider-sub-card__badge">
+                            {language === "ko" ? "미설치" : "not installed"}
+                          </span>
+                        ) : null}
+                      </button>
                     );
                   })}
-                </select>
-              </label>
+                </div>
+              ) : (
+                <div className="provider-ensemble-info" style={{ marginTop: "8px" }}>
+                  <div className="provider-ensemble-badge">
+                    <span>GPT</span>
+                    <span className="provider-ensemble-plus">+</span>
+                    <span>Claude</span>
+                  </div>
+                  <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "6px 0 0" }}>
+                    {language === "ko"
+                      ? "GPT가 계획·실행을 맡고, Claude가 특정 단계를 처리합니다."
+                      : "GPT handles planning and execution. Claude handles specific steps."}
+                  </p>
+                </div>
+              )}
 
               {providerUnavailable && providerReason ? (
                 <div className="info-callout info-callout--warning" style={{ marginTop: "8px" }}>
