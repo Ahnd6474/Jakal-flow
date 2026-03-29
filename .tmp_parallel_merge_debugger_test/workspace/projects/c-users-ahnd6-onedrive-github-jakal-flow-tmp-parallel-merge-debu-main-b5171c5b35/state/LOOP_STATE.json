@@ -1,0 +1,20 @@
+{
+  "block_index": 0,
+  "counters": {
+    "empty_cycles": 0,
+    "no_progress_blocks": 0,
+    "regression_failures": 0
+  },
+  "current_checkpoint_id": null,
+  "current_safe_revision": "safe-revision",
+  "current_task": null,
+  "last_block_completed_at": null,
+  "last_candidates": [],
+  "last_commit_hash": null,
+  "pending_checkpoint_approval": false,
+  "plan_locked": true,
+  "repo_id": "b5171c5b35416a8a1526f7fa390e5b7103cdfcd3",
+  "repo_slug": "c-users-ahnd6-onedrive-github-jakal-flow-tmp-parallel-merge-debu-main-b5171c5b35",
+  "stop_reason": null,
+  "stop_requested": false
+}

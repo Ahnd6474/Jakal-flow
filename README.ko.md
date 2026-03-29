@@ -193,7 +193,9 @@ npm run tauri:dev
 | step 단위 reasoning effort | 예 |
 | step 단위 success criteria | 예 |
 | step 단위 verification command override | 예 |
-| owned-path 기반 병렬 안전성 | 예 |
+| guarded-overlap 경로 정책과 owned-path 호환성 | 예 |
+| contract-wave spine/common requirement 아티팩트 | 예 |
+| integration/review용 lineage manifest | 예 |
 | 실행 전 step 수동 편집 | 예 |
 | 데스크톱 백그라운드 폴링 | 예 |
 | 체크포인트 타임라인과 승인 상태 | 예 |
@@ -486,6 +488,7 @@ workspace_root/
 - `docs/ML_EXPERIMENT_REPORT.md`
 - `docs/ML_EXPERIMENT_RESULTS.svg`
 - `docs/RESEARCH_NOTES.md`
+- `docs/SHARED_CONTRACTS.md`
 - `docs/attempt_history.md`
 - `memory/success_patterns.jsonl`
 - `memory/failure_patterns.jsonl`
@@ -503,11 +506,14 @@ workspace_root/
 - `state/CHECKPOINTS.json`
 - `state/EXECUTION_PLAN.json`
 - `state/LINEAGES.json`
+- `state/SPINE.json`
+- `state/COMMON_REQUIREMENTS.json`
 - `state/ML_MODE_STATE.json`
 - `state/ML_STEP_REPORT.json`
 - `state/PROJECT_DETAIL_CACHE_CORE.json`
 - `state/PROJECT_DETAIL_CACHE_FULL.json`
 - `state/UI_RUN_CONTROL.json`
+- `state/lineage_manifests/*.json`
 - `state/ml_experiments/*.json`
 - `state/share_sessions.json`
 - `state/verification_cache/*.json`

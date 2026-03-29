@@ -10,7 +10,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from .commit_naming import build_commit_descriptor, build_initial_commit_descriptor
-from .contract_wave import current_spine_version, ensure_contract_wave_artifacts, normalize_execution_step_policy, policy_summary
+from .contract_wave import (
+    current_spine_version,
+    ensure_contract_wave_artifacts,
+    load_lineage_manifests,
+    manifest_summary_markdown,
+    normalize_execution_step_policy,
+    policy_summary,
+)
 from .environment import ensure_gitignore, ensure_virtualenv
 from . import execution_plan_support
 from .codex_runner import CodexRunner
@@ -1555,6 +1562,11 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                     raise RuntimeError("Integration context could not be created.")
                 integration_plan_state = self.save_execution_plan_state(integration_context, deepcopy(plan_state))
                 self._save_lineage_states(integration_context, lineages)
+                integration_manifests = []
+                for lineage in merge_lineages:
+                    integration_manifests.extend(load_lineage_manifests(context.paths, lineage_id=lineage.lineage_id))
+                if integration_manifests:
+                    write_text(integration_context.paths.block_review_file, manifest_summary_markdown(integration_manifests))
                 integration_runner = CodexRunner(integration_context.runtime.codex_path)
                 integration_reporter = Reporter(integration_context)
                 integration_memory_context = MemoryStore(integration_context.paths).render_context(read_text(integration_context.paths.mid_term_plan_file))
@@ -2346,7 +2358,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         reports_dir = worker_root / "reports"
         state_dir = worker_root / "state"
         lineage_manifests_dir = state_dir / "lineage_manifests"
-        for directory in [worker_root, docs_dir, memory_dir, logs_dir, reports_dir, state_dir]:
+        for directory in [worker_root, docs_dir, memory_dir, logs_dir, reports_dir, state_dir, lineage_manifests_dir]:
             ensure_dir(directory)
         self.workspace.migrate_logs_dir(legacy_logs_dir, logs_dir)
         return ProjectPaths(

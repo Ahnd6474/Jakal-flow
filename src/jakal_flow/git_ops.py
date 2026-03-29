@@ -163,6 +163,29 @@ class GitOps:
                 changed.append(parsed_path)
         return changed
 
+    def diff_name_status(self, repo_dir: Path, base_revision: str, head_revision: str) -> list[tuple[str, str]]:
+        base = str(base_revision or "").strip()
+        head = str(head_revision or "").strip()
+        if not base or not head:
+            return []
+        result = self.run(["diff", "--name-status", base, head], cwd=repo_dir, check=False)
+        if result.returncode != 0:
+            return []
+        entries: list[tuple[str, str]] = []
+        for line in result.stdout.splitlines():
+            raw = line.strip()
+            if not raw:
+                continue
+            parts = raw.split("\t")
+            if len(parts) < 2:
+                continue
+            status = parts[0].strip().upper()
+            path = parts[-1].strip()
+            if not path:
+                continue
+            entries.append((status, path))
+        return entries
+
     def _parse_status_path(self, line: str) -> str | None:
         if len(line) < 4:
             return None

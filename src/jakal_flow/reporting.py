@@ -5,6 +5,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 import zipfile
 
+from .contract_wave import load_lineage_manifest_payloads
 from .failure_logs import collect_failure_artifacts
 from .github_api import GitHubAPIError, GitHubClient, parse_github_repository_url
 from .models import ProjectContext, TestRunResult
@@ -95,6 +96,9 @@ class Reporter:
             "loop_state": self.context.loop_state.to_dict(),
             "recent_passes": passes,
             "recent_blocks": blocks,
+            "spine": read_json(self.context.paths.spine_file, default={}),
+            "common_requirements": read_json(self.context.paths.common_requirements_file, default={}),
+            "lineage_manifests": load_lineage_manifest_payloads(self.context.paths),
         }
         path = self.context.paths.reports_dir / "latest_report.json"
         write_json(path, report)

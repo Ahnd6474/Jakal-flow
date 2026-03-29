@@ -11,6 +11,8 @@ from uuid import uuid4
 
 from .commit_naming import build_commit_descriptor, build_initial_commit_descriptor
 from .contract_wave import (
+    DEFAULT_SPINE_VERSION,
+    PromotionAssessment,
     build_lineage_manifest,
     classify_completed_lineage_step,
     current_spine_version,
@@ -143,7 +145,7 @@ class OrchestratorLineageMixin:
         reports_dir = lineage_root / "reports"
         state_dir = lineage_root / "state"
         lineage_manifests_dir = state_dir / "lineage_manifests"
-        for directory in [lineage_root, docs_dir, memory_dir, logs_dir, reports_dir, state_dir]:
+        for directory in [lineage_root, docs_dir, memory_dir, logs_dir, reports_dir, state_dir, lineage_manifests_dir]:
             ensure_dir(directory)
         self.workspace.migrate_logs_dir(legacy_logs_dir, logs_dir)
         return ProjectPaths(
@@ -540,7 +542,10 @@ class OrchestratorLineageMixin:
         child_counts: dict[str, int],
         *,
         batch_size: int,
+        assessment: PromotionAssessment | None = None,
     ) -> bool:
+        if assessment is not None:
+            return bool(assessment.auto_promote_eligible)
         return batch_size == 1 and self._step_kind(step) == "task" and child_counts.get(step.step_id, 0) == 0
     def _promote_lineage_to_target_branch(
         self,
@@ -638,6 +643,7 @@ class OrchestratorLineageMixin:
 
         reporter = Reporter(context)
         worker_results: list[dict[str, object]] = []
+        batch_manifests = []
         final_status = "completed"
         batch_summary = ""
 
@@ -786,6 +792,12 @@ class OrchestratorLineageMixin:
                 if final_status == "paused":
                     continue
                 if str(worker_result.get("status") or "").strip() == "completed":
+                    normalize_execution_step_policy(
+                        step,
+                        step_kind=self._step_kind(step),
+                        current_spine_version=current_spine_version(context.paths),
+                    )
+                    previous_safe_revision = str(lineage.safe_revision or lineage.head_commit or "").strip()
                     head_commit = str(
                         worker_result.get("head_commit")
                         or worker_result.get("commit_hash")
@@ -799,8 +811,61 @@ class OrchestratorLineageMixin:
                     lineage.status = "active"
                     lineage.notes = str(worker_result.get("test_summary") or worker_result.get("notes") or "").strip()
 
+                    changed_files = sorted(set(str(item).strip() for item in worker_result.get("changed_files", []) if str(item).strip()))
+                    assessment = classify_completed_lineage_step(
+                        step,
+                        changed_files=changed_files,
+                        verification_passed=True,
+                        batch_size=len(ordered_targets),
+                        child_count=child_counts.get(step.step_id, 0),
+                        step_kind=self._step_kind(step),
+                    )
+                    worker_result["promotion_assessment"] = assessment.to_dict()
+                    step.promotion_class = assessment.promotion_class
+                    diff_entries: list[tuple[str, str]] = []
+                    if previous_safe_revision and head_commit and previous_safe_revision != head_commit and lineage.worktree_dir.exists():
+                        diff_entries = self.git.diff_name_status(lineage.worktree_dir, previous_safe_revision, head_commit)
+                    manifest = build_lineage_manifest(
+                        lineage_id=lineage.lineage_id,
+                        step=step,
+                        changed_files=changed_files,
+                        diff_entries=diff_entries,
+                        verification_command=step.test_command or context.runtime.test_cmd,
+                        verification_summary=str(worker_result.get("test_summary") or worker_result.get("notes") or "").strip(),
+                        verification_passed=True,
+                        assessment=assessment,
+                        commit_hash=head_commit or str(worker_result.get("commit_hash") or "").strip(),
+                    )
+                    _spine_state, _requirements_state, crr_record = update_contract_wave_artifacts_for_completion(
+                        context.paths,
+                        step=step,
+                        lineage_id=lineage.lineage_id,
+                        manifest=manifest,
+                        assessment=assessment,
+                    )
+                    normalize_execution_step_policy(
+                        step,
+                        step_kind=self._step_kind(step),
+                        current_spine_version=manifest.spine_version or current_spine_version(context.paths),
+                    )
+                    manifest_path = save_lineage_manifest(context.paths, manifest)
+                    worker_result["lineage_manifest"] = manifest.to_dict()
+                    worker_result["lineage_manifest_file"] = str(manifest_path)
+                    batch_manifests.append(manifest)
+                    lineage.latest_promotion_class = assessment.promotion_class
+                    lineage.latest_spine_version = manifest.spine_version
+                    if str(manifest_path) not in lineage.manifest_files:
+                        lineage.manifest_files.append(str(manifest_path))
+                    if crr_record is not None:
+                        lineage.notes = (lineage.notes + f" | Common requirement request: {crr_record.request_id}").strip(" |")
+
                     promotion_result = {"promoted": False, "reason": "not_applicable", "commit_hash": None}
-                    if self._can_auto_promote_lineage_step(step, child_counts, batch_size=len(ordered_targets)):
+                    if self._can_auto_promote_lineage_step(
+                        step,
+                        child_counts,
+                        batch_size=len(ordered_targets),
+                        assessment=assessment,
+                    ):
                         promoted, promotion_reason, integrated_revision = self._promote_lineage_to_target_branch(context, lineage)
                         promotion_result = {
                             "promoted": promoted,
@@ -902,6 +967,9 @@ class OrchestratorLineageMixin:
                         "changed_files": changed_files,
                         "test_results": pass_entry.get("test_results"),
                         "lineage_push": worker_result.get("lineage_push"),
+                        "promotion_class": str(worker_result.get("promotion_assessment", {}).get("promotion_class", "")),
+                        "promotion_assessment": worker_result.get("promotion_assessment"),
+                        "lineage_manifest_file": worker_result.get("lineage_manifest_file"),
                     }
                 )
                 block_entry.update(
@@ -916,6 +984,9 @@ class OrchestratorLineageMixin:
                         "commit_hashes": [step.commit_hash] if step.commit_hash else [],
                         "rollback_status": rollback_status,
                         "lineage_push": worker_result.get("lineage_push"),
+                        "promotion_class": str(worker_result.get("promotion_assessment", {}).get("promotion_class", "")),
+                        "promotion_assessment": worker_result.get("promotion_assessment"),
+                        "lineage_manifest_file": worker_result.get("lineage_manifest_file"),
                     }
                 )
                 reporter.log_pass(pass_entry)
@@ -936,14 +1007,15 @@ class OrchestratorLineageMixin:
 
             context.loop_state.block_index = next_block_index
             context.loop_state.last_block_completed_at = completion_time
-            reporter.write_block_review(
-                reflection_markdown(
-                    f"Lineage batch {batch_label}",
-                    batch_summary or "Lineage batch finished.",
-                    sorted(set(combined_changed_files)),
-                    [step.commit_hash for step in ordered_targets if step.commit_hash],
-                )
+            block_review = reflection_markdown(
+                f"Lineage batch {batch_label}",
+                batch_summary or "Lineage batch finished.",
+                sorted(set(combined_changed_files)),
+                [step.commit_hash for step in ordered_targets if step.commit_hash],
             )
+            if batch_manifests:
+                block_review = f"{block_review.rstrip()}\n\n{manifest_summary_markdown(batch_manifests)}\n"
+            reporter.write_block_review(block_review)
             if final_status == "failed":
                 self._report_failure(
                     context,
@@ -1009,7 +1081,8 @@ class OrchestratorLineageMixin:
         logs_dir = WorkspaceManager.repo_logs_dir(worktree_dir)
         reports_dir = integration_root / "reports"
         state_dir = integration_root / "state"
-        for directory in [integration_root, docs_dir, memory_dir, logs_dir, reports_dir, state_dir]:
+        lineage_manifests_dir = state_dir / "lineage_manifests"
+        for directory in [integration_root, docs_dir, memory_dir, logs_dir, reports_dir, state_dir, lineage_manifests_dir]:
             ensure_dir(directory)
         self.workspace.migrate_logs_dir(legacy_logs_dir, logs_dir)
         return ProjectPaths(
@@ -1041,9 +1114,12 @@ class OrchestratorLineageMixin:
             checkpoint_state_file=state_dir / "CHECKPOINTS.json",
             execution_plan_file=state_dir / "EXECUTION_PLAN.json",
             lineage_state_file=state_dir / "LINEAGES.json",
+            spine_file=state_dir / "SPINE.json",
+            common_requirements_file=state_dir / "COMMON_REQUIREMENTS.json",
             ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
             ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
             ml_experiment_reports_dir=state_dir / "ml_experiments",
+            lineage_manifests_dir=lineage_manifests_dir,
             ui_control_file=state_dir / "UI_RUN_CONTROL.json",
             ui_event_log_file=logs_dir / "ui_events.jsonl",
             execution_flow_svg_file=docs_dir / "EXECUTION_FLOW.svg",
@@ -1052,6 +1128,7 @@ class OrchestratorLineageMixin:
             closeout_report_pptx_file=reports_dir / "CLOSEOUT_REPORT.pptx",
             ml_experiment_report_file=docs_dir / "ML_EXPERIMENT_REPORT.md",
             ml_experiment_results_svg_file=docs_dir / "ML_EXPERIMENT_RESULTS.svg",
+            shared_contracts_file=docs_dir / "SHARED_CONTRACTS.md",
         )
     def _build_integration_context(
         self,
@@ -1147,7 +1224,8 @@ class OrchestratorLineageMixin:
         metadata["merge_targets"] = merge_targets
         if upstream_titles:
             metadata["parallel_step_titles"] = upstream_titles
-        return ExecutionStep(
+        return normalize_execution_step_policy(
+            ExecutionStep(
             step_id=f"{step.step_id}-MERGE",
             title=f"Resolve integration merge for {step.step_id}",
             display_description=f"Resolve merge conflicts while integrating {', '.join(merge_targets) or step.step_id}.",
@@ -1164,7 +1242,13 @@ class OrchestratorLineageMixin:
             reasoning_effort="high",
             depends_on=merge_targets,
             owned_paths=ordered_paths,
+            step_type="integration",
+            scope_class="shared_reviewed",
+            spine_version=step.spine_version,
+            shared_contracts=list(step.shared_contracts),
             metadata=metadata,
+            ),
+            current_spine_version=step.spine_version or DEFAULT_SPINE_VERSION,
         )
     def _build_parallel_batch_merge_step(
         self,
@@ -1183,7 +1267,8 @@ class OrchestratorLineageMixin:
                     continue
                 seen_paths.add(normalized)
                 ordered_paths.append(normalized)
-        return ExecutionStep(
+        return normalize_execution_step_policy(
+            ExecutionStep(
             step_id="BATCH-MERGE",
             title=f"Resolve merged parallel batch conflict {titles}",
             display_description=f"Resolve cherry-pick conflicts while merging {titles}.",
@@ -1200,7 +1285,11 @@ class OrchestratorLineageMixin:
             reasoning_effort="high",
             depends_on=step_ids,
             owned_paths=ordered_paths,
+            step_type="integration",
+            scope_class="shared_reviewed",
             metadata={"parallel_step_titles": parallel_step_titles, "merge_phase": "parallel_batch"},
+            ),
+            current_spine_version=DEFAULT_SPINE_VERSION,
         )
     def _normalize_hybrid_step_kind(self, value: object) -> str:
         normalized = str(value or "").strip().lower()

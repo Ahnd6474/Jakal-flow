@@ -220,7 +220,9 @@ Reasoning effort levels:
 | Per-step reasoning effort | Yes |
 | Per-step success criteria | Yes |
 | Per-step verification command overrides | Yes |
-| Owned-path based parallel safety | Yes |
+| Guarded-overlap path policy with owned-path compatibility | Yes |
+| Contract-wave spine/common requirement artifacts | Yes |
+| Lineage manifests for integration/review | Yes |
 | Manual step editing before execution | Yes |
 | Background polling from desktop UI | Yes |
 | Checkpoint timeline and approval state | Yes |
@@ -525,6 +527,7 @@ Common project artifacts can include:
 - `docs/ML_EXPERIMENT_REPORT.md`
 - `docs/ML_EXPERIMENT_RESULTS.svg`
 - `docs/RESEARCH_NOTES.md`
+- `docs/SHARED_CONTRACTS.md`
 - `docs/attempt_history.md`
 - `memory/success_patterns.jsonl`
 - `memory/failure_patterns.jsonl`
@@ -542,11 +545,14 @@ Common project artifacts can include:
 - `state/CHECKPOINTS.json`
 - `state/EXECUTION_PLAN.json`
 - `state/LINEAGES.json`
+- `state/SPINE.json`
+- `state/COMMON_REQUIREMENTS.json`
 - `state/ML_MODE_STATE.json`
 - `state/ML_STEP_REPORT.json`
 - `state/PROJECT_DETAIL_CACHE_CORE.json`
 - `state/PROJECT_DETAIL_CACHE_FULL.json`
 - `state/UI_RUN_CONTROL.json`
+- `state/lineage_manifests/*.json`
 - `state/ml_experiments/*.json`
 - `state/share_sessions.json`
 - `state/verification_cache/*.json`

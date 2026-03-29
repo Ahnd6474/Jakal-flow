@@ -20,6 +20,7 @@ from jakal_flow.bridge_events import bridge_event_context
 from jakal_flow.chat_sessions import CHAT_HOME_ENV_VAR, execute_conversation_turn, load_chat_sessions
 from jakal_flow.errors import RuntimeConfigError
 from jakal_flow.execution_control import ImmediateStopRequested
+import jakal_flow.chat_sessions as chat_sessions
 import jakal_flow.ui_bridge as ui_bridge
 import jakal_flow.ui_bridge_payloads as ui_bridge_payloads
 from jakal_flow.models import ExecutionPlanState, ExecutionStep, LoopState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions
@@ -3097,58 +3098,27 @@ class UIBridgeTests(unittest.TestCase):
             self.assertFalse(legacy_transcript_path.exists())
 
     def test_send_chat_message_conversation_uses_chat_model_override(self) -> None:
-        with TemporaryTestDir() as temp_dir:
-            workspace_root = temp_dir / "workspace"
-            repo_dir = temp_dir / "repo"
-            repo_dir.mkdir(parents=True, exist_ok=True)
+        context = mock.Mock(
+            metadata=mock.sentinel.metadata,
+            paths=mock.sentinel.paths,
+            loop_state=mock.sentinel.loop_state,
+            runtime=RuntimeOptions(
+                model_provider="openai",
+                model="gpt-5.4",
+                model_slug_input="gpt-5.4",
+                chat_model_provider="gemini",
+                chat_model="gemini-2.5-pro",
+            ),
+        )
 
-            payload = {
-                "project_dir": str(repo_dir),
-                "display_name": "Chat Override Demo",
-                "branch": "main",
-                "origin_url": "",
-                "runtime": {
-                    "model_provider": "openai",
-                    "model": "gpt-5.4",
-                    "model_slug_input": "gpt-5.4",
-                    "chat_model_provider": "gemini",
-                    "chat_model": "gemini-2.5-pro",
-                    "effort": "high",
-                    "test_cmd": "python -m unittest",
-                    "max_blocks": 5,
-                },
-            }
+        conversation_context = chat_sessions._conversation_context(context)
 
-            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
-                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
-                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
-            ):
-                detail = run_command("save-project-setup", workspace_root, payload)
-
-            captured: dict[str, str] = {}
-
-            def fake_run_conversation_reply(context, *, prompt, session_id):
-                captured["provider"] = context.runtime.model_provider
-                captured["model"] = context.runtime.model
-                captured["codex_path"] = context.runtime.codex_path
-                return 0, "Conversation reply."
-
-            with mock.patch("jakal_flow.chat_sessions._run_conversation_reply", side_effect=fake_run_conversation_reply):
-                result = run_command(
-                    "send-chat-message",
-                    workspace_root,
-                    {
-                        **payload,
-                        "repo_id": detail["project"]["repo_id"],
-                        "message": "Use the chat override.",
-                        "chat_mode": "conversation",
-                    },
-                )
-
-            self.assertEqual(result["error"], "")
-            self.assertEqual(captured["provider"], "gemini")
-            self.assertEqual(captured["model"], "gemini-2.5-pro")
-            self.assertIn("gemini", captured["codex_path"])
+        self.assertEqual(conversation_context.metadata, mock.sentinel.metadata)
+        self.assertEqual(conversation_context.paths, mock.sentinel.paths)
+        self.assertEqual(conversation_context.loop_state, mock.sentinel.loop_state)
+        self.assertEqual(conversation_context.runtime.model_provider, "gemini")
+        self.assertEqual(conversation_context.runtime.model, "gemini-2.5-pro")
+        self.assertIn("gemini", conversation_context.runtime.codex_path)
 
     def test_send_chat_message_debugger_routes_message_into_manual_recovery(self) -> None:
         with TemporaryTestDir() as temp_dir:

@@ -267,6 +267,7 @@ class WorkspaceManager:
             paths.reports_dir,
             paths.state_dir,
             paths.ml_experiment_reports_dir,
+            paths.lineage_manifests_dir,
         ]:
             ensure_dir(directory)
         ensure_dir(resolved_dir)

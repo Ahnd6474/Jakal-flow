@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from .contract_wave import normalize_execution_step_policy, policy_summary
 from .model_selection import normalize_reasoning_effort
 from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, ProjectContext
 from .step_models import planning_model_selection_guidance, resolve_step_model_choice
@@ -772,24 +773,56 @@ def parse_execution_plan_response(
             metadata = {}
         else:
             metadata = dict(metadata)
-        steps.append(
-            ExecutionStep(
-                step_id=str(item.get("step_id", item.get("node_id", ""))).strip() or f"ST{len(steps) + 1}",
-                title=title,
-                display_description=display_description,
-                codex_description=codex_description,
-                model_provider=str(item.get("model_provider", "")).strip().lower(),
-                model=str(item.get("model", item.get("model_slug_input", ""))).strip().lower(),
-                test_command=str(item.get("test_command", "")).strip() or default_test_command,
-                success_criteria=str(item.get("success_criteria", "")).strip(),
-                reasoning_effort=reasoning_effort,
-                parallel_group=parallel_group,
-                depends_on=depends_on,
-                owned_paths=owned_paths,
-                status="pending",
-                metadata=metadata,
-            )
+        step = ExecutionStep(
+            step_id=str(item.get("step_id", item.get("node_id", ""))).strip() or f"ST{len(steps) + 1}",
+            title=title,
+            display_description=display_description,
+            codex_description=codex_description,
+            model_provider=str(item.get("model_provider", "")).strip().lower(),
+            model=str(item.get("model", item.get("model_slug_input", ""))).strip().lower(),
+            test_command=str(item.get("test_command", "")).strip() or default_test_command,
+            success_criteria=str(item.get("success_criteria", "")).strip(),
+            step_type=str(item.get("step_type", metadata.get("step_type", ""))).strip().lower(),
+            scope_class=str(item.get("scope_class", metadata.get("scope_class", ""))).strip().lower(),
+            spine_version=str(item.get("spine_version", metadata.get("spine_version", ""))).strip(),
+            shared_contracts=[
+                str(value).strip()
+                for value in item.get("shared_contracts", metadata.get("shared_contracts", []))
+                if str(value).strip()
+            ]
+            if isinstance(item.get("shared_contracts", metadata.get("shared_contracts", [])), list)
+            else [],
+            verification_profile=str(item.get("verification_profile", metadata.get("verification_profile", ""))).strip().lower(),
+            promotion_class=str(item.get("promotion_class", metadata.get("promotion_class", ""))).strip().lower(),
+            primary_scope_paths=[
+                str(value).strip()
+                for value in item.get("primary_scope_paths", metadata.get("primary_scope_paths", []))
+                if str(value).strip()
+            ]
+            if isinstance(item.get("primary_scope_paths", metadata.get("primary_scope_paths", [])), list)
+            else [],
+            shared_reviewed_paths=[
+                str(value).strip()
+                for value in item.get("shared_reviewed_paths", metadata.get("shared_reviewed_paths", []))
+                if str(value).strip()
+            ]
+            if isinstance(item.get("shared_reviewed_paths", metadata.get("shared_reviewed_paths", [])), list)
+            else [],
+            forbidden_core_paths=[
+                str(value).strip()
+                for value in item.get("forbidden_core_paths", metadata.get("forbidden_core_paths", []))
+                if str(value).strip()
+            ]
+            if isinstance(item.get("forbidden_core_paths", metadata.get("forbidden_core_paths", [])), list)
+            else [],
+            reasoning_effort=reasoning_effort,
+            parallel_group=parallel_group,
+            depends_on=depends_on,
+            owned_paths=owned_paths,
+            status="pending",
+            metadata=metadata,
         )
+        steps.append(normalize_execution_step_policy(step))
     return plan_title, summary, steps
 
 
@@ -877,6 +910,8 @@ def implementation_prompt(
     task_title = execution_step.title if execution_step else candidate.title
     display_description = execution_step.display_description.strip() if execution_step else ""
     codex_description = execution_step.codex_description.strip() if execution_step else ""
+    if execution_step:
+        normalize_execution_step_policy(execution_step)
     test_command = context.runtime.test_cmd
     if execution_step and execution_step.test_command.strip():
         test_command = execution_step.test_command.strip()
@@ -890,8 +925,16 @@ def implementation_prompt(
         else f"The verification command `{test_command}` exits successfully."
     )
     depends_on = ", ".join(execution_step.depends_on) if execution_step and execution_step.depends_on else "none"
-    owned_paths = "\n".join(f"- {path}" for path in execution_step.owned_paths) if execution_step and execution_step.owned_paths else "- none declared"
+    owned_path_lines = []
+    if execution_step and execution_step.owned_paths:
+        owned_path_lines.extend(f"- owned: {path}" for path in execution_step.owned_paths)
+    if execution_step and execution_step.shared_reviewed_paths:
+        owned_path_lines.extend(f"- shared-reviewed: {path}" for path in execution_step.shared_reviewed_paths)
+    if execution_step and execution_step.forbidden_core_paths:
+        owned_path_lines.extend(f"- forbidden-core: {path}" for path in execution_step.forbidden_core_paths)
+    owned_paths = "\n".join(owned_path_lines) if owned_path_lines else "- none declared"
     step_metadata = execution_step.metadata if execution_step and execution_step.metadata else {}
+    step_policy = policy_summary(execution_step) if execution_step else "step_type=feature; scope_class=free_owned"
     agents_summary = repository_agents_summary(context.paths.repo_dir, max_chars=1200)
     try:
         return template.format(
@@ -907,7 +950,7 @@ def implementation_prompt(
             depends_on=depends_on,
             owned_paths=owned_paths,
             agents_summary=agents_summary,
-            step_metadata=json.dumps(step_metadata, indent=2, sort_keys=True) if step_metadata else "{}",
+            step_metadata=json.dumps({**step_metadata, "policy_summary": step_policy}, indent=2, sort_keys=True) if step_metadata or step_policy else "{}",
             candidate_rationale=candidate.rationale,
             memory_context=memory_context,
             plan_snapshot=compact_text(plan_text, 4000),
@@ -943,6 +986,8 @@ def debugger_prompt(
     task_title = execution_step.title if execution_step else candidate.title
     display_description = execution_step.display_description.strip() if execution_step else ""
     codex_description = execution_step.codex_description.strip() if execution_step else ""
+    if execution_step:
+        normalize_execution_step_policy(execution_step)
     test_command = context.runtime.test_cmd
     if execution_step and execution_step.test_command.strip():
         test_command = execution_step.test_command.strip()
@@ -956,8 +1001,16 @@ def debugger_prompt(
         else f"The verification command `{test_command}` exits successfully."
     )
     depends_on = ", ".join(execution_step.depends_on) if execution_step and execution_step.depends_on else "none"
-    owned_paths = "\n".join(f"- {path}" for path in execution_step.owned_paths) if execution_step and execution_step.owned_paths else "- none declared"
+    owned_path_lines = []
+    if execution_step and execution_step.owned_paths:
+        owned_path_lines.extend(f"- owned: {path}" for path in execution_step.owned_paths)
+    if execution_step and execution_step.shared_reviewed_paths:
+        owned_path_lines.extend(f"- shared-reviewed: {path}" for path in execution_step.shared_reviewed_paths)
+    if execution_step and execution_step.forbidden_core_paths:
+        owned_path_lines.extend(f"- forbidden-core: {path}" for path in execution_step.forbidden_core_paths)
+    owned_paths = "\n".join(owned_path_lines) if owned_path_lines else "- none declared"
     step_metadata = execution_step.metadata if execution_step and execution_step.metadata else {}
+    step_policy = policy_summary(execution_step) if execution_step else "step_type=debug; scope_class=free_owned"
     agents_summary = repository_agents_summary(context.paths.repo_dir, max_chars=1200)
     try:
         return template.format(
@@ -973,7 +1026,7 @@ def debugger_prompt(
             depends_on=depends_on,
             owned_paths=owned_paths,
             agents_summary=agents_summary,
-            step_metadata=json.dumps(step_metadata, indent=2, sort_keys=True) if step_metadata else "{}",
+            step_metadata=json.dumps({**step_metadata, "policy_summary": step_policy}, indent=2, sort_keys=True) if step_metadata or step_policy else "{}",
             candidate_rationale=candidate.rationale,
             memory_context=memory_context,
             plan_snapshot=compact_text(plan_text, 4000),
@@ -1012,6 +1065,8 @@ def merger_prompt(
     task_title = execution_step.title if execution_step else candidate.title
     display_description = execution_step.display_description.strip() if execution_step else ""
     codex_description = execution_step.codex_description.strip() if execution_step else ""
+    if execution_step:
+        normalize_execution_step_policy(execution_step)
     test_command = context.runtime.test_cmd
     if execution_step and execution_step.test_command.strip():
         test_command = execution_step.test_command.strip()
@@ -1028,8 +1083,16 @@ def merger_prompt(
         )
     )
     depends_on = ", ".join(execution_step.depends_on) if execution_step and execution_step.depends_on else "none"
-    owned_paths = "\n".join(f"- {path}" for path in execution_step.owned_paths) if execution_step and execution_step.owned_paths else "- none declared"
+    owned_path_lines = []
+    if execution_step and execution_step.owned_paths:
+        owned_path_lines.extend(f"- owned: {path}" for path in execution_step.owned_paths)
+    if execution_step and execution_step.shared_reviewed_paths:
+        owned_path_lines.extend(f"- shared-reviewed: {path}" for path in execution_step.shared_reviewed_paths)
+    if execution_step and execution_step.forbidden_core_paths:
+        owned_path_lines.extend(f"- forbidden-core: {path}" for path in execution_step.forbidden_core_paths)
+    owned_paths = "\n".join(owned_path_lines) if owned_path_lines else "- none declared"
     step_metadata = execution_step.metadata if execution_step and execution_step.metadata else {}
+    step_policy = policy_summary(execution_step) if execution_step else "step_type=integration; scope_class=shared_reviewed"
     agents_summary = repository_agents_summary(context.paths.repo_dir, max_chars=1200)
     try:
         return template.format(
@@ -1044,7 +1107,7 @@ def merger_prompt(
             depends_on=depends_on,
             owned_paths=owned_paths,
             agents_summary=agents_summary,
-            step_metadata=json.dumps(step_metadata, indent=2, sort_keys=True) if step_metadata else "{}",
+            step_metadata=json.dumps({**step_metadata, "policy_summary": step_policy}, indent=2, sort_keys=True) if step_metadata or step_policy else "{}",
             candidate_rationale=candidate.rationale,
             memory_context=memory_context,
             plan_snapshot=compact_text(plan_text, 4000),
@@ -1255,6 +1318,7 @@ def execution_plan_markdown(
     if not steps:
         lines.append("- ST1: Establish a minimal, testable first step and verify it locally.")
     for step in steps:
+        normalize_execution_step_policy(step)
         step_kind = str((step.metadata or {}).get("step_kind", "")).strip().lower() or "task"
         step_model = resolve_step_model_choice(step, context.runtime)
         configured_provider = step.model_provider or "auto"
@@ -1265,14 +1329,22 @@ def execution_plan_markdown(
                 f"  - UI description: {step.display_description or step.title}",
                 f"  - Codex instruction: {step.codex_description or step.display_description or step.title}",
                 f"  - Step kind: {step_kind}",
+                f"  - Step type: {step.step_type or 'feature'}",
+                f"  - Scope class: {step.scope_class or 'free_owned'}",
+                f"  - Spine version: {step.spine_version or 'spine-v1'}",
+                f"  - Shared contracts: {', '.join(step.shared_contracts) if step.shared_contracts else 'none'}",
                 f"  - Model provider: {configured_provider} -> {step_model.provider} ({step_model.reason})",
                 f"  - Model: {configured_model} -> {step_model.model or 'provider default'}",
                 f"  - GPT reasoning: {step.reasoning_effort or context.runtime.effort or 'high'}",
                 f"  - Parallel group: {step.parallel_group or 'none'}",
                 f"  - Depends on: {', '.join(step.depends_on) if step.depends_on else 'none'}",
                 f"  - Owned paths: {', '.join(step.owned_paths) if step.owned_paths else 'none declared'}",
+                f"  - Shared-reviewed paths: {', '.join(step.shared_reviewed_paths) if step.shared_reviewed_paths else 'none'}",
+                f"  - Forbidden-core paths: {', '.join(step.forbidden_core_paths) if step.forbidden_core_paths else 'none'}",
                 f"  - Verification: {step.test_command or 'Use the default test command.'}",
+                f"  - Verification profile: {step.verification_profile or 'default'}",
                 f"  - Success criteria: {step.success_criteria or 'Verification command completes successfully.'}",
+                f"  - Declared promotion class: {step.promotion_class or 'green'}",
             ]
         )
         merge_from = (step.metadata or {}).get("merge_from", [])

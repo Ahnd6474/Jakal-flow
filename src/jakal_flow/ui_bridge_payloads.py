@@ -22,7 +22,7 @@ from .utils import append_jsonl, compact_text, normalize_workflow_mode, now_utc_
 from .workspace import WorkspaceManager
 
 
-DETAIL_CACHE_VERSION = 10
+DETAIL_CACHE_VERSION = 11
 
 PLANNING_STAGE_DEFINITIONS = (
     {"key": "context_scan", "label": "Scan repository context"},
@@ -111,6 +111,8 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
         project.paths.logs_dir / "test_runs.jsonl",
         project.paths.ui_event_log_file,
         project.paths.checkpoint_state_file,
+        project.paths.spine_file,
+        project.paths.common_requirements_file,
         project.paths.ml_mode_state_file,
         project.paths.execution_flow_svg_file,
         chat_sessions_registry_file(project),
@@ -134,6 +136,7 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
                 project.paths.mid_term_plan_file,
                 project.paths.scope_guard_file,
                 project.paths.research_notes_file,
+                project.paths.shared_contracts_file,
             ]
         )
     for path in tracked_files:
@@ -1019,6 +1022,9 @@ def _build_project_detail_base_payload(
             "word_report_file": str(project.paths.closeout_report_docx_file),
             "powerpoint_report_file": str(project.paths.closeout_report_pptx_file),
             "ml_experiment_report_file": str(project.paths.ml_experiment_report_file),
+            "spine_file": str(project.paths.spine_file),
+            "common_requirements_file": str(project.paths.common_requirements_file),
+            "shared_contracts_file": str(project.paths.shared_contracts_file),
         },
         "bottom_panels": bottom_panels,
         "github": {

@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 
+from .contract_wave import normalize_execution_step_policy
 from .models import ExecutionPlanState, ExecutionStep, RuntimeOptions
 from .step_models import resolve_step_model_choice
 from .utils import parse_json_text, similarity_score
@@ -274,6 +275,11 @@ def postprocess_generated_plan_steps(
 
         if execution_mode == "parallel" and not step.owned_paths:
             step.owned_paths = normalize_owned_paths(step.metadata.get("candidate_owned_paths", []))
+        if block and block.is_skeleton_contract and not step.shared_contracts:
+            step.shared_contracts = sorted(shared_contracts)
+            if not step.step_type:
+                step.step_type = "contract"
+        normalize_execution_step_policy(step)
 
     if execution_mode == "parallel":
         repack_parallelizable_steps(
