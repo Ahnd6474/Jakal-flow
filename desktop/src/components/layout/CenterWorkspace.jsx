@@ -172,6 +172,9 @@ export function CenterWorkspace({
   queuedJobs,
   onChangeForm,
   onChangeProgramSettings,
+  onSaveProject,
+  onSaveProgramSettings,
+  programSettingsDirty = false,
   onChooseDirectory,
   onArchiveProject,
   onDeleteProject,
@@ -186,6 +189,8 @@ export function CenterWorkspace({
   onSavePlan,
   onResetPlan,
   onRunPlan,
+  onRunManualDebugger,
+  onRunManualMerger,
   onRequestStop,
   onCancelQueuedJob,
   onSelectStep,
@@ -284,6 +289,8 @@ export function CenterWorkspace({
             onSavePlan={onSavePlan}
             onResetPlan={onResetPlan}
             onRunPlan={onRunPlan}
+            onRunManualDebugger={onRunManualDebugger}
+            onRunManualMerger={onRunManualMerger}
             onRequestStop={onRequestStop}
             onCancelQueuedJob={onCancelQueuedJob}
             onGenerateShareLink={onGenerateShareLink}
@@ -324,6 +331,7 @@ export function CenterWorkspace({
             busy={busy}
             onChangeForm={onChangeForm}
             onChangeProgramSettings={onChangeProgramSettings}
+            onSaveProject={onSaveProject}
             onChooseDirectory={onChooseDirectory}
             onArchiveProject={onArchiveProject}
             onDeleteProject={onDeleteProject}
@@ -337,7 +345,9 @@ export function CenterWorkspace({
             shareDetail={workspaceShareDetail}
             busy={busy}
             shareBusy={shareBusy}
+            dirty={programSettingsDirty}
             onChangeSettings={onChangeProgramSettings}
+            onSaveSettings={onSaveProgramSettings}
             onGenerateShareLink={onGenerateShareLink}
             onCopyShareLink={onCopyShareLink}
             onRevokeShareLink={onRevokeShareLink}

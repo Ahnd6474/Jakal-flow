@@ -2442,6 +2442,202 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(detail["reports"]["latest_failure"], {})
             self.assertFalse(latest_failure_file.exists())
 
+    def test_run_manual_debugger_command_updates_detail_and_activity(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Manual Debugger Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+            plan_payload = {
+                "plan_title": "Manual Debugger Demo",
+                "project_prompt": "Recover the failing step manually.",
+                "summary": "One failed step remains.",
+                "workflow_mode": "standard",
+                "execution_mode": "parallel",
+                "default_test_command": "python -m unittest",
+                "steps": [
+                    {
+                        "step_id": "ST1",
+                        "title": "Recover backend",
+                        "display_description": "Repair the backend.",
+                        "codex_description": "Repair the backend.",
+                        "success_criteria": "Tests pass",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "status": "failed",
+                    }
+                ],
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                saved = run_command("save-project-setup", workspace_root, payload)
+
+            project_root = Path(saved["project"]["project_root"])
+            latest_failure_file = project_root / "reports" / "latest_pr_failure_status.json"
+            report_md = project_root / "reports" / "20260329000000_manual_debugger_failed.prfail.md"
+            report_json = project_root / "reports" / "20260329000000_manual_debugger_failed.prfail.json"
+            report_md.write_text("manual debugger failed\n", encoding="utf-8")
+            report_json.write_text(json.dumps({"summary": "Previous failure."}), encoding="utf-8")
+            latest_failure_file.write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-03-29T00:00:00+00:00",
+                        "failure_type": "manual_debugger_failed",
+                        "posted": False,
+                        "result": {"reason": "test"},
+                        "report_markdown_file": str(report_md),
+                        "report_json_file": str(report_json),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_run_manual_debugger_recovery(self, project_dir, runtime, branch="main", origin_url=""):
+                context = self.local_project(project_dir)
+                assert context is not None
+                self.clear_latest_failure_status(context)
+                return context, self.load_execution_plan_state(context), {
+                    "pass_name": "block-search-debug",
+                    "summary": "Recovered manually.",
+                    "commit_hash": "abc123",
+                }
+
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()), mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.run_manual_debugger_recovery",
+                new=fake_run_manual_debugger_recovery,
+            ):
+                detail = run_command(
+                    "run-manual-debugger",
+                    workspace_root,
+                    {
+                        **payload,
+                        "plan": plan_payload,
+                    },
+                )
+
+            self.assertEqual(detail["reports"]["latest_failure"], {})
+            self.assertTrue(any("manual-debugger-started" in line for line in detail["activity"]))
+            self.assertTrue(any("manual-debugger-finished" in line for line in detail["activity"]))
+
+    def test_run_manual_merger_command_updates_detail_and_activity(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Manual Merger Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+            plan_payload = {
+                "plan_title": "Manual Merger Demo",
+                "project_prompt": "Resolve the merge conflict manually.",
+                "summary": "One failed batch remains.",
+                "workflow_mode": "standard",
+                "execution_mode": "parallel",
+                "default_test_command": "python -m unittest",
+                "steps": [
+                    {
+                        "step_id": "ST1",
+                        "title": "Frontend slice",
+                        "display_description": "Finish the frontend slice.",
+                        "codex_description": "Finish the frontend slice.",
+                        "success_criteria": "Frontend slice is integrated",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "status": "failed",
+                    },
+                    {
+                        "step_id": "ST2",
+                        "title": "Backend slice",
+                        "display_description": "Finish the backend slice.",
+                        "codex_description": "Finish the backend slice.",
+                        "success_criteria": "Backend slice is integrated",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "status": "failed",
+                    },
+                ],
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                saved = run_command("save-project-setup", workspace_root, payload)
+
+            project_root = Path(saved["project"]["project_root"])
+            latest_failure_file = project_root / "reports" / "latest_pr_failure_status.json"
+            report_md = project_root / "reports" / "20260329000000_manual_merger_failed.prfail.md"
+            report_json = project_root / "reports" / "20260329000000_manual_merger_failed.prfail.json"
+            report_md.write_text("manual merger failed\n", encoding="utf-8")
+            report_json.write_text(json.dumps({"summary": "Previous merge failure."}), encoding="utf-8")
+            latest_failure_file.write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-03-29T00:00:00+00:00",
+                        "failure_type": "manual_merger_failed",
+                        "posted": False,
+                        "result": {"reason": "test"},
+                        "report_markdown_file": str(report_md),
+                        "report_json_file": str(report_json),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_run_manual_merger_recovery(self, project_dir, runtime, branch="main", origin_url=""):
+                context = self.local_project(project_dir)
+                assert context is not None
+                self.clear_latest_failure_status(context)
+                return context, self.load_execution_plan_state(context), {
+                    "pass_name": "parallel-batch-merger",
+                    "summary": "Merged manually.",
+                    "commit_hash": "def456",
+                }
+
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()), mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.run_manual_merger_recovery",
+                new=fake_run_manual_merger_recovery,
+            ):
+                detail = run_command(
+                    "run-manual-merger",
+                    workspace_root,
+                    {
+                        **payload,
+                        "plan": plan_payload,
+                    },
+                )
+
+            self.assertEqual(detail["reports"]["latest_failure"], {})
+            self.assertTrue(any("manual-merger-started" in line for line in detail["activity"]))
+            self.assertTrue(any("manual-merger-finished" in line for line in detail["activity"]))
+
     def test_run_plan_routes_single_hybrid_task_batches_through_lineage_execution(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

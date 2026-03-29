@@ -158,6 +158,7 @@ export function ConfigEditorView({
   busy,
   onChangeForm,
   onChangeProgramSettings,
+  onSaveProject,
   onChooseDirectory,
   onArchiveProject,
   onDeleteProject,
@@ -244,6 +245,14 @@ export function ConfigEditorView({
           <h2>{t("tab.config")}</h2>
         </div>
         <div className="field-row">
+          <button
+            className="toolbar-button toolbar-button--accent"
+            onClick={onSaveProject}
+            type="button"
+            disabled={busy || !form.project_dir?.trim()}
+          >
+            {t("action.saveConfiguration")}
+          </button>
           <button
             className="toolbar-button toolbar-button--ghost"
             onClick={onArchiveProject}

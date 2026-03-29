@@ -4000,6 +4000,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("Do not edit README.md during debugger recovery.", parallel_debugger_template)
         self.assertIn("{merge_targets}", parallel_merger_template)
         self.assertIn("integration worktree", parallel_merger_template)
+        self.assertIn("git worktree list", parallel_merger_template)
+        self.assertIn("multiple branches or lineages", parallel_merger_template)
         self.assertIn("Failing merge context", parallel_merger_template)
         self.assertIn("adjacent compatibility breakage", parallel_merger_template)
         self.assertIn("adjacent integration touchpoints", parallel_merger_template)

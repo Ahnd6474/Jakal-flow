@@ -266,8 +266,6 @@ export function IdeToolbar({
   const tone = statusTone(projectStatus);
   const repoPath = String(projectPath || "").trim();
   const remoteUrl = String(githubUrl || "").trim();
-  const hasProjectLinks = Boolean(repoPath || remoteUrl);
-
   return (
     <header className="ide-toolbar">
       {/* Logo + Refresh */}
@@ -327,23 +325,35 @@ export function IdeToolbar({
           <SettingsIcon />
         </button>
 
-        {hasProjectLinks ? <div className="toolbar-divider" /> : null}
+        <div className="toolbar-divider" />
 
-        {repoPath ? (
-          <>
-            <button className="toolbar-btn toolbar-btn--icon" onClick={onOpenFolder} type="button" title={language === "ko" ? "폴더 열기" : "Open folder"}>
-              <FolderIcon />
-            </button>
-            <button className="toolbar-btn toolbar-btn--icon" onClick={onOpenVsCode} type="button" title={language === "ko" ? "외부 에디터에서 열기" : "Open in external editor"}>
-              <EditorIcon />
-            </button>
-          </>
-        ) : null}
-        {remoteUrl ? (
-          <button className="toolbar-btn toolbar-btn--icon" onClick={onOpenGithub} type="button" title="Open on GitHub">
-            <GithubIcon />
-          </button>
-        ) : null}
+        <button
+          className="toolbar-btn toolbar-btn--icon"
+          onClick={onOpenFolder}
+          type="button"
+          title={language === "ko" ? "폴더 열기" : "Open folder"}
+          disabled={!repoPath}
+        >
+          <FolderIcon />
+        </button>
+        <button
+          className="toolbar-btn toolbar-btn--icon"
+          onClick={onOpenVsCode}
+          type="button"
+          title={language === "ko" ? "외부 에디터에서 열기" : "Open in external editor"}
+          disabled={!repoPath}
+        >
+          <EditorIcon />
+        </button>
+        <button
+          className="toolbar-btn toolbar-btn--icon"
+          onClick={onOpenGithub}
+          type="button"
+          title="Open on GitHub"
+          disabled={!remoteUrl}
+        >
+          <GithubIcon />
+        </button>
 
         <div className="toolbar-divider" />
 

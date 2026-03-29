@@ -11,6 +11,7 @@ import { StatusBar } from "./components/layout/StatusBar";
 import { nextSidebarTab } from "./controllerHelpers";
 import { useDesktopController } from "./hooks/useDesktopController";
 import { useI18n } from "./i18n";
+import { toggleStepSelection } from "./utils";
 
 /* ── Clamp helpers ── */
 const SIDEBAR_MIN = 200;
@@ -161,6 +162,12 @@ export default function App() {
   const sidebarOpen = Boolean(controller.sidebarTab);
   const sidebarStyle = sidebarOpen ? { width: controller.sidebarWidth, flex: `0 0 ${controller.sidebarWidth}px` } : undefined;
   const compact = Boolean(controller.programSettings?.compact_mode);
+  const handleSelectStep = useCallback(
+    (stepId) => {
+      controller.setSelectedStepId((current) => toggleStepSelection(current, stepId));
+    },
+    [controller.setSelectedStepId],
+  );
 
   const paletteActions = useMemo(() => [
     { id: "tab-run", label: t("tab.flow"), shortcut: "Ctrl+1", category: "Tab", keywords: "run flow execution", onExecute: () => controller.setCenterTab("run") },
@@ -234,8 +241,8 @@ export default function App() {
             onChangeTab={(nextTab) =>
               controller.setSidebarTab((currentTab) => nextSidebarTab(currentTab, nextTab))
             }
-            projects={controller.filteredProjects}
-            historyProjects={controller.filteredHistoryProjects}
+            projects={controller.projects}
+            historyProjects={controller.historyProjects}
             selectedProjectId={controller.selectedProjectId}
             selectedHistoryId={controller.selectedHistoryId}
             loadingProjectId={controller.loadingProjectId}
@@ -286,6 +293,9 @@ export default function App() {
               queuedJobs={controller.queuedJobs}
               onChangeForm={controller.setProjectForm}
               onChangeProgramSettings={controller.setProgramSettings}
+              onSaveProject={controller.saveProject}
+              onSaveProgramSettings={controller.saveProgramSettings}
+              programSettingsDirty={controller.programSettingsDirty}
               onChooseDirectory={controller.chooseDirectory}
               onArchiveProject={controller.archiveProject}
               onDeleteProject={controller.deleteProject}
@@ -305,9 +315,11 @@ export default function App() {
               onSavePlan={controller.savePlan}
               onResetPlan={controller.resetPlan}
               onRunPlan={controller.runPlan}
+              onRunManualDebugger={controller.runManualDebugger}
+              onRunManualMerger={controller.runManualMerger}
               onRequestStop={controller.requestStop}
               onCancelQueuedJob={controller.cancelQueuedReservation}
-              onSelectStep={controller.setSelectedStepId}
+              onSelectStep={handleSelectStep}
               onUpdateStepField={controller.updateSelectedStep}
               onSaveStepLocal={controller.saveStepLocal}
               onAddStep={controller.addStep}

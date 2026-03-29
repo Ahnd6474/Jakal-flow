@@ -796,6 +796,47 @@ test("IdeToolbar keeps project link actions visible when only form-level paths a
   assert.match(html, /title="Open on GitHub"/);
 });
 
+test("IdeToolbar keeps project link actions visible but disabled without project paths", async () => {
+  const html = await renderBundledComponent(
+    "ide-toolbar-project-links-disabled-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projects: [],
+      selectedProjectId: "",
+      projectDetail: {
+        project: {
+          current_status: "idle",
+        },
+      },
+      planDraft: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [],
+      },
+      projectPath: "",
+      githubUrl: "",
+      busy: false,
+      activeJob: null,
+      activeCenterTab: "config",
+      onSelectProject: noop,
+      onNewProject: noop,
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onGeneratePlan: noop,
+      onRunPlan: noop,
+      onApproveCheckpoint: noop,
+      onOpenFolder: noop,
+      onOpenVsCode: noop,
+      onOpenGithub: noop,
+    },
+  );
+
+  assert.match(html, /title="Open folder"[^>]*disabled=""/);
+  assert.match(html, /title="Open in external editor"[^>]*disabled=""/);
+  assert.match(html, /title="Open on GitHub"[^>]*disabled=""/);
+});
+
 test("IdeToolbar prefers the live plan progress while a run is active", async () => {
   const html = await renderBundledComponent(
     "ide-toolbar-live-plan-render",
@@ -1735,7 +1776,9 @@ test("AppSettingsView exposes dashboard visibility controls", async () => {
         },
       },
       busy: false,
+      dirty: true,
       onChangeSettings: noop,
+      onSaveSettings: noop,
       onGenerateShareLink: noop,
       onCopyShareLink: noop,
       onRevokeShareLink: noop,
@@ -1744,6 +1787,7 @@ test("AppSettingsView exposes dashboard visibility controls", async () => {
   );
 
   assert.doesNotMatch(html, /Show only the dashboard cards you want to keep visible\./);
+  assert.match(html, /Save Program Settings/);
   assert.match(html, /Status/);
   assert.match(html, /5h Usage/);
   assert.match(html, /7d Usage/);
@@ -1903,6 +1947,7 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
       ],
       busy: false,
       onChangeForm: noop,
+      onSaveProject: noop,
       onChooseDirectory: noop,
       onArchiveProject: noop,
       onDeleteProject: noop,
@@ -1911,6 +1956,7 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
 
   assert.doesNotMatch(html, /Advanced Settings/);
   assert.doesNotMatch(html, /Custom Model Slug/);
+  assert.match(html, />Save Configuration<\/button>/);
   assert.match(html, /Planning Reasoning/);
   assert.match(html, /Memory \/ Worker \(GiB\)/);
   assert.doesNotMatch(html, /Extra Prompt/);

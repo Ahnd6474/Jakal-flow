@@ -1922,6 +1922,15 @@ export function firstSelectableStepId(plan) {
   return pending?.step_id || "";
 }
 
+export function toggleStepSelection(currentStepId = "", nextStepId = "") {
+  const current = String(currentStepId || "").trim();
+  const next = String(nextStepId || "").trim();
+  if (!next || current === next) {
+    return "";
+  }
+  return next;
+}
+
 export const CLOSEOUT_STEP_ID = "CO1";
 
 export function isSystemStep(step) {
@@ -2188,6 +2197,10 @@ export function commandLabel(command, language = "en") {
       return translate(locale, "action.runRemaining");
     case "run-closeout":
       return translate(locale, "action.closeout");
+    case "run-manual-debugger":
+      return locale === "ko" ? "수동 디버거" : "Manual Debugger";
+    case "run-manual-merger":
+      return locale === "ko" ? "수동 머저" : "Manual Merger";
     default:
       return String(command || (locale === "ko" ? "백그라운드 작업" : "Background Job"))
         .split("-")

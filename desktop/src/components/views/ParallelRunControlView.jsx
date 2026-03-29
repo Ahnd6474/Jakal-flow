@@ -259,6 +259,8 @@ export function ParallelRunControlView({
   onSavePlan,
   onResetPlan,
   onRunPlan,
+  onRunManualDebugger,
+  onRunManualMerger,
   onRequestStop,
   onCancelQueuedJob,
   onAutoRunAfterPlanChange,
@@ -346,6 +348,11 @@ export function ParallelRunControlView({
         || failureArtifacts.length
       ),
   );
+  const manualDebuggerLabel = language === "ko" ? "수동 디버거 호출" : "Run Debugger";
+  const manualMergerLabel = language === "ko" ? "수동 머저 호출" : "Run Merger";
+  const manualRecoveryHint = language === "ko"
+    ? "자동 복구가 실패했을 때 최근 실패 로그로 debugger를 다시 실행하거나, 현재 git 충돌 상태를 merger에 넘길 수 있습니다."
+    : "When automatic recovery falls short, rerun the debugger against the latest failure logs or hand the current git conflict to the merger.";
 
   useEffect(() => {
     setFailureDismissed(false);
@@ -432,6 +439,15 @@ export function ParallelRunControlView({
             {latestFailure?.report_json_file ? <div className="field field--wide"><span>Failure bundle</span><p style={{ fontFamily: "monospace", fontSize: "12px" }}>{latestFailure.report_json_file}</p></div> : null}
             {failureArtifacts.length ? <div className="field field--wide"><span>Failure artifacts</span><p style={{ fontFamily: "monospace", fontSize: "12px" }}>{failureArtifacts.join("\n")}</p></div> : null}
           </div>
+          <div className="action-row" style={{ marginTop: "12px" }}>
+            <button className="toolbar-btn toolbar-btn--accent" onClick={onRunManualDebugger} type="button" disabled={busy}>
+              <RunIcon /><span>{manualDebuggerLabel}</span>
+            </button>
+            <button className="toolbar-btn" onClick={onRunManualMerger} type="button" disabled={busy}>
+              <RunIcon /><span>{manualMergerLabel}</span>
+            </button>
+          </div>
+          <p style={{ marginTop: "10px", fontSize: "12px", color: "var(--text-dim)" }}>{manualRecoveryHint}</p>
         </div>
       ) : null}
 

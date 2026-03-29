@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import { statusTone } from "../../utils";
@@ -23,6 +23,15 @@ function SidebarCheckpointsIcon() {
     <svg aria-hidden="true" className="sidebar-icon__svg" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="7.25" stroke="currentColor" strokeWidth="1.7" />
       <path d="M12 8.25v4.25l2.75 1.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SidebarProjectsIcon() {
+  return (
+    <svg aria-hidden="true" className="sidebar-icon__svg" viewBox="0 0 24 24" fill="none">
+      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11Z" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 9h8M8 13h8M8 17h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </svg>
   );
 }
@@ -218,12 +227,23 @@ function CardFolderIcon() {
 export function SidebarPane({
   activeTab,
   onChangeTab,
+  projects = [],
+  historyProjects = [],
+  selectedProjectId = "",
+  selectedHistoryId = "",
+  loadingProjectId = "",
+  projectFilter = "",
   workspaceFilter,
+  onProjectFilterChange = () => {},
   onWorkspaceFilterChange,
+  onSelectProject = () => {},
+  onSelectHistory = () => {},
+  onNewProject = () => {},
   workspaceTree,
   checkpoints,
 }) {
   const { language, t } = useI18n();
+  const deferredProjectFilter = useDeferredValue(projectFilter);
   const workspaceTabActive = activeTab === "workspace";
   const deferredWorkspaceFilter = useDeferredValue(workspaceFilter);
   const workspaceFilterCacheRef = useRef(new Map());
@@ -263,7 +283,35 @@ export function SidebarPane({
     return nextTree;
   }, [deferredWorkspaceFilter, normalizedWorkspaceTree, workspaceTabActive]);
 
+  const visibleProjects = useMemo(() => {
+    const query = deferredProjectFilter.trim().toLowerCase();
+    if (!query) {
+      return projects;
+    }
+    return (projects || []).filter((project) =>
+      [project.display_name, project.slug, project.status, project.detail, project.repo_path]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [deferredProjectFilter, projects]);
+
+  const visibleHistoryProjects = useMemo(() => {
+    const query = deferredProjectFilter.trim().toLowerCase();
+    if (!query) {
+      return historyProjects;
+    }
+    return (historyProjects || []).filter((project) =>
+      [project.display_name, project.slug, project.status, project.detail, project.repo_path]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [deferredProjectFilter, historyProjects]);
+
   const tabs = [
+    ["projects", <SidebarProjectsIcon key="projects-icon" />, t("common.project")],
+    ["history", <SidebarHistoryIcon key="history-icon" />, t("tab.history")],
     ["workspace", <SidebarExplorerIcon key="workspace-icon" />, t("sidebar.explorer")],
     ["plans", <SidebarCheckpointsIcon key="plans-icon" />, t("sidebar.checkpoints")],
   ];
@@ -274,6 +322,99 @@ export function SidebarPane({
 
       {activeTab ? (
         <div className="sidebar-panel">
+
+          {activeTab === "projects" ? (
+            <>
+              <div className="sidebar-panel__header">
+                <strong>{t("common.project")}</strong>
+              </div>
+
+              <SearchInput
+                value={projectFilter}
+                onChange={onProjectFilterChange}
+                placeholder={t("sidebar.searchProjects")}
+              />
+
+              <button className="sidebar-add-btn" onClick={onNewProject} type="button">
+                <PlusIcon />
+                <span>{t("action.new")}</span>
+              </button>
+
+              <div className="sidebar-list">
+                {visibleProjects.length ? (
+                  visibleProjects.map((project) => {
+                    const tone = statusTone(project?.status);
+                    return (
+                      <button
+                        key={project.repo_id || project.display_name}
+                        className={`sidebar-project sidebar-project--${tone} ${project.repo_id === selectedProjectId ? "selected" : ""} ${project.repo_id === loadingProjectId ? "loading" : ""}`.trim()}
+                        onClick={() => onSelectProject(project.repo_id)}
+                        type="button"
+                      >
+                        <div className="sidebar-project__fill" />
+                        <div className="sidebar-project__title">
+                          <strong>{project.display_name || project.slug || t("common.unknown")}</strong>
+                          <span className={`status-badge status-badge--${tone} sidebar-project__status`}>
+                            {displayStatus(project.status, language)}
+                          </span>
+                        </div>
+                        {project.detail ? <span>{project.detail}</span> : null}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="empty-block">
+                    <EmptyProjectsIcon />
+                    <span>{t("sidebar.emptyProjects")}</span>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
+
+          {activeTab === "history" ? (
+            <>
+              <div className="sidebar-panel__header">
+                <strong>{t("tab.history")}</strong>
+              </div>
+
+              <SearchInput
+                value={projectFilter}
+                onChange={onProjectFilterChange}
+                placeholder={t("sidebar.searchProjects")}
+              />
+
+              <div className="sidebar-list">
+                {visibleHistoryProjects.length ? (
+                  visibleHistoryProjects.map((project) => {
+                    const tone = statusTone(project?.status);
+                    return (
+                      <button
+                        key={project.archive_id || project.display_name}
+                        className={`sidebar-project sidebar-project--${tone} ${project.archive_id === selectedHistoryId ? "selected" : ""}`.trim()}
+                        onClick={() => onSelectHistory(project.archive_id)}
+                        type="button"
+                      >
+                        <div className="sidebar-project__fill" />
+                        <div className="sidebar-project__title">
+                          <strong>{project.display_name || project.slug || t("common.unknown")}</strong>
+                          <span className={`status-badge status-badge--${tone} sidebar-project__status`}>
+                            {displayStatus(project.status, language)}
+                          </span>
+                        </div>
+                        {project.detail ? <span>{project.detail}</span> : null}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="empty-block">
+                    <EmptyHistoryIcon />
+                    <span>{language === "ko" ? "기록이 없습니다." : "No archived runs yet."}</span>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
 
           {/* ── Workspace explorer tab ── */}
           {activeTab === "workspace" ? (

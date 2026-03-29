@@ -65,7 +65,7 @@ from .planning import (
 from .reporting import Reporter
 from .status_views import status_from_plan_state
 from .step_models import normalize_step_model, normalize_step_model_provider, provider_execution_preflight_error, resolve_step_model_choice
-from .utils import compact_text, ensure_dir, normalize_workflow_mode, now_utc_iso, read_json, read_last_jsonl, read_text, remove_tree, svg_text_element, wrap_svg_text, write_json, write_text
+from .utils import compact_text, ensure_dir, normalize_workflow_mode, now_utc_iso, read_json, read_jsonl_tail, read_last_jsonl, read_text, remove_tree, svg_text_element, wrap_svg_text, write_json, write_text
 from .verification import VerificationRunner
 from .workspace import WorkspaceManager
 
@@ -5213,6 +5213,346 @@ class Orchestrator:
             owned_paths=ordered_paths,
             metadata={"parallel_step_titles": parallel_step_titles},
         )
+
+    def _latest_failure_bundle_json(self, context: ProjectContext) -> dict[str, object]:
+        latest_failure_status = read_json(context.paths.reports_dir / "latest_pr_failure_status.json", default={})
+        if not isinstance(latest_failure_status, dict) or not latest_failure_status:
+            return {}
+        report_json_file = str(latest_failure_status.get("report_json_file", "")).strip()
+        if not report_json_file:
+            return {}
+        bundle_json = read_json(Path(report_json_file), default={})
+        return bundle_json if isinstance(bundle_json, dict) else {}
+
+    def _latest_failed_test_run_entry(
+        self,
+        context: ProjectContext,
+        *,
+        preferred_labels: tuple[str, ...] = (),
+    ) -> dict[str, object] | None:
+        recent_test_runs = read_jsonl_tail(context.paths.logs_dir / "test_runs.jsonl", 40)
+        normalized_preferred = tuple(str(item).strip().lower() for item in preferred_labels if str(item).strip())
+        for entry in reversed(recent_test_runs):
+            try:
+                returncode = int(entry.get("returncode", 0))
+            except (TypeError, ValueError):
+                continue
+            if returncode == 0:
+                continue
+            label = str(entry.get("label", "")).strip().lower()
+            if normalized_preferred and label not in normalized_preferred:
+                continue
+            return entry
+        return None
+
+    def _test_run_result_from_log_entry(self, context: ProjectContext, entry: dict[str, object]) -> TestRunResult:
+        label = str(entry.get("label", "")).strip() or "manual-recovery"
+        stdout_file_value = str(entry.get("stdout_file", "")).strip()
+        stderr_file_value = str(entry.get("stderr_file", "")).strip()
+        stdout_file = Path(stdout_file_value) if stdout_file_value else context.paths.logs_dir / f"{label}.stdout.log"
+        stderr_file = Path(stderr_file_value) if stderr_file_value else context.paths.logs_dir / f"{label}.stderr.log"
+        try:
+            returncode = int(entry.get("returncode", 1))
+        except (TypeError, ValueError):
+            returncode = 1
+        return TestRunResult(
+            command=str(entry.get("command", context.runtime.test_cmd)).strip() or context.runtime.test_cmd,
+            returncode=returncode,
+            stdout_file=stdout_file,
+            stderr_file=stderr_file,
+            summary=str(entry.get("summary", "")).strip() or f"{label} failed.",
+            failure_reason=str(entry.get("failure_reason", "")).strip(),
+            duration_seconds=float(entry.get("duration_seconds", 0.0) or 0.0),
+            source_duration_seconds=float(entry.get("source_duration_seconds", 0.0) or 0.0),
+            cache_hit=bool(entry.get("cache_hit")),
+            state_fingerprint=str(entry.get("state_fingerprint", "")).strip() or None,
+            cache_key=str(entry.get("cache_key", "")).strip() or None,
+        )
+
+    def _manual_recovery_block_index(
+        self,
+        context: ProjectContext,
+        *,
+        bundle_json: dict[str, object],
+        test_entry: dict[str, object] | None = None,
+    ) -> int:
+        raw_block_index = bundle_json.get("block_index") if isinstance(bundle_json, dict) else None
+        if raw_block_index is None and isinstance(test_entry, dict):
+            raw_block_index = test_entry.get("block_index")
+        try:
+            block_index = int(raw_block_index)
+        except (TypeError, ValueError):
+            block_index = int(context.loop_state.block_index or 0)
+        return max(1, block_index)
+
+    def _manual_recovery_steps(
+        self,
+        plan_state: ExecutionPlanState,
+        *,
+        selected_task: str,
+        failing_label: str,
+    ) -> list[ExecutionStep]:
+        normalized_task = str(selected_task).strip().lower()
+        normalized_label = str(failing_label).strip().lower()
+        for step in plan_state.steps:
+            if normalized_task and normalized_task in {step.step_id.strip().lower(), step.title.strip().lower()}:
+                return [step]
+        failed_steps = [step for step in plan_state.steps if step.status == "failed"]
+        if normalized_label.startswith("parallel-batch") or "parallel batch" in normalized_task:
+            if len(failed_steps) >= 2:
+                return failed_steps
+            non_completed = [step for step in plan_state.steps if step.status != "completed"]
+            return non_completed if non_completed else failed_steps
+        if failed_steps:
+            return failed_steps
+        return []
+
+    def _manual_debugger_failure_message(self, run_result, test_result: TestRunResult | None) -> str:
+        if test_result is not None and test_result.returncode != 0:
+            return str(test_result.summary).strip() or "Manual debugger recovery still failed verification."
+        message = str(getattr(run_result, "last_message", "") or "").strip()
+        if message:
+            return message
+        return f"Manual debugger pass failed with code {int(getattr(run_result, 'returncode', 1) or 1)}."
+
+    def _manual_merger_failure_message(self, run_result, success: bool) -> str:
+        if success:
+            return ""
+        message = str(getattr(run_result, "last_message", "") or "").strip()
+        if message:
+            return message
+        return f"Manual merger pass failed with code {int(getattr(run_result, 'returncode', 1) or 1)}."
+
+    def run_manual_debugger_recovery(
+        self,
+        project_dir: Path,
+        runtime: RuntimeOptions,
+        branch: str = "main",
+        origin_url: str = "",
+    ) -> tuple[ProjectContext, ExecutionPlanState, dict[str, object]]:
+        context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
+        plan_state = self.load_execution_plan_state(context)
+        bundle_json = self._latest_failure_bundle_json(context)
+        failing_test_entry = self._latest_failed_test_run_entry(context)
+        if failing_test_entry is None:
+            raise RuntimeError("No failed verification log is available for manual debugger recovery.")
+
+        failing_test_result = self._test_run_result_from_log_entry(context, failing_test_entry)
+        failing_pass_name = str(failing_test_entry.get("label", "")).strip() or "manual-debugger"
+        selected_task = str(bundle_json.get("selected_task", "")).strip()
+        recovery_steps = self._manual_recovery_steps(
+            plan_state,
+            selected_task=selected_task,
+            failing_label=failing_pass_name,
+        )
+        test_command = str(plan_state.default_test_command or runtime.test_cmd).strip() or runtime.test_cmd
+        execution_step: ExecutionStep | None = None
+        if len(recovery_steps) > 1 or str(failing_pass_name).strip().lower().startswith("parallel-batch"):
+            execution_step = self._build_parallel_batch_debug_step(recovery_steps, test_command)
+        elif recovery_steps:
+            execution_step = recovery_steps[0]
+        candidate_title = selected_task or (execution_step.title if execution_step is not None else "Manual debugger recovery")
+        candidate = CandidateTask(
+            candidate_id="manual-debugger",
+            title=candidate_title,
+            rationale=(
+                self._execution_step_rationale(execution_step, test_command)
+                if execution_step is not None
+                else "Inspect the latest failing verification logs and repair the current repository state safely."
+            ),
+            plan_refs=[step.step_id for step in recovery_steps],
+            score=1.0,
+        )
+        runner = CodexRunner(context.runtime.codex_path)
+        reporter = Reporter(context)
+        memory_context = MemoryStore(context.paths).render_context(read_text(context.paths.mid_term_plan_file))
+        block_index = self._manual_recovery_block_index(
+            context,
+            bundle_json=bundle_json,
+            test_entry=failing_test_entry,
+        )
+        pass_name, run_result, test_result, commit_hash = self._run_debugger_pass(
+            context=context,
+            runner=runner,
+            reporter=reporter,
+            block_index=block_index,
+            candidate=candidate,
+            execution_step=execution_step,
+            memory_context=memory_context,
+            failing_pass_name=failing_pass_name,
+            failing_test_result=failing_test_result,
+        )
+        failure_summary = self._manual_debugger_failure_message(run_result, test_result)
+        if run_result.returncode != 0 or test_result is None or test_result.returncode != 0:
+            rollback_status = "manual_recovery_failed"
+            self._log_pass_result(
+                context=context,
+                reporter=reporter,
+                block_index=block_index,
+                candidate=candidate,
+                pass_name=pass_name,
+                run_result=run_result,
+                test_result=test_result,
+                commit_hash=None,
+                rollback_status=rollback_status,
+                search_enabled=False,
+            )
+            self._report_failure(
+                context,
+                reporter,
+                failure_type="manual_debugger_failed",
+                summary=failure_summary,
+                block_index=block_index,
+                selected_task=candidate.title,
+                extra={
+                    "artifact_paths": [
+                        str(failing_test_result.stdout_file),
+                        str(failing_test_result.stderr_file),
+                    ],
+                },
+            )
+            latest_failure_status = read_json(context.paths.reports_dir / "latest_pr_failure_status.json", default={})
+            failure_report = str(latest_failure_status.get("report_markdown_file", "")).strip() if isinstance(latest_failure_status, dict) else ""
+            if failure_report:
+                raise RuntimeError(f"{failure_summary} Failure report: {failure_report}")
+            raise RuntimeError(failure_summary)
+        self._log_pass_result(
+            context=context,
+            reporter=reporter,
+            block_index=block_index,
+            candidate=candidate,
+            pass_name=pass_name,
+            run_result=run_result,
+            test_result=test_result,
+            commit_hash=commit_hash,
+            rollback_status="not_needed",
+            search_enabled=False,
+        )
+        if commit_hash:
+            context.metadata.current_safe_revision = commit_hash
+            context.loop_state.current_safe_revision = commit_hash
+            context.loop_state.last_commit_hash = commit_hash
+            context.metadata.last_run_at = now_utc_iso()
+            self.workspace.save_project(context)
+        self.clear_latest_failure_status(context)
+        reporter.write_status_report()
+        return context, self.load_execution_plan_state(context), {
+            "pass_name": pass_name,
+            "summary": str(test_result.summary).strip(),
+            "commit_hash": commit_hash,
+        }
+
+    def run_manual_merger_recovery(
+        self,
+        project_dir: Path,
+        runtime: RuntimeOptions,
+        branch: str = "main",
+        origin_url: str = "",
+    ) -> tuple[ProjectContext, ExecutionPlanState, dict[str, object]]:
+        context = self.setup_local_project(project_dir=project_dir, runtime=runtime, branch=branch, origin_url=origin_url)
+        plan_state = self.load_execution_plan_state(context)
+        conflicted_files = self.git.conflicted_files(context.paths.repo_dir)
+        if not conflicted_files:
+            raise RuntimeError("No active git conflict is available for manual merger recovery.")
+
+        bundle_json = self._latest_failure_bundle_json(context)
+        selected_task = str(bundle_json.get("selected_task", "")).strip()
+        recovery_steps = self._manual_recovery_steps(
+            plan_state,
+            selected_task=selected_task,
+            failing_label="parallel-batch-merge",
+        )
+        test_command = str(plan_state.default_test_command or runtime.test_cmd).strip() or runtime.test_cmd
+        execution_step = self._build_parallel_batch_merge_step(recovery_steps, test_command)
+        candidate = CandidateTask(
+            candidate_id="manual-merger",
+            title=selected_task or execution_step.title,
+            rationale=self._execution_step_rationale(execution_step, test_command),
+            plan_refs=[step.step_id for step in recovery_steps],
+            score=1.0,
+        )
+        runner = CodexRunner(context.runtime.codex_path)
+        reporter = Reporter(context)
+        memory_context = MemoryStore(context.paths).render_context(read_text(context.paths.mid_term_plan_file))
+        block_index = self._manual_recovery_block_index(context, bundle_json=bundle_json)
+        git_status_result = self.git.run(["status", "--short"], cwd=context.paths.repo_dir, check=False)
+        report_text = ""
+        report_markdown_file = str(bundle_json.get("report_markdown_file", "")).strip()
+        if report_markdown_file:
+            report_text = read_text(Path(report_markdown_file))
+        failing_summary = (
+            str(bundle_json.get("summary", "")).strip()
+            or f"Manual merge recovery requested for conflicted files: {', '.join(conflicted_files)}."
+        )
+        pass_name, run_result, success, commit_hash = self._run_merger_pass(
+            context=context,
+            runner=runner,
+            reporter=reporter,
+            block_index=block_index,
+            candidate=candidate,
+            execution_step=execution_step,
+            memory_context=memory_context,
+            failing_command="parallel-batch-merge",
+            failing_summary=failing_summary,
+            failing_stdout=git_status_result.stdout,
+            failing_stderr=report_text or git_status_result.stderr or failing_summary,
+            merge_targets=[step.step_id for step in recovery_steps],
+            post_success_strategy="continue_cherry_pick",
+        )
+        failure_summary = self._manual_merger_failure_message(run_result, success)
+        if run_result.returncode != 0 or not success:
+            rollback_status = "manual_recovery_failed"
+            self._log_pass_result(
+                context=context,
+                reporter=reporter,
+                block_index=block_index,
+                candidate=candidate,
+                pass_name=pass_name,
+                run_result=run_result,
+                test_result=None,
+                commit_hash=None,
+                rollback_status=rollback_status,
+                search_enabled=False,
+            )
+            self._report_failure(
+                context,
+                reporter,
+                failure_type="manual_merger_failed",
+                summary=failure_summary,
+                block_index=block_index,
+                selected_task=candidate.title,
+                extra={"conflict": self._parallel_conflict_details(conflicted_files)},
+            )
+            latest_failure_status = read_json(context.paths.reports_dir / "latest_pr_failure_status.json", default={})
+            failure_report = str(latest_failure_status.get("report_markdown_file", "")).strip() if isinstance(latest_failure_status, dict) else ""
+            if failure_report:
+                raise RuntimeError(f"{failure_summary} Failure report: {failure_report}")
+            raise RuntimeError(failure_summary)
+        self._log_pass_result(
+            context=context,
+            reporter=reporter,
+            block_index=block_index,
+            candidate=candidate,
+            pass_name=pass_name,
+            run_result=run_result,
+            test_result=None,
+            commit_hash=commit_hash,
+            rollback_status="not_needed",
+            search_enabled=False,
+        )
+        if commit_hash:
+            context.metadata.current_safe_revision = commit_hash
+            context.loop_state.current_safe_revision = commit_hash
+            context.loop_state.last_commit_hash = commit_hash
+            context.metadata.last_run_at = now_utc_iso()
+            self.workspace.save_project(context)
+        self.clear_latest_failure_status(context)
+        reporter.write_status_report()
+        return context, self.load_execution_plan_state(context), {
+            "pass_name": pass_name,
+            "summary": f"Resolved conflicted files: {', '.join(conflicted_files)}.",
+            "commit_hash": commit_hash,
+        }
 
     def _execute_pass(
         self,
