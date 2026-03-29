@@ -70,7 +70,7 @@ from .planning import (
 from .reporting import Reporter
 from .status_views import status_from_plan_state
 from .step_models import normalize_step_model, normalize_step_model_provider, provider_execution_preflight_error, resolve_step_model_choice
-from .utils import compact_text, ensure_dir, normalize_workflow_mode, now_utc_iso, read_json, read_jsonl_tail, read_last_jsonl, read_text, remove_tree, svg_text_element, wrap_svg_text, write_json, write_text
+from .utils import append_jsonl, compact_text, ensure_dir, normalize_workflow_mode, now_utc_iso, read_json, read_jsonl_tail, read_last_jsonl, read_text, remove_tree, svg_text_element, wrap_svg_text, write_json, write_text
 from .verification import VerificationRunner
 from .workspace import WorkspaceManager
 from .orchestrator_lineage import OrchestratorLineageMixin
@@ -1988,6 +1988,33 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
         provider_slug = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in str(provider or "").strip().lower()).strip("-") or "fallback"
         return f"{normalized_pass_name}-fallback-{provider_slug}"
 
+    def _append_runtime_ui_event(
+        self,
+        context: ProjectContext,
+        event_type: str,
+        message: str,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        payload = {
+            "timestamp": now_utc_iso(),
+            "event_type": event_type,
+            "message": message,
+            "details": details or {},
+        }
+        append_jsonl(context.paths.ui_event_log_file, payload)
+        if getattr(context.runtime, "save_project_logs", False):
+            append_jsonl(
+                context.paths.logs_dir / "project_activity.jsonl",
+                {
+                    "timestamp": payload["timestamp"],
+                    "repo_id": context.metadata.repo_id,
+                    "project_dir": str(context.metadata.repo_path),
+                    "event_type": event_type,
+                    "message": message,
+                    "details": payload["details"],
+                },
+            )
+
     def _merge_provider_fallback_result(
         self,
         *,
@@ -2048,6 +2075,20 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
             to_provider = normalize_step_model_provider(str(getattr(fallback_runtime, "model_provider", "") or "")) or str(getattr(fallback_runtime, "model_provider", "") or "").strip() or "unknown"
             if safe_revision:
                 self.git.hard_reset(context.paths.repo_dir, safe_revision)
+            self._append_runtime_ui_event(
+                context,
+                "provider-fallback-started",
+                f"Retrying {pass_name} on {to_provider} after {from_provider} failed.",
+                {
+                    "flow": "execution",
+                    "block_index": block_index,
+                    "pass_type": pass_name,
+                    "step_id": execution_step.step_id if execution_step is not None else "",
+                    "from_provider": from_provider,
+                    "to_provider": to_provider,
+                    "trigger_detail": compact_text(failure_detail, max_chars=240),
+                },
+            )
             context.runtime = fallback_runtime
             fallback_runner = CodexRunner(context.runtime.codex_path)
             try:
@@ -2084,6 +2125,24 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                     }
                 )
                 last_result = candidate_result
+                self._append_runtime_ui_event(
+                    context,
+                    "provider-fallback-finished",
+                    f"Fallback attempt on {to_provider} failed.",
+                    {
+                        "flow": "execution",
+                        "block_index": block_index,
+                        "pass_type": pass_name,
+                        "step_id": execution_step.step_id if execution_step is not None else "",
+                        "from_provider": from_provider,
+                        "to_provider": to_provider,
+                        "returncode": candidate_result.returncode,
+                        "attempt_count": candidate_result.attempt_count,
+                        "succeeded": False,
+                        "will_continue": is_provider_fallbackable_error(error_detail),
+                        "trigger_detail": compact_text(error_detail, max_chars=240),
+                    },
+                )
                 if is_provider_fallbackable_error(error_detail):
                     continue
                 context.runtime = primary_runtime
@@ -2110,6 +2169,29 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                 }
             )
             last_result = candidate_result
+            candidate_fallbackable = is_provider_fallbackable_error(candidate_detail)
+            self._append_runtime_ui_event(
+                context,
+                "provider-fallback-finished",
+                (
+                    f"Fallback attempt on {to_provider} succeeded."
+                    if candidate_result.returncode == 0
+                    else f"Fallback attempt on {to_provider} failed."
+                ),
+                {
+                    "flow": "execution",
+                    "block_index": block_index,
+                    "pass_type": pass_name,
+                    "step_id": execution_step.step_id if execution_step is not None else "",
+                    "from_provider": from_provider,
+                    "to_provider": to_provider,
+                    "returncode": candidate_result.returncode,
+                    "attempt_count": candidate_result.attempt_count,
+                    "succeeded": candidate_result.returncode == 0,
+                    "will_continue": candidate_result.returncode != 0 and candidate_fallbackable,
+                    "trigger_detail": compact_text(candidate_detail, max_chars=240),
+                },
+            )
             if candidate_result.returncode == 0:
                 return self._merge_provider_fallback_result(
                     base_result=candidate_result,
@@ -2120,7 +2202,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                     trigger_detail=failure_detail,
                     chain=fallback_chain,
                 )
-            if not is_provider_fallbackable_error(candidate_detail):
+            if not candidate_fallbackable:
                 context.runtime = primary_runtime
                 return self._merge_provider_fallback_result(
                     base_result=candidate_result,

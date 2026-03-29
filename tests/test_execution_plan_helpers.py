@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from types import SimpleNamespace
 from pathlib import Path
 import shutil
@@ -3022,6 +3023,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             test_cmd="python -m pytest",
         )
         observed_providers: list[str] = []
+        ui_events: list[dict[str, object]] = []
 
         try:
             context = orchestrator.workspace.initialize_local_project(
@@ -3126,6 +3128,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                     memory_context_override="Recent memory context",
                     execution_step=execution_step,
                 )
+                ui_events = read_jsonl_tail(context.paths.ui_event_log_file, 4)
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 
@@ -3140,9 +3143,41 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(run_result.diagnostics["provider_fallback"]["from_provider"], "gemini")
         self.assertEqual(run_result.diagnostics["provider_fallback"]["to_provider"], "openai")
         self.assertIn("ModelNotFoundError", run_result.diagnostics["provider_fallback"]["trigger_detail"])
+        self.assertEqual([event.get("event_type") for event in ui_events[-2:]], ["provider-fallback-started", "provider-fallback-finished"])
+        self.assertIn("Retrying block-search-pass on openai", str(ui_events[-2].get("message", "")))
+        self.assertEqual(ui_events[-1].get("details", {}).get("succeeded"), True)
         mocked_fallback_run.assert_called_once()
         mocked_reset.assert_called_once_with(repo_dir, "safe-revision")
         mocked_commit.assert_called_once()
+
+    def test_write_json_retries_transient_windows_replace_denied(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_atomic_write_retry_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        temp_root.mkdir(parents=True, exist_ok=True)
+        target = temp_root / "LOOP_STATE.json"
+
+        replace_attempts: list[tuple[str, str]] = []
+        saved_payload: dict[str, object] = {}
+        real_replace = os.replace
+
+        def flaky_replace(src, dst):
+            replace_attempts.append((str(src), str(dst)))
+            if len(replace_attempts) < 3:
+                raise PermissionError(13, "Access is denied", str(dst))
+            return real_replace(src, dst)
+
+        try:
+            with mock.patch("jakal_flow.utils.os.replace", side_effect=flaky_replace), mock.patch(
+                "jakal_flow.utils.time.sleep"
+            ) as mocked_sleep:
+                write_json(target, {"current_task": "ST7", "pending_checkpoint_approval": False})
+                saved_payload = read_json(target, default={})
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(len(replace_attempts), 3)
+        self.assertEqual(mocked_sleep.call_count, 2)
+        self.assertEqual(saved_payload, {"current_task": "ST7", "pending_checkpoint_approval": False})
 
     def test_execute_verified_repo_pass_falls_back_to_local_oss_after_remote_quota_failures(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_verified_repo_local_provider_fallback_test"

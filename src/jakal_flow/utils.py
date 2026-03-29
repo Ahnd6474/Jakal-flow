@@ -9,11 +9,13 @@ import re
 import shutil
 import stat
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 UTC = getattr(datetime, "UTC", timezone.utc)
+_ATOMIC_REPLACE_RETRY_DELAYS = (0.02, 0.05, 0.1, 0.2, 0.35)
 
 
 def now_utc_iso() -> str:
@@ -41,6 +43,13 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
+def _is_transient_atomic_replace_error(exc: OSError) -> bool:
+    winerror = getattr(exc, "winerror", None)
+    if winerror in {5, 32}:
+        return True
+    return getattr(exc, "errno", None) in {13, 16}
+
+
 def _atomic_write_bytes(path: Path, content: bytes) -> None:
     ensure_dir(path.parent)
     temp_path: str | None = None
@@ -56,7 +65,15 @@ def _atomic_write_bytes(path: Path, content: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
             temp_path = handle.name
-        os.replace(temp_path, path)
+        for attempt_index, delay in enumerate((*_ATOMIC_REPLACE_RETRY_DELAYS, None)):
+            try:
+                os.replace(temp_path, path)
+                temp_path = None
+                break
+            except OSError as exc:
+                if delay is None or not _is_transient_atomic_replace_error(exc):
+                    raise
+                time.sleep(delay)
     finally:
         if temp_path:
             try:
