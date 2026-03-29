@@ -2113,7 +2113,8 @@ export function executionProgressCaption(plan, language = "en") {
 }
 
 export function canEditStep(step, busy) {
-  return Boolean(step) && !isSystemStep(step) && step.status === "pending" && !busy;
+  const normalizedStatus = String(step?.status || "").trim().toLowerCase();
+  return Boolean(step) && !isSystemStep(step) && ["pending", "failed"].includes(normalizedStatus) && !busy;
 }
 
 export function toolbarProgressCaption(plan) {

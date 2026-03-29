@@ -558,6 +558,24 @@ function ChatPanel({
 function CheckpointsPanel({ checkpoints, visibleCheckpoints, language, t }) {
   const [expandedIds, setExpandedIds] = useState(new Set());
 
+  useEffect(() => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      visibleCheckpoints.forEach((checkpoint) => {
+        const isPendingCheckpoint =
+          checkpoint?.status === "awaiting_review" ||
+          checkpoint?.checkpoint_id === checkpoints?.pending?.checkpoint_id;
+        const hasDetails = checkpoint?.title || checkpoint?.target_block || checkpoint?.deadline_at;
+        if (isPendingCheckpoint && hasDetails && !next.has(checkpoint.checkpoint_id)) {
+          next.add(checkpoint.checkpoint_id);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [checkpoints?.pending?.checkpoint_id, visibleCheckpoints]);
+
   function toggleExpand(id) {
     setExpandedIds((prev) => {
       const next = new Set(prev);

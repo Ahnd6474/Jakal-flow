@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { jobHasNewerActiveReplacement } from "./utils.js";
+import { canEditStep, jobHasNewerActiveReplacement } from "./utils.js";
 
 test("jobHasNewerActiveReplacement detects a newer active job for the same project", () => {
   const jobs = [
@@ -43,4 +43,32 @@ test("jobHasNewerActiveReplacement ignores terminal jobs when no newer active re
   ];
 
   assert.equal(jobHasNewerActiveReplacement(jobs[0], jobs), false);
+});
+
+test("canEditStep allows editing failed steps when the run is idle", () => {
+  assert.equal(
+    canEditStep(
+      {
+        step_id: "ST2",
+        status: "failed",
+        metadata: {},
+      },
+      false,
+    ),
+    true,
+  );
+});
+
+test("canEditStep still blocks failed steps while a run is active", () => {
+  assert.equal(
+    canEditStep(
+      {
+        step_id: "ST2",
+        status: "failed",
+        metadata: {},
+      },
+      true,
+    ),
+    false,
+  );
 });
