@@ -1058,8 +1058,7 @@ class Orchestrator:
         }
 
     def _cleanup_lineage_worktree(self, repo_dir: Path, lineage: LineageState) -> None:
-        if lineage.worktree_dir.exists():
-            self.git.remove_worktree(repo_dir, lineage.worktree_dir, force=True)
+        self.git.remove_worktree(repo_dir, lineage.worktree_dir, force=True)
         if lineage.branch_name:
             self.git.delete_branch(repo_dir, lineage.branch_name, force=True)
 
@@ -1723,7 +1722,7 @@ class Orchestrator:
     def _cleanup_integration_worktree(self, repo_dir: Path, integration_info: dict[str, object]) -> None:
         worktree_dir = integration_info.get("worktree_dir")
         branch_name = str(integration_info.get("branch_name") or "").strip()
-        if isinstance(worktree_dir, Path) and worktree_dir.exists():
+        if isinstance(worktree_dir, Path):
             self.git.remove_worktree(repo_dir, worktree_dir, force=True)
         if branch_name:
             self.git.delete_branch(repo_dir, branch_name, force=True)

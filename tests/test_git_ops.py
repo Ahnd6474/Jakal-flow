@@ -201,6 +201,91 @@ class GitOpsTests(unittest.TestCase):
         self.assertEqual(changed_files, [])
         self.assertFalse(has_changes)
 
+    def test_add_worktree_recovers_missing_registered_path_and_reuses_existing_branch(self) -> None:
+        repo_dir = Path(__file__).resolve().parents[1]
+        worktree_dir = repo_dir / ".tmp_stale_worktree" / "repo"
+        git = GitOps()
+        calls: list[list[str]] = []
+        state = {"failed_once": False}
+
+        def fake_run(
+            args: list[str],
+            cwd: Path,
+            check: bool = True,
+            env: dict[str, str] | None = None,
+        ) -> CommandResult:
+            calls.append(args)
+            if args == ["worktree", "add", "-b", "feature", str(worktree_dir), "main"] and not state["failed_once"]:
+                state["failed_once"] = True
+                raise GitCommandError(
+                    f"git worktree add -b feature {worktree_dir} main failed with code 128: "
+                    f"fatal: '{worktree_dir.as_posix()}' is a missing but already registered worktree"
+                )
+            if args == ["worktree", "remove", "--force", str(worktree_dir)]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+            if args == ["worktree", "prune"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+            if args == ["rev-parse", "--verify", "refs/heads/feature"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="abc123\n", stderr="")
+            if args == ["worktree", "add", str(worktree_dir), "feature"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+            raise AssertionError(f"Unexpected git command: {args}")
+
+        with mock.patch.object(git, "run", side_effect=fake_run):
+            git.add_worktree(repo_dir, worktree_dir, "feature", "main")
+
+        self.assertEqual(
+            calls,
+            [
+                ["worktree", "add", "-b", "feature", str(worktree_dir), "main"],
+                ["worktree", "remove", "--force", str(worktree_dir)],
+                ["worktree", "prune"],
+                ["rev-parse", "--verify", "refs/heads/feature"],
+                ["worktree", "add", str(worktree_dir), "feature"],
+            ],
+        )
+
+    def test_attach_worktree_recovers_missing_registered_path(self) -> None:
+        repo_dir = Path(__file__).resolve().parents[1]
+        worktree_dir = repo_dir / ".tmp_stale_attach_worktree" / "repo"
+        git = GitOps()
+        calls: list[list[str]] = []
+        state = {"failed_once": False}
+
+        def fake_run(
+            args: list[str],
+            cwd: Path,
+            check: bool = True,
+            env: dict[str, str] | None = None,
+        ) -> CommandResult:
+            calls.append(args)
+            if args == ["worktree", "add", str(worktree_dir), "feature"] and not state["failed_once"]:
+                state["failed_once"] = True
+                raise GitCommandError(
+                    f"git worktree add {worktree_dir} feature failed with code 128: "
+                    f"fatal: '{worktree_dir.as_posix()}' is a missing but already registered worktree"
+                )
+            if args == ["worktree", "remove", "--force", str(worktree_dir)]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+            if args == ["worktree", "prune"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+            if args == ["worktree", "add", str(worktree_dir), "feature"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+            raise AssertionError(f"Unexpected git command: {args}")
+
+        with mock.patch.object(git, "run", side_effect=fake_run):
+            git.attach_worktree(repo_dir, worktree_dir, "feature")
+
+        self.assertEqual(
+            calls,
+            [
+                ["worktree", "add", str(worktree_dir), "feature"],
+                ["worktree", "remove", "--force", str(worktree_dir)],
+                ["worktree", "prune"],
+                ["worktree", "add", str(worktree_dir), "feature"],
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

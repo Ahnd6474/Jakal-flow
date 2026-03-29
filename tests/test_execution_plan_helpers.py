@@ -451,6 +451,44 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         mocked_add.assert_not_called()
         self.assertEqual(lineage_context.metadata.branch, lineage.branch_name)
 
+    def test_cleanup_lineage_worktree_unregisters_missing_worktree_path(self) -> None:
+        orchestrator = Orchestrator(Path.cwd() / ".tmp_cleanup_lineage_worktree_test")
+        repo_dir = Path.cwd() / ".tmp_cleanup_lineage_worktree_test" / "repo"
+        lineage = LineageState(
+            lineage_id="LN1",
+            branch_name="jakal-flow-lineage-ln1",
+            worktree_dir=repo_dir / ".lineages" / "ln1" / "repo",
+            project_root=repo_dir / ".lineages" / "ln1",
+            created_at="2026-03-28T00:00:00+00:00",
+            updated_at="2026-03-28T00:00:00+00:00",
+        )
+
+        with mock.patch.object(orchestrator.git, "remove_worktree") as mocked_remove, mock.patch.object(
+            orchestrator.git,
+            "delete_branch",
+        ) as mocked_delete:
+            orchestrator._cleanup_lineage_worktree(repo_dir, lineage)
+
+        mocked_remove.assert_called_once_with(repo_dir, lineage.worktree_dir, force=True)
+        mocked_delete.assert_called_once_with(repo_dir, lineage.branch_name, force=True)
+
+    def test_cleanup_integration_worktree_unregisters_missing_worktree_path(self) -> None:
+        orchestrator = Orchestrator(Path.cwd() / ".tmp_cleanup_integration_worktree_test")
+        repo_dir = Path.cwd() / ".tmp_cleanup_integration_worktree_test" / "repo"
+        worktree_dir = repo_dir / ".integration" / "repo"
+
+        with mock.patch.object(orchestrator.git, "remove_worktree") as mocked_remove, mock.patch.object(
+            orchestrator.git,
+            "delete_branch",
+        ) as mocked_delete:
+            orchestrator._cleanup_integration_worktree(
+                repo_dir,
+                {"worktree_dir": worktree_dir, "branch_name": "jakal-flow-integration"},
+            )
+
+        mocked_remove.assert_called_once_with(repo_dir, worktree_dir, force=True)
+        mocked_delete.assert_called_once_with(repo_dir, "jakal-flow-integration", force=True)
+
     def test_pending_execution_batches_uses_dependency_ready_waves(self) -> None:
         orchestrator = Orchestrator(Path.cwd() / ".tmp_pending_batches_workspace")
         plan_state = ExecutionPlanState(

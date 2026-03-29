@@ -13,6 +13,7 @@ class GitCommandError(RuntimeError):
 
 
 UNTRACKED_OVERWRITE_MARKER = "The following untracked working tree files would be overwritten by merge:"
+MISSING_REGISTERED_WORKTREE_MARKER = "is a missing but already registered worktree"
 
 
 class GitOps:
@@ -226,13 +227,40 @@ class GitOps:
         result = self.run(["merge-base", "--is-ancestor", older, newer], cwd=repo_dir, check=False)
         return result.returncode == 0
 
+    def _is_missing_registered_worktree_error(self, error_text: str) -> bool:
+        return MISSING_REGISTERED_WORKTREE_MARKER in error_text
+
+    def prune_worktrees(self, repo_dir: Path) -> None:
+        self.run(["worktree", "prune"], cwd=repo_dir, check=False)
+
+    def _clear_stale_worktree_registration(self, repo_dir: Path, worktree_dir: Path) -> None:
+        self.remove_worktree(repo_dir, worktree_dir, force=True)
+        self.prune_worktrees(repo_dir)
+
     def add_worktree(self, repo_dir: Path, worktree_dir: Path, branch_name: str, start_point: str) -> None:
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
-        self.run(["worktree", "add", "-b", branch_name, str(worktree_dir), start_point], cwd=repo_dir)
+        add_args = ["worktree", "add", "-b", branch_name, str(worktree_dir), start_point]
+        try:
+            self.run(add_args, cwd=repo_dir)
+        except GitCommandError as exc:
+            if not self._is_missing_registered_worktree_error(str(exc)):
+                raise
+            self._clear_stale_worktree_registration(repo_dir, worktree_dir)
+            if self.branch_exists(repo_dir, branch_name):
+                self.run(["worktree", "add", str(worktree_dir), branch_name], cwd=repo_dir)
+            else:
+                self.run(add_args, cwd=repo_dir)
 
     def attach_worktree(self, repo_dir: Path, worktree_dir: Path, branch_name: str) -> None:
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
-        self.run(["worktree", "add", str(worktree_dir), branch_name], cwd=repo_dir)
+        add_args = ["worktree", "add", str(worktree_dir), branch_name]
+        try:
+            self.run(add_args, cwd=repo_dir)
+        except GitCommandError as exc:
+            if not self._is_missing_registered_worktree_error(str(exc)):
+                raise
+            self._clear_stale_worktree_registration(repo_dir, worktree_dir)
+            self.run(add_args, cwd=repo_dir)
 
     def remove_worktree(self, repo_dir: Path, worktree_dir: Path, force: bool = True) -> None:
         args = ["worktree", "remove"]
