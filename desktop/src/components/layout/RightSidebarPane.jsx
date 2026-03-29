@@ -527,6 +527,7 @@ function ProjectChatPane({
 
 export function RightSidebarPane({
   activeTab = "chat",
+  collapsed = false,
   onChangeTab,
   detail,
   planDraft,
@@ -609,8 +610,9 @@ export function RightSidebarPane({
   ];
 
   return (
-    <aside className="details-pane rsb">
-      <div className="rsb-panel">
+    <aside className={`details-pane rsb ${collapsed ? "rsb--collapsed" : ""}`.trim()}>
+      {collapsed ? null : (
+        <div className="rsb-panel">
         {activeTab === "chat" ? (
           <ProjectChatPane
             chat={chat}
@@ -866,17 +868,18 @@ export function RightSidebarPane({
             ) : null}
           </div>
         ) : null}
-      </div>
+        </div>
+      )}
 
       <div className="rsb-rail">
         {railTabs.map(({ id, icon, title, dot }) => (
           <button
             key={id}
-            className={`sidebar-icon${activeTab === id ? " active" : ""}`}
+            className={`sidebar-icon${!collapsed && activeTab === id ? " active" : ""}`}
             onClick={() => onChangeTab?.(id)}
             title={title}
             type="button"
-            aria-pressed={activeTab === id}
+            aria-pressed={!collapsed && activeTab === id}
           >
             {icon}
             {dot ? <span className="rsb-rail__dot" /> : null}

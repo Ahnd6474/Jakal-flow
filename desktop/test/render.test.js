@@ -580,6 +580,51 @@ test("RightSidebarPane renders the project chat on the right rail by default", a
   assert.match(html, /chat\.summary\.txt/);
 });
 
+test("RightSidebarPane keeps the icon rail visible when the right panel is collapsed", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-collapsed-rail-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      collapsed: true,
+      activeTab: "chat",
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+      },
+      planDraft: {
+        steps: [],
+      },
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: null,
+      busy: false,
+      chat: {
+        messages: [
+          { message_id: "msg-1", role: "assistant", text: "Hello from the right side." },
+        ],
+      },
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+      onChangeChatModelSelection: noop,
+    },
+  );
+
+  assert.match(html, /rsb--collapsed/);
+  assert.match(html, /title="AI Chat"/);
+  assert.doesNotMatch(html, /Chat model/);
+  assert.doesNotMatch(html, /Hello from the right side\./);
+});
+
 test("CenterWorkspace shows estimated cost only for paid configured runtimes", async () => {
   const html = await renderBundledComponent(
     "parallel-workspace-paid-cost-render",
@@ -836,7 +881,7 @@ test("IdeToolbar renders the selected project and highlights program settings", 
   assert.match(html, /title="Program Settings"/);
 });
 
-test("IdeToolbar exposes a right sidebar toggle and keeps it active while the inspector is open", async () => {
+test("IdeToolbar does not render a dedicated right sidebar toggle button", async () => {
   const html = await renderBundledComponent(
     "ide-toolbar-right-sidebar-toggle-render",
     "./src/components/layout/IdeToolbar.jsx",
@@ -857,21 +902,17 @@ test("IdeToolbar exposes a right sidebar toggle and keeps it active while the in
       busy: false,
       activeJob: null,
       activeCenterTab: "run",
-      rightCollapsed: false,
       onSelectProject: noop,
       onNewProject: noop,
       onRefresh: noop,
       onOpenSettings: noop,
-      onToggleRight: noop,
       onGeneratePlan: noop,
       onRunPlan: noop,
       onApproveCheckpoint: noop,
     },
   );
 
-  assert.match(html, /title="Toggle right sidebar"/);
-  assert.match(html, /title="Toggle right sidebar"[\s\S]*title="Toggle right sidebar"/);
-  assert.match(html, /toolbar-btn toolbar-btn--icon toolbar-btn--active/);
+  assert.doesNotMatch(html, /Toggle right sidebar/);
 });
 
 test("IdeToolbar keeps project link actions visible when only form-level paths are available", async () => {
@@ -2199,6 +2240,81 @@ test("ConfigEditorView keeps checkpoint controls editable during an active run",
   assert.match(html, /Checkpoint Interval/);
   assert.match(html, /Require checkpoint approval/);
   assert.doesNotMatch(html, /Word Report Creation/);
+});
+
+test("ConfigEditorView shows all supported GPT-5.4 reasoning options from the fallback catalog", async () => {
+  const html = await renderBundledComponent(
+    "config-editor-gpt54-fallback-reasoning-render",
+    "./src/components/views/ConfigEditorView.jsx",
+    "ConfigEditorView",
+    {
+      form: {
+        project_dir: "C:/demo",
+        display_name: "Demo",
+        branch: "main",
+        github_mode: "existing",
+        origin_url: "",
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          model_preset: "",
+          model_slug_input: "gpt-5.4",
+          effort: "medium",
+          workflow_mode: "standard",
+          execution_mode: "parallel",
+          parallel_worker_mode: "auto",
+          parallel_workers: 0,
+          parallel_memory_per_worker_gib: 3,
+          checkpoint_interval_blocks: 1,
+          ml_max_cycles: 3,
+          max_blocks: 5,
+        },
+      },
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "auto",
+          display_name: "Auto",
+          hidden: false,
+          default_reasoning_effort: "medium",
+          supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+          provider: "openai",
+        },
+        {
+          model: "gpt-5.4",
+          display_name: "GPT-5.4",
+          hidden: false,
+          default_reasoning_effort: "medium",
+          supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+          provider: "openai",
+        },
+      ],
+      codexStatus: {
+        providers: {
+          openai: {
+            available: true,
+            configured: false,
+            usable: false,
+            reason: "Codex CLI is installed but OpenAI authentication is not configured.",
+          },
+        },
+      },
+      busy: false,
+      activeJob: null,
+      onChangeForm: noop,
+      onChangeProgramSettings: noop,
+      onSaveProject: noop,
+      onChooseDirectory: noop,
+      onArchiveProject: noop,
+      onDeleteProject: noop,
+    },
+  );
+
+  assert.match(html, />Auto<\/strong>/);
+  assert.match(html, />Low<\/strong>/);
+  assert.match(html, />Medium<\/strong>/);
+  assert.match(html, />High<\/strong>/);
+  assert.match(html, />XHigh<\/strong>/);
 });
 
 test("DetailsPane shows report documents and checkpoint deadlines in the inspector", async () => {
