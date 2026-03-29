@@ -22,6 +22,7 @@ import {
   parallelLimitTone,
   parallelWorkerLabel,
   planStepsWithCloseout,
+  providerAvailable,
   providerUsable,
   providerStatusReason,
   projectStatusWithJob,
@@ -681,7 +682,7 @@ export function ParallelRunControlView({
               <label className="field"><span>{t("field.modelProvider")}</span>
                 <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStep}>
                   <option value="">{autoProviderLabel(language)}</option>
-                  {providerOptions.map(([value, label]) => (<option key={value} value={value} disabled={!providerUsable(value, codexStatus)} title={providerStatusReason(value, codexStatus)}>{label}</option>))}
+                  {providerOptions.map(([value, label]) => (<option key={value} value={value} disabled={!providerAvailable(value, codexStatus)} title={providerStatusReason(value, codexStatus)}>{label}</option>))}
                 </select>
                 {selectedStep.model_provider && !providerUsable(selectedStep.model_provider, codexStatus) && providerStatusReason(selectedStep.model_provider, codexStatus) ? (
                   <small className="field-hint" style={{ color: "var(--warning)" }}>{providerStatusReason(selectedStep.model_provider, codexStatus)}</small>
