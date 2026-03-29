@@ -949,9 +949,9 @@ test("IdeToolbar renders the selected project and highlights program settings", 
   assert.match(html, /title="Program Settings"/);
 });
 
-test("IdeToolbar exposes a right sidebar toggle and keeps it active while the inspector is open", async () => {
+test("IdeToolbar keeps the compact utility actions visible without a right sidebar toggle", async () => {
   const html = await renderBundledComponent(
-    "ide-toolbar-right-sidebar-toggle-render",
+    "ide-toolbar-utility-actions-render",
     "./src/components/layout/IdeToolbar.jsx",
     "IdeToolbar",
     {
@@ -970,21 +970,19 @@ test("IdeToolbar exposes a right sidebar toggle and keeps it active while the in
       busy: false,
       activeJob: null,
       activeCenterTab: "run",
-      rightCollapsed: false,
       onSelectProject: noop,
       onNewProject: noop,
       onRefresh: noop,
       onOpenSettings: noop,
-      onToggleRight: noop,
       onGeneratePlan: noop,
       onRunPlan: noop,
       onApproveCheckpoint: noop,
     },
   );
 
-  assert.match(html, /title="Toggle right sidebar"/);
-  assert.match(html, /title="Toggle right sidebar"[\s\S]*title="Toggle right sidebar"/);
-  assert.match(html, /toolbar-btn toolbar-btn--icon toolbar-btn--active/);
+  assert.match(html, /title="Refresh"/);
+  assert.match(html, /title="Program Settings"/);
+  assert.doesNotMatch(html, /title="Toggle right sidebar"/);
 });
 
 test("IdeToolbar keeps project link actions visible when only form-level paths are available", async () => {
