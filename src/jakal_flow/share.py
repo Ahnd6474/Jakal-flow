@@ -4,7 +4,6 @@ import hmac
 import os
 import re
 import secrets
-import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,7 +15,7 @@ from .errors import SubprocessTimeoutError
 from .planning import execution_plan_svg
 from .run_control import load_run_control
 from .status_views import effective_project_status
-from .subprocess_utils import run_subprocess
+from .subprocess_utils import run_subprocess, windows_process_is_running
 from .utils import (
     append_jsonl,
     compact_text,
@@ -225,9 +224,19 @@ def process_is_running(pid: int) -> bool:
                 timeout_seconds=PROCESS_QUERY_TIMEOUT_SECS,
             )
         except (OSError, SubprocessTimeoutError):
-            return False
-        stdout = decode_process_output(completed.stdout)
-        return f"{pid}" in stdout
+            completed = None
+        else:
+            stdout = decode_process_output(completed.stdout)
+            if f"{pid}" in stdout:
+                return True
+            stderr = decode_process_output(completed.stderr)
+            tasklist_message = f"{stdout}\n{stderr}".lower()
+            if completed.returncode == 0 and "access denied" not in tasklist_message:
+                return False
+        fallback = windows_process_is_running(pid)
+        if fallback is not None:
+            return fallback
+        return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
