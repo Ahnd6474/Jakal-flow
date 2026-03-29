@@ -26,6 +26,8 @@ from .model_selection import (
     normalize_reasoning_effort,
 )
 from .model_providers import (
+    default_local_model,
+    effective_local_model_provider,
     normalize_billing_mode,
     normalize_local_model_provider,
     normalize_model_provider,
@@ -449,11 +451,11 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         str(merged.get("local_model_provider", "")),
         fallback="",
     )
-    if merged["model_provider"] == "oss":
-        if not merged["local_model_provider"]:
-            merged["local_model_provider"] = DEFAULT_LOCAL_MODEL_PROVIDER
-    else:
-        merged["local_model_provider"] = ""
+    merged["local_model_provider"] = effective_local_model_provider(
+        merged["model_provider"],
+        merged["local_model_provider"],
+        fallback=DEFAULT_LOCAL_MODEL_PROVIDER,
+    )
     merged["provider_base_url"] = str(merged.get("provider_base_url", "")).strip()
     if not merged["provider_base_url"] and provider.default_base_url:
         merged["provider_base_url"] = provider.default_base_url
@@ -500,6 +502,11 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         provider_default_model = GEMINI_DEFAULT_MODEL
     elif merged["model_provider"] == "claude":
         provider_default_model = CLAUDE_DEFAULT_MODEL
+    elif merged["model_provider"] == "ollama":
+        provider_default_model = default_local_model(
+            merged["model_provider"],
+            merged["local_model_provider"],
+        )
     elif merged["model_provider"] == "qwen_code":
         provider_default_model = QWEN_CODE_DEFAULT_MODEL
     elif merged["model_provider"] == "deepseek":
@@ -512,9 +519,18 @@ def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
         provider_default_model = GLM_DEFAULT_MODEL
     elif merged["model_provider"] == "ensemble":
         provider_default_model = merged["ensemble_openai_model"] or "gpt-5.4"
+    elif merged["model_provider"] == "oss":
+        provider_default_model = default_local_model(
+            merged["model_provider"],
+            merged["local_model_provider"],
+        )
     if provider_default_model and "model" not in payload and "model_slug_input" not in payload:
         merged["model"] = provider_default_model
         merged["model_slug_input"] = provider_default_model
+    elif merged["model_provider"] in {"ollama", "oss"} and not merged["model"]:
+        merged["model"] = provider_default_model
+        if not str(merged.get("model_slug_input", "")).strip():
+            merged["model_slug_input"] = provider_default_model
 
     if not merged["model"]:
         preset = model_preset_by_id(merged["model_preset"] or DEFAULT_MODEL_PRESET_ID)

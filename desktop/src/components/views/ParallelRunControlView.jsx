@@ -17,6 +17,7 @@ import {
   isSystemStep,
   KIMI_DEFAULT_MODEL,
   MINIMAX_DEFAULT_MODEL,
+  MODEL_REASONING_OPTIONS,
   parallelLimitDescription,
   parallelLimitTone,
   parallelWorkerLabel,
@@ -183,6 +184,118 @@ function WebpageIcon() {
   );
 }
 
+/* ── Effort labels ── */
+function effortShortLabel(value, language) {
+  const ko = language === "ko";
+  switch (String(value || "").toLowerCase()) {
+    case "auto": return ko ? "자동" : "Auto";
+    case "low": return ko ? "낮음" : "Low";
+    case "medium": return ko ? "중간" : "Med";
+    case "high": return ko ? "높음" : "High";
+    case "xhigh": return ko ? "최고" : "Max";
+    default: return value;
+  }
+}
+
+function effortDescription(value, language) {
+  const ko = language === "ko";
+  switch (String(value || "").toLowerCase()) {
+    case "auto": return ko ? "동적으로 조절" : "Dynamic adjustment";
+    case "low": return ko ? "가장 빠름" : "Fastest";
+    case "medium": return ko ? "균형" : "Balanced";
+    case "high": return ko ? "더 정밀" : "More thorough";
+    case "xhigh": return ko ? "최고 수준" : "Maximum depth";
+    default: return "";
+  }
+}
+
+/* ── Model chip label helpers ── */
+const PROVIDER_SHORT = {
+  openai: "Codex", claude: "Claude", gemini: "Gemini", ensemble: "Ensemble",
+  deepseek: "DeepSeek", qwen_code: "Qwen", kimi: "Kimi", minimax: "MiniMax",
+  glm: "GLM", openrouter: "OpenRouter", opencdk: "CDK", local_openai: "Local", oss: "OSS",
+};
+
+function modelChipLabel(form, detail) {
+  const model = String(form?.runtime?.model || form?.runtime?.model_slug_input || detail?.runtime?.model || "").trim();
+  const provider = String(form?.runtime?.model_provider || detail?.runtime?.model_provider || "openai").trim().toLowerCase();
+  if (model && model !== "auto") {
+    return model.length > 16 ? `${model.slice(0, 15)}\u2026` : model;
+  }
+  return PROVIDER_SHORT[provider] || provider;
+}
+
+/* ── ModelEffortChip: single button + popover ── */
+function ModelEffortChip({ form, detail, busy, onChangeForm, language }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const currentEffort = form?.runtime?.effort || detail?.runtime?.effort || "high";
+  const chipModel = modelChipLabel(form, detail);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e) {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  return (
+    <div className="mec-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className={`mec-chip${open ? " mec-chip--open" : ""}`}
+        onClick={() => setOpen((v) => !v)}
+        disabled={busy}
+        title={language === "ko" ? "모델 및 추론 강도 설정" : "Model & reasoning settings"}
+      >
+        <span className="mec-chip__model">{chipModel}</span>
+        <span className="mec-chip__sep">·</span>
+        <span className="mec-chip__effort">{effortShortLabel(currentEffort, language)}</span>
+        <svg className="mec-chip__chevron" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {open ? (
+        <div className="mec-popover">
+          <div className="mec-popover__model-row">
+            <span className="mec-popover__label">{language === "ko" ? "모델" : "Model"}</span>
+            <span className="mec-popover__model-name">{chipModel}</span>
+          </div>
+          <div className="mec-popover__divider" />
+          <div className="mec-popover__section">
+            <span className="mec-popover__label">{language === "ko" ? "추론 강도" : "Reasoning"}</span>
+            <div className="mec-effort-list">
+              {MODEL_REASONING_OPTIONS.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  className={`mec-effort-row${currentEffort === opt ? " mec-effort-row--active" : ""}`}
+                  onClick={() => {
+                    onChangeForm?.((c) => ({ ...c, runtime: { ...c.runtime, effort: opt } }));
+                    setOpen(false);
+                  }}
+                  disabled={busy}
+                >
+                  <span className="mec-effort-row__name">{effortShortLabel(opt, language)}</span>
+                  <span className="mec-effort-row__desc">{effortDescription(opt, language)}</span>
+                  {currentEffort === opt ? (
+                    <svg className="mec-effort-row__check" viewBox="0 0 16 16" fill="none">
+                      <path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* ── Helpers ── */
 function autoProviderLabel(language) {
   return language === "ko" ? "자동 (AGENTS.md 선호)" : "Auto (AGENTS.md preference)";
@@ -279,6 +392,7 @@ export function ParallelRunControlView({
     ["openai", "Codex CLI"],
     ["claude", "Claude Code"],
     ["gemini", "Gemini CLI"],
+    ["ollama", "Ollama"],
     ["qwen_code", "Qwen Code"],
     ["deepseek", "DeepSeek via Claude Code"],
     ["kimi", "Kimi"],
@@ -287,13 +401,15 @@ export function ParallelRunControlView({
     ["openrouter", "OpenRouter"],
     ["opencdk", "OpenCDK"],
     ["local_openai", "Local OpenAI-Compatible"],
-    ["oss", "Local OSS"],
+    ["oss", "LM Studio / Local OSS"],
   ];
 
   const livePlan = activeJob?.status === "running" && detail?.plan ? detail.plan : planDraft;
   const promptValue = livePlan?.project_prompt || "";
   const [promptDraft, setPromptDraft] = useState(promptValue);
   const [failureDismissed, setFailureDismissed] = useState(false);
+  // Prompt collapsed when already has content; expanded when empty (first-time input)
+  const [promptExpanded, setPromptExpanded] = useState(!promptValue);
   const steps = useMemo(
     () =>
       planStepsWithCloseout(livePlan, {
@@ -592,38 +708,65 @@ export function ParallelRunControlView({
           )}
         </div>
       ) : null}
-      {/* ── Prompt (bottom, ChatGPT-style) ── */}
-      <div className="run-prompt-strip run-prompt-strip--bottom">
-        <div className="run-prompt-strip__inner">
-          <div className="run-prompt-strip__label-right">
-            <span className="run-prompt-strip__count">{livePlan?.project_prompt?.length || 0} {language === "ko" ? "자" : "chars"}</span>
-            <select
-              className="run-effort-pill"
-              value={form?.runtime?.effort || detail?.runtime?.effort || "high"}
-              onChange={(event) =>
-                onChangeForm?.((current) => ({
-                  ...current,
-                  runtime: { ...current.runtime, effort: event.target.value },
-                }))
-              }
+      {/* ── Prompt strip (bottom) ── */}
+      <div className={`run-prompt-strip run-prompt-strip--bottom${promptExpanded ? "" : " run-prompt-strip--collapsed"}`}>
+        {promptExpanded ? (
+          /* Expanded: full textarea */
+          <div className="run-prompt-strip__inner">
+            <div className="run-prompt-strip__toolbar">
+              <span className="run-prompt-strip__count">{promptDraft.length} {language === "ko" ? "자" : "chars"}</span>
+              <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} />
+              {promptDraft.trim() ? (
+                <button
+                  type="button"
+                  className="run-prompt-strip__collapse-btn"
+                  onClick={() => {
+                    if (promptDraft !== promptValue) onPromptChange?.(promptDraft);
+                    setPromptExpanded(false);
+                  }}
+                  title={language === "ko" ? "접기" : "Collapse"}
+                >
+                  <svg viewBox="0 0 16 16" fill="none" width="12" height="12">
+                    <path d="M3 10l5-5 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+            <textarea
+              ref={promptRef}
+              className="run-prompt-strip__input"
+              value={promptDraft}
+              onChange={(event) => setPromptDraft(event.target.value)}
+              onBlur={() => {
+                if (promptDraft !== promptValue) onPromptChange?.(promptDraft);
+                if (promptDraft.trim()) setPromptExpanded(false);
+              }}
               disabled={busy}
-              title={language === "ko" ? "모델 추론 강도" : "Reasoning strength"}
-            >
-              {REASONING_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>{reasoningEffortLabel(opt, language)}</option>
-              ))}
-            </select>
+              placeholder={language === "ko" ? "프로젝트 프롬프트를 입력하세요..." : "Enter your project prompt…"}
+            />
           </div>
-          <textarea
-            ref={promptRef}
-            className="run-prompt-strip__input"
-            value={promptDraft}
-            onChange={(event) => setPromptDraft(event.target.value)}
-            onBlur={() => { if (promptDraft !== promptValue) onPromptChange?.(promptDraft); }}
-            disabled={busy}
-            placeholder={language === "ko" ? "프로젝트 프롬프트를 입력하세요..." : "Enter your project prompt…"}
-          />
-        </div>
+        ) : (
+          /* Collapsed: compact single row */
+          <div className="run-prompt-collapsed">
+            <svg className="run-prompt-collapsed__icon" viewBox="0 0 16 16" fill="none" width="14" height="14">
+              <path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            <span className="run-prompt-collapsed__text">
+              {promptValue
+                ? (promptValue.length > 72 ? `${promptValue.slice(0, 72)}\u2026` : promptValue)
+                : (language === "ko" ? "프롬프트 없음" : "No prompt")}
+            </span>
+            <button
+              type="button"
+              className="run-prompt-collapsed__edit"
+              onClick={() => setPromptExpanded(true)}
+              disabled={busy}
+            >
+              {language === "ko" ? "편집" : "Edit"}
+            </button>
+            <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} />
+          </div>
+        )}
       </div>
     </section>
   );

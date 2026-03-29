@@ -7,6 +7,7 @@ import sys
 
 from .failure_logs import write_runtime_failure_log
 from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER, VALID_MODEL_PROVIDERS
+from .model_providers import effective_local_model_provider
 from .models import RuntimeOptions
 from .orchestrator import Orchestrator
 from .status_views import effective_project_status
@@ -129,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
 def runtime_from_args(args: argparse.Namespace) -> RuntimeOptions:
     return RuntimeOptions(
         model_provider=args.model_provider,
-        local_model_provider=args.local_model_provider if args.model_provider == "oss" else "",
+        local_model_provider=effective_local_model_provider(args.model_provider, args.local_model_provider),
         provider_base_url=args.provider_base_url,
         provider_api_key_env=args.provider_api_key_env,
         billing_mode=args.billing_mode,
