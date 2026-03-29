@@ -122,6 +122,7 @@ select:focus {
 
 textarea {
   resize: vertical;
+  line-height: 1.6;
 }
 
 pre {
@@ -235,6 +236,12 @@ pre {
 
 .toolbar-button:hover:not(:disabled) {
   background: var(--bg-panel-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.toolbar-button--accent:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(76, 123, 179, 0.35);
 }
 
 .workspace-tab:hover,
@@ -694,10 +701,10 @@ pre {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 8px 8px 24px;
+  padding: 12px 12px 28px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   scroll-padding-bottom: 24px;
 }
 
@@ -711,6 +718,13 @@ pre {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+}
+
+.content-card__header {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
 }
 
 .view-header h2 {
@@ -750,9 +764,12 @@ pre {
 
 .overview-grid,
 .history-grid,
-.form-layout,
-.run-layout {
+.form-layout {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.run-layout {
+  grid-template-columns: 1fr;
 }
 
 .step-editor-grid {
@@ -786,6 +803,14 @@ pre {
   background: var(--bg-panel);
   border-radius: var(--radius);
   padding: 8px;
+}
+
+.content-card {
+  padding: 12px 14px;
+}
+
+.metric-card {
+  padding: 10px 12px;
 }
 
 .content-card--flow {
@@ -825,8 +850,9 @@ pre {
 
 .metric-card strong {
   display: block;
-  margin-top: 4px;
-  font-size: 15px;
+  margin-top: 5px;
+  font-size: 16px;
+  letter-spacing: -0.01em;
 }
 
 .metric-card--success {
@@ -1123,7 +1149,9 @@ pre {
 }
 
 .editor-textarea--prompt {
-  min-height: 120px;
+  min-height: 280px;
+  font-size: 13.5px;
+  line-height: 1.7;
 }
 
 .run-summary {
@@ -1131,6 +1159,16 @@ pre {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
+
+.run-summary .metric-card {
+  border-top: 2px solid var(--border-strong);
+  transition: border-color 140ms ease;
+}
+
+.run-summary .metric-card--success { border-top-color: var(--success); }
+.run-summary .metric-card--warning { border-top-color: var(--warning); }
+.run-summary .metric-card--danger  { border-top-color: var(--danger); }
+.run-summary .metric-card--info    { border-top-color: var(--info); }
 
 .run-layout {
   align-items: start;
@@ -1286,7 +1324,8 @@ pre {
 
 .run-node.selected {
   border-color: var(--bg-accent-strong);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0 0 2px rgba(95, 151, 214, 0.35), 0 12px 24px rgba(0, 0, 0, 0.2);
+  transform: translateY(-2px);
 }
 
 .dense-row {
@@ -2349,36 +2388,88 @@ select:focus {
 
 .run-prompt-strip {
   display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 10px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   flex-shrink: 0;
 }
 
+.run-prompt-strip__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
 .run-prompt-strip__input {
-  flex: 1;
-  min-height: 32px;
+  width: 100%;
+  min-height: 130px;
   resize: vertical;
-  font-size: 12px;
-  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   color: var(--text);
 }
 
 .run-prompt-strip__input:focus {
   border-color: var(--bg-accent-strong);
+  box-shadow: 0 0 0 2px rgba(95, 151, 214, 0.15);
   outline: none;
 }
 
 .run-prompt-strip__count {
   font-size: 10px;
   color: var(--text-dim);
-  padding-top: 8px;
   white-space: nowrap;
+}
+
+/* ── Report format badges (closeout step) ── */
+.report-format-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 0 4px;
+}
+
+.report-format-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-panel-alt);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: default;
+  transition: border-color 120ms, color 120ms, background 120ms;
+}
+
+.report-format-chip svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.report-format-chip--word   { color: #4b8bbe; border-color: rgba(75,139,190,0.4); background: rgba(75,139,190,0.08); }
+.report-format-chip--ppt    { color: #d4573b; border-color: rgba(212,87,59,0.4);  background: rgba(212,87,59,0.08); }
+.report-format-chip--web    { color: #5eaa6f; border-color: rgba(94,170,111,0.4); background: rgba(94,170,111,0.08); }
+
+/* ── Remote control toolbar button ── */
+.toolbar-btn--remote {
+  color: var(--info);
+  border-color: rgba(95, 151, 214, 0.4);
 }
 
 .run-flow-area {

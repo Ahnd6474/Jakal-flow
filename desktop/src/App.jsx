@@ -190,11 +190,14 @@ export default function App() {
         busy={controller.busy}
         activeJob={controller.activeJob}
         activeCenterTab={controller.centerTab}
+        shareUrl={controller.workspaceShareDetail?.active_session?.share_url || ""}
+        shareBusy={controller.shareBusy}
         onRefresh={controller.forceRefresh}
         onOpenSettings={() => controller.setCenterTab("app-settings")}
         onGeneratePlan={controller.generatePlan}
         onRunPlan={controller.runPlan}
         onApproveCheckpoint={controller.approveCheckpoint}
+        onGenerateShareLink={controller.generateShareLink}
       />
 
       {/* ── Live run progress banner ── */}

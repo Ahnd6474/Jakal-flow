@@ -67,6 +67,15 @@ function ChevronRight() {
   );
 }
 
+function RemoteLinkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function IdeToolbar({
   projectDetail,
   planDraft,
@@ -74,11 +83,14 @@ export function IdeToolbar({
   busy,
   activeJob,
   activeCenterTab,
+  shareUrl,
+  shareBusy,
   onRefresh,
   onOpenSettings,
   onGeneratePlan,
   onRunPlan,
   onApproveCheckpoint,
+  onGenerateShareLink,
 }) {
   const planningRunning = isPlanningProgressRunning(projectDetail?.planning_progress);
   const projectStatusWithActiveJob = projectStatusWithJob(projectDetail?.project?.current_status || "idle", activeJob) || "idle";
@@ -157,6 +169,19 @@ export function IdeToolbar({
           aria-label={t("toolbar.programSettings")}
         >
           <SettingsIcon />
+        </button>
+
+        <div className="toolbar-divider" />
+
+        <button
+          className={`toolbar-btn toolbar-btn--remote${shareUrl ? " toolbar-btn--active" : ""}`}
+          onClick={onGenerateShareLink}
+          type="button"
+          disabled={shareBusy || !projectDetail?.project}
+          title={shareUrl ? `Remote Control: ${shareUrl}` : (t("action.generateShareLink") || "Remote Control")}
+        >
+          <RemoteLinkIcon />
+          <span>Remote Control</span>
         </button>
 
         <div className="toolbar-divider" />

@@ -6,6 +6,7 @@ import {
   basename,
   canEditStep,
   CLAUDE_DEFAULT_MODEL,
+  CLOSEOUT_STEP_ID,
   DEEPSEEK_DEFAULT_MODEL,
   commandLabel,
   effectiveStepStatus,
@@ -150,6 +151,34 @@ function ResetIcon() {
     <svg viewBox="0 0 24 24" fill="none">
       <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M3 3v5h5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/* ── Report format icons ── */
+function WordIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M8 13l2 6 2-4 2 4 2-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function PptIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none">
+      <rect x="2" y="4" width="20" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 18v2M16 18v2M6 20h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M9 8h3a2 2 0 0 1 0 4H9V8z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function WebpageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M2 12h20M12 3c-2.5 3-4 5.5-4 9s1.5 6 4 9M12 3c2.5 3 4 5.5 4 9s-1.5 6-4 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }
@@ -386,18 +415,20 @@ export function ParallelRunControlView({
         </div>
       ) : null}
 
-      {/* ── Prompt (compact collapsible) ── */}
+      {/* ── Prompt ── */}
       <div className="run-prompt-strip">
+        <div className="run-prompt-strip__label">
+          <span>{language === "ko" ? "프롬프트" : "Prompt"}</span>
+          <span className="run-prompt-strip__count">{livePlan?.project_prompt?.length || 0} {language === "ko" ? "자" : "chars"}</span>
+        </div>
         <textarea
           className="run-prompt-strip__input"
           value={promptDraft}
           onChange={(event) => setPromptDraft(event.target.value)}
           onBlur={() => { if (promptDraft !== promptValue) onPromptChange?.(promptDraft); }}
           disabled={busy}
-          rows={2}
-          placeholder={language === "ko" ? "프로젝트 프롬프트..." : "Project prompt…"}
+          placeholder={language === "ko" ? "프로젝트 프롬프트를 입력하세요..." : "Enter your project prompt…"}
         />
-        <span className="run-prompt-strip__count">{livePlan?.project_prompt?.length || 0}</span>
       </div>
 
       {/* ── Flow chart (main area) ── */}
@@ -449,6 +480,16 @@ export function ParallelRunControlView({
               <div className="field field--wide"><span>{t("field.description")}</span><p>{selectedStep.display_description || t("run.noSummary")}</p></div>
               <div className="field field--wide"><span>{t("field.dependsOn")}</span><p>{(selectedStep.depends_on || []).join(", ") || t("common.none")}</p></div>
               {selectedStep.notes ? <div className="field field--wide"><span>{t("common.status")}</span><p>{selectedStep.notes}</p></div> : null}
+              {selectedStep.step_id === CLOSEOUT_STEP_ID ? (
+                <div className="field field--wide">
+                  <span>{language === "ko" ? "보고서 형식" : "Report Formats"}</span>
+                  <div className="report-format-row">
+                    <span className="report-format-chip report-format-chip--word"><WordIcon />Word</span>
+                    <span className="report-format-chip report-format-chip--ppt"><PptIcon />PowerPoint</span>
+                    <span className="report-format-chip report-format-chip--web"><WebpageIcon />Webpage</span>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="step-fields-2col">
