@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
+import re
 from typing import Any
 
 from .models import ExecutionStep, ProjectPaths
@@ -12,6 +14,7 @@ SCOPE_CLASSES = {"hard_owned", "shared_reviewed", "free_owned"}
 PROMOTION_CLASSES = {"green", "yellow", "red"}
 DEFAULT_SPINE_VERSION = "spine-v1"
 DEFAULT_VERIFICATION_PROFILE = "default"
+_SYMBOLIC_SOURCE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx"}
 
 
 def _normalize(value: Any) -> Any:
@@ -367,6 +370,7 @@ class LineageManifest:
     touched_files: list[str] = field(default_factory=list)
     new_helpers_added: list[str] = field(default_factory=list)
     helpers_deleted: list[str] = field(default_factory=list)
+    helper_symbol_changes: list[str] = field(default_factory=list)
     public_symbol_changes: list[str] = field(default_factory=list)
     config_changes: list[str] = field(default_factory=list)
     migration_changes: list[str] = field(default_factory=list)
@@ -398,7 +402,8 @@ class LineageManifest:
             touched_files=_normalize_paths(data.get("touched_files", [])),
             new_helpers_added=_normalize_paths(data.get("new_helpers_added", [])),
             helpers_deleted=_normalize_paths(data.get("helpers_deleted", [])),
-            public_symbol_changes=_normalize_paths(data.get("public_symbol_changes", [])),
+            helper_symbol_changes=_normalize_strings(data.get("helper_symbol_changes", [])),
+            public_symbol_changes=_normalize_strings(data.get("public_symbol_changes", [])),
             config_changes=_normalize_paths(data.get("config_changes", [])),
             migration_changes=_normalize_paths(data.get("migration_changes", [])),
             verification_commands=_normalize_strings(data.get("verification_commands", [])),
@@ -668,12 +673,140 @@ def _is_migration_path(path: str) -> bool:
     )
 
 
+def _supports_symbol_inventory(path: str) -> bool:
+    return Path(_normalize_path(path)).suffix.lower() in _SYMBOLIC_SOURCE_SUFFIXES
+
+
+def _read_manifest_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        try:
+            return path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return ""
+    except OSError:
+        return ""
+
+
+def _python_signature_from_args(args: ast.arguments) -> str:
+    parts: list[str] = []
+    posonly = [arg.arg for arg in args.posonlyargs]
+    regular = [arg.arg for arg in args.args]
+    if posonly:
+        parts.extend(posonly)
+        parts.append("/")
+    parts.extend(regular)
+    if args.vararg:
+        parts.append(f"*{args.vararg.arg}")
+    elif args.kwonlyargs:
+        parts.append("*")
+    parts.extend(arg.arg for arg in args.kwonlyargs)
+    if args.kwarg:
+        parts.append(f"**{args.kwarg.arg}")
+    return ", ".join(parts)
+
+
+def _extract_python_symbol_inventory(text: str) -> dict[str, str]:
+    try:
+        module = ast.parse(text)
+    except SyntaxError:
+        return {}
+    inventory: dict[str, str] = {}
+    for node in module.body:
+        if isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+            bases = []
+            for base in node.bases:
+                try:
+                    bases.append(ast.unparse(base))
+                except Exception:
+                    continue
+            suffix = f"({', '.join(bases)})" if bases else ""
+            inventory[node.name] = f"class {node.name}{suffix}"
+        elif isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
+            inventory[node.name] = f"function {node.name}({_python_signature_from_args(node.args)})"
+        elif isinstance(node, ast.AsyncFunctionDef) and not node.name.startswith("_"):
+            inventory[node.name] = f"async function {node.name}({_python_signature_from_args(node.args)})"
+    return inventory
+
+
+def _extract_js_symbol_inventory(text: str) -> dict[str, str]:
+    inventory: dict[str, str] = {}
+    for match in re.finditer(r"export\s+(async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)", text):
+        async_prefix = "async " if match.group(1) else ""
+        name = match.group(2)
+        signature = " ".join(match.group(3).strip().split())
+        inventory[name] = f"{async_prefix}function {name}({signature})"
+    for match in re.finditer(r"export\s+class\s+([A-Za-z_$][\w$]*)", text):
+        name = match.group(1)
+        inventory[name] = f"class {name}"
+    for match in re.finditer(r"export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)", text):
+        name = match.group(1)
+        inventory[name] = f"value {name}"
+    for match in re.finditer(r"export\s+default\s+function(?:\s+([A-Za-z_$][\w$]*))?\s*\(([^)]*)\)", text):
+        name = match.group(1) or "default"
+        signature = " ".join(match.group(2).strip().split())
+        inventory[f"default:{name}"] = f"default function {name}({signature})"
+    for match in re.finditer(r"export\s*\{([^}]+)\}", text):
+        for raw_item in match.group(1).split(","):
+            name = raw_item.strip()
+            if not name:
+                continue
+            exported_name = name.split(" as ")[-1].strip()
+            inventory.setdefault(exported_name, f"named export {exported_name}")
+    return inventory
+
+
+def _extract_symbol_inventory(path: str, text: str) -> dict[str, str]:
+    suffix = Path(_normalize_path(path)).suffix.lower()
+    if not text.strip():
+        return {}
+    if suffix == ".py":
+        return _extract_python_symbol_inventory(text)
+    if suffix in {".js", ".jsx", ".ts", ".tsx"}:
+        return _extract_js_symbol_inventory(text)
+    return {}
+
+
+def _symbol_changes_for_path(
+    path: str,
+    *,
+    before_text: str,
+    after_text: str,
+    fallback_when_touched: bool = False,
+) -> list[str]:
+    before_symbols = _extract_symbol_inventory(path, before_text)
+    after_symbols = _extract_symbol_inventory(path, after_text)
+    changes: list[str] = []
+    for name in sorted(after_symbols.keys() - before_symbols.keys()):
+        changes.append(f"{path}: +{after_symbols[name]}")
+    for name in sorted(before_symbols.keys() - after_symbols.keys()):
+        changes.append(f"{path}: -{before_symbols[name]}")
+    for name in sorted(before_symbols.keys() & after_symbols.keys()):
+        if before_symbols[name] != after_symbols[name]:
+            changes.append(f"{path}: ~{before_symbols[name]} -> {after_symbols[name]}")
+    if not changes and fallback_when_touched and (before_text.strip() or after_text.strip()):
+        changes.append(f"{path}: ~module body changed")
+    return changes
+
+
+def _current_file_text(repo_dir: Path | None, relative_path: str) -> str:
+    if not isinstance(repo_dir, Path):
+        return ""
+    target = repo_dir / Path(_normalize_path(relative_path))
+    if not target.exists() or not target.is_file():
+        return ""
+    return _read_manifest_text(target)
+
+
 def build_lineage_manifest(
     *,
     lineage_id: str,
     step: ExecutionStep,
     changed_files: list[str],
     diff_entries: list[tuple[str, str]] | None,
+    repo_dir: Path | None = None,
+    previous_file_texts: dict[str, str] | None = None,
     verification_command: str,
     verification_summary: str,
     verification_passed: bool,
@@ -689,6 +822,36 @@ def build_lineage_manifest(
     ]
     new_helpers = [path for status, path in normalized_diffs if status.startswith("A") and _is_helper_path(path)]
     deleted_helpers = [path for status, path in normalized_diffs if status.startswith("D") and _is_helper_path(path)]
+    previous_text_lookup = {
+        _normalize_path(path): str(text or "")
+        for path, text in (previous_file_texts or {}).items()
+        if _normalize_path(path)
+    }
+    helper_symbol_changes: list[str] = []
+    public_symbol_changes: list[str] = []
+    for path in touched_files:
+        if not _supports_symbol_inventory(path):
+            continue
+        before_text = previous_text_lookup.get(path, "")
+        after_text = _current_file_text(repo_dir, path)
+        if _is_helper_path(path):
+            helper_symbol_changes.extend(
+                _symbol_changes_for_path(
+                    path,
+                    before_text=before_text,
+                    after_text=after_text,
+                    fallback_when_touched=False,
+                )
+            )
+        if _is_public_api_path(path):
+            public_symbol_changes.extend(
+                _symbol_changes_for_path(
+                    path,
+                    before_text=before_text,
+                    after_text=after_text,
+                    fallback_when_touched=True,
+                )
+            )
     manifest_id = f"{lineage_id.lower()}-{step.step_id.lower()}-{''.join(char for char in now_utc_iso() if char.isdigit())[:14]}"
     shared_contracts_changed = list(step.shared_contracts) if step.step_type == "contract" or assessment.crr_required else []
     return LineageManifest(
@@ -703,7 +866,8 @@ def build_lineage_manifest(
         touched_files=touched_files,
         new_helpers_added=new_helpers,
         helpers_deleted=deleted_helpers,
-        public_symbol_changes=[path for path in touched_files if _is_public_api_path(path)],
+        helper_symbol_changes=helper_symbol_changes,
+        public_symbol_changes=public_symbol_changes,
         config_changes=[path for path in touched_files if _is_config_path(path)],
         migration_changes=[path for path in touched_files if _is_migration_path(path)],
         verification_commands=_normalize_strings([verification_command]),
@@ -770,6 +934,8 @@ def manifest_summary_markdown(manifests: list[LineageManifest]) -> str:
                 f"- Spine version: {manifest.spine_version}",
                 f"- Promotion: {manifest.promotion_class} ({manifest.promotion_reason or 'n/a'})",
                 f"- Touched files: {', '.join(manifest.touched_files) if manifest.touched_files else 'none'}",
+                f"- Helper symbol changes: {', '.join(manifest.helper_symbol_changes) if manifest.helper_symbol_changes else 'none'}",
+                f"- Public symbol changes: {', '.join(manifest.public_symbol_changes) if manifest.public_symbol_changes else 'none'}",
                 f"- Shared contracts used: {', '.join(manifest.shared_contracts_used) if manifest.shared_contracts_used else 'none'}",
                 f"- Shared contracts changed: {', '.join(manifest.shared_contracts_changed) if manifest.shared_contracts_changed else 'none'}",
                 f"- Verification: {', '.join(manifest.verification_commands) if manifest.verification_commands else 'none'}",

@@ -34,6 +34,7 @@ import {
   commandLabel,
   inheritProjectIdentityForm,
   isDuplicateProjectJobError,
+  isChatCommand,
   jobHasNewerActiveReplacement,
   planDependencyValidationMessage,
   projectJobFromJobs,
@@ -41,6 +42,7 @@ import {
   projectFormFromDetail,
   sanitizeProjectListForJobState,
   shouldReplaceVisibleProject,
+  visibleExecutionJob,
   workspaceStatsFromProjects,
 } from "../utils";
 import {
@@ -101,6 +103,7 @@ export function useDesktopController() {
   const pendingBridgeRefreshListingRef = useRef(false);
   const startingProjectJobsRef = useRef(new Set());
   const activeJobRef = useRef(null);
+  const blockingJobRef = useRef(null);
   const appliedSchedulerLimitRef = useRef(0);
   const autoRunAfterPlanRef = useRef(false);
   const defaultRuntimeRef = useRef(null);
@@ -125,7 +128,7 @@ export function useDesktopController() {
     () => needsExpandedProjectDetail({ centerTab, sidebarTab, bottomCollapsed, bottomTab }),
     [bottomCollapsed, bottomTab, centerTab, sidebarTab],
   );
-  const activeJob = useMemo(
+  const projectJob = useMemo(
     () =>
       projectJobFromJobs(jobs, {
         repo_id: selectedProjectId,
@@ -135,11 +138,12 @@ export function useDesktopController() {
       }),
     [jobs, projectDetail?.project?.current_status, projectDetail?.project?.last_run_at, projectDetail?.project?.repo_path, projectForm?.project_dir, selectedProjectId],
   );
+  const activeJob = useMemo(() => visibleExecutionJob(projectJob), [projectJob]);
   const activeJobId = activeJob?.id || "";
   const queuedJobs = useMemo(
     () =>
       [...jobs]
-        .filter((job) => String(job?.status || "").trim().toLowerCase() === "queued")
+        .filter((job) => String(job?.status || "").trim().toLowerCase() === "queued" && !isChatCommand(job?.command))
         .sort((left, right) => {
           const leftPosition = Number.parseInt(String(left?.queue_position || 0), 10) || Number.MAX_SAFE_INTEGER;
           const rightPosition = Number.parseInt(String(right?.queue_position || 0), 10) || Number.MAX_SAFE_INTEGER;
@@ -151,7 +155,7 @@ export function useDesktopController() {
     [jobs],
   );
 
-  const busy = Boolean(pendingAction || startingJobCount > 0 || ["queued", "running"].includes(String(activeJob?.status || "").trim().toLowerCase()));
+  const busy = Boolean(pendingAction || startingJobCount > 0 || ["queued", "running"].includes(String(projectJob?.status || "").trim().toLowerCase()));
   const canRequestStop = String(activeJob?.status || "").trim().toLowerCase() === "running";
   const canCancelReservation = String(activeJob?.status || "").trim().toLowerCase() === "queued";
   const shareBusy = pendingAction === "create_share_session" || pendingAction === "revoke_share_session";
@@ -206,6 +210,10 @@ export function useDesktopController() {
   useEffect(() => {
     activeJobRef.current = activeJob;
   }, [activeJob]);
+
+  useEffect(() => {
+    blockingJobRef.current = projectJob;
+  }, [projectJob]);
 
   useEffect(() => {
     autoRunAfterPlanRef.current = Boolean(autoRunAfterPlan);
@@ -773,24 +781,6 @@ export function useDesktopController() {
               runningJob: nextSelectedJob,
               force: true,
             });
-          }
-          if (!["queued", "running"].includes(jobStatus) && !cancelled && !supersededByActiveJob) {
-            setMessage(
-              jobStatus === "failed"
-                ? messagePayload(
-                    "error",
-                    String(
-                      job.error
-                        || job.result?.error
-                        || translate(language, "message.commandFailed", {
-                          command: commandLabel(job.command, language),
-                        }),
-                    ),
-                  )
-                : job.result?.error
-                  ? messagePayload("error", String(job.result.error))
-                  : null,
-            );
           }
           return;
         }
@@ -1468,7 +1458,7 @@ export function useDesktopController() {
     } catch (error) {
       if (isDuplicateProjectJobError(error)) {
         try {
-          const jobSnapshot = await syncRunningJobSnapshot(activeJobRef.current?.id || "");
+          const jobSnapshot = await syncRunningJobSnapshot(blockingJobRef.current?.id || "");
           applyCurrentJobSnapshot(jobSnapshot);
           reapplyProjectJobState(jobSnapshot?.jobs || []);
           const recoveredJob = projectJobFromJobs(jobSnapshot?.jobs || [], targetProject);
@@ -1633,7 +1623,7 @@ export function useDesktopController() {
     if (!messageText) {
       return null;
     }
-    if (["queued", "running"].includes(String(activeJob?.status || "").trim().toLowerCase())) {
+    if (["queued", "running"].includes(String(projectJob?.status || "").trim().toLowerCase())) {
       setMessage(
         messagePayload(
           "error",

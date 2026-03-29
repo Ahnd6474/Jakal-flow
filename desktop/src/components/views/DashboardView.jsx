@@ -13,6 +13,7 @@ import {
   runtimeSummary,
   shouldShowEstimatedCost,
   statusTone,
+  visibleExecutionJob,
 } from "../../utils";
 
 function Stat({ label, value, tone = "neutral", icon, sub }) {
@@ -60,6 +61,7 @@ function UsageIcon() {
 
 export function DashboardView({ detail, planDraft, modelPresets, modelCatalog, activeJob, programSettings }) {
   const { language, t } = useI18n();
+  const executionJob = visibleExecutionJob(activeJob);
   const usage = detail?.snapshot?.recent_usage || {};
   const codexStatus = detail?.codex_status || {};
   const runtimeInsights = detail?.runtime_insights || {};
@@ -69,7 +71,7 @@ export function DashboardView({ detail, planDraft, modelPresets, modelCatalog, a
   const account = codexStatus.account || {};
   const usageBuckets = codexUsageBuckets(codexStatus, language);
   const dashboardVisibility = normalizeDashboardVisibility(programSettings?.dashboard_visibility);
-  const livePlan = activeJob?.status === "running" && detail?.plan ? detail.plan : planDraft;
+  const livePlan = executionJob?.status === "running" && detail?.plan ? detail.plan : planDraft;
   const allSteps = livePlan?.steps || [];
   const completedSteps = allSteps.filter((step) => step.status === "completed");
   const pendingSteps = allSteps.filter((step) => step.status !== "completed");
@@ -77,7 +79,7 @@ export function DashboardView({ detail, planDraft, modelPresets, modelCatalog, a
   const parallelLimitValue = parallelWorkerLabel(parallelInsight.recommended_workers ?? 1, language);
   const parallelLimitDetails = parallelLimitDescription(parallelInsight, language);
   const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
-  const activeStatusKey = projectStatusWithJob(projectStatus, activeJob) || "idle";
+  const activeStatusKey = projectStatusWithJob(projectStatus, executionJob) || "idle";
   const activeStatus = displayStatus(activeStatusKey, language);
   const tone = statusTone(activeStatusKey);
 

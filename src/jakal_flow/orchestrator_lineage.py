@@ -823,13 +823,27 @@ class OrchestratorLineageMixin:
                     worker_result["promotion_assessment"] = assessment.to_dict()
                     step.promotion_class = assessment.promotion_class
                     diff_entries: list[tuple[str, str]] = []
+                    previous_file_texts: dict[str, str] = {}
                     if previous_safe_revision and head_commit and previous_safe_revision != head_commit and lineage.worktree_dir.exists():
                         diff_entries = self.git.diff_name_status(lineage.worktree_dir, previous_safe_revision, head_commit)
+                        for _status, path in diff_entries:
+                            normalized_path = str(path).strip().replace("\\", "/")
+                            if not normalized_path:
+                                continue
+                            previous_text = self.git.read_file_at_revision(
+                                lineage.worktree_dir,
+                                previous_safe_revision,
+                                normalized_path,
+                            )
+                            if previous_text is not None:
+                                previous_file_texts[normalized_path] = previous_text
                     manifest = build_lineage_manifest(
                         lineage_id=lineage.lineage_id,
                         step=step,
                         changed_files=changed_files,
                         diff_entries=diff_entries,
+                        repo_dir=lineage.worktree_dir,
+                        previous_file_texts=previous_file_texts,
                         verification_command=step.test_command or context.runtime.test_cmd,
                         verification_summary=str(worker_result.get("test_summary") or worker_result.get("notes") or "").strip(),
                         verification_passed=True,

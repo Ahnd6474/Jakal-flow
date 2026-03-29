@@ -23,6 +23,7 @@ import {
   reasoningEffortLabel,
   shouldShowEstimatedCost,
   statusTone,
+  visibleExecutionJob,
 } from "../../utils";
 
 function autoProviderLabel(language) {
@@ -187,15 +188,16 @@ export function RunControlView({
   const executionMode = "parallel";
   const flowColumns = 3;
   const selectedSystemStep = isSystemStep(selectedStep);
-  const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", activeJob);
-  const activeJobStatus = String(activeJob?.status || "").trim().toLowerCase();
+  const executionJob = visibleExecutionJob(activeJob);
+  const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", executionJob);
+  const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
   const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
   const closeoutStatus = String(planDraft?.closeout_status || "not_started").trim().toLowerCase();
   const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
   const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
   const isPlanningJobRunning =
     activeJobStatus === "running"
-    && String(activeJob?.command || "").trim().toLowerCase() === "generate-plan";
+    && String(executionJob?.command || "").trim().toLowerCase() === "generate-plan";
   const canResetPlan = !busy || isPlanningJobRunning;
   const latestFailure = detail?.reports?.latest_failure || {};
   const failureArtifacts = Array.isArray(latestFailure?.artifact_files) ? latestFailure.artifact_files.slice(0, 8) : [];

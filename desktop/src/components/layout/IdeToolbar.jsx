@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { commandLabel, isDebuggingStatus, isPlanningProgressRunning, projectStatusWithJob, statusTone, toolbarProgressCaptionDisplay } from "../../utils";
+import { commandLabel, isDebuggingStatus, isPlanningProgressRunning, projectStatusWithJob, statusTone, toolbarProgressCaptionDisplay, visibleExecutionJob } from "../../utils";
 
 function AppLogo() {
   return (
@@ -281,27 +281,28 @@ export function IdeToolbar({
   onOpenVsCode,
   onOpenGithub,
 }) {
+  const executionJob = visibleExecutionJob(activeJob);
   const planningRunning = isPlanningProgressRunning(projectDetail?.planning_progress);
-  const projectStatusWithActiveJob = projectStatusWithJob(projectDetail?.project?.current_status || "idle", activeJob) || "idle";
+  const projectStatusWithActiveJob = projectStatusWithJob(projectDetail?.project?.current_status || "idle", executionJob) || "idle";
   const projectStatus =
-    String(activeJob?.status || "").trim().toLowerCase() === "running" || !planningRunning
+    String(executionJob?.status || "").trim().toLowerCase() === "running" || !planningRunning
       ? projectStatusWithActiveJob
       : "running:generate-plan";
 
-  const livePlan = String(activeJob?.status || "").trim().toLowerCase() === "running" && projectDetail?.plan ? projectDetail.plan : planDraft;
+  const livePlan = String(executionJob?.status || "").trim().toLowerCase() === "running" && projectDetail?.plan ? projectDetail.plan : planDraft;
   const { language, t } = useI18n();
   const normalizedProjectStatus = String(projectStatus || "").trim().toLowerCase();
   const statusLabel =
-    String(activeJob?.status || "").trim().toLowerCase() === "running"
+    String(executionJob?.status || "").trim().toLowerCase() === "running"
     && !isDebuggingStatus(projectDetail?.project?.current_status || "")
     && normalizedProjectStatus !== "running:merging"
-      ? commandLabel(activeJob.command, language)
+      ? commandLabel(executionJob?.command, language)
       : planningRunning && !isDebuggingStatus(projectDetail?.project?.current_status || "") && normalizedProjectStatus !== "running:merging"
         ? displayStatus("running:generate-plan", language)
         : displayStatus(projectStatus, language);
 
   const planStatusLabel = toolbarProgressCaptionDisplay(livePlan, language, {
-    activeJob,
+    activeJob: executionJob,
     planningProgress: projectDetail?.planning_progress,
   });
 

@@ -186,6 +186,20 @@ class GitOps:
             entries.append((status, path))
         return entries
 
+    def read_file_at_revision(self, repo_dir: Path, revision: str, relative_path: str) -> str | None:
+        normalized_revision = str(revision or "").strip()
+        normalized_path = str(relative_path or "").strip().replace("\\", "/")
+        if not normalized_revision or not normalized_path:
+            return None
+        result = self.run(
+            ["show", f"{normalized_revision}:{normalized_path}"],
+            cwd=repo_dir,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout
+
     def _parse_status_path(self, line: str) -> str | None:
         if len(line) < 4:
             return None

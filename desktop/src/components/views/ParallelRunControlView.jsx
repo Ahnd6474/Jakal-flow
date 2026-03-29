@@ -31,6 +31,7 @@ import {
   reasoningEffortLabel,
   shouldShowEstimatedCost,
   statusTone,
+  visibleExecutionJob,
 } from "../../utils";
 
 /* ── Metric card icons ── */
@@ -443,15 +444,16 @@ export function ParallelRunControlView({
   const parallelLimitValue = parallelWorkerLabel(parallelInsight.recommended_workers ?? 1, language);
   const parallelLimitDetails = parallelLimitDescription(parallelInsight, language);
   const parallelLimitCardTone = parallelLimitTone(parallelInsight);
-  const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", activeJob);
-  const activeJobStatus = String(activeJob?.status || "").trim().toLowerCase();
+  const executionJob = visibleExecutionJob(activeJob);
+  const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", executionJob);
+  const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
   const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
   const closeoutStatus = String(livePlan?.closeout_status || "not_started").trim().toLowerCase();
   const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
   const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
   const activeQueuePosition =
     activeJobStatus === "queued"
-      ? queuedPosition(activeJob?.queue_position)
+      ? queuedPosition(executionJob?.queue_position)
       : 0;
   const latestFailure = detail?.reports?.latest_failure || {};
   const failureArtifacts = useMemo(

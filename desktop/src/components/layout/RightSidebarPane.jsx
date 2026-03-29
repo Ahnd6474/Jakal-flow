@@ -3,7 +3,7 @@ import { openInSystem } from "../../api";
 import { ChatMessageContent } from "../../chatMarkdown";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { effectiveStepStatus, reasoningEffortLabel, runtimeSummary, statusTone } from "../../utils";
+import { effectiveStepStatus, reasoningEffortLabel, runtimeSummary, statusTone, visibleExecutionJob } from "../../utils";
 
 function RailChatIcon() {
   return (
@@ -36,6 +36,17 @@ function RailInspectorIcon() {
     <svg aria-hidden="true" className="sidebar-icon__svg" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
       <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function RailContractsIcon() {
+  return (
+    <svg aria-hidden="true" className="sidebar-icon__svg" viewBox="0 0 24 24" fill="none">
+      <circle cx="6" cy="12" r="2.2" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="18" cy="6" r="2.2" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="18" cy="18" r="2.2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 12h4M14.5 7.5l-3 3M14.5 16.5l-3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }
@@ -554,7 +565,8 @@ export function RightSidebarPane({
   const selectedStep = (planDraft?.steps || []).find((step) => step.step_id === selectedStepId) || null;
   const pendingCheckpoint = detail?.checkpoints?.pending || null;
   const selectedStepStatus = effectiveStepStatus(selectedStep, detail?.project?.current_status || "");
-  const liveRuntimeEditable = ["running", "queued"].includes(String(activeJob?.status || "").trim().toLowerCase());
+  const executionJob = visibleExecutionJob(activeJob);
+  const liveRuntimeEditable = ["running", "queued"].includes(String(executionJob?.status || "").trim().toLowerCase());
 
   const closeoutPath = String(detail?.files?.closeout_report_file || "").trim();
   const wordPath = String(detail?.reports?.word_report_path || detail?.files?.word_report_file || "").trim();
@@ -566,6 +578,26 @@ export function RightSidebarPane({
   ).trim();
   const webpagePath = String(detail?.reports?.webpage_path || detail?.files?.webpage_file || "").trim();
   const mlReportPath = String(detail?.files?.ml_experiment_report_file || "").trim();
+  const spineReport = detail?.reports?.spine || {};
+  const commonRequirements = detail?.reports?.common_requirements || {};
+  const lineageManifestSummary = detail?.reports?.lineage_manifest_summary || {};
+  const lineageManifests = Array.isArray(detail?.reports?.lineage_manifests) ? detail.reports.lineage_manifests : [];
+  const openCommonRequirements = Array.isArray(commonRequirements?.open_items) ? commonRequirements.open_items : [];
+  const resolvedCommonRequirements = Array.isArray(commonRequirements?.resolved_items) ? commonRequirements.resolved_items : [];
+  const spineHistory = Array.isArray(spineReport?.recent_history) ? spineReport.recent_history : [];
+  const selectedStepContracts = Array.isArray(selectedStep?.shared_contracts) ? selectedStep.shared_contracts : [];
+  const selectedPrimaryScope = Array.isArray(selectedStep?.primary_scope_paths) ? selectedStep.primary_scope_paths : [];
+  const selectedSharedReviewed = Array.isArray(selectedStep?.shared_reviewed_paths) ? selectedStep.shared_reviewed_paths : [];
+  const selectedForbiddenCore = Array.isArray(selectedStep?.forbidden_core_paths) ? selectedStep.forbidden_core_paths : [];
+  const sharedContractsText = String(detail?.reports?.shared_contracts_text || "").trim();
+  const spinePath = String(detail?.files?.spine_file || detail?.reports?.spine?.path || "").trim();
+  const commonRequirementsPath = String(detail?.files?.common_requirements_file || detail?.reports?.common_requirements?.path || "").trim();
+  const sharedContractsPath = String(detail?.files?.shared_contracts_file || detail?.reports?.shared_contracts_path || "").trim();
+  const lineageManifestsDir = String(detail?.files?.lineage_manifests_dir || detail?.reports?.lineage_manifests_dir || "").trim();
+  const contractAttention =
+    Number(commonRequirements?.open_count || 0) > 0
+    || Number(lineageManifestSummary?.yellow_count || 0) > 0
+    || Number(lineageManifestSummary?.red_count || 0) > 0;
 
   useEffect(() => {
     if (activeTab === "output" && outputRef.current) {
@@ -600,6 +632,12 @@ export function RightSidebarPane({
       icon: <RailFilesIcon />,
       title: language === "ko" ? "Reports & Files" : "Reports & Files",
       dot: hasFiles,
+    },
+    {
+      id: "contracts",
+      icon: <RailContractsIcon />,
+      title: language === "ko" ? "Contract Wave" : "Contract Wave",
+      dot: contractAttention,
     },
     {
       id: "inspector",
@@ -763,6 +801,215 @@ export function RightSidebarPane({
                   </div>
                 ))}
               </>
+            ) : null}
+          </div>
+        ) : null}
+
+        {activeTab === "contracts" ? (
+          <div className="rsb-inspector">
+            <section className="details-card">
+              <div className="details-card__header">
+                <strong>{language === "ko" ? "Contract Wave" : "Contract Wave"}</strong>
+                <span className={`status-badge status-badge--${contractAttention ? "warning" : "success"}`}>
+                  {contractAttention ? (language === "ko" ? "Needs review" : "Needs review") : (language === "ko" ? "Stable" : "Stable")}
+                </span>
+              </div>
+              <dl className="details-list">
+                <div>
+                  <dt>{language === "ko" ? "Spine" : "Spine"}</dt>
+                  <dd>{String(spineReport?.current_version || "spine-v1")}</dd>
+                </div>
+                <div>
+                  <dt>{language === "ko" ? "Open CRRs" : "Open CRRs"}</dt>
+                  <dd>{Number(commonRequirements?.open_count || 0)}</dd>
+                </div>
+                <div>
+                  <dt>{language === "ko" ? "Resolved CRRs" : "Resolved CRRs"}</dt>
+                  <dd>{Number(commonRequirements?.resolved_count || 0)}</dd>
+                </div>
+                <div>
+                  <dt>{language === "ko" ? "Manifests" : "Manifests"}</dt>
+                  <dd>{Number(lineageManifestSummary?.total || 0)}</dd>
+                </div>
+                <div>
+                  <dt>{language === "ko" ? "Promotion mix" : "Promotion mix"}</dt>
+                  <dd>
+                    G {Number(lineageManifestSummary?.green_count || 0)} / Y {Number(lineageManifestSummary?.yellow_count || 0)} / R {Number(lineageManifestSummary?.red_count || 0)}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+
+            <section className="details-card">
+              <div className="details-card__header">
+                <strong>{language === "ko" ? "Artifacts" : "Artifacts"}</strong>
+              </div>
+              <div style={{ display: "grid", gap: "10px" }}>
+                <ReportFileCard
+                  title="SPINE.json"
+                  kind=".json"
+                  icon={<MarkdownDocIcon />}
+                  path={spinePath}
+                  available={Boolean(spinePath)}
+                  onOpen={handleOpenFile}
+                  language={language}
+                />
+                <ReportFileCard
+                  title="COMMON_REQUIREMENTS.json"
+                  kind=".json"
+                  icon={<MarkdownDocIcon />}
+                  path={commonRequirementsPath}
+                  available={Boolean(commonRequirementsPath)}
+                  onOpen={handleOpenFile}
+                  language={language}
+                />
+                <ReportFileCard
+                  title="SHARED_CONTRACTS.md"
+                  kind="Markdown"
+                  icon={<MarkdownDocIcon />}
+                  path={sharedContractsPath}
+                  available={Boolean(sharedContractsPath)}
+                  onOpen={handleOpenFile}
+                  language={language}
+                />
+                <ReportFileCard
+                  title={language === "ko" ? "Lineage manifests" : "Lineage manifests"}
+                  kind={language === "ko" ? "Directory" : "Directory"}
+                  icon={<OpenFolderIcon />}
+                  path={lineageManifestsDir}
+                  available={Boolean(lineageManifestsDir)}
+                  onOpen={handleOpenFile}
+                  language={language}
+                />
+              </div>
+            </section>
+
+            {selectedStep ? (
+              <section className="details-card">
+                <div className="details-card__header">
+                  <strong>{language === "ko" ? "Selected Step Policy" : "Selected Step Policy"}</strong>
+                  <span className={`status-badge status-badge--${statusTone(selectedStep.promotion_class || "pending")}`}>
+                    {String(selectedStep.promotion_class || "-").toUpperCase()}
+                  </span>
+                </div>
+                <div className="details-text">
+                  <strong>{selectedStep.step_id}: {selectedStep.title}</strong>
+                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                    {language === "ko" ? "Step type" : "Step type"}: {selectedStep.step_type || "feature"} · {language === "ko" ? "Scope" : "Scope"}: {selectedStep.scope_class || "free_owned"} · {language === "ko" ? "Spine" : "Spine"}: {selectedStep.spine_version || spineReport?.current_version || "spine-v1"}
+                  </p>
+                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                    Contracts: {selectedStepContracts.length ? selectedStepContracts.join(", ") : "none"}
+                  </p>
+                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                    Primary: {selectedPrimaryScope.length ? selectedPrimaryScope.join(", ") : "none"}
+                  </p>
+                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                    Shared-reviewed: {selectedSharedReviewed.length ? selectedSharedReviewed.join(", ") : "none"}
+                  </p>
+                  <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                    Forbidden-core: {selectedForbiddenCore.length ? selectedForbiddenCore.join(", ") : "none"}
+                  </p>
+                </div>
+              </section>
+            ) : null}
+
+            <section className="details-card">
+              <div className="details-card__header">
+                <strong>{language === "ko" ? "Open Common Requirements" : "Open Common Requirements"}</strong>
+              </div>
+              {openCommonRequirements.length ? (
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {openCommonRequirements.slice(0, 6).map((item) => (
+                    <div key={item.request_id} className="details-text">
+                      <strong>{item.request_id} · {item.title || (language === "ko" ? "Shared requirement review" : "Shared requirement review")}</strong>
+                      <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                        {String(item.promotion_class || "").toUpperCase()} · {item.spine_version || spineReport?.current_version || "spine-v1"} · {item.lineage_id || "n/a"} / {item.step_id || "n/a"}
+                      </p>
+                      <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>{item.reason || item.notes || "-"}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="details-text" style={{ color: "var(--text-dim)", fontSize: "11px" }}>
+                  {language === "ko" ? "No open CRRs." : "No open CRRs."}
+                </div>
+              )}
+            </section>
+
+            <section className="details-card">
+              <div className="details-card__header">
+                <strong>{language === "ko" ? "Recent Manifests" : "Recent Manifests"}</strong>
+              </div>
+              {lineageManifests.length ? (
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {lineageManifests.slice(0, 6).map((item) => (
+                    <div key={item.manifest_id || `${item.lineage_id}-${item.step_id}`} className="details-text">
+                      <strong>{item.lineage_id || "LN?"} / {item.step_id || "ST?"}</strong>
+                      <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                        {String(item.promotion_class || "-").toUpperCase()} · {item.step_type || "feature"} · {item.scope_class || "free_owned"}
+                      </p>
+                      <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                        {item.promotion_reason || "-"}
+                      </p>
+                      <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                        Helpers: {Array.isArray(item.helper_symbol_changes) && item.helper_symbol_changes.length ? item.helper_symbol_changes.length : 0} · APIs: {Array.isArray(item.public_symbol_changes) && item.public_symbol_changes.length ? item.public_symbol_changes.length : 0}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="details-text" style={{ color: "var(--text-dim)", fontSize: "11px" }}>
+                  {language === "ko" ? "No lineage manifests recorded yet." : "No lineage manifests recorded yet."}
+                </div>
+              )}
+            </section>
+
+            {spineHistory.length ? (
+              <section className="details-card">
+                <div className="details-card__header">
+                  <strong>{language === "ko" ? "Recent Spine Checkpoints" : "Recent Spine Checkpoints"}</strong>
+                </div>
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {spineHistory.slice(0, 5).map((item) => (
+                    <div key={`${item.version}-${item.created_at}`} className="details-text">
+                      <strong>{item.version}</strong>
+                      <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                        {item.created_at || "-"} · {item.lineage_id || "n/a"} / {item.step_id || "n/a"}
+                      </p>
+                      <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>{item.notes || "-"}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {sharedContractsText ? (
+              <section className="details-card">
+                <div className="details-card__header">
+                  <strong>{language === "ko" ? "Shared Contracts Snapshot" : "Shared Contracts Snapshot"}</strong>
+                </div>
+                <div className="details-text">
+                  <pre style={{ whiteSpace: "pre-wrap", fontSize: "11px" }}>{sharedContractsText}</pre>
+                </div>
+              </section>
+            ) : null}
+
+            {resolvedCommonRequirements.length ? (
+              <section className="details-card">
+                <div className="details-card__header">
+                  <strong>{language === "ko" ? "Resolved Common Requirements" : "Resolved Common Requirements"}</strong>
+                </div>
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {resolvedCommonRequirements.slice(0, 4).map((item) => (
+                    <div key={item.request_id} className="details-text">
+                      <strong>{item.request_id} · {item.title || "-"}</strong>
+                      <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                        {item.resolved_at || "-"} · {item.lineage_id || "n/a"} / {item.step_id || "n/a"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
             ) : null}
           </div>
         ) : null}

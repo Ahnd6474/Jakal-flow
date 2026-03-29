@@ -135,10 +135,22 @@ export function jobHasNewerActiveReplacement(job = null, jobs = []) {
   return ["queued", "running"].includes(String(replacement?.status || "").trim().toLowerCase());
 }
 
+export function isChatCommand(command = "") {
+  return String(command || "").trim().toLowerCase() === "send-chat-message";
+}
+
+export function visibleExecutionJob(job = null) {
+  if (!job || isChatCommand(job?.command)) {
+    return null;
+  }
+  return job;
+}
+
 export function projectStatusWithJob(status = "", activeJob = null) {
+  const job = visibleExecutionJob(activeJob);
   const currentStatus = String(status || "").trim();
-  const jobStatus = String(activeJob?.status || "").trim().toLowerCase();
-  const command = String(activeJob?.command || "").trim() || "background-job";
+  const jobStatus = String(job?.status || "").trim().toLowerCase();
+  const command = String(job?.command || "").trim() || "background-job";
   if (jobStatus === "queued") {
     return `queued:${command}`;
   }
@@ -1099,12 +1111,13 @@ export function planningProgressCaptionDisplay(progress = null, language = "en")
 }
 
 export function deriveExecutionProgress(detail = null, planDraft = null, activeJob = null) {
+  const progressJob = visibleExecutionJob(activeJob);
   const detailPlan = detail?.plan && typeof detail.plan === "object" ? detail.plan : null;
   const fallbackPlan = planDraft && typeof planDraft === "object" ? planDraft : {};
   const plan = cloneValue(detailPlan || fallbackPlan) || {};
   const { steps, completedCount, totalCount, closeoutStatus } = planProgressCounts(plan);
   const stats = detail?.stats || computePlanStats(plan);
-  const command = activeJob?.status === "running" ? String(activeJob?.command || "").trim() : "";
+  const command = progressJob?.status === "running" ? String(progressJob?.command || "").trim() : "";
   const runningStepList = runningExecutionSteps(plan);
   const runningStep = runningStepList[0] || null;
   const nextStep = steps.find((step) => step.status !== "completed") || null;
@@ -1120,7 +1133,7 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     .filter(Boolean)
     .slice(0, 3);
   const isActive =
-    activeJob?.status === "running" ||
+    progressJob?.status === "running" ||
     runningStepList.length > 0 ||
     closeoutRunning ||
     status.startsWith("running:") ||

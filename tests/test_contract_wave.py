@@ -223,6 +223,105 @@ class ContractWaveTests(unittest.TestCase):
         self.assertEqual(manifests[0].new_helpers_added, ["src/helpers/contract_helper.py"])
         self.assertEqual(manifests[0].promotion_class, "yellow")
 
+    def test_build_lineage_manifest_tracks_symbol_level_changes(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_symbols"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        repo_dir = temp_root / "repo"
+        (repo_dir / "src" / "api").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "src" / "helpers").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "src" / "api" / "contracts.py").write_text(
+            "\n".join(
+                [
+                    "class UserContract(BaseModel):",
+                    "    pass",
+                    "",
+                    "def fetch_user(user_id, include_profile):",
+                    "    return user_id",
+                    "",
+                    "def create_user(payload):",
+                    "    return payload",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (repo_dir / "src" / "helpers" / "contract_helper.py").write_text(
+            "\n".join(
+                [
+                    "def normalize_contract(payload):",
+                    "    return payload",
+                    "",
+                    "def format_contract(payload, version):",
+                    "    return payload",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        try:
+            step = normalize_execution_step_policy(
+                ExecutionStep(
+                    step_id="ST10",
+                    title="Evolve the public contract",
+                    owned_paths=["src/api/contracts.py", "src/helpers/contract_helper.py"],
+                    shared_contracts=["api.user"],
+                    step_type="contract",
+                    scope_class="shared_reviewed",
+                )
+            )
+            assessment = classify_completed_lineage_step(
+                step,
+                changed_files=["src/api/contracts.py", "src/helpers/contract_helper.py"],
+                verification_passed=True,
+                batch_size=1,
+                child_count=0,
+            )
+            manifest = build_lineage_manifest(
+                lineage_id="LN7",
+                step=step,
+                changed_files=["src/api/contracts.py", "src/helpers/contract_helper.py"],
+                diff_entries=[
+                    ("M", "src/api/contracts.py"),
+                    ("M", "src/helpers/contract_helper.py"),
+                ],
+                repo_dir=repo_dir,
+                previous_file_texts={
+                    "src/api/contracts.py": "\n".join(
+                        [
+                            "class UserContract:",
+                            "    pass",
+                            "",
+                            "def fetch_user(user_id):",
+                            "    return user_id",
+                            "",
+                            "def delete_user(user_id):",
+                            "    return user_id",
+                            "",
+                        ]
+                    ),
+                    "src/helpers/contract_helper.py": "\n".join(
+                        [
+                            "def normalize_contract(payload):",
+                            "    return payload",
+                            "",
+                        ]
+                    ),
+                },
+                verification_command="python -m pytest tests/test_contracts.py",
+                verification_summary="contracts passed",
+                verification_passed=True,
+                assessment=assessment,
+                commit_hash="ln7-head",
+            )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertTrue(any("+function create_user(payload)" in item for item in manifest.public_symbol_changes))
+        self.assertTrue(any("-function delete_user(user_id)" in item for item in manifest.public_symbol_changes))
+        self.assertTrue(any("~function fetch_user(user_id) -> function fetch_user(user_id, include_profile)" in item for item in manifest.public_symbol_changes))
+        self.assertTrue(any("+function format_contract(payload, version)" in item for item in manifest.helper_symbol_changes))
+
     def test_allocate_lineage_requires_explicit_join_for_multiple_dependencies(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_join_guard"
         shutil.rmtree(temp_root, ignore_errors=True)

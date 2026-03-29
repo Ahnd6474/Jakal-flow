@@ -6,6 +6,7 @@ import {
   runtimeSummary,
   shouldShowEstimatedCost,
   statusTone,
+  visibleExecutionJob,
 } from "../../utils";
 
 function BranchIcon() {
@@ -40,15 +41,16 @@ export function StatusBar({
   rightCollapsed,
 }) {
   const { language, t } = useI18n();
+  const executionJob = visibleExecutionJob(activeJob);
   const project = detail?.project || {};
   const runtime = detail?.runtime || {};
   const costEstimate = detail?.runtime_insights?.cost || {};
   const showCost = shouldShowEstimatedCost(runtime, costEstimate);
   const tone = statusTone(project.current_status || "idle");
-  const jobStatus = String(activeJob?.status || "").trim().toLowerCase();
+  const jobStatus = String(executionJob?.status || "").trim().toLowerCase();
   const jobLabel =
     jobStatus === "running"
-      ? commandLabel(activeJob.command, language)
+      ? commandLabel(executionJob?.command, language)
       : jobStatus === "queued"
         ? t("common.queued")
         : null;

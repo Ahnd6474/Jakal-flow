@@ -1,0 +1,45 @@
+# Chat Transcript
+
+- Session ID: chat-20260329133340-adb8d5
+- Title: 안녕
+- Created At: 2026-03-29T13:33:40+00:00
+- Updated At: 2026-03-29T13:54:32+00:00
+- Message Count: 6
+
+## 2026-03-29T13:33:41+00:00 | user | conversation | completed
+안녕
+
+## 2026-03-29T13:33:59+00:00 | assistant | conversation | completed
+안녕하세요. 저장소는 읽기 전용으로 살펴보면서 설명이나 검토는 할 수 있습니다. 필요한 내용이 있으면 바로 말해 주세요.
+
+## 2026-03-29T13:34:17+00:00 | user | conversation | completed
+너는 누구니
+
+## 2026-03-29T13:34:44+00:00 | assistant | conversation | completed
+나는 이 세션에서 `lit` 저장소를 읽기 전용으로 살펴보는 Codex야.
+
+지금은 대화 전용 모드라 파일 수정, 커밋, 스테이징은 못 하고, 대신 이런 건 할 수 있어:
+- 코드 구조 설명
+- 버그 원인 추적
+- 구현 아이디어와 트레이드오프 정리
+- 변경이 필요하면 어떻게 고치면 될지 제안
+
+원하면 바로 저장소를 같이 읽어보면서 설명해 줄게.
+
+## 2026-03-29T13:48:09+00:00 | user | conversation | completed
+jakal flow에서 lit를 git 대신 쓰기 위해 강화 또는 추가할 기능을 제안해
+
+## 2026-03-29T13:54:32+00:00 | assistant | conversation | completed
+**판단**
+`lit`는 이미 Git 흉내보다 Jakal Flow용 로컬 실행 VCS 방향에 더 가깝습니다. 체크포인트, 롤백, 검증, lineage, artifact, backend API는 이미 있고 [README.md](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/README.md#L3) [README.md](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/README.md#L122) [backend_api.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/backend_api.py#L276), 원격/`push`/`pull`/`clone`은 명시적 non-goal입니다 [README.md](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/README.md#L154). 그래서 `git 대신`의 핵심은 Git parity가 아니라, Jakal Flow가 바로 붙을 수 있는 자동화 표면을 완성하는 쪽입니다.
+
+**우선순위 제안**
+- `P0`: 자동화용 CLI/API를 먼저 완성하세요. 지금 `checkpoint`, `verify`, `lineage`, `doctor`, `export`는 backend+`--json`을 쓰지만 [backend_api.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/backend_api.py#L424) [verify.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/verify.py#L12), `init/add/commit/status/diff`는 여전히 사람 출력 중심입니다 [init.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/init.py#L9) [add.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/add.py#L9) [commit.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/commit.py#L9) [status.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/status.py#L9) [diff.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/diff.py#L9). Jakal Flow가 Git porcelain 대신 쓰려면 전 명령 `--json`, structured status/diff, stable exit code, 그리고 `commit/checkpoint`에 provenance 입력이 필요합니다. 모델은 이미 있습니다 [domain.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/domain.py#L161).
+- `P0`: lineage를 “동시 작업공간”까지 확장하세요. 현재는 `create/switch/promote`만 있어서 결국 한 working tree를 번갈아 스위치하는 형태입니다 [lineage.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/lineage.py#L35) [lineage.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/lineage.py#L135). Jakal Flow의 병렬 워커를 Git worktree 없이 돌리려면 `lineage materialize/create-workspace`, `attach`, `list`, `gc` 같은 다중 workspace가 필요합니다.
+- `P1`: step 단위 transaction/policy 명령을 추가하세요. 현재 테스트도 `commit -> checkpoint -> verify -> lineage -> export`를 수동 조합합니다 [test_cli_end_to_end.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/tests/test_cli_end_to_end.py#L36). Jakal Flow는 `lit step begin/complete/fail` 같은 고수준 명령으로 묶고, 자동 safe checkpoint, verify gate, 실패 시 latest-safe rollback을 정책으로 넣는 편이 맞습니다.
+- `P1`: owned path를 promotion 때만이 아니라 stage/commit 때도 강제하세요. 지금 ownership violation은 promotion preview에서 주로 잡힙니다 [lineage.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/lineage.py#L474) [lineage.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/lineage.py#L505). Jakal Flow backend라면 “나중에 promote에서 막힘”보다 “처음부터 잘못된 경로는 commit 불가”가 더 낫습니다.
+- `P1`: operation/journal을 공개 surface로 올리세요. `OperationRecord`와 journal path는 이미 있고 [domain.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/domain.py#L409) backend도 operation record를 저장합니다 [backend_api.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/backend_api.py#L783). 그런데 이를 조회/스트리밍하는 명령은 없습니다. `lit operation list/show/stream --jsonl`이 있으면 Jakal Flow가 verify/promote/rollback 상태를 screen scraping 없이 추적할 수 있습니다.
+- `P2`: Git closeout bridge를 강화하세요. 현재 `lit export`는 실제 Git repo를 만드는 게 아니라 plan/trailer만 만듭니다 [export.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/export.py#L9) [export_git.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/export_git.py#L40), README도 그 한계를 명시합니다 [README.md](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/README.md#L147). GitHub PR closeout이 계속 필요하다면 `lit export apply`나 patch/bundle 생성이 필요합니다.
+- `P2`: Git baseline import/bootstrap을 넣으세요. `origin_commit` 필드는 있지만 [domain.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/domain.py#L173), `init`에는 Git 기준점을 넣는 흐름이 없습니다 [init.py](/C:/Users/ahnd6/OneDrive/문서/GitHub/lit/src/lit/commands/init.py#L10). 기존 Git 저장소 위에서 Jakal Flow를 돌릴 생각이면 `lit init --origin-commit <sha>` 같은 시작점 고정이 필요합니다.
+
+가장 먼저 할 3개만 고르면 `1) 전 명령 JSON/API 일원화`, `2) multi-workspace lineage`, `3) step transaction + policy engine`입니다. 이 셋이 되면 Jakal Flow 내부에서는 Git의 `status/diff/branch/worktree` 의존을 상당 부분 `lit`로 바꿀 수 있습니다.
