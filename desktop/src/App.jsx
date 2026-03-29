@@ -369,6 +369,9 @@ export default function App() {
             onSelectChatSession={controller.loadChatSession}
             onStartNewChatSession={controller.startNewChatSession}
             onSendChatMessage={controller.sendChatMessage}
+            chatSettings={controller.programSettings}
+            modelCatalog={controller.modelCatalog}
+            onChangeChatModelSelection={controller.setChatModelSelection}
           />
         </div>
       </div>

@@ -78,6 +78,8 @@ def _normalize_execution_step_model(model_provider: Any, model: Any) -> str:
 class RuntimeOptions:
     model_provider: str = "openai"
     local_model_provider: str = ""
+    chat_model_provider: str = ""
+    chat_local_model_provider: str = ""
     provider_base_url: str = ""
     provider_api_key_env: str = ""
     ensemble_openai_model: str = "gpt-5.4"
@@ -93,6 +95,7 @@ class RuntimeOptions:
     model_preset: str = "auto"
     model_selection_mode: str = "slug"
     model_slug_input: str = ""
+    chat_model: str = ""
     effort_selection_mode: str = "explicit"
     use_fast_mode: bool = False
     generate_word_report: bool = False
