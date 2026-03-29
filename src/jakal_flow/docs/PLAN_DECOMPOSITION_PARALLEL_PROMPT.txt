@@ -10,6 +10,12 @@ Requested execution mode:
 Workflow mode:
 {workflow_mode}
 
+Current spine version:
+{current_spine_version}
+
+Current shared contract snapshot:
+{shared_contracts_snapshot}
+
 Required planning workflow:
 1. Decompose the request into the smallest meaningful implementation ideas.
 2. Identify any shared contracts, schemas, interfaces, entrypoints, or file skeletons that are genuinely missing or that must be tightened in existing code before broad fan-out work starts.
@@ -22,6 +28,11 @@ Parallel decomposition rules:
 - Plan toward a finished, handoff-quality result instead of a narrow MVP slice.
 - Prefer candidate blocks with narrow ownership boundaries.
 - Prefer exact files or leaf directories over broad package roots.
+- Treat `step_kind` as a later topology concern for Planner Agent B and focus here on semantic execution roles plus guarded-overlap policy hints.
+- Use `step_type_hint` to distinguish shared contract freezing (`contract`) from normal delivery work (`feature`), later integration (`integration`), post-integration repair (`debug`), and closeout-only work (`closeout`).
+- Use `scope_class_hint` to mark whether a candidate block should stay free-owned, needs shared-reviewed routing, or reaches forbidden core territory that should force later coordination.
+- Carry the current spine version forward unless the block is explicitly proposing a contract-wave change.
+- Name shared contracts/helpers/APIs/config/schema surfaces explicitly when they influence later batching or promotion routing.
 - If a small contract-freezing or skeleton step can unlock a wide safe fan-out, recommend it explicitly.
 - If the source inventory already shows relevant implementation, prefer editing or extending that code and avoid scaffold-only bootstrap work.
 - Do not fake parallelism for risky, same-file, or shared-contract heavy work.
@@ -37,17 +48,33 @@ Return exactly one JSON object in this shape:
     "task_title": "short skeleton/bootstrap title",
     "purpose": "why this small step helps later execution",
     "contract_docstring": "docstring text that should be written into the skeleton code to lock the contract and boundaries",
+    "step_type_hint": "usually contract when a shared freeze step is needed",
+    "scope_class_hint": "shared_reviewed or hard_owned only when truly necessary",
+    "verification_profile_hint": "default unless this block clearly needs a different verification shape",
+    "spine_version_hint": "usually the current spine version unless this block intentionally advances it",
+    "shared_contracts": ["contract names this step freezes or changes"],
     "candidate_owned_paths": ["narrow repo-relative files or directories"],
+    "primary_scope_candidates": ["guarded-overlap primary scope paths for this block"],
+    "shared_reviewed_candidates": ["shared paths that should never auto-promote as green"],
+    "forbidden_core_candidates": ["hard-owned or shared-core paths that force later coordination"],
     "success_criteria": "what makes the skeleton good enough"
   }},
   "candidate_blocks": [
     {{
       "block_id": "B1",
       "goal": "one clear outcome",
+      "step_type_hint": "contract, feature, integration, debug, or closeout",
+      "scope_class_hint": "hard_owned, shared_reviewed, or free_owned",
+      "verification_profile_hint": "default or another short profile label",
+      "spine_version_hint": "current spine version this block expects to build against",
+      "shared_contracts": ["shared contracts/helpers/APIs/config/schema surfaces relevant to this block"],
       "work_items": ["small implementation ideas inside this block"],
       "implementation_notes": "2-5 sentence planning note describing intended interfaces, constraints, and implementation shape",
       "testable_boundary": "local completion condition",
       "candidate_owned_paths": ["narrow repo-relative files or directories"],
+      "primary_scope_candidates": ["primary guarded-overlap paths"],
+      "shared_reviewed_candidates": ["shared-reviewed paths if later integration review is required"],
+      "forbidden_core_candidates": ["hard-owned/core paths that should trigger CRR or join routing"],
       "parallelizable_after": ["block ids or contract names that must exist first"],
       "parallel_notes": "why this could or could not be parallel later"
     }}
@@ -75,6 +102,9 @@ Docs:
 
 Source inventory:
 {source}
+
+Current shared contract state:
+{shared_contracts_snapshot}
 
 User request:
 {user_prompt}

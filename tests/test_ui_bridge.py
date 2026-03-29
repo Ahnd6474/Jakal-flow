@@ -183,7 +183,7 @@ def build_test_project_context(
         execution_plan_file=state_dir / "EXECUTION_PLAN.json",
         lineage_state_file=state_dir / "LINEAGES.json",
         spine_file=state_dir / "SPINE.json",
-        common_requirements_file=docs_dir / "COMMON_REQUIREMENTS.md",
+        common_requirements_file=state_dir / "COMMON_REQUIREMENTS.json",
         ml_mode_state_file=state_dir / "ML_MODE_STATE.json",
         ml_step_report_file=state_dir / "ML_STEP_REPORT.json",
         ml_experiment_reports_dir=state_dir / "ml_experiments",
@@ -1260,6 +1260,105 @@ class UIBridgeTests(unittest.TestCase):
 
             self.assertEqual(loaded["reports"]["word_report_path"], str(word_report_path))
             self.assertIn(str(word_report_path), loaded["summary"])
+
+    def test_report_payload_includes_contract_wave_artifacts(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            context = build_test_project_context(temp_dir, display_name="Contract Wave Demo")
+            context.paths.spine_file.write_text(
+                json.dumps(
+                    {
+                        "current_version": "spine-v3",
+                        "updated_at": "2026-03-29T01:00:00+00:00",
+                        "history": [
+                            {
+                                "version": "spine-v3",
+                                "created_at": "2026-03-29T01:00:00+00:00",
+                                "step_id": "ST-CONTRACT",
+                                "lineage_id": "LN1",
+                                "shared_contracts": ["api/payments"],
+                                "notes": "Advanced the shared payments contract.",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            context.paths.common_requirements_file.write_text(
+                json.dumps(
+                    {
+                        "updated_at": "2026-03-29T01:30:00+00:00",
+                        "open_requirements": [
+                            {
+                                "request_id": "CRR1",
+                                "status": "open",
+                                "created_at": "2026-03-29T01:15:00+00:00",
+                                "title": "Payments schema review",
+                                "reason": "Touches a shared reviewed adapter.",
+                                "promotion_class": "yellow",
+                                "step_id": "ST2",
+                                "lineage_id": "LN2",
+                                "spine_version": "spine-v3",
+                                "affected_paths": ["src/payments/adapter.py"],
+                                "shared_contracts": ["api/payments"],
+                            }
+                        ],
+                        "resolved_requirements": [
+                            {
+                                "request_id": "CRR0",
+                                "status": "resolved",
+                                "created_at": "2026-03-29T00:30:00+00:00",
+                                "resolved_at": "2026-03-29T01:10:00+00:00",
+                                "title": "Initial contract freeze",
+                                "reason": "Shared contract advanced cleanly.",
+                                "promotion_class": "yellow",
+                                "step_id": "ST-CONTRACT",
+                                "lineage_id": "LN1",
+                                "spine_version": "spine-v3",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            context.paths.shared_contracts_file.write_text(
+                "# Shared Contracts\n\n- Current spine version: spine-v3\n- Shared contracts: api/payments\n",
+                encoding="utf-8",
+            )
+            (context.paths.lineage_manifests_dir / "20260329020000_ln2_st2.json").write_text(
+                json.dumps(
+                    {
+                        "manifest_id": "MAN-1",
+                        "lineage_id": "LN2",
+                        "step_id": "ST2",
+                        "step_title": "Adapt the shared payments adapter",
+                        "created_at": "2026-03-29T02:00:00+00:00",
+                        "step_type": "feature",
+                        "scope_class": "shared_reviewed",
+                        "spine_version": "spine-v3",
+                        "touched_files": ["src/payments/adapter.py"],
+                        "verification_commands": ["python -m pytest tests/test_payments.py"],
+                        "verification_summary": "payments tests passed",
+                        "verification_status": "passed",
+                        "shared_contracts_used": ["api/payments"],
+                        "promotion_class": "yellow",
+                        "promotion_reason": "Touches shared-reviewed adapter paths.",
+                        "common_requirement_request_id": "CRR1",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            reports = ui_bridge_payloads.report_payload(context)
+
+            self.assertEqual(reports["spine"]["current_version"], "spine-v3")
+            self.assertEqual(reports["spine"]["history_count"], 1)
+            self.assertEqual(reports["common_requirements"]["open_count"], 1)
+            self.assertEqual(reports["common_requirements"]["resolved_count"], 1)
+            self.assertEqual(reports["lineage_manifest_summary"]["yellow_count"], 1)
+            self.assertEqual(reports["lineage_manifest_summary"]["total"], 1)
+            self.assertEqual(reports["lineage_manifests"][0]["manifest_id"], "MAN-1")
+            self.assertEqual(reports["lineage_manifests"][0]["common_requirement_request_id"], "CRR1")
+            self.assertIn("api/payments", reports["shared_contracts_text"])
 
     def test_load_project_exposes_powerpoint_report_target_path(self) -> None:
         with TemporaryTestDir() as temp_dir:

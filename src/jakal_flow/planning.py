@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .contract_wave import normalize_execution_step_policy, policy_summary
+from .contract_wave import DEFAULT_SPINE_VERSION, load_spine_state, normalize_execution_step_policy, policy_summary
 from .model_selection import normalize_reasoning_effort
 from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, ProjectContext
 from .step_models import planning_model_selection_guidance, resolve_step_model_choice
@@ -298,9 +298,45 @@ def _candidate_owned_paths_from_source_summary(source_summary: str, limit: int =
     return candidates
 
 
+def _prompt_string_list(values: object) -> list[str]:
+    if isinstance(values, list):
+        items = [str(item).strip() for item in values]
+    elif isinstance(values, str):
+        items = [part.strip() for part in values.replace("\r", "\n").replace(",", "\n").split("\n")]
+    else:
+        return []
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
+
+
+def _planning_spine_version(context: ProjectContext) -> str:
+    spine_file = getattr(getattr(context, "paths", None), "spine_file", None)
+    if isinstance(spine_file, Path):
+        return load_spine_state(spine_file).current_version or DEFAULT_SPINE_VERSION
+    return DEFAULT_SPINE_VERSION
+
+
+def _planning_shared_contracts_snapshot(context: ProjectContext, *, max_chars: int = 2200) -> str:
+    shared_contracts_file = getattr(getattr(context, "paths", None), "shared_contracts_file", None)
+    if not isinstance(shared_contracts_file, Path):
+        return "# Shared Contracts\n\nNo shared contracts recorded yet.\n"
+    return compact_text(
+        read_text(shared_contracts_file),
+        max_chars,
+    ) or "# Shared Contracts\n\nNo shared contracts recorded yet.\n"
+
+
 def build_fast_planner_outline(
     repo_inputs: dict[str, str],
     user_prompt: str,
+    *,
+    current_spine_version: str = DEFAULT_SPINE_VERSION,
 ) -> str:
     source_summary = repo_inputs.get("source", "")
     candidate_owned_paths = _candidate_owned_paths_from_source_summary(source_summary)
@@ -318,13 +354,26 @@ def build_fast_planner_outline(
             "task_title": "",
             "purpose": "",
             "contract_docstring": "",
+            "step_type_hint": "contract",
+            "scope_class_hint": "shared_reviewed",
+            "verification_profile_hint": "default",
+            "spine_version_hint": current_spine_version,
+            "shared_contracts": [],
             "candidate_owned_paths": [],
+            "primary_scope_candidates": [],
+            "shared_reviewed_candidates": [],
+            "forbidden_core_candidates": [],
             "success_criteria": "",
         },
         "candidate_blocks": [
             {
                 "block_id": "B1",
                 "goal": prompt_summary,
+                "step_type_hint": "feature",
+                "scope_class_hint": "free_owned",
+                "verification_profile_hint": "default",
+                "spine_version_hint": current_spine_version,
+                "shared_contracts": [],
                 "work_items": [
                     "Identify the smallest safe implementation slice that directly satisfies the user request.",
                     "Reuse or extend existing modules before creating new boundaries.",
@@ -336,6 +385,9 @@ def build_fast_planner_outline(
                 ),
                 "testable_boundary": "The final execution plan maps the request onto small, locally judgeable checkpoints.",
                 "candidate_owned_paths": candidate_owned_paths,
+                "primary_scope_candidates": list(candidate_owned_paths),
+                "shared_reviewed_candidates": [],
+                "forbidden_core_candidates": [],
                 "parallelizable_after": [],
                 "parallel_notes": "Only create a parallel-ready wave when the owned paths stay narrow and non-overlapping.",
             }
@@ -663,6 +715,8 @@ def prompt_to_execution_plan_prompt(
     workflow_mode = normalize_workflow_mode(getattr(runtime, "workflow_mode", "standard"))
     template = template_text or load_plan_generation_prompt_template(execution_mode, workflow_mode)
     compact_inputs = followup_planning_repository_inputs(repo_inputs)
+    spine_version = _planning_spine_version(context)
+    shared_contracts_snapshot = _planning_shared_contracts_snapshot(context)
     try:
         return template.format(
             repo_dir=context.paths.repo_dir,
@@ -677,6 +731,8 @@ def prompt_to_execution_plan_prompt(
             user_prompt=user_prompt.strip(),
             planner_outline=compact_text(planner_outline.strip(), 4000) or "Planner Agent A output unavailable.",
             model_selection_guidance=planning_model_selection_guidance(runtime),
+            current_spine_version=spine_version,
+            shared_contracts_snapshot=shared_contracts_snapshot,
         )
     except KeyError as exc:
         raise ValueError(f"Unknown placeholder in plan generation prompt template: {exc.args[0]}") from exc
@@ -693,6 +749,8 @@ def prompt_to_plan_decomposition_prompt(
     runtime = getattr(context, "runtime", None)
     workflow_mode = normalize_workflow_mode(getattr(runtime, "workflow_mode", "standard"))
     template = template_text or load_plan_decomposition_prompt_template(execution_mode, workflow_mode)
+    spine_version = _planning_spine_version(context)
+    shared_contracts_snapshot = _planning_shared_contracts_snapshot(context)
     try:
         return template.format(
             repo_dir=context.paths.repo_dir,
@@ -705,6 +763,8 @@ def prompt_to_plan_decomposition_prompt(
             docs=repo_inputs["docs"],
             source=repo_inputs.get("source", "Source inventory unavailable."),
             user_prompt=user_prompt.strip(),
+            current_spine_version=spine_version,
+            shared_contracts_snapshot=shared_contracts_snapshot,
         )
     except KeyError as exc:
         raise ValueError(f"Unknown placeholder in plan decomposition prompt template: {exc.args[0]}") from exc
@@ -759,15 +819,8 @@ def parse_execution_plan_response(
         )
         parallel_group = str(item.get("parallel_group", "")).strip()
         raw_dependencies = item.get("depends_on", [])
-        if isinstance(raw_dependencies, list):
-            depends_on = [str(value).strip() for value in raw_dependencies if str(value).strip()]
-        else:
-            depends_on = [part.strip() for part in str(raw_dependencies).replace("\n", ",").split(",") if part.strip()]
-        raw_owned_paths = item.get("owned_paths", [])
-        if isinstance(raw_owned_paths, list):
-            owned_paths = [str(value).strip() for value in raw_owned_paths if str(value).strip()]
-        else:
-            owned_paths = [part.strip() for part in str(raw_owned_paths).replace("\n", ",").split(",") if part.strip()]
+        depends_on = _prompt_string_list(item.get("depends_on", []))
+        owned_paths = _prompt_string_list(item.get("owned_paths", []))
         metadata = item.get("metadata", {})
         if not isinstance(metadata, dict):
             metadata = {}
@@ -785,36 +838,12 @@ def parse_execution_plan_response(
             step_type=str(item.get("step_type", metadata.get("step_type", ""))).strip().lower(),
             scope_class=str(item.get("scope_class", metadata.get("scope_class", ""))).strip().lower(),
             spine_version=str(item.get("spine_version", metadata.get("spine_version", ""))).strip(),
-            shared_contracts=[
-                str(value).strip()
-                for value in item.get("shared_contracts", metadata.get("shared_contracts", []))
-                if str(value).strip()
-            ]
-            if isinstance(item.get("shared_contracts", metadata.get("shared_contracts", [])), list)
-            else [],
+            shared_contracts=_prompt_string_list(item.get("shared_contracts", metadata.get("shared_contracts", []))),
             verification_profile=str(item.get("verification_profile", metadata.get("verification_profile", ""))).strip().lower(),
             promotion_class=str(item.get("promotion_class", metadata.get("promotion_class", ""))).strip().lower(),
-            primary_scope_paths=[
-                str(value).strip()
-                for value in item.get("primary_scope_paths", metadata.get("primary_scope_paths", []))
-                if str(value).strip()
-            ]
-            if isinstance(item.get("primary_scope_paths", metadata.get("primary_scope_paths", [])), list)
-            else [],
-            shared_reviewed_paths=[
-                str(value).strip()
-                for value in item.get("shared_reviewed_paths", metadata.get("shared_reviewed_paths", []))
-                if str(value).strip()
-            ]
-            if isinstance(item.get("shared_reviewed_paths", metadata.get("shared_reviewed_paths", [])), list)
-            else [],
-            forbidden_core_paths=[
-                str(value).strip()
-                for value in item.get("forbidden_core_paths", metadata.get("forbidden_core_paths", []))
-                if str(value).strip()
-            ]
-            if isinstance(item.get("forbidden_core_paths", metadata.get("forbidden_core_paths", [])), list)
-            else [],
+            primary_scope_paths=_prompt_string_list(item.get("primary_scope_paths", metadata.get("primary_scope_paths", []))),
+            shared_reviewed_paths=_prompt_string_list(item.get("shared_reviewed_paths", metadata.get("shared_reviewed_paths", []))),
+            forbidden_core_paths=_prompt_string_list(item.get("forbidden_core_paths", metadata.get("forbidden_core_paths", []))),
             reasoning_effort=reasoning_effort,
             parallel_group=parallel_group,
             depends_on=depends_on,

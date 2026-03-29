@@ -1,0 +1,67 @@
+# jakal-flow runtime failure
+generated_at: 2026-03-29T14:23:49+00:00
+source: ui-bridge
+command: run-closeout
+workspace_root: C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\.tub\c8ce00594\workspace
+repo_id: cabf2a3de9c64e6d75b109951a789a113b595d98
+project_root: C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\.tub\c8ce00594\workspace\projects\c-users-ahnd6-onedrive-github-jakal-flow-tub-c8ce00594-repo-main-cabf2a3de9
+repo_dir: C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\.tub\c8ce00594\repo
+branch: main
+exception_type: RuntimeError
+exception_message: Closeout subprocess crashed. Failure report: C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\.tub\c8ce00594\workspace\projects\c-users-ahnd6-onedrive-github-jakal-flow-tub-c8ce00594-repo-main-cabf2a3de9\reports\20260328000000_closeout_failed.prfail.md
+
+## Payload
+{
+  "branch": "main",
+  "display_name": "Closeout Failure Demo",
+  "origin_url": "",
+  "plan": {
+    "default_test_command": "python -m unittest",
+    "execution_mode": "parallel",
+    "plan_title": "Closeout Failure Demo",
+    "project_prompt": "Finish the work",
+    "steps": [
+      {
+        "codex_description": "Implementation finished",
+        "display_description": "Implementation finished",
+        "reasoning_effort": "high",
+        "status": "completed",
+        "step_id": "ST1",
+        "success_criteria": "Tests pass",
+        "test_command": "python -m unittest",
+        "title": "Implement"
+      }
+    ],
+    "summary": "Everything is ready for closeout.",
+    "workflow_mode": "standard"
+  },
+  "project_dir": "C:\\Users\\ahnd6\\OneDrive\\문서\\GitHub\\Jakal-flow\\.tub\\c8ce00594\\repo",
+  "runtime": {
+    "effort": "high",
+    "max_blocks": 5,
+    "model": "gpt-5.4",
+    "model_preset": "high",
+    "test_cmd": "python -m unittest"
+  }
+}
+
+## Traceback
+Traceback (most recent call last):
+  File "C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\src\jakal_flow\ui_bridge_commands\runs.py", line 394, in run_closeout
+    project, saved = ctx.orchestrator.run_execution_closeout(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\tests\test_ui_bridge.py", line 2532, in fake_run_execution_closeout
+    raise RuntimeError("closeout explosion")
+RuntimeError: closeout explosion
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\src\jakal_flow\ui_bridge.py", line 571, in run_command
+    result = handler(
+             ^^^^^^^^
+  File "C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\src\jakal_flow\ui_bridge_commands\runs.py", line 401, in run_closeout
+    raise_closeout_failure(ctx, project_dir, exc)
+  File "C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\src\jakal_flow\ui_bridge_commands\runs.py", line 73, in raise_closeout_failure
+    raise RuntimeError(f"{note} Failure report: {failure_report}") from exc
+RuntimeError: Closeout subprocess crashed. Failure report: C:\Users\ahnd6\OneDrive\문서\GitHub\Jakal-flow\.tub\c8ce00594\workspace\projects\c-users-ahnd6-onedrive-github-jakal-flow-tub-c8ce00594-repo-main-cabf2a3de9\reports\20260328000000_closeout_failed.prfail.md

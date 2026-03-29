@@ -230,7 +230,11 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorMlMixin, OrchestratorRe
                     "agent_label": "Planner Agent A",
                 },
             )
-            planner_outline = build_fast_planner_outline(repo_inputs, project_prompt)
+            planner_outline = build_fast_planner_outline(
+                repo_inputs,
+                project_prompt,
+                current_spine_version=current_spine_version(context.paths),
+            )
             report_progress(
                 "planner-agent-finished",
                 "Planner Agent A was skipped in fast mode; a compact heuristic outline was saved instead.",

@@ -2625,7 +2625,7 @@ select:focus {
   text-transform: uppercase;
 }
 
-.sidebar-chat-bubble p {
+.sidebar-chat-bubble__content {
   margin: 0;
   padding: 7px 10px;
   font-size: 12px;
@@ -2634,17 +2634,96 @@ select:focus {
   word-break: break-word;
 }
 
-.sidebar-chat-bubble--user p {
+.sidebar-chat-bubble--user .sidebar-chat-bubble__content {
   background: var(--bg-accent);
   color: #e8eef8;
   border-bottom-right-radius: 2px;
 }
 
-.sidebar-chat-bubble--assistant p,
-.sidebar-chat-bubble--system p {
+.sidebar-chat-bubble--assistant .sidebar-chat-bubble__content,
+.sidebar-chat-bubble--system .sidebar-chat-bubble__content {
   background: var(--bg-panel-alt);
   color: var(--text);
   border-bottom-left-radius: 2px;
+}
+
+.sidebar-chat-bubble__content--plain {
+  white-space: pre-wrap;
+}
+
+.sidebar-chat-bubble__content--markdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-chat-bubble__content--markdown p,
+.sidebar-chat-bubble__content--markdown ul,
+.sidebar-chat-bubble__content--markdown ol,
+.sidebar-chat-bubble__content--markdown blockquote,
+.sidebar-chat-bubble__content--markdown pre,
+.sidebar-chat-bubble__content--markdown h1,
+.sidebar-chat-bubble__content--markdown h2,
+.sidebar-chat-bubble__content--markdown h3,
+.sidebar-chat-bubble__content--markdown h4 {
+  margin: 0;
+}
+
+.sidebar-chat-bubble__content--markdown p,
+.sidebar-chat-bubble__content--markdown li,
+.sidebar-chat-markdown__quote {
+  white-space: pre-wrap;
+}
+
+.sidebar-chat-markdown__heading {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+}
+
+.sidebar-chat-markdown__list {
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-chat-markdown__quote {
+  padding-left: 10px;
+  border-left: 2px solid rgba(95, 151, 214, 0.45);
+  color: var(--text-muted);
+}
+
+.sidebar-chat-markdown__pre {
+  overflow-x: auto;
+  padding: 8px 9px;
+  border-radius: calc(var(--radius) - 2px);
+  background: rgba(10, 14, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-chat-markdown__pre code {
+  display: block;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.sidebar-chat-markdown__inline-code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(10, 14, 20, 0.34);
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.sidebar-chat-markdown__link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(95, 151, 214, 0.7);
+  text-underline-offset: 2px;
 }
 
 .sidebar-chat-composer {

@@ -82,6 +82,36 @@ test("preserveProjectDetailSupplement clears stale latest failure when core refr
   assert.equal(merged.reports.closeout_report_text, "full report body");
 });
 
+test("preserveProjectDetailSupplement keeps contract-wave report sections on core refresh", () => {
+  const previousDetail = {
+    detail_level: "full",
+    project: { repo_id: "repo-1" },
+    reports: {
+      latest_failure: {},
+      spine: { current_version: "spine-v4", history_count: 2 },
+      common_requirements: { open_count: 1, resolved_count: 3 },
+      lineage_manifests: [{ manifest_id: "MAN-1", promotion_class: "yellow" }],
+      shared_contracts_text: "# Shared Contracts\n\n- api/payments",
+    },
+    loaded_sections: { reports: true },
+  };
+  const nextDetail = {
+    detail_level: "core",
+    project: { repo_id: "repo-1" },
+    reports: {
+      latest_failure: {},
+    },
+    loaded_sections: {},
+  };
+
+  const merged = preserveProjectDetailSupplement(nextDetail, previousDetail);
+
+  assert.equal(merged.reports.spine.current_version, "spine-v4");
+  assert.equal(merged.reports.common_requirements.open_count, 1);
+  assert.equal(merged.reports.lineage_manifests[0].manifest_id, "MAN-1");
+  assert.equal(merged.reports.shared_contracts_text, "# Shared Contracts\n\n- api/payments");
+});
+
 test("applyProjectDetailState preserves the current project_dir when a sparse detail payload omits repo_path", () => {
   let capturedProjectForm = {
     project_dir: "C:/repo",

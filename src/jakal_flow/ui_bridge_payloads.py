@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from .chat_sessions import chat_active_session_file, chat_payload, chat_sessions_registry_file
 from .codex_app_server import fetch_codex_backend_snapshot
+from .contract_wave import load_common_requirements_state, load_lineage_manifest_payloads, load_spine_state
 from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER
 from .model_providers import normalize_local_model_provider, normalize_model_provider, provider_preset
 from .models import ExecutionPlanState, ProjectContext
@@ -22,7 +23,7 @@ from .utils import append_jsonl, compact_text, normalize_workflow_mode, now_utc_
 from .workspace import WorkspaceManager
 
 
-DETAIL_CACHE_VERSION = 11
+DETAIL_CACHE_VERSION = 12
 
 PLANNING_STAGE_DEFINITIONS = (
     {"key": "context_scan", "label": "Scan repository context"},
@@ -487,6 +488,85 @@ def managed_workspace_tree(context: ProjectContext) -> list[dict[str, Any]]:
     ]
 
 
+def _sort_payload_items(items: list[dict[str, Any]], *timestamp_keys: str) -> list[dict[str, Any]]:
+    def sort_key(item: dict[str, Any]) -> str:
+        for key in timestamp_keys:
+            value = str(item.get(key, "")).strip()
+            if value:
+                return value
+        return ""
+
+    return sorted(items, key=sort_key, reverse=True)
+
+
+def _contract_wave_report_payload(context: ProjectContext) -> dict[str, Any]:
+    spine_state = load_spine_state(context.paths.spine_file)
+    common_requirements_state = load_common_requirements_state(context.paths.common_requirements_file)
+    spine_history = _sort_payload_items(
+        [item.to_dict() for item in spine_state.history],
+        "created_at",
+    )
+    open_requirements = _sort_payload_items(
+        [item.to_dict() for item in common_requirements_state.open_requirements],
+        "created_at",
+    )
+    resolved_requirements = _sort_payload_items(
+        [item.to_dict() for item in common_requirements_state.resolved_requirements],
+        "resolved_at",
+        "created_at",
+    )
+    lineage_manifests = _sort_payload_items(
+        load_lineage_manifest_payloads(context.paths),
+        "created_at",
+    )
+
+    manifest_summary = {
+        "total": len(lineage_manifests),
+        "green_count": 0,
+        "yellow_count": 0,
+        "red_count": 0,
+        "latest_manifest": lineage_manifests[0] if lineage_manifests else None,
+    }
+    for manifest in lineage_manifests:
+        promotion_class = str(manifest.get("promotion_class", "")).strip().lower()
+        if promotion_class == "green":
+            manifest_summary["green_count"] += 1
+        elif promotion_class == "yellow":
+            manifest_summary["yellow_count"] += 1
+        elif promotion_class == "red":
+            manifest_summary["red_count"] += 1
+
+    return {
+        "spine": {
+            "current_version": spine_state.current_version,
+            "updated_at": spine_state.updated_at,
+            "history_count": len(spine_state.history),
+            "latest_checkpoint": spine_history[0] if spine_history else None,
+            "recent_history": spine_history[:8],
+            "json_text": preview_text(context.paths.spine_file, default="{\n}\n", max_chars=4000),
+            "path": str(context.paths.spine_file),
+        },
+        "common_requirements": {
+            "updated_at": common_requirements_state.updated_at,
+            "open_count": len(common_requirements_state.open_requirements),
+            "resolved_count": len(common_requirements_state.resolved_requirements),
+            "open_items": open_requirements[:8],
+            "resolved_items": resolved_requirements[:8],
+            "json_text": preview_text(context.paths.common_requirements_file, default="{\n}\n", max_chars=4000),
+            "path": str(context.paths.common_requirements_file),
+        },
+        "shared_contracts_text": preview_text(
+            context.paths.shared_contracts_file,
+            default="# Shared Contracts\n\nNo shared contracts recorded yet.\n",
+            max_chars=8000,
+        ),
+        "shared_contracts_path": str(context.paths.shared_contracts_file),
+        "lineage_manifests": lineage_manifests[:12],
+        "lineage_manifest_summary": manifest_summary,
+        "lineage_manifests_dir": str(context.paths.lineage_manifests_dir),
+    }
+
+
 def report_payload(context: ProjectContext) -> dict[str, Any]:
     latest_failure_status = safe_json(context.paths.reports_dir / "latest_pr_failure_status.json", default={})
     latest_failure: dict[str, Any] = {}
@@ -541,6 +621,7 @@ def report_payload(context: ProjectContext) -> dict[str, Any]:
         "powerpoint_report_path": str(context.paths.closeout_report_pptx_file) if context.paths.closeout_report_pptx_file.exists() else "",
         "powerpoint_report_target_path": str(context.paths.closeout_report_pptx_file),
         "ml_results_svg_path": str(context.paths.ml_experiment_results_svg_file) if context.paths.ml_experiment_results_svg_file.exists() else "",
+        **_contract_wave_report_payload(context),
         "latest_failure": latest_failure,
     }
 
@@ -1025,6 +1106,7 @@ def _build_project_detail_base_payload(
             "spine_file": str(project.paths.spine_file),
             "common_requirements_file": str(project.paths.common_requirements_file),
             "shared_contracts_file": str(project.paths.shared_contracts_file),
+            "lineage_manifests_dir": str(project.paths.lineage_manifests_dir),
         },
         "bottom_panels": bottom_panels,
         "github": {

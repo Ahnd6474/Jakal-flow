@@ -48,6 +48,7 @@ from jakal_flow.planning import (
     STEP_EXECUTION_PARALLEL_PROMPT_FILENAME,
     STEP_EXECUTION_PROMPT_FILENAME,
     bootstrap_plan_prompt,
+    build_fast_planner_outline,
     execution_plan_svg,
     load_debugger_prompt_template,
     load_finalization_prompt_template,
@@ -223,6 +224,45 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(len(steps), 1)
         self.assertEqual(steps[0].title, "Retry the parser")
 
+    def test_parse_execution_plan_response_accepts_string_policy_lists(self) -> None:
+        response = """
+        {
+          "tasks": [
+            {
+              "step_id": "ST2",
+              "task_title": "Harden the shared adapter",
+              "display_description": "Update the shared adapter carefully.",
+              "codex_description": "Change the adapter in place and keep compatibility intact.",
+              "depends_on": "ST1",
+              "owned_paths": "src/payments/adapter.py",
+              "step_type": "feature",
+              "scope_class": "shared_reviewed",
+              "spine_version": "spine-v5",
+              "shared_contracts": "api/payments, config/runtime",
+              "verification_profile": "adapter",
+              "primary_scope_paths": "src/payments/adapter.py",
+              "shared_reviewed_paths": "src/contracts/payments.py\\nsrc/config/runtime.py",
+              "forbidden_core_paths": "src/core/schema.py",
+              "success_criteria": "The adapter remains backward compatible."
+            }
+          ]
+        }
+        """
+
+        _title, _summary, steps = parse_execution_plan_response(response, "python -m unittest", "high", limit=3)
+
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0].depends_on, ["ST1"])
+        self.assertEqual(steps[0].shared_contracts, ["api/payments", "config/runtime"])
+        self.assertEqual(steps[0].primary_scope_paths, ["src/payments/adapter.py"])
+        self.assertEqual(
+            steps[0].shared_reviewed_paths,
+            ["src/contracts/payments.py", "src/config/runtime.py"],
+        )
+        self.assertEqual(steps[0].forbidden_core_paths, ["src/core/schema.py"])
+        self.assertEqual(steps[0].spine_version, "spine-v5")
+        self.assertEqual(steps[0].verification_profile, "adapter")
+
     def test_execution_step_from_dict_accepts_legacy_description(self) -> None:
         step = ExecutionStep.from_dict(
             {
@@ -264,6 +304,23 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual(step.model_provider, "gemini")
         self.assertEqual(step.model, GEMINI_DEFAULT_MODEL)
+
+    def test_build_fast_planner_outline_emits_contract_wave_hints(self) -> None:
+        outline = json.loads(
+            build_fast_planner_outline(
+                {"source": "Existing implementation files detected. src/main.py"},
+                "Add a contract-aware payments flow.",
+                current_spine_version="spine-v9",
+            )
+        )
+
+        candidate = outline["candidate_blocks"][0]
+        self.assertEqual(candidate["step_type_hint"], "feature")
+        self.assertEqual(candidate["scope_class_hint"], "free_owned")
+        self.assertEqual(candidate["spine_version_hint"], "spine-v9")
+        self.assertIn("primary_scope_candidates", candidate)
+        self.assertIn("shared_reviewed_candidates", candidate)
+        self.assertIn("forbidden_core_candidates", candidate)
 
     def test_execution_step_from_dict_drops_plain_codex_model_for_openai_steps(self) -> None:
         step = ExecutionStep.from_dict(
@@ -4588,10 +4645,20 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         repo_dir = temp_root / "repo"
         (repo_dir / "docs").mkdir(parents=True, exist_ok=True)
         (repo_dir / "src").mkdir(parents=True, exist_ok=True)
+        managed_docs = temp_root / "managed-docs"
+        managed_docs.mkdir(parents=True, exist_ok=True)
         (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
         (repo_dir / "AGENTS.md").write_text("AGENTS summary", encoding="utf-8")
         (repo_dir / "docs" / "notes.md").write_text("docs summary", encoding="utf-8")
         (repo_dir / "src" / "main.py").write_text("def run() -> None:\n    pass\n", encoding="utf-8")
+        (managed_docs / "SPINE.json").write_text(
+            json.dumps({"current_version": "spine-v7", "history": []}),
+            encoding="utf-8",
+        )
+        (managed_docs / "SHARED_CONTRACTS.md").write_text(
+            "# Shared Contracts\n\n- Current spine version: spine-v7\n- Shared contracts: api/ui-shell\n",
+            encoding="utf-8",
+        )
 
         try:
             repo_inputs = scan_repository_inputs(repo_dir)
@@ -4602,7 +4669,12 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             self.assertIn("React + Tauri", reference_notes)
 
             context = SimpleNamespace(
-                paths=SimpleNamespace(repo_dir=repo_dir, plan_file=temp_root / "managed-docs" / "PLAN.md"),
+                paths=SimpleNamespace(
+                    repo_dir=repo_dir,
+                    plan_file=managed_docs / "PLAN.md",
+                    spine_file=managed_docs / "SPINE.json",
+                    shared_contracts_file=managed_docs / "SHARED_CONTRACTS.md",
+                ),
                 metadata=SimpleNamespace(
                     repo_url="https://github.com/example/project.git",
                     branch="main",
@@ -4631,6 +4703,10 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("Requested execution mode:", plan_prompt)
         self.assertIn("Model routing guidance for this run:", plan_prompt)
         self.assertIn("Default routing for this run:", plan_prompt)
+        self.assertIn("Current spine version:", plan_prompt)
+        self.assertIn("spine-v7", plan_prompt)
+        self.assertIn("Current shared contract snapshot:", plan_prompt)
+        self.assertIn("api/ui-shell", plan_prompt)
         self.assertIn("parallel", plan_prompt)
         self.assertIn("Planner Agent A decomposition artifact:", plan_prompt)
         self.assertIn("Planner Agent A output unavailable.", plan_prompt)
@@ -4642,9 +4718,21 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn('"model"', plan_prompt)
         self.assertIn("depends_on", plan_prompt)
         self.assertIn("owned_paths", plan_prompt)
+        self.assertIn("step_type", plan_prompt)
+        self.assertIn("scope_class", plan_prompt)
+        self.assertIn("shared_contracts", plan_prompt)
+        self.assertIn("primary_scope_paths", plan_prompt)
+        self.assertIn("shared_reviewed_paths", plan_prompt)
+        self.assertIn("forbidden_core_paths", plan_prompt)
         self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", plan_prompt)
         self.assertIn("React + Tauri", plan_prompt)
         self.assertIn("well-known algorithm", plan_prompt)
+        self.assertIn("step_type_hint", decomposition_prompt)
+        self.assertIn("scope_class_hint", decomposition_prompt)
+        self.assertIn("spine_version_hint", decomposition_prompt)
+        self.assertIn("primary_scope_candidates", decomposition_prompt)
+        self.assertIn("shared_reviewed_candidates", decomposition_prompt)
+        self.assertIn("forbidden_core_candidates", decomposition_prompt)
         self.assertIn("1. Follow AGENTS.md and explicit repository constraints first.", bootstrap_prompt)
         self.assertIn("src/jakal_flow/docs/REFERENCE_GUIDE.md", bootstrap_prompt)
         self.assertIn("React + Tauri", bootstrap_prompt)

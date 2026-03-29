@@ -27,6 +27,12 @@ Use the following priority order while planning:
 Requested execution mode:
 {execution_mode}
 
+Current spine version:
+{current_spine_version}
+
+Current shared contract snapshot:
+{shared_contracts_snapshot}
+
 The app is currently in parallel mode. Plan a DAG execution tree instead of a simple list.
 Use `step_id` and `depends_on` to define the graph.
 Only let steps become parallel-ready when their dependencies are complete.
@@ -39,6 +45,11 @@ If a wide fan-out needs one small contract-freezing or coordination step first, 
 If the source inventory or Planner Agent A shows that the relevant implementation already exists, fold scaffold-only bootstrap work into the concrete implementation step or reduce it to the smallest contract-tightening edit.
 Do not put risky, tightly coupled, shared-contract, or same-file refactors in the same parallel-ready wave.
 If a step needs broad repo-wide edits or merge-sensitive refactors, keep it isolated rather than pretending it is parallel-safe.
+Keep `step_kind` and `step_type` separate. `step_kind` is topology only (`task`, `join`, `barrier`) while `step_type` is the semantic execution role (`contract`, `feature`, `integration`, `debug`, `closeout`).
+Use guarded-overlap policy fields explicitly. `owned_paths` remains the compatibility ownership field, while `primary_scope_paths`, `shared_reviewed_paths`, and `forbidden_core_paths` describe green/yellow/red routing boundaries.
+Use `scope_class = free_owned` for normal feature work, `shared_reviewed` when a step intentionally touches shared contracts/helpers/APIs/config/schema surfaces, and `hard_owned` only when the step truly enters protected shared core paths.
+Carry the current spine version through downstream work. Only use a different `spine_version` when the step is intentionally evolving a contract wave.
+If a step would require shared-core or non-additive contract work, plan it as contract/integration-aware work instead of pretending it is an ordinary green feature pass.
 When several branches should reconverge before later integration-sensitive work, emit an explicit join node instead of hiding that synchronization inside a vague later task.
 Use `metadata.step_kind = "join"` for an explicit merge/integration checkpoint and `metadata.step_kind = "barrier"` for a synchronization checkpoint that must run alone before later work continues.
 Join or barrier nodes must run alone, must not use `parallel_group`, and should depend on the upstream nodes they are reconciling.
@@ -63,8 +74,17 @@ JSON shape:
       "model_provider": "execution backend for this step, such as openai, claude, or gemini",
       "model": "model slug or alias for this step",
       "reasoning_effort": "one of low, medium, high, xhigh based on expected difficulty",
+      "step_type": "contract, feature, integration, debug, or closeout",
+      "scope_class": "hard_owned, shared_reviewed, or free_owned",
+      "spine_version": "the contract-wave spine version this step expects to build against",
+      "shared_contracts": ["shared contracts/helpers/APIs/config/schema surfaces this step uses or changes"],
+      "verification_profile": "short verification policy label such as default",
+      "promotion_class": "optional planner expectation only; runtime computes the authoritative class",
       "depends_on": ["step ids that must complete first"],
       "owned_paths": ["repo-relative paths or directories this step primarily owns"],
+      "primary_scope_paths": ["guarded-overlap primary scope paths; usually mirrors or narrows owned_paths"],
+      "shared_reviewed_paths": ["shared paths that should route through integration review instead of auto-promotion"],
+      "forbidden_core_paths": ["hard-owned/core paths that force CRR or explicit coordination"],
       "success_criteria": "clear completion condition that can be judged locally",
       "metadata": {{
         "step_kind": "task unless this is an explicit join or barrier node",
@@ -93,14 +113,25 @@ Field requirements:
 - "model_provider": choose a concrete provider for the step. In ensemble mode, set this explicitly for every step and follow the routing guidance above.
 - "model": choose the concrete model slug or alias for the selected provider. In ensemble mode, set this explicitly for every step and follow the routing guidance above.
 - "reasoning_effort": choose only `low`, `medium`, `high`, or `xhigh`. Use `low` for narrow mechanical edits, `medium` for normal implementation, `high` for multi-file or tricky work, and `xhigh` only for the hardest investigations or refactors.
+- "step_type": use `feature` for normal implementation, `contract` for shared contract freeze/evolution work, `integration` for explicit merger/join responsibilities, `debug` for post-integration or post-verification repair work, and `closeout` only for true closeout work. Do not use `closeout` for normal task nodes just because docs are involved.
+- "scope_class": use `free_owned` by default, `shared_reviewed` when the step deliberately touches shared-review surfaces, and `hard_owned` only when the step must enter protected shared core paths.
+- "spine_version": default to the current spine version shown above unless this step intentionally advances contract-wave state.
+- "shared_contracts": list the shared contracts/helpers/APIs/config/schema surfaces that this step depends on or changes. Use an empty array when none apply.
+- "verification_profile": keep this short and concrete. Use `default` when there is no special requirement.
+- "promotion_class": you may include the likely class for operator readability, but treat it as a planner estimate. The runtime recomputes the real guarded-overlap promotion class.
 - "depends_on": in parallel mode, use this to encode the DAG.
 - "owned_paths": in parallel mode, list the main repo-relative files or directories each step owns so independently ready steps can be batched safely. Prefer narrow exact files or leaf directories. Use an empty array only when the step should run alone.
+- "primary_scope_paths": usually mirror `owned_paths`, but feel free to narrow them further when only part of an owned directory is truly primary scope.
+- "shared_reviewed_paths": list shared touchpoints that must not auto-promote as green even when verification passes.
+- "forbidden_core_paths": list protected shared-core paths only when the step truly must enter them. If this field is non-empty, the plan should usually isolate the work and expect explicit coordination.
 - "success_criteria": a concrete, locally judgeable done condition, describing what must be true when the block is complete.
 - "metadata": carry Planner Agent A traceability hints. Preserve `candidate_block_id`, carry `parallelizable_after`, keep non-skeleton notes in `implementation_notes`, and use `skeleton_contract_docstring` only for the skeleton/bootstrap contract step.
 - Do not assign a provider that is marked unavailable in the routing guidance unless the target repository explicitly requires it.
 - For a normal work node, set `metadata.step_kind` to `task` or leave it empty.
 - For an explicit synchronization node, set `metadata.step_kind` to `join` or `barrier`. Join nodes should normally depend on 2 or more upstream steps, set `metadata.merge_from`, and use `metadata.join_policy = "all"`.
 - Do not emit `join_policy = "any"` or other custom merge semantics. The runtime currently supports only explicit `all` joins.
+- If `metadata.step_kind` is `join`, the matching `step_type` should normally be `integration`.
+- Do not mark a node as a direct green feature pass when its own policy fields show shared-reviewed or forbidden-core scope.
 - If the step is the skeleton/bootstrap contract step, make `codex_description` explicitly tell the executor to update existing code in place when that surface already exists and create only the smallest necessary skeleton otherwise.
 
 Do not include markdown fences or commentary outside the JSON.
@@ -120,6 +151,9 @@ Docs:
 
 Source inventory:
 {source}
+
+Current shared contract state:
+{shared_contracts_snapshot}
 
 Planner Agent A decomposition artifact:
 {planner_outline}

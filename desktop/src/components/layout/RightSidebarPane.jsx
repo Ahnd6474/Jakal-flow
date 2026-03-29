@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { openInSystem } from "../../api";
+import { ChatMessageContent } from "../../chatMarkdown";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import { effectiveStepStatus, reasoningEffortLabel, runtimeSummary, statusTone } from "../../utils";
@@ -442,7 +443,7 @@ function ProjectChatPane({
                 {roleLabel(msg.role)}
                 {msg.mode && String(msg.mode).trim().toLowerCase() !== "conversation" ? ` · ${modeLabel(msg.mode)}` : ""}
               </span>
-              <p>{msg.text}</p>
+              <ChatMessageContent role={msg.role} text={msg.text} />
             </div>
           ))
         )}

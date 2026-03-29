@@ -580,6 +580,74 @@ test("RightSidebarPane renders the project chat on the right rail by default", a
   assert.match(html, /chat\.summary\.txt/);
 });
 
+test("RightSidebarPane renders assistant replies with safe markdown while keeping user text plain", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-chat-markdown-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+        runtime: {
+          effort: "medium",
+        },
+      },
+      planDraft: {
+        steps: [],
+      },
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: null,
+      busy: false,
+      chat: {
+        sessions: [
+          { session_id: "chat-1", title: "Markdown", message_count: 2 },
+        ],
+        active_session_id: "chat-1",
+        messages: [
+          {
+            message_id: "msg-1",
+            role: "assistant",
+            text: "# Release Notes\n\n- Ship UI polish\n- Keep code blocks\n\n```js\nconst ready = true;\n  return ready;\n```\n\nOpen the [preview](https://example.com).",
+          },
+          {
+            message_id: "msg-2",
+            role: "user",
+            text: "Keep **this** plain.\n  Preserve the indent.",
+          },
+        ],
+        summary_file: "C:/demo/chat.summary.txt",
+      },
+      chatSettings: {},
+      selectedChatSessionId: "chat-1",
+      chatDraftSession: false,
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+      onChangeChatModelSelection: noop,
+    },
+  );
+
+  assert.match(html, /sidebar-chat-bubble__content--markdown/);
+  assert.match(html, /<h1 class="sidebar-chat-markdown__heading">Release Notes<\/h1>/);
+  assert.match(html, /<ul class="sidebar-chat-markdown__list">/);
+  assert.match(html, /<li>Ship UI polish<\/li>/);
+  assert.match(html, /<pre class="sidebar-chat-markdown__pre"><code class="language-js">const ready = true;/);
+  assert.match(html, /href="https:\/\/example\.com"/);
+  assert.match(html, /sidebar-chat-bubble__content--plain/);
+  assert.match(html, /Keep \*\*this\*\* plain\./);
+  assert.doesNotMatch(html, /<strong>this<\/strong>/);
+});
+
 test("CenterWorkspace shows estimated cost only for paid configured runtimes", async () => {
   const html = await renderBundledComponent(
     "parallel-workspace-paid-cost-render",
