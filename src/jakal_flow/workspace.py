@@ -10,7 +10,8 @@ from .models import LoopCounters, LoopState, ProjectContext, ProjectPaths, RepoM
 from .parallel_resources import normalize_parallel_worker_mode
 from .utils import ensure_dir, now_utc_iso, read_json, remove_tree, stable_repo_identity, write_json
 
-LOCAL_PROJECT_LOG_DIRNAME = "jakal-flow-logs"
+LOCAL_PROJECT_LOG_DIRNAME = "jakal flow logs"
+LEGACY_LOCAL_PROJECT_LOG_DIRNAME = "jakal-flow-logs"
 
 
 class WorkspaceManager:
@@ -59,8 +60,17 @@ class WorkspaceManager:
     def build_paths(self, slug: str) -> ProjectPaths:
         return self.build_paths_from_root(self.projects_root / slug)
 
+    def _local_repo_logs_dir(self, repo_dir: Path) -> Path:
+        resolved_repo_dir = repo_dir.resolve()
+        legacy_logs_dir = resolved_repo_dir / LEGACY_LOCAL_PROJECT_LOG_DIRNAME
+        preferred_logs_dir = resolved_repo_dir / LOCAL_PROJECT_LOG_DIRNAME
+        if preferred_logs_dir.exists() or not legacy_logs_dir.exists():
+            return preferred_logs_dir
+        shutil.move(str(legacy_logs_dir), str(preferred_logs_dir))
+        return preferred_logs_dir
+
     def _apply_local_repo_log_paths(self, paths: ProjectPaths, repo_dir: Path) -> ProjectPaths:
-        repo_logs_dir = repo_dir.resolve() / LOCAL_PROJECT_LOG_DIRNAME
+        repo_logs_dir = self._local_repo_logs_dir(repo_dir)
         paths.logs_dir = repo_logs_dir
         paths.pass_log_file = repo_logs_dir / "passes.jsonl"
         paths.block_log_file = repo_logs_dir / "blocks.jsonl"

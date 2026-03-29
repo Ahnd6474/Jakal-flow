@@ -169,17 +169,35 @@ class UIBridgeTests(unittest.TestCase):
             workspace = WorkspaceManager(workspace_root)
             context = workspace.initialize_local_project(project_dir, "main", runtime_from_payload({}), display_name="Demo")
 
-            self.assertEqual(context.paths.logs_dir, project_dir.resolve() / "jakal-flow-logs")
-            self.assertEqual(context.paths.pass_log_file, project_dir.resolve() / "jakal-flow-logs" / "passes.jsonl")
-            self.assertEqual(context.paths.block_log_file, project_dir.resolve() / "jakal-flow-logs" / "blocks.jsonl")
-            self.assertEqual(context.paths.ui_event_log_file, project_dir.resolve() / "jakal-flow-logs" / "ui_events.jsonl")
+            self.assertEqual(context.paths.logs_dir, project_dir.resolve() / "jakal flow logs")
+            self.assertEqual(context.paths.pass_log_file, project_dir.resolve() / "jakal flow logs" / "passes.jsonl")
+            self.assertEqual(context.paths.block_log_file, project_dir.resolve() / "jakal flow logs" / "blocks.jsonl")
+            self.assertEqual(context.paths.ui_event_log_file, project_dir.resolve() / "jakal flow logs" / "ui_events.jsonl")
 
             ui_bridge.append_ui_event(context, "step-started", "Running ST1", {"step_id": "ST1"})
 
-            events = read_jsonl(project_dir.resolve() / "jakal-flow-logs" / "ui_events.jsonl")
+            events = read_jsonl(project_dir.resolve() / "jakal flow logs" / "ui_events.jsonl")
             self.assertEqual(len(events), 1)
             self.assertEqual(events[0]["event_type"], "step-started")
             self.assertEqual(events[0]["details"]["step_id"], "ST1")
+
+    def test_local_project_logs_migrate_from_legacy_repo_folder_name(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            project_dir = temp_dir / "repo"
+            legacy_logs_dir = project_dir / "jakal-flow-logs"
+            legacy_logs_dir.mkdir(parents=True, exist_ok=True)
+            (legacy_logs_dir / "ui_events.jsonl").write_text('{"event_type":"legacy"}\n', encoding="utf-8")
+
+            workspace = WorkspaceManager(workspace_root)
+            context = workspace.initialize_local_project(project_dir, "main", runtime_from_payload({}), display_name="Demo")
+
+            migrated_logs_dir = project_dir.resolve() / "jakal flow logs"
+            self.assertEqual(context.paths.logs_dir, migrated_logs_dir)
+            self.assertTrue(migrated_logs_dir.exists())
+            self.assertFalse(legacy_logs_dir.exists())
+            events = read_jsonl(migrated_logs_dir / "ui_events.jsonl")
+            self.assertEqual(events[0]["event_type"], "legacy")
 
     def test_start_share_server_process_replaces_stale_state_file(self) -> None:
         with TemporaryTestDir() as temp_dir:
