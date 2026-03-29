@@ -1,0 +1,36 @@
+{"details": {}, "event_type": "project-saved", "message": "Saved project setup from the desktop shell.", "timestamp": "2026-03-27T00:18:22+00:00"}
+{"details": {}, "event_type": "project-saved", "message": "Saved project setup from the desktop shell.", "timestamp": "2026-03-27T00:18:31+00:00"}
+{"details": {}, "event_type": "project-saved", "message": "Saved project setup from the desktop shell.", "timestamp": "2026-03-27T00:18:39+00:00"}
+{"details": {}, "event_type": "project-saved", "message": "Saved project setup from the desktop shell.", "timestamp": "2026-03-27T00:18:50+00:00"}
+{"details": {}, "event_type": "project-saved", "message": "Saved project setup from the desktop shell.", "timestamp": "2026-03-27T00:19:16+00:00"}
+{"details": {}, "event_type": "project-saved", "message": "Saved project setup from the desktop shell.", "timestamp": "2026-03-27T00:19:32+00:00"}
+{"details": {}, "event_type": "project-saved", "message": "Saved project setup from the desktop shell.", "timestamp": "2026-03-27T00:19:37+00:00"}
+{"details": {}, "event_type": "project-saved", "message": "Saved project setup from the desktop shell.", "timestamp": "2026-03-27T00:20:25+00:00"}
+{"details": {}, "event_type": "project-saved", "message": "Saved project setup from the desktop shell.", "timestamp": "2026-03-27T00:20:30+00:00"}
+{"details": {"max_steps": 8}, "event_type": "plan-generated", "message": "Generated a new execution plan with 7 step(s).", "timestamp": "2026-03-27T00:41:37+00:00"}
+{"details": {}, "event_type": "run-started", "message": "Started running the remaining execution steps.", "timestamp": "2026-03-27T00:44:19+00:00"}
+{"details": {"step_id": "ST1", "title": "Scaffold contracts and app skeleton"}, "event_type": "step-started", "message": "Running ST1: Scaffold contracts and app skeleton", "timestamp": "2026-03-27T00:44:19+00:00"}
+{"details": {"expires_at": "2026-03-27T01:47:13+00:00", "session_id": "cdce2957421119d52fd2ee6a112033e4"}, "event_type": "share-session-created", "message": "Created a temporary read-only share session.", "timestamp": "2026-03-27T00:47:13+00:00"}
+{"details": {"expires_at": "2026-03-27T02:13:35+00:00", "session_id": "53ef5cacbb04d3fb4567da8de557a86d"}, "event_type": "share-session-created", "message": "Created a temporary read-only share session.", "timestamp": "2026-03-27T01:13:35+00:00"}
+{"details": {}, "event_type": "run-started", "message": "Started running the remaining execution steps.", "timestamp": "2026-03-27T01:25:04+00:00"}
+{"details": {"step_id": "ST1", "title": "Scaffold contracts and app skeleton"}, "event_type": "step-started", "message": "Running ST1: Scaffold contracts and app skeleton", "timestamp": "2026-03-27T01:25:04+00:00"}
+{"details": {"commit_hash": "70377dc106c1a6e2e5e1a94e54fed3ff338859a8", "status": "completed", "step_id": "ST1"}, "event_type": "step-finished", "message": "ST1 finished with status completed.", "timestamp": "2026-03-27T01:47:25+00:00"}
+{"details": {"execution_mode": "parallel", "parallel_worker_mode": "auto", "parallel_workers": 3, "step_ids": ["ST2", "ST3", "ST4"]}, "event_type": "batch-started", "message": "Running parallel batch: ST2, ST3, ST4", "timestamp": "2026-03-27T01:47:25+00:00"}
+{"details": {"execution_mode": "parallel", "step_id": "ST2", "title": "Build shell, settings, and persistence workspace"}, "event_type": "step-started", "message": "Running ST2: Build shell, settings, and persistence workspace", "timestamp": "2026-03-27T01:47:25+00:00"}
+{"details": {"execution_mode": "parallel", "step_id": "ST3", "title": "Implement expression engine and precision modes"}, "event_type": "step-started", "message": "Running ST3: Implement expression engine and precision modes", "timestamp": "2026-03-27T01:47:25+00:00"}
+{"details": {"execution_mode": "parallel", "step_id": "ST4", "title": "Implement matrix engine and matrix mode"}, "event_type": "step-started", "message": "Running ST4: Implement matrix engine and matrix mode", "timestamp": "2026-03-27T01:47:25+00:00"}
+{"details": {"commit_hash": "d593d757c2ab5cc5029898c92a5dccbb8b887d5b", "status": "completed", "step_id": "ST2"}, "event_type": "step-finished", "message": "ST2 finished with status completed.", "timestamp": "2026-03-27T02:31:11+00:00"}
+{"details": {"commit_hash": "f0d001e7adbf88d7f328b235130afe2b3a01fb7a", "status": "completed", "step_id": "ST3"}, "event_type": "step-finished", "message": "ST3 finished with status completed.", "timestamp": "2026-03-27T02:31:11+00:00"}
+{"details": {"commit_hash": "00f2b7386b2929e8a03978ff77b5e06677dc7793", "status": "completed", "step_id": "ST4"}, "event_type": "step-finished", "message": "ST4 finished with status completed.", "timestamp": "2026-03-27T02:31:11+00:00"}
+{"details": {"statuses": {"ST2": "completed", "ST3": "completed", "ST4": "completed"}, "step_ids": ["ST2", "ST3", "ST4"]}, "event_type": "batch-finished", "message": "Parallel batch finished for ST2, ST3, ST4.", "timestamp": "2026-03-27T02:31:11+00:00"}
+{"details": {"execution_mode": "parallel", "parallel_worker_mode": "auto", "parallel_workers": 3, "step_ids": ["ST5", "ST6"]}, "event_type": "batch-started", "message": "Running parallel batch: ST5, ST6", "timestamp": "2026-03-27T02:31:11+00:00"}
+{"details": {"execution_mode": "parallel", "step_id": "ST5", "title": "Add numerical solver mode"}, "event_type": "step-started", "message": "Running ST5: Add numerical solver mode", "timestamp": "2026-03-27T02:31:11+00:00"}
+{"details": {"execution_mode": "parallel", "step_id": "ST6", "title": "Add numerical analysis tools"}, "event_type": "step-started", "message": "Running ST6: Add numerical analysis tools", "timestamp": "2026-03-27T02:31:11+00:00"}
+{"details": {"commit_hash": "63a5ee640e795662ebc08bf5fbbd93bac286d9b8", "status": "completed", "step_id": "ST5"}, "event_type": "step-finished", "message": "ST5 finished with status completed.", "timestamp": "2026-03-27T03:02:29+00:00"}
+{"details": {"commit_hash": "16e063edc3b8be759b302048a2a81847442703fd", "status": "completed", "step_id": "ST6"}, "event_type": "step-finished", "message": "ST6 finished with status completed.", "timestamp": "2026-03-27T03:02:29+00:00"}
+{"details": {"statuses": {"ST5": "completed", "ST6": "completed"}, "step_ids": ["ST5", "ST6"]}, "event_type": "batch-finished", "message": "Parallel batch finished for ST5, ST6.", "timestamp": "2026-03-27T03:02:29+00:00"}
+{"details": {"step_id": "ST7", "title": "Integrate product flow and project docs"}, "event_type": "step-started", "message": "Running ST7: Integrate product flow and project docs", "timestamp": "2026-03-27T03:02:29+00:00"}
+{"details": {"commit_hash": "d79960248c91c256e66c4fc2bbcd84509de96a9a", "status": "completed", "step_id": "ST7"}, "event_type": "step-finished", "message": "ST7 finished with status completed.", "timestamp": "2026-03-27T03:16:11+00:00"}
+{"details": {}, "event_type": "closeout-started", "message": "Started project closeout.", "timestamp": "2026-03-27T03:16:11+00:00"}
+{"details": {"commit_hash": "cc4cee441bf41d4aab9e29e9a9fe129e2f85345e", "status": "completed"}, "event_type": "closeout-finished", "message": "Closeout finished with status completed.", "timestamp": "2026-03-27T03:25:31+00:00"}
+{"details": {}, "event_type": "run-finished", "message": "Finished the run loop for the current project.", "timestamp": "2026-03-27T03:25:31+00:00"}
