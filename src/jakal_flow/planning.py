@@ -1030,6 +1030,7 @@ def merger_prompt(
     depends_on = ", ".join(execution_step.depends_on) if execution_step and execution_step.depends_on else "none"
     owned_paths = "\n".join(f"- {path}" for path in execution_step.owned_paths) if execution_step and execution_step.owned_paths else "- none declared"
     step_metadata = execution_step.metadata if execution_step and execution_step.metadata else {}
+    agents_summary = repository_agents_summary(context.paths.repo_dir, max_chars=1200)
     try:
         return template.format(
             repo_dir=context.paths.repo_dir,
@@ -1042,6 +1043,7 @@ def merger_prompt(
             success_criteria=success_criteria,
             depends_on=depends_on,
             owned_paths=owned_paths,
+            agents_summary=agents_summary,
             step_metadata=json.dumps(step_metadata, indent=2, sort_keys=True) if step_metadata else "{}",
             candidate_rationale=candidate.rationale,
             memory_context=memory_context,

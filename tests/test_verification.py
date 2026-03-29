@@ -143,7 +143,7 @@ class VerificationRunnerTests(unittest.TestCase):
             shutil.rmtree(temp_root, ignore_errors=True)
 
     def test_fallback_tree_fingerprint_ignores_parallel_runtime_paths(self) -> None:
-        temp_root = Path(__file__).resolve().parents[1] / ".tmp_verification_runtime_ignore_test"
+        temp_root = Path(__file__).resolve().parents[1] / ".tvri"
         shutil.rmtree(temp_root, ignore_errors=True)
         try:
             context = self._build_context(temp_root)

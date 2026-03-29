@@ -251,7 +251,7 @@ class ShareMonitoringTests(unittest.TestCase):
         install_mock.assert_called_once_with(workspace_root)
 
     @mock.patch("jakal_flow.share.os.name", "nt")
-    @mock.patch("jakal_flow.share.subprocess.run")
+    @mock.patch("jakal_flow.subprocess_utils.subprocess.run")
     def test_process_is_running_handles_non_utf8_tasklist_output(self, run_mock: mock.Mock) -> None:
         run_mock.return_value = mock.Mock(stdout=b"\xc0\xfd\xbc\xd3 python.exe                 4321")
 
@@ -259,7 +259,7 @@ class ShareMonitoringTests(unittest.TestCase):
 
     @mock.patch("jakal_flow.share.os.name", "nt")
     @mock.patch("jakal_flow.share.windows_process_is_running", return_value=True)
-    @mock.patch("jakal_flow.share.subprocess.run")
+    @mock.patch("jakal_flow.subprocess_utils.subprocess.run")
     def test_process_is_running_falls_back_when_tasklist_access_is_denied(
         self,
         run_mock: mock.Mock,

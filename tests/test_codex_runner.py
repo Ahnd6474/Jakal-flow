@@ -229,10 +229,16 @@ class CodexRunnerTests(unittest.TestCase):
             )
             runner = CodexRunner("codex.cmd")
             observed: dict[str, object] = {}
+            prompt = (
+                f"Inspect repo {context.paths.repo_dir}\n"
+                f"Docs live at {context.paths.docs_dir}\n"
+                f"Research notes file: {context.paths.docs_dir / 'RESEARCH_NOTES.md'}"
+            )
 
             def fake_run(command, scope_id=None, label="", input_bytes=None, env=None, cwd=None, **_kwargs):
                 observed["command"] = list(command)
                 observed["cwd"] = cwd
+                observed["input_bytes"] = input_bytes
                 alias_output = Path(command[command.index("-o") + 1])
                 alias_output.write_text("Aliased response", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
@@ -240,7 +246,7 @@ class CodexRunnerTests(unittest.TestCase):
             with mock.patch("jakal_flow.codex_runner.run_subprocess_capture", side_effect=fake_run):
                 result = runner.run_pass(
                     context=context,
-                    prompt="Apply a safe fix",
+                    prompt=prompt,
                     pass_type="demo pass",
                     block_index=1,
                     search_enabled=False,
@@ -268,6 +274,18 @@ class CodexRunnerTests(unittest.TestCase):
             self.assertEqual(len(add_dirs), 3)
             for directory in add_dirs:
                 self.assertTrue(all(ord(char) < 128 for char in str(directory)))
+
+            observed_input = observed["input_bytes"]
+            self.assertIsInstance(observed_input, bytes)
+            runtime_prompt = observed_input.decode("utf-8")
+            self.assertNotIn(str(context.paths.repo_dir), runtime_prompt)
+            self.assertNotIn(str(context.paths.docs_dir), runtime_prompt)
+            self.assertIn(str(observed_cwd), runtime_prompt)
+            self.assertIn(str(add_dirs[0]), runtime_prompt)
+
+            saved_prompt = (context.paths.logs_dir / "block_0001" / "demo_pass.prompt.md").read_text(encoding="utf-8")
+            self.assertIn(str(context.paths.repo_dir), saved_prompt)
+            self.assertIn(str(context.paths.docs_dir), saved_prompt)
 
     def test_run_pass_adds_oss_flags_for_local_models(self) -> None:
         with _TemporaryTestDir() as temp_root:

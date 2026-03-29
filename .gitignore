@@ -25,3 +25,13 @@ desktop/src-tauri/target/
 .lineages/
 jakal-flow-logs/
 jakal-flow-logx/
+
+# Test and coverage artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+pytestdebug.log
+junit.xml
+junit-*.xml
+test-results/

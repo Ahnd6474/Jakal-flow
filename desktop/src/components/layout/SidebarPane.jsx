@@ -299,14 +299,51 @@ function ReservationsPanel({ queuedJobs, onCancelQueuedJob, language, t }) {
   );
 }
 
-function ChatPanel({ chatMessages, onSendChatMessage, busy, language, t }) {
+function ChatPanel({
+  chat,
+  selectedChatSessionId,
+  chatDraftSession,
+  onSelectChatSession,
+  onStartNewChatSession,
+  onSendChatMessage,
+  busy,
+  language,
+}) {
+  const sessions = Array.isArray(chat?.sessions) ? chat.sessions : [];
+  const remoteMessages = Array.isArray(chat?.messages) ? chat.messages : [];
+  const activeSessionId = String(selectedChatSessionId || chat?.active_session_id || "").trim();
+  const summaryFile = String(chat?.summary_file || "").trim();
   const [input, setInput] = useState("");
-  const [localMessages, setLocalMessages] = useState(Array.isArray(chatMessages) ? chatMessages : []);
+  const [pendingMode, setPendingMode] = useState("conversation");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [localMessages, setLocalMessages] = useState(remoteMessages);
   const bottomRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    setLocalMessages(remoteMessages);
+  }, [remoteMessages, activeSessionId, chatDraftSession]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [localMessages]);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event) {
+      if (!menuRef.current?.contains(event.target)) {
+        setMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [menuOpen]);
 
   function handleSend() {
     const text = input.trim();
