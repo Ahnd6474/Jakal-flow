@@ -3019,6 +3019,43 @@ class UIBridgeTests(unittest.TestCase):
             self.assertIn("Conversation reply.", transcript_path.read_text(encoding="utf-8"))
             self.assertIn("Rolling Summary", summary_path.read_text(encoding="utf-8"))
 
+    def test_execute_conversation_turn_sanitizes_markdown_heavy_reply(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            chat_home = temp_dir / "jakal-flow-chat"
+            context = build_test_project_context(
+                temp_dir,
+                repo_id="chat-format-demo",
+                slug="chat-format-demo",
+                display_name="Chat Format Demo",
+            )
+            plan_state = ExecutionPlanState(
+                plan_title="Chat Format Demo",
+                project_prompt="Explain the repository state plainly.",
+                summary="Chat formatting test plan.",
+            )
+            raw_reply = (
+                "**판단** lit는 이미 정리되어 있습니다.\n\n"
+                "- 핵심 문서는 [README.md](/tmp/README.md#L3) 를 보세요.\n"
+                "- 구현은 [backend_api.py](/tmp/backend_api.py#L10) 에 있습니다."
+            )
+
+            with mock.patch.dict(os.environ, {CHAT_HOME_ENV_VAR: str(chat_home)}), mock.patch(
+                "jakal_flow.chat_sessions._run_conversation_reply",
+                return_value=(0, raw_reply),
+            ):
+                result = execute_conversation_turn(
+                    context,
+                    plan_state=plan_state,
+                    user_message="현재 상태를 읽기 쉽게 설명해줘",
+                )
+
+            assistant_text = result["chat"]["messages"][-1]["text"]
+            self.assertIn("판단", assistant_text)
+            self.assertIn("README.md", assistant_text)
+            self.assertIn("backend_api.py", assistant_text)
+            self.assertNotIn("[README.md](", assistant_text)
+            self.assertNotIn("**판단**", assistant_text)
+
     def test_load_chat_sessions_migrates_legacy_project_chat_storage_into_global_chat_home(self) -> None:
         with TemporaryTestDir() as temp_dir:
             chat_home = temp_dir / "jakal-flow-chat"

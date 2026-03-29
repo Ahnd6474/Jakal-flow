@@ -1,0 +1,2 @@
+{"created_at": "2026-03-29T14:02:59+00:00", "message_id": "msg-20260329140259-607a3d", "metadata": {}, "mode": "merger", "role": "user", "status": "completed", "text": "Merge the recovered slices into the main line."}
+{"created_at": "2026-03-29T14:03:00+00:00", "message_id": "msg-20260329140300-bbfc78", "metadata": {"command": "run-manual-merger", "commit_hash": "def456", "pass_name": "parallel-batch-merger"}, "mode": "merger", "role": "assistant", "status": "completed", "text": "Manual merger finished. Merged via chat."}
