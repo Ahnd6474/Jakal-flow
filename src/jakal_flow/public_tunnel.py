@@ -10,12 +10,15 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .process_supervisor import hidden_window_creationflags, hidden_window_startupinfo, terminate_process
+from .errors import SubprocessTimeoutError
+from .subprocess_utils import run_subprocess, terminate_process_handle
 from .utils import append_jsonl, decode_process_output, now_utc_iso, read_json, write_json
 
 
 DEFAULT_TUNNEL_COMMAND = "cloudflared"
 DEFAULT_TUNNEL_START_TIMEOUT_SECS = 12.0
 DEFAULT_TUNNEL_INSTALL_TIMEOUT_SECS = 180.0
+PROCESS_QUERY_TIMEOUT_SECS = 4.0
 DEFAULT_CLOUDFLARED_PACKAGE_ID = "Cloudflare.cloudflared"
 TRYCLOUDFLARE_URL_RE = re.compile(r"https://[-a-z0-9]+\.trycloudflare\.com", re.IGNORECASE)
 
@@ -57,11 +60,15 @@ def process_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
     if os.name == "nt":
-        completed = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}"],
-            check=False,
-            capture_output=True,
-        )
+        try:
+            completed = run_subprocess(
+                ["tasklist", "/FI", f"PID eq {pid}"],
+                check=False,
+                capture_output=True,
+                timeout_seconds=PROCESS_QUERY_TIMEOUT_SECS,
+            )
+        except (OSError, SubprocessTimeoutError):
+            return False
         stdout = decode_process_output(completed.stdout)
         return f"{pid}" in stdout
     try:
@@ -367,14 +374,7 @@ def start_cloudflare_quick_tunnel(workspace_root: Path, target_url: str, cloudfl
         else:
             time.sleep(0.1)
     if not public_url:
-        try:
-            process.terminate()
-            process.wait(timeout=1.5)
-        except Exception:
-            try:
-                process.kill()
-            except Exception:
-                pass
+        terminate_process_handle(process, wait_timeout_seconds=1.5)
         excerpt = " | ".join(line for line in buffered_lines if line) or "No startup output."
         raise RuntimeError(f"Could not start Cloudflare Quick Tunnel. {excerpt}")
 

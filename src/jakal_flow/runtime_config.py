@@ -130,62 +130,95 @@ def normalize_runtime_payload(
     force_execution_mode: str | None = None,
 ) -> dict[str, Any]:
     source = dict(payload or {})
-    merged = {**_default_runtime_payload(defaults), **source}
-    merged["max_blocks"] = coerce_positive_int(merged.get("max_blocks", 1), default=1)
-    merged["no_progress_limit"] = coerce_positive_int(merged.get("no_progress_limit", 3), default=3)
-    merged["regression_limit"] = coerce_positive_int(merged.get("regression_limit", 3), default=3)
-    merged["empty_cycle_limit"] = coerce_positive_int(merged.get("empty_cycle_limit", 3), default=3)
-    merged["optimization_mode"] = normalize_optimization_mode(merged.get("optimization_mode", "light"))
+    default_values = _default_runtime_payload(defaults)
+    merged = {**default_values, **source}
+    merged["max_blocks"] = coerce_positive_int(
+        merged.get("max_blocks", default_values.get("max_blocks", 1)),
+        default=int(default_values.get("max_blocks", 1) or 1),
+    )
+    merged["no_progress_limit"] = coerce_positive_int(
+        merged.get("no_progress_limit", default_values.get("no_progress_limit", 3)),
+        default=int(default_values.get("no_progress_limit", 3) or 3),
+    )
+    merged["regression_limit"] = coerce_positive_int(
+        merged.get("regression_limit", default_values.get("regression_limit", 3)),
+        default=int(default_values.get("regression_limit", 3) or 3),
+    )
+    merged["empty_cycle_limit"] = coerce_positive_int(
+        merged.get("empty_cycle_limit", default_values.get("empty_cycle_limit", 3)),
+        default=int(default_values.get("empty_cycle_limit", 3) or 3),
+    )
+    merged["optimization_mode"] = normalize_optimization_mode(
+        merged.get("optimization_mode", default_values.get("optimization_mode", "light"))
+    )
     merged["optimization_large_file_lines"] = coerce_positive_int(
-        merged.get("optimization_large_file_lines", 350),
-        default=350,
+        merged.get("optimization_large_file_lines", default_values.get("optimization_large_file_lines", 350)),
+        default=int(default_values.get("optimization_large_file_lines", 350) or 350),
         minimum=50,
     )
     merged["optimization_long_function_lines"] = coerce_positive_int(
-        merged.get("optimization_long_function_lines", 80),
-        default=80,
+        merged.get("optimization_long_function_lines", default_values.get("optimization_long_function_lines", 80)),
+        default=int(default_values.get("optimization_long_function_lines", 80) or 80),
         minimum=25,
     )
     merged["optimization_duplicate_block_lines"] = coerce_positive_int(
-        merged.get("optimization_duplicate_block_lines", 4),
-        default=4,
+        merged.get("optimization_duplicate_block_lines", default_values.get("optimization_duplicate_block_lines", 4)),
+        default=int(default_values.get("optimization_duplicate_block_lines", 4) or 4),
         minimum=3,
     )
     merged["optimization_max_files"] = coerce_positive_int(
-        merged.get("optimization_max_files", 3),
-        default=3,
+        merged.get("optimization_max_files", default_values.get("optimization_max_files", 3)),
+        default=int(default_values.get("optimization_max_files", 3) or 3),
         minimum=1,
     )
     merged["checkpoint_interval_blocks"] = coerce_positive_int(
-        merged.get("checkpoint_interval_blocks", 2),
-        default=2,
+        merged.get("checkpoint_interval_blocks", default_values.get("checkpoint_interval_blocks", 2)),
+        default=int(default_values.get("checkpoint_interval_blocks", 2) or 2),
     )
     raw_parallel_worker_mode = merged.get("parallel_worker_mode", "auto")
     if "parallel_worker_mode" not in source and "parallel_workers" in source:
         raw_parallel_worker_mode = "manual"
     merged["parallel_worker_mode"] = normalize_parallel_worker_mode(raw_parallel_worker_mode)
     merged["parallel_workers"] = (
-        coerce_nonnegative_int(merged.get("parallel_workers", 0), default=0)
+        coerce_nonnegative_int(merged.get("parallel_workers", default_values.get("parallel_workers", 0)), default=int(default_values.get("parallel_workers", 0) or 0))
         if merged["parallel_worker_mode"] == "auto"
-        else coerce_positive_int(merged.get("parallel_workers", 2), default=2)
+        else coerce_positive_int(merged.get("parallel_workers", default_values.get("parallel_workers", 2)), default=max(1, int(default_values.get("parallel_workers", 2) or 2)))
     )
     merged["parallel_memory_per_worker_gib"] = coerce_positive_tenths_float(
-        merged.get("parallel_memory_per_worker_gib", 3),
-        default=3.0,
+        merged.get("parallel_memory_per_worker_gib", default_values.get("parallel_memory_per_worker_gib", 3.0)),
+        default=float(default_values.get("parallel_memory_per_worker_gib", 3.0) or 3.0),
     )
-    merged["save_project_logs"] = coerce_bool(merged.get("save_project_logs", False), False)
-    merged["ml_max_cycles"] = coerce_positive_int(merged.get("ml_max_cycles", 3), default=3)
-    merged["allow_push"] = coerce_bool(merged.get("allow_push", False), False)
-    merged["auto_merge_pull_request"] = coerce_bool(merged.get("auto_merge_pull_request", False), False)
-    merged["allow_background_queue"] = coerce_bool(merged.get("allow_background_queue", True), True)
-    merged["background_queue_priority"] = coerce_int(merged.get("background_queue_priority", 0), default=0)
+    merged["save_project_logs"] = coerce_bool(
+        merged.get("save_project_logs", default_values.get("save_project_logs", False)),
+        bool(default_values.get("save_project_logs", False)),
+    )
+    merged["ml_max_cycles"] = coerce_positive_int(
+        merged.get("ml_max_cycles", default_values.get("ml_max_cycles", 3)),
+        default=int(default_values.get("ml_max_cycles", 3) or 3),
+    )
+    merged["allow_push"] = coerce_bool(
+        merged.get("allow_push", default_values.get("allow_push", False)),
+        bool(default_values.get("allow_push", False)),
+    )
+    merged["auto_merge_pull_request"] = coerce_bool(
+        merged.get("auto_merge_pull_request", default_values.get("auto_merge_pull_request", False)),
+        bool(default_values.get("auto_merge_pull_request", False)),
+    )
+    merged["allow_background_queue"] = coerce_bool(
+        merged.get("allow_background_queue", default_values.get("allow_background_queue", True)),
+        bool(default_values.get("allow_background_queue", True)),
+    )
+    merged["background_queue_priority"] = coerce_int(
+        merged.get("background_queue_priority", default_values.get("background_queue_priority", 0)),
+        default=int(default_values.get("background_queue_priority", 0) or 0),
+    )
     merged["require_checkpoint_approval"] = coerce_bool(
-        merged.get("require_checkpoint_approval", True),
-        True,
+        merged.get("require_checkpoint_approval", default_values.get("require_checkpoint_approval", True)),
+        bool(default_values.get("require_checkpoint_approval", True)),
     )
-    merged["execution_mode"] = force_execution_mode or str(merged.get("execution_mode", "parallel")).strip() or "parallel"
-    merged["workflow_mode"] = normalize_workflow_mode(merged.get("workflow_mode", "standard"))
-    merged["test_cmd"] = str(merged.get("test_cmd", "python -m pytest")).strip() or "python -m pytest"
+    merged["execution_mode"] = force_execution_mode or str(merged.get("execution_mode", default_values.get("execution_mode", "parallel"))).strip() or "parallel"
+    merged["workflow_mode"] = normalize_workflow_mode(merged.get("workflow_mode", default_values.get("workflow_mode", "standard")))
+    merged["test_cmd"] = str(merged.get("test_cmd", default_values.get("test_cmd", "python -m pytest"))).strip() or "python -m pytest"
     merged["model_provider"] = normalize_model_provider(
         str(merged.get("model_provider", DEFAULT_MODEL_PROVIDER)),
         fallback=DEFAULT_MODEL_PROVIDER,
@@ -224,14 +257,24 @@ def normalize_runtime_payload(
         merged.get("reasoning_output_cost_per_million_usd", 0.0)
     )
     merged["per_pass_cost_usd"] = coerce_nonnegative_float(merged.get("per_pass_cost_usd", 0.0))
-    merged["codex_path"] = str(merged.get("codex_path", "")).strip() or default_codex_path(merged["model_provider"])
+    merged["codex_path"] = (
+        str(merged.get("codex_path", "")).strip()
+        or str(default_values.get("codex_path", "")).strip()
+        or default_codex_path(merged["model_provider"])
+    )
     merged["model"] = str(merged.get("model", "")).strip().lower()
     merged["model_preset"] = normalize_model_preset_id(str(merged.get("model_preset", "")), fallback="")
     merged["effort_selection_mode"] = str(merged.get("effort_selection_mode", "")).strip().lower()
     if merged["effort_selection_mode"] not in {"auto", "explicit"}:
         merged["effort_selection_mode"] = "explicit"
-    merged["use_fast_mode"] = coerce_bool(merged.get("use_fast_mode", False), False)
-    merged["generate_word_report"] = coerce_bool(merged.get("generate_word_report", False), False)
+    merged["use_fast_mode"] = coerce_bool(
+        merged.get("use_fast_mode", default_values.get("use_fast_mode", False)),
+        bool(default_values.get("use_fast_mode", False)),
+    )
+    merged["generate_word_report"] = coerce_bool(
+        merged.get("generate_word_report", default_values.get("generate_word_report", False)),
+        bool(default_values.get("generate_word_report", False)),
+    )
     merged["effort"] = normalize_reasoning_effort(str(merged.get("effort", "")).strip(), fallback="medium")
     merged["planning_effort"] = normalize_reasoning_effort(
         str(merged.get("planning_effort", "")),

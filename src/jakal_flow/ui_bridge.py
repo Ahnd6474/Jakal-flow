@@ -364,9 +364,11 @@ def optional_text(value: Any) -> str | None:
 
 
 def runtime_from_payload(payload: dict[str, Any]) -> RuntimeOptions:
+    defaults = desktop_runtime_defaults()
+    defaults["codex_path"] = default_codex_path()
     return normalize_runtime_from_payload(
         payload,
-        defaults=desktop_runtime_defaults(),
+        defaults=defaults,
         force_execution_mode="parallel",
     )
 

@@ -12,9 +12,11 @@ from typing import Any
 from urllib.parse import quote
 
 from .models import ExecutionPlanState, ProjectContext
+from .errors import SubprocessTimeoutError
 from .planning import execution_plan_svg
 from .run_control import load_run_control
 from .status_views import effective_project_status
+from .subprocess_utils import run_subprocess
 from .utils import (
     append_jsonl,
     compact_text,
@@ -33,6 +35,7 @@ UTC = getattr(datetime, "UTC", timezone.utc)
 DEFAULT_SHARE_HOST = "0.0.0.0"
 DEFAULT_SHARE_PORT = 0
 DEFAULT_SHARE_TTL_MINUTES = 60
+PROCESS_QUERY_TIMEOUT_SECS = 4.0
 MAX_PUBLIC_LOG_LINE_CHARS = 240
 MAX_PUBLIC_LOG_LINES = 12
 DEFAULT_VIEWER_PATH = "/share/view"
@@ -214,11 +217,15 @@ def process_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
     if os.name == "nt":
-        completed = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}"],
-            check=False,
-            capture_output=True,
-        )
+        try:
+            completed = run_subprocess(
+                ["tasklist", "/FI", f"PID eq {pid}"],
+                check=False,
+                capture_output=True,
+                timeout_seconds=PROCESS_QUERY_TIMEOUT_SECS,
+            )
+        except (OSError, SubprocessTimeoutError):
+            return False
         stdout = decode_process_output(completed.stdout)
         return f"{pid}" in stdout
     try:

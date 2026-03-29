@@ -11,9 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ._version import __version__
 from .model_constants import AUTO_MODEL_SLUG, VALID_REASONING_EFFORTS
 from .model_providers import builtin_model_catalog, discover_local_model_catalog
 from .platform_defaults import default_codex_path
+from .subprocess_utils import run_subprocess, terminate_process_handle
 from .utils import now_utc_iso
 
 UTC = getattr(datetime, "UTC", timezone.utc)
@@ -120,23 +122,14 @@ class _CodexAppServerSession:
             {
                 "clientInfo": {
                     "name": "jakal-flow",
-                    "version": "0.1.0",
+                    "version": __version__,
                 }
             },
         )
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        if self.process is None:
-            return
-        try:
-            self.process.terminate()
-            self.process.wait(timeout=1.5)
-        except subprocess.TimeoutExpired:
-            self.process.kill()
-            self.process.wait(timeout=1.5)
-        except OSError:
-            pass
+        terminate_process_handle(self.process, wait_timeout_seconds=1.5)
 
     def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.process is None or self.process.stdin is None:
@@ -228,7 +221,7 @@ def fetch_codex_backend_snapshot(codex_path: str = "") -> CodexBackendSnapshot:
             account=_format_account_snapshot(account_result),
             rate_limits=_format_rate_limits(rate_limit_result),
         )
-    except Exception as exc:
+    except (RuntimeError, OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
         local_models = discover_local_model_catalog()
         return CodexBackendSnapshot(
             checked_at=checked_at,
@@ -250,14 +243,14 @@ def _fetch_gemini_backend_snapshot(codex_path: str) -> CodexBackendSnapshot:
     checked_at = now_utc_iso()
     resolved_path = resolve_codex_path(codex_path or default_codex_path("gemini"))
     try:
-        completed = subprocess.run(
+        completed = run_subprocess(
             [resolved_path, "--version"],
             capture_output=True,
             check=False,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=4,
+            timeout_seconds=4,
         )
     except (FileNotFoundError, OSError, subprocess.SubprocessError) as exc:
         return CodexBackendSnapshot(
@@ -298,14 +291,14 @@ def _fetch_claude_backend_snapshot(codex_path: str) -> CodexBackendSnapshot:
     checked_at = now_utc_iso()
     resolved_path = resolve_codex_path(codex_path or default_codex_path("claude"))
     try:
-        version_completed = subprocess.run(
+        version_completed = run_subprocess(
             [resolved_path, "--version"],
             capture_output=True,
             check=False,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=4,
+            timeout_seconds=4,
         )
     except (FileNotFoundError, OSError, subprocess.SubprocessError) as exc:
         return CodexBackendSnapshot(
@@ -346,14 +339,14 @@ def _fetch_claude_backend_snapshot(codex_path: str) -> CodexBackendSnapshot:
         )
 
     try:
-        auth_completed = subprocess.run(
+        auth_completed = run_subprocess(
             [resolved_path, "auth", "status"],
             capture_output=True,
             check=False,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=4,
+            timeout_seconds=4,
         )
         auth_payload = _parse_json_output(auth_completed.stdout)
         account.update(_format_claude_account_snapshot(auth_completed.returncode, auth_payload))
@@ -377,14 +370,14 @@ def _fetch_qwen_backend_snapshot(codex_path: str) -> CodexBackendSnapshot:
     checked_at = now_utc_iso()
     resolved_path = resolve_codex_path(codex_path or default_codex_path("qwen_code"))
     try:
-        completed = subprocess.run(
+        completed = run_subprocess(
             [resolved_path, "--version"],
             capture_output=True,
             check=False,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=4,
+            timeout_seconds=4,
         )
     except (FileNotFoundError, OSError, subprocess.SubprocessError) as exc:
         return CodexBackendSnapshot(

@@ -3,159 +3,210 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import subprocess
 import sys
 
+from .errors import RuntimeConfigError
 from .failure_logs import write_runtime_failure_log
-from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER, VALID_MODEL_PROVIDERS
 from .models import RuntimeOptions
 from .orchestrator import Orchestrator
+from .runtime_config import load_runtime_from_sources, parse_runtime_overrides
 from .status_views import effective_project_status
+
+
+CLI_HANDLED_EXCEPTIONS = (
+    RuntimeError,
+    ValueError,
+    KeyError,
+    FileNotFoundError,
+    OSError,
+    json.JSONDecodeError,
+    subprocess.SubprocessError,
+    RuntimeConfigError,
+)
+
+
+def _add_workspace_argument(target: argparse.ArgumentParser) -> None:
+    target.add_argument(
+        "--workspace-root",
+        default=".jakal-flow-workspace",
+        help="Root directory for isolated managed projects",
+    )
+
+
+def _add_repo_arguments(target: argparse.ArgumentParser) -> None:
+    target.add_argument("--repo-url", required=True, help="GitHub repository URL")
+    target.add_argument("--branch", default="main", help="Target branch")
+
+
+def _add_runtime_config_arguments(target: argparse.ArgumentParser) -> None:
+    target.add_argument(
+        "--config",
+        type=Path,
+        help="Runtime configuration file (.json or .toml). Use top-level keys or a [runtime] / runtime object.",
+    )
+    target.add_argument(
+        "--set",
+        dest="runtime_overrides",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Override one runtime setting after loading --config. VALUE may be JSON when needed.",
+    )
+
+
+def _add_legacy_runtime_arguments(target: argparse.ArgumentParser) -> None:
+    hidden = argparse.SUPPRESS
+    target.add_argument("--model-provider", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--local-model-provider", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--model", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--provider-base-url", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--provider-api-key-env", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--billing-mode", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--input-cost-per-million-usd", type=float, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--cached-input-cost-per-million-usd", type=float, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--output-cost-per-million-usd", type=float, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--reasoning-output-cost-per-million-usd", type=float, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--per-pass-cost-usd", type=float, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--fast", action="store_true", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--word-report", action="store_true", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--effort", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--planning-effort", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--workflow-mode", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--ml-max-cycles", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--extra-prompt", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--plan-prompt", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--approval-mode", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--sandbox-mode", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--test-cmd", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--max-blocks", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--optimization-mode", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--optimization-large-file-lines", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--optimization-long-function-lines", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--optimization-duplicate-block-lines", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--optimization-max-files", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--allow-push", action="store_true", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--parallel-worker-mode", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--parallel-workers", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--parallel-memory-per-worker-gib", type=float, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--allow-background-queue", action="store_true", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--background-queue-priority", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--save-project-logs", action="store_true", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--auto-merge-pull-request", action="store_true", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--codex-path", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--git-user-name", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--git-user-email", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--require-checkpoint-approval", action="store_true", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--checkpoint-interval-blocks", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--no-progress-limit", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--regression-limit", type=int, default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--empty-cycle-limit", type=int, default=argparse.SUPPRESS, help=hidden)
+
+
+def _add_runtime_command_arguments(target: argparse.ArgumentParser, *, include_repo: bool = True) -> None:
+    if include_repo:
+        _add_repo_arguments(target)
+    _add_workspace_argument(target)
+    _add_runtime_config_arguments(target)
+    target.add_argument("--plan-file", type=Path, help="Optional path to seed PLAN.md")
+    _add_legacy_runtime_arguments(target)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Multi-repository AI CLI orchestrator")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    def add_shared_arguments(target: argparse.ArgumentParser, include_repo: bool = True) -> None:
-        if include_repo:
-            target.add_argument("--repo-url", required=True, help="GitHub repository URL")
-            target.add_argument("--branch", default="main", help="Target branch")
-        target.add_argument(
-            "--workspace-root",
-            default=".jakal-flow-workspace",
-            help="Root directory for isolated managed projects",
-        )
-        target.add_argument(
-            "--model-provider",
-            default=DEFAULT_MODEL_PROVIDER,
-            choices=sorted(VALID_MODEL_PROVIDERS),
-            help="Provider preset to use for this project",
-        )
-        target.add_argument(
-            "--local-model-provider",
-            default=DEFAULT_LOCAL_MODEL_PROVIDER,
-            choices=[DEFAULT_LOCAL_MODEL_PROVIDER, "lmstudio"],
-            help="Local provider to use when --model-provider oss is selected",
-        )
-        target.add_argument("--model", default="auto", help="Model slug passed to the selected CLI, or auto when the provider supports it")
-        target.add_argument("--provider-base-url", default="", help="Override the provider base URL used for compatible non-default providers")
-        target.add_argument("--provider-api-key-env", default="", help="Environment variable name that stores the provider API key")
-        target.add_argument("--billing-mode", default="", help="Cost estimate mode: included, token, or per_pass")
-        target.add_argument("--input-cost-per-million-usd", type=float, default=0.0, help="Estimated USD per 1M input tokens")
-        target.add_argument("--cached-input-cost-per-million-usd", type=float, default=0.0, help="Estimated USD per 1M cached input tokens")
-        target.add_argument("--output-cost-per-million-usd", type=float, default=0.0, help="Estimated USD per 1M output tokens")
-        target.add_argument("--reasoning-output-cost-per-million-usd", type=float, default=0.0, help="Estimated USD per 1M reasoning output tokens")
-        target.add_argument("--per-pass-cost-usd", type=float, default=0.0, help="Estimated USD charged per Codex/API pass when using per_pass billing")
-        target.add_argument("--fast", action="store_true", help="Prefix Codex prompts with /fast before execution")
-        target.add_argument("--word-report", action="store_true", help="Generate a .docx closeout report after closeout completes")
-        target.add_argument("--effort", default="medium", help="Reasoning effort override: low, medium, high, xhigh")
-        target.add_argument(
-            "--workflow-mode",
-            default="standard",
-            choices=["standard", "ml"],
-            help="Execution workflow mode: standard software iteration or ML experiment loop",
-        )
-        target.add_argument("--ml-max-cycles", type=int, default=3, help="Maximum automatic ML planning cycles before stopping")
-        target.add_argument("--extra-prompt", default="", help="Additional user instructions appended to Codex prompts")
-        target.add_argument(
-            "--plan-prompt",
-            default="",
-            help="Optional prompt used by Codex to draft the initial project plan",
-        )
-        target.add_argument("--approval-mode", default="never", help="Codex approval mode")
-        target.add_argument("--sandbox-mode", default="workspace-write", help="Codex sandbox mode")
-        target.add_argument("--test-cmd", default="python -m pytest", help="Validation command to run after passes")
-        target.add_argument("--max-blocks", type=int, default=1, help="Maximum blocks to execute in one run")
-        target.add_argument(
-            "--optimization-mode",
-            default="light",
-            choices=["off", "light", "refactor"],
-            help="Optional pre-closeout optimization pass intensity",
-        )
-        target.add_argument(
-            "--optimization-large-file-lines",
-            type=int,
-            default=350,
-            help="Flag files at or above this many lines for pre-closeout optimization",
-        )
-        target.add_argument(
-            "--optimization-long-function-lines",
-            type=int,
-            default=80,
-            help="Flag Python functions at or above this many lines for pre-closeout optimization",
-        )
-        target.add_argument(
-            "--optimization-duplicate-block-lines",
-            type=int,
-            default=4,
-            help="Minimum normalized block size used when scanning for duplicated logic",
-        )
-        target.add_argument(
-            "--optimization-max-files",
-            type=int,
-            default=3,
-            help="Maximum number of candidate files to send into the pre-closeout optimization pass",
-        )
-        target.add_argument("--allow-push", action="store_true", help="Push safe commits to origin")
-        target.add_argument("--plan-file", type=Path, help="Optional path to seed PLAN.md")
-        target.add_argument("--resume", action="store_true", help="Resume an existing managed repository")
-
     init_parser = subparsers.add_parser("init-repo", help="Initialize and register a managed repository")
-    add_shared_arguments(init_parser)
+    _add_runtime_command_arguments(init_parser)
 
     run_parser = subparsers.add_parser("run", help="Run one or more improvement blocks")
-    add_shared_arguments(run_parser)
+    _add_runtime_command_arguments(run_parser)
 
     resume_parser = subparsers.add_parser("resume", help="Resume a managed repository run")
-    add_shared_arguments(resume_parser)
+    _add_runtime_command_arguments(resume_parser)
     resume_parser.set_defaults(resume=True)
 
     list_parser = subparsers.add_parser("list-repos", help="List repositories managed in the workspace")
-    add_shared_arguments(list_parser, include_repo=False)
+    _add_workspace_argument(list_parser)
 
     status_parser = subparsers.add_parser("status", help="Show repository status")
-    add_shared_arguments(status_parser)
+    _add_workspace_argument(status_parser)
+    _add_repo_arguments(status_parser)
 
     history_parser = subparsers.add_parser("history", help="Show block history")
-    add_shared_arguments(history_parser)
+    _add_workspace_argument(history_parser)
+    _add_repo_arguments(history_parser)
     history_parser.add_argument("--limit", type=int, default=10, help="Number of history items to show")
 
     report_parser = subparsers.add_parser("report", help="Generate a machine-readable report")
-    add_shared_arguments(report_parser)
+    _add_workspace_argument(report_parser)
+    _add_repo_arguments(report_parser)
 
     return parser
 
 
+def _legacy_runtime_overrides(args: argparse.Namespace) -> dict[str, object]:
+    mapping = {
+        "model_provider": "model_provider",
+        "local_model_provider": "local_model_provider",
+        "model": "model",
+        "provider_base_url": "provider_base_url",
+        "provider_api_key_env": "provider_api_key_env",
+        "billing_mode": "billing_mode",
+        "input_cost_per_million_usd": "input_cost_per_million_usd",
+        "cached_input_cost_per_million_usd": "cached_input_cost_per_million_usd",
+        "output_cost_per_million_usd": "output_cost_per_million_usd",
+        "reasoning_output_cost_per_million_usd": "reasoning_output_cost_per_million_usd",
+        "per_pass_cost_usd": "per_pass_cost_usd",
+        "fast": "use_fast_mode",
+        "word_report": "generate_word_report",
+        "effort": "effort",
+        "planning_effort": "planning_effort",
+        "workflow_mode": "workflow_mode",
+        "ml_max_cycles": "ml_max_cycles",
+        "extra_prompt": "extra_prompt",
+        "plan_prompt": "init_plan_prompt",
+        "approval_mode": "approval_mode",
+        "sandbox_mode": "sandbox_mode",
+        "test_cmd": "test_cmd",
+        "max_blocks": "max_blocks",
+        "optimization_mode": "optimization_mode",
+        "optimization_large_file_lines": "optimization_large_file_lines",
+        "optimization_long_function_lines": "optimization_long_function_lines",
+        "optimization_duplicate_block_lines": "optimization_duplicate_block_lines",
+        "optimization_max_files": "optimization_max_files",
+        "allow_push": "allow_push",
+        "parallel_worker_mode": "parallel_worker_mode",
+        "parallel_workers": "parallel_workers",
+        "parallel_memory_per_worker_gib": "parallel_memory_per_worker_gib",
+        "allow_background_queue": "allow_background_queue",
+        "background_queue_priority": "background_queue_priority",
+        "save_project_logs": "save_project_logs",
+        "auto_merge_pull_request": "auto_merge_pull_request",
+        "codex_path": "codex_path",
+        "git_user_name": "git_user_name",
+        "git_user_email": "git_user_email",
+        "require_checkpoint_approval": "require_checkpoint_approval",
+        "checkpoint_interval_blocks": "checkpoint_interval_blocks",
+        "no_progress_limit": "no_progress_limit",
+        "regression_limit": "regression_limit",
+        "empty_cycle_limit": "empty_cycle_limit",
+    }
+    overrides: dict[str, object] = {}
+    for attr_name, runtime_key in mapping.items():
+        if hasattr(args, attr_name):
+            overrides[runtime_key] = getattr(args, attr_name)
+    return overrides
+
+
 def runtime_from_args(args: argparse.Namespace) -> RuntimeOptions:
-    return RuntimeOptions(
-        model_provider=args.model_provider,
-        local_model_provider=args.local_model_provider if args.model_provider == "oss" else "",
-        provider_base_url=args.provider_base_url,
-        provider_api_key_env=args.provider_api_key_env,
-        billing_mode=args.billing_mode,
-        input_cost_per_million_usd=args.input_cost_per_million_usd,
-        cached_input_cost_per_million_usd=args.cached_input_cost_per_million_usd,
-        output_cost_per_million_usd=args.output_cost_per_million_usd,
-        reasoning_output_cost_per_million_usd=args.reasoning_output_cost_per_million_usd,
-        per_pass_cost_usd=args.per_pass_cost_usd,
-        model=args.model,
-        use_fast_mode=args.fast,
-        generate_word_report=args.word_report,
-        effort=args.effort,
-        workflow_mode=args.workflow_mode,
-        ml_max_cycles=max(1, args.ml_max_cycles),
-        extra_prompt=args.extra_prompt,
-        init_plan_prompt=args.plan_prompt,
-        approval_mode=args.approval_mode,
-        sandbox_mode=args.sandbox_mode,
-        test_cmd=args.test_cmd,
-        max_blocks=args.max_blocks,
-        optimization_mode=args.optimization_mode,
-        optimization_large_file_lines=max(50, args.optimization_large_file_lines),
-        optimization_long_function_lines=max(25, args.optimization_long_function_lines),
-        optimization_duplicate_block_lines=max(3, args.optimization_duplicate_block_lines),
-        optimization_max_files=max(1, args.optimization_max_files),
-        allow_push=args.allow_push,
+    config_path = getattr(args, "config", None)
+    runtime_override_items = getattr(args, "runtime_overrides", []) or []
+    legacy_overrides = _legacy_runtime_overrides(args)
+    override_payload = {**legacy_overrides, **parse_runtime_overrides(runtime_override_items)}
+    return load_runtime_from_sources(
+        config_path=config_path,
+        overrides=override_payload,
     )
 
 
@@ -167,7 +218,7 @@ def _list_repo_status(orchestrator: Orchestrator, project) -> str:
         return raw_status
     try:
         plan_state = orchestrator.load_execution_plan_state(project)
-    except Exception:
+    except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
         return raw_status or "setup_ready"
     return effective_project_status(raw_status, plan_state, project.loop_state)
 
@@ -221,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
                 branch=args.branch,
                 runtime=runtime,
                 plan_path=args.plan_file,
-                resume=args.resume,
+                resume=bool(getattr(args, "resume", False)),
             )
             print(json.dumps(context.loop_state.to_dict(), indent=2))
             return 0
@@ -242,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
 
         parser.error(f"Unsupported command: {args.command}")
         return 2
-    except Exception as exc:
+    except CLI_HANDLED_EXCEPTIONS as exc:
         write_runtime_failure_log(
             Path(args.workspace_root).expanduser().resolve(),
             source="cli",

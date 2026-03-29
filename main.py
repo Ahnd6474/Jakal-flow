@@ -1,13 +1,9 @@
-from pathlib import Path
-import sys
-
-
-ROOT = Path(__file__).resolve().parent
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
-
-from jakal_flow.cli import main
+try:
+    from jakal_flow.cli import main
+except ModuleNotFoundError as exc:
+    if exc.name != "jakal_flow":
+        raise
+    raise SystemExit("jakal_flow is not importable. Run `python -m jakal_flow` from an installed or editable environment.") from exc
 
 
 if __name__ == "__main__":

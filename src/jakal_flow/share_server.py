@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from ._version import __version__
 from .orchestrator import Orchestrator
 from .run_control import request_stop_after_current_step
 from .share import (
@@ -149,7 +150,7 @@ class ShareRemoteControlManager:
 
 
 class ShareRequestHandler(BaseHTTPRequestHandler):
-    server_version = "jakal-flow-share/0.1"
+    server_version = f"jakal-flow-share/{__version__}"
     stream_poll_interval_secs = 1.0
     stream_heartbeat_interval_secs = 15.0
 
