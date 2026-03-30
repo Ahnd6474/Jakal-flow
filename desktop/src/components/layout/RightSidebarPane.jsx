@@ -1,21 +1,17 @@
 ﻿import { Suspense, lazy, memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ChatMessageContent } from "../../chatMarkdown";
 import { useI18n } from "../../i18n";
-import { resolveExecutionDisplayPlan, runtimeSummary } from "../../utils";
-<<<<<<< Updated upstream
-import { isActiveExecutionStatus, runtimeSummary, visibleExecutionJob } from "../../utils";
-=======
 import {
   defaultModelForRuntime,
   filterModelCatalogByProvider,
   normalizedLocalModelProvider,
   normalizedModelProvider,
   reasoningEffortLabel,
+  resolveExecutionDisplayPlan,
   runtimeSummary,
   supportedReasoningOptions,
   visibleExecutionJob,
 } from "../../utils";
->>>>>>> Stashed changes
 
 function RailChatIcon() {
   return (
@@ -360,10 +356,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
   busy,
   language,
   centerMode = false,
-<<<<<<< Updated upstream
   promptValue = "",
-=======
->>>>>>> Stashed changes
   onGeneratePlan,
 }) {
   const sessions = Array.isArray(chat?.sessions) ? chat.sessions : [];
@@ -608,17 +601,10 @@ const ProjectChatPane = memo(function ProjectChatPane({
       return;
     }
     const mode = pendingMode;
-<<<<<<< Updated upstream
     setInput("");
     setPendingMode("conversation");
     setMenuOpen(false);
     if (mode === "plan") {
-=======
-    if (mode === "plan") {
-      setInput("");
-      setPendingMode("conversation");
-      setMenuOpen(false);
->>>>>>> Stashed changes
       void Promise.resolve(onGeneratePlan?.(text)).catch(() => {});
       return;
     }
@@ -843,11 +829,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
               onClick={() => setMenuOpen((current) => !current)}
               type="button"
               disabled={busy}
-<<<<<<< Updated upstream
               title={language === "ko" ? "계획, 디버거, 머저 모드 선택" : "Choose plan, debugger, or merger"}
-=======
-              title={language === "ko" ? "Choose plan, debugger or merger" : "Choose plan, debugger or merger"}
->>>>>>> Stashed changes
             >
               <PlusIcon />
             </button>
@@ -857,10 +839,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
                   type="button"
                   onClick={() => {
                     setPendingMode("plan");
-<<<<<<< Updated upstream
                     setInput((current) => current.trim() ? current : String(promptValue || ""));
-=======
->>>>>>> Stashed changes
                     setMenuOpen(false);
                   }}
                 >
@@ -924,10 +903,6 @@ const ProjectChatPane = memo(function ProjectChatPane({
           </button>
         </div>
       </div>
-<<<<<<< Updated upstream
-=======
-
->>>>>>> Stashed changes
     </div>
   );
 }, (previousProps, nextProps) => (
@@ -986,6 +961,7 @@ export const RightSidebarPane = memo(function RightSidebarPane({
   onDeleteCommonRequirement,
   onUpdateSpineCheckpoint,
   onDeleteSpineCheckpoint,
+  promptValue = "",
   onGeneratePlan,
 }) {
   const { language } = useI18n();

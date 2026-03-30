@@ -1788,7 +1788,6 @@ export function useDesktopController() {
     };
   }
 
-<<<<<<< Updated upstream
   async function generatePlan(promptOverride = undefined) {
     const hasPromptOverride = typeof promptOverride === "string";
     const nextPlanDraft = hasPromptOverride
@@ -1800,15 +1799,6 @@ export function useDesktopController() {
     const prompt = String(nextPlanDraft?.project_prompt || "").trim();
     if (hasPromptOverride && nextPlanDraft.project_prompt !== String(planDraft?.project_prompt || "")) {
       syncPlan(nextPlanDraft);
-=======
-  async function generatePlan(promptOverride = null) {
-    const prompt = String(promptOverride ?? planDraft?.project_prompt ?? "").trim();
-    if (promptOverride !== null) {
-      syncPlan({
-        ...(planDraft || {}),
-        project_prompt: promptOverride,
-      });
->>>>>>> Stashed changes
     }
     const generationValidation = planGenerationValidation({
       projectDir: projectForm.project_dir,

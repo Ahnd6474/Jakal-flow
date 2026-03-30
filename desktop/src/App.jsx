@@ -11,6 +11,8 @@ import { isActiveExecutionStatus, toggleStepSelection } from "./utils";
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
+const WORKSPACE_MIN = 320;
+const WORKSPACE_MAX = 900;
 const RIGHT_MIN = 260;
 const RIGHT_MAX = 520;
 const RIGHT_COLLAPSED_WIDTH = 52;
@@ -62,7 +64,7 @@ export default function App() {
   const controller = useDesktopController();
   const { t } = useI18n();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [rightTab, setRightTab] = useState("output");
+  const [rightTab, setRightTab] = useState("chat");
   const lastShiftRef = useRef(0);
   const controllerCommandRef = useRef({
     setCenterTab: controller.setCenterTab,
@@ -175,6 +177,8 @@ export default function App() {
   }, []);
 
   const sidebarSnap = useRef(controller.sidebarWidth);
+  const [workspaceWidth, setWorkspaceWidth] = useState(480);
+  const workspaceSnap = useRef(480);
   const rightSnap = useRef(controller.rightWidth);
   const bottomSnap = useRef(controller.bottomHeight);
   const draggingRef = useRef(null);
@@ -205,6 +209,21 @@ export default function App() {
     () => makeSplitterHandlers("bottom", bottomSnap, controller.setBottomHeight, BOTTOM_MIN, BOTTOM_MAX, -1),
     [controller.setBottomHeight, makeSplitterHandlers],
   );
+  const workspaceSplitter = useMemo(
+    () => ({
+      onResize: (delta) => {
+        if (draggingRef.current !== "workspace") {
+          workspaceSnap.current = workspaceWidth;
+          draggingRef.current = "workspace";
+        }
+        setWorkspaceWidth(clamp(workspaceSnap.current - delta, WORKSPACE_MIN, WORKSPACE_MAX));
+      },
+      onDragEnd: () => {
+        draggingRef.current = null;
+      },
+    }),
+    [workspaceWidth],
+  );
   const rightSplitter = useMemo(
     () => makeSplitterHandlers("right", rightSnap, controller.setRightWidth, RIGHT_MIN, RIGHT_MAX, -1),
     [controller.setRightWidth, makeSplitterHandlers],
@@ -212,15 +231,12 @@ export default function App() {
 
   const detail = controller.projectDetail;
   const deferredDetail = useDeferredValue(detail);
-<<<<<<< Updated upstream
   const deferredPlanDraft = useDeferredValue(controller.planDraft);
   const useLiveExecutionDetail =
     isActiveExecutionStatus(controller.activeJob?.status)
     || isActiveExecutionStatus(detail?.project?.current_status);
   const sidebarDetail = useLiveExecutionDetail ? detail : deferredDetail;
   const sidebarPlanDraft = useLiveExecutionDetail && detail?.plan ? detail.plan : deferredPlanDraft;
-=======
->>>>>>> Stashed changes
   const sidebarOpen = Boolean(controller.sidebarTab);
   const showRightSidebar = controller.centerTab !== "ai-chat";
   const sidebarStyle = sidebarOpen ? { width: controller.sidebarWidth, flex: `0 0 ${controller.sidebarWidth}px` } : undefined;
@@ -230,6 +246,12 @@ export default function App() {
     : undefined;
   const compact = Boolean(controller.programSettings?.compact_mode);
 
+  const handleRightTabChange = useCallback((nextTab) => {
+    const requestedTab = String(nextTab || "").trim();
+    if (requestedTab) {
+      setRightTab(requestedTab);
+    }
+  }, []);
   const handleSelectStep = useCallback((stepId) => {
     controller.setSelectedStepId((current) => toggleStepSelection(current, stepId));
   }, [controller.setSelectedStepId]);
@@ -352,7 +374,6 @@ export default function App() {
           <Splitter axis="vertical" onResize={sidebarSplitter.onResize} onDragEnd={sidebarSplitter.onDragEnd} title="Resize sidebar" />
         ) : null}
 
-<<<<<<< Updated upstream
         {/* ── Center: Full-screen AI Chat ── */}
         <div className="ide-center-column ide-chat-center">
           <Suspense fallback={<PanelSuspenseFallback className="ide-chat-center" />}>
@@ -404,10 +425,6 @@ export default function App() {
           style={{ width: workspaceWidth, flex: `0 0 ${workspaceWidth}px` }}
         >
           <div className="ide-center-column" style={{ height: "100%" }}>
-=======
-        <div className="ide-pane ide-pane--workspace-right" style={{ flex: "1 1 auto", minWidth: 0 }}>
-          <div className="ide-center-column" style={{ height: "100%", flex: "1 1 auto", minWidth: 0 }}>
->>>>>>> Stashed changes
             <div className="ide-main">
               <CenterWorkspace
                 activeTab={controller.centerTab}

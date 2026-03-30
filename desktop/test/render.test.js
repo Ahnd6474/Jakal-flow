@@ -895,7 +895,6 @@ test("RightSidebarPane renders process output through the deferred detail panel"
   assert.match(html, /step-2/);
 });
 
-<<<<<<< Updated upstream
 test("RightSidebarPane inspector prefers the live execution plan over a stale draft while a run is active", async () => {
   const html = await renderBundledComponent(
     "right-sidebar-inspector-live-plan-render",
@@ -1020,10 +1019,7 @@ test("RightSidebarPane inspector uses the live plan when project status is runni
   assert.doesNotMatch(html, /Stale Build/);
 });
 
-test("RightSidebarPane keeps an out-of-catalog chat model visible in the selector", async () => {
-=======
 test("RightSidebarPane scopes chat models to the provider selected in program settings", async () => {
->>>>>>> Stashed changes
   const html = await renderBundledComponent(
     "right-sidebar-chat-custom-model-render",
     "./src/components/layout/RightSidebarPane.jsx",
