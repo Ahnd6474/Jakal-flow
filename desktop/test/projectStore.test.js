@@ -205,6 +205,11 @@ test("applyProjectDetailState reapplies program model defaults while keeping oth
     bind_host: "0.0.0.0",
   });
   assert.equal(nextLoadingProjectId, "");
+  assert.equal(nextProjectForm.project_dir, "/repo");
+  assert.equal(nextProjectForm.display_name, "Demo");
+  assert.equal(nextProjectForm.branch, "main");
+  assert.equal(nextProjectForm.origin_url, "");
+  assert.equal(nextProjectForm.github_mode, "existing");
   assert.equal(nextProjectForm.runtime.model, "auto");
   assert.equal(nextProjectForm.runtime.effort, "medium");
   assert.equal(nextProjectForm.runtime.parallel_memory_per_worker_gib, 7);
@@ -215,6 +220,115 @@ test("applyProjectDetailState reapplies program model defaults while keeping oth
   });
   assert.equal(nextSelectedStepId, "");
   assert.equal(nextPlanDirty, false);
+});
+
+test("applyProjectDetailState preserves an unsaved plan draft and selected step on same-project refresh", () => {
+  let nextProjectDetail = null;
+  let nextProjectForm = {
+    project_dir: "/repo",
+    display_name: "Demo",
+    branch: "main",
+    origin_url: "",
+    github_mode: "existing",
+    runtime: {
+      model: "auto",
+      effort: "medium",
+      test_cmd: "python -m pytest",
+    },
+  };
+  let nextPlanDraft = {
+    project_prompt: "Unsaved prompt",
+    execution_mode: "parallel",
+    closeout_status: "not_started",
+    steps: [
+      { step_id: "ST1", title: "Plan", status: "completed" },
+      { step_id: "ST2", title: "Build", status: "running" },
+    ],
+  };
+  let nextSelectedStepId = "ST2";
+  let nextPlanDirty = true;
+
+  const applied = applyProjectDetailState({
+    detail: {
+      project: {
+        repo_id: "demo",
+        repo_path: "/repo",
+        display_name: "Demo",
+        slug: "demo",
+        branch: "main",
+        origin_url: "",
+      },
+      runtime: {
+        model: "gpt-5.4-mini",
+        effort: "high",
+        test_cmd: "npm test",
+      },
+      plan: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "running" },
+        ],
+      },
+      codex_status: {
+        model_catalog: [],
+      },
+    },
+    options: {
+      preserveDirtyPlan: true,
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: {
+        current: "",
+      },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "demo",
+        },
+        codex_status: {},
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model: "auto",
+        effort: "medium",
+        test_cmd: "python -m pytest",
+      },
+      planDirty: true,
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: (value) => {
+        nextProjectDetail = value;
+      },
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: (value) => {
+        nextProjectForm = typeof value === "function" ? value(nextProjectForm) : value;
+      },
+      setPlanDraft: (value) => {
+        nextPlanDraft = value;
+      },
+      setSelectedStepId: (value) => {
+        nextSelectedStepId = typeof value === "function" ? value(nextSelectedStepId) : value;
+      },
+      setPlanDirty: (value) => {
+        nextPlanDirty = value;
+      },
+    },
+  });
+
+  assert.equal(applied.project.repo_id, "demo");
+  assert.equal(nextProjectDetail.project.repo_id, "demo");
+  assert.equal(nextProjectForm.project_dir, "/repo");
+  assert.equal(nextProjectForm.runtime.model, "auto");
+  assert.equal(nextPlanDraft.project_prompt, "Unsaved prompt");
+  assert.equal(nextSelectedStepId, "ST2");
+  assert.equal(nextPlanDirty, true);
 });
 
 test("applyProjectDetailState clears a stale selected step when the refreshed plan is already complete", () => {

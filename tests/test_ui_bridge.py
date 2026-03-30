@@ -414,7 +414,7 @@ class UIBridgeTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(caption, "Completed 1/4 steps, ready: ST2, ST3")
+        self.assertEqual(caption, "Completed 1/4 steps, pending: ST2, ST3")
 
     def test_progress_caption_reports_running_nodes_for_parallel_dag(self) -> None:
         caption = progress_caption(
@@ -509,6 +509,121 @@ class UIBridgeTests(unittest.TestCase):
             self.assertIn(">pending<", first_history["flow_svg_text"])
             self.assertIn(">running<", second_history["flow_svg_text"])
             self.assertNotEqual(first_history["flow_svg_text"], second_history["flow_svg_text"])
+
+    def test_history_payload_refreshes_flow_svg_from_lineage_block_logs(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            context = build_test_project_context(
+                temp_dir,
+                repo_id="repo-flow-lineage",
+                slug="repo-flow-lineage",
+                display_name="Flow Lineage Demo",
+            )
+            ui_bridge_payloads._SECTION_PAYLOAD_MEMORY_CACHE.clear()
+
+            plan = ExecutionPlanState(
+                execution_mode="parallel",
+                steps=[
+                    ExecutionStep(step_id="ST1", title="Frontend", status="pending", metadata={"lineage_id": "LN1"}),
+                    ExecutionStep(step_id="ST2", title="Backend", status="pending", metadata={"lineage_id": "LN2"}),
+                ],
+            )
+            context.paths.execution_plan_file.write_text(
+                json.dumps(plan.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            context.paths.block_log_file.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "block_index": 7,
+                                "lineage_id": "LN2",
+                                "status": "failed",
+                                "selected_task": "Backend",
+                                "test_summary": "backend failed",
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "block_index": 7,
+                                "lineage_id": "LN1",
+                                "status": "completed",
+                                "selected_task": "Frontend",
+                                "test_summary": "frontend done",
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            if context.paths.execution_flow_svg_file.exists():
+                context.paths.execution_flow_svg_file.unlink()
+
+            history = ui_bridge_payloads.history_payload(context)
+
+            self.assertTrue(context.paths.execution_flow_svg_file.exists())
+            self.assertIn("execution-flow-signature:", history["flow_svg_text"])
+            self.assertIn(">completed<", history["flow_svg_text"])
+            self.assertIn(">failed<", history["flow_svg_text"])
+
+    def test_history_payload_refreshes_flow_svg_when_block_log_changes(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            context = build_test_project_context(
+                temp_dir,
+                repo_id="repo-flow-refresh",
+                slug="repo-flow-refresh",
+                display_name="Flow Refresh Demo",
+            )
+            ui_bridge_payloads._SECTION_PAYLOAD_MEMORY_CACHE.clear()
+
+            plan = ExecutionPlanState(
+                execution_mode="parallel",
+                steps=[
+                    ExecutionStep(step_id="ST1", title="Frontend", status="pending", metadata={"lineage_id": "LN1"}),
+                ],
+            )
+            context.paths.execution_plan_file.write_text(
+                json.dumps(plan.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            context.paths.block_log_file.write_text(
+                json.dumps(
+                    {
+                        "block_index": 1,
+                        "lineage_id": "LN1",
+                        "status": "running",
+                        "selected_task": "Frontend",
+                        "test_summary": "still running",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            first_history = ui_bridge_payloads.history_payload(context)
+
+            context.paths.block_log_file.write_text(
+                json.dumps(
+                    {
+                        "block_index": 1,
+                        "lineage_id": "LN1",
+                        "status": "completed",
+                        "selected_task": "Frontend",
+                        "test_summary": "frontend done",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            second_history = ui_bridge_payloads.history_payload(context)
+
+            self.assertNotEqual(first_history["flow_svg_text"], second_history["flow_svg_text"])
+            self.assertIn(">running<", first_history["flow_svg_text"])
+            self.assertIn(">completed<", second_history["flow_svg_text"])
 
     def test_effective_project_status_clears_stale_running_step_when_plan_is_idle(self) -> None:
         status = effective_project_status(
@@ -2677,6 +2792,56 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(len(loaded["checkpoints"]["items"]), 1)
             self.assertIsNone(loaded["checkpoints"]["pending"])
             self.assertEqual(loaded["checkpoints"]["items"][0]["status"], "approved")
+
+    def test_checkpoint_payload_reconciles_status_from_block_log(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            context = build_test_project_context(temp_dir)
+            context.loop_state.current_checkpoint_id = "CP1"
+            context.loop_state.current_checkpoint_lineage_id = "LN-1"
+            context.loop_state.pending_checkpoint_approval = True
+
+            context.paths.checkpoint_state_file.write_text(
+                json.dumps(
+                    {
+                        "checkpoints": [
+                            {
+                                "checkpoint_id": "CP1",
+                                "title": "Review me",
+                                "target_block": 1,
+                                "status": "pending",
+                                "lineage_id": "LN-1",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            context.paths.block_log_file.write_text(
+                json.dumps(
+                    {
+                        "block_index": 1,
+                        "lineage_id": "LN-1",
+                        "status": "completed",
+                        "selected_task": "Review me",
+                        "test_summary": "Checkpoint ready.",
+                        "commit_hashes": ["abc123"],
+                        "completed_at": "2026-03-29T10:00:00+00:00",
+                        "started_at": "2026-03-29T09:59:00+00:00",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = ui_bridge_payloads.checkpoint_payload(context)
+
+            self.assertEqual(payload["items"][0]["status"], "awaiting_review")
+            self.assertEqual(payload["items"][0]["commit_hashes"], ["abc123"])
+            self.assertIsNotNone(payload["pending"])
+            self.assertEqual(payload["pending"]["checkpoint_id"], "CP1")
+            self.assertEqual(payload["pending"]["status"], "awaiting_review")
+            self.assertIn("Status: awaiting_review", payload["timeline_markdown"])
+            self.assertIn("Lineage: LN-1", payload["timeline_markdown"])
 
     def test_approve_checkpoint_respects_string_push_flag_and_clears_pending_checkpoint(self) -> None:
         with TemporaryTestDir() as temp_dir:

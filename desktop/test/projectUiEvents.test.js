@@ -220,6 +220,50 @@ test("applyProjectUiEvent patches running step state from run events", () => {
   assert.equal(updated.snapshot.plan.steps[1].status, "running");
 });
 
+test("applyProjectUiEvent marks a finished step completed and keeps the live snapshot aligned", () => {
+  const updated = applyProjectUiEvent(
+    {
+      project: { repo_id: "repo-1", current_status: "running:parallel" },
+      plan: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "running" },
+          { step_id: "ST3", title: "API", status: "pending" },
+        ],
+      },
+      snapshot: {
+        plan: {
+          execution_mode: "parallel",
+          closeout_status: "not_started",
+          steps: [
+            { step_id: "ST1", title: "Plan", status: "completed" },
+            { step_id: "ST2", title: "Build", status: "running" },
+            { step_id: "ST3", title: "API", status: "pending" },
+          ],
+        },
+      },
+    },
+    sampleEvent("step-finished", {
+      event: {
+        timestamp: "2026-03-30T00:05:00+00:00",
+        details: {
+          step_id: "ST2",
+          status: "completed",
+          commit_hash: "abc123",
+        },
+      },
+    }),
+  );
+
+  assert.equal(updated.project.current_status, "running:parallel");
+  assert.equal(updated.plan.steps[1].status, "completed");
+  assert.equal(updated.plan.steps[1].completed_at, "2026-03-30T00:05:00+00:00");
+  assert.equal(updated.plan.steps[1].commit_hash, "abc123");
+  assert.equal(updated.snapshot.plan.steps[1].status, "completed");
+});
+
 test("shouldRefreshProjectDetailForUiEvent only reloads for structural run updates", () => {
   assert.equal(shouldRefreshProjectDetailForUiEvent(sampleEvent("step-started")), true);
   assert.equal(shouldRefreshProjectDetailForUiEvent(sampleEvent("step-finished")), true);

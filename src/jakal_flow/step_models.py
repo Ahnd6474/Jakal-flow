@@ -102,7 +102,7 @@ def resolve_step_model_choice(step: ExecutionStep, runtime: RuntimeOptions) -> S
     provider, reason = _general_provider_choice(runtime)
     return StepModelChoice(
         provider=provider,
-        model=explicit_model or _default_model_for_provider(provider, runtime),
+        model=explicit_model or normalize_step_model(getattr(runtime, "execution_model", "")) or _default_model_for_provider(provider, runtime),
         source="auto",
         reason=reason,
     )

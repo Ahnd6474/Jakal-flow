@@ -92,6 +92,7 @@ class RuntimeOptions:
     reasoning_output_cost_per_million_usd: float = 0.0
     per_pass_cost_usd: float = 0.0
     model: str = "auto"
+    execution_model: str = ""
     model_preset: str = "auto"
     model_selection_mode: str = "slug"
     model_slug_input: str = ""
@@ -199,6 +200,7 @@ class LoopState:
     stop_reason: str | None = None
     stop_requested: bool = False
     current_checkpoint_id: str | None = None
+    current_checkpoint_lineage_id: str | None = None
     pending_checkpoint_approval: bool = False
     counters: LoopCounters = field(default_factory=LoopCounters)
 
@@ -397,6 +399,7 @@ class Checkpoint:
     status: str = "pending"
     created_at: str | None = None
     reached_at: str | None = None
+    lineage_id: str = ""
     approved_at: str | None = None
     review_notes: str = ""
     commit_hashes: list[str] = field(default_factory=list)
@@ -404,6 +407,24 @@ class Checkpoint:
 
     def to_dict(self) -> dict[str, Any]:
         return _normalize(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Checkpoint":
+        return cls(
+            checkpoint_id=str(data.get("checkpoint_id", "")).strip(),
+            title=str(data.get("title", "")).strip(),
+            plan_refs=_string_list(data.get("plan_refs", [])),
+            target_block=_int_or_default(data.get("target_block", 0), 0, minimum=0),
+            deadline_at=str(data.get("deadline_at", "")).strip(),
+            status=str(data.get("status", "pending")).strip() or "pending",
+            created_at=_optional_str(data.get("created_at")),
+            reached_at=_optional_str(data.get("reached_at")),
+            lineage_id=str(data.get("lineage_id", "")).strip(),
+            approved_at=_optional_str(data.get("approved_at")),
+            review_notes=str(data.get("review_notes", "")).strip(),
+            commit_hashes=_string_list(data.get("commit_hashes", [])),
+            pushed=bool(data.get("pushed", False)),
+        )
 
 
 @dataclass(slots=True)

@@ -63,6 +63,7 @@ from jakal_flow.planning import (
     STEP_EXECUTION_PROMPT_FILENAME,
     bootstrap_plan_prompt,
     build_fast_planner_outline,
+    execution_plan_markdown,
     execution_plan_svg,
     load_debugger_prompt_template,
     load_finalization_prompt_template,
@@ -84,6 +85,7 @@ from jakal_flow.planning import (
 )
 from jakal_flow.reporting import Reporter
 from jakal_flow.step_models import CLAUDE_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL, resolve_step_model_choice
+import jakal_flow.ui_bridge_payloads as ui_bridge_payloads
 from jakal_flow.utils import append_jsonl, read_json, read_jsonl_tail, read_last_jsonl, write_json
 from jakal_flow.verification import VerificationRunner
 
@@ -260,6 +262,80 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual(len(steps), 1)
         self.assertEqual(steps[0].reasoning_effort, "xhigh")
+
+    def test_execution_plan_markdown_explicitly_marks_pending_steps(self) -> None:
+        context = SimpleNamespace(
+            metadata=SimpleNamespace(
+                display_name="Demo Repo",
+                slug="demo-repo",
+                repo_url="https://example.invalid/demo.git",
+                branch="main",
+            ),
+            paths=SimpleNamespace(repo_dir=Path("C:/tmp/demo-repo")),
+            runtime=SimpleNamespace(effort="medium"),
+        )
+
+        markdown = execution_plan_markdown(
+            context,
+            "Demo Plan",
+            "Prompt",
+            "Summary",
+            "standard",
+            "parallel",
+            [ExecutionStep(step_id="ST1", title="Start here", status="pending")],
+        )
+
+        self.assertIn("  - Status: pending", markdown)
+
+    def test_checkpoints_reconcile_from_block_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_dir = Path(temp_root)
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            orchestrator = Orchestrator(workspace_root)
+            runtime = RuntimeOptions(test_cmd="python -m unittest", require_checkpoint_approval=True)
+            context = orchestrator.workspace.initialize_local_project(repo_dir, "main", runtime, display_name="Demo")
+
+            write_json(
+                context.paths.checkpoint_state_file,
+                {
+                    "checkpoints": [
+                        {
+                            "checkpoint_id": "CP1",
+                            "title": "Review me",
+                            "target_block": 1,
+                            "status": "pending",
+                            "lineage_id": "LN-1",
+                        }
+                    ]
+                },
+            )
+            context.paths.block_log_file.write_text(
+                json.dumps(
+                    {
+                        "block_index": 1,
+                        "lineage_id": "LN-1",
+                        "status": "completed",
+                        "selected_task": "Review me",
+                        "test_summary": "Checkpoint ready.",
+                        "commit_hashes": ["abc123"],
+                        "completed_at": "2026-03-29T10:00:00+00:00",
+                        "started_at": "2026-03-29T09:59:00+00:00",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            data = orchestrator.checkpoints(context.metadata.repo_url, context.metadata.branch)
+            stored = read_json(context.paths.checkpoint_state_file, default={})
+            timeline = context.paths.checkpoint_timeline_file.read_text(encoding="utf-8")
+
+        self.assertEqual(data["checkpoints"][0]["status"], "awaiting_review")
+        self.assertEqual(stored["checkpoints"][0]["status"], "awaiting_review")
+        self.assertEqual(stored["checkpoints"][0]["commit_hashes"], ["abc123"])
+        self.assertIn("Status: awaiting_review", timeline)
 
     def test_parse_execution_plan_response_preserves_metadata(self) -> None:
         response = """
@@ -515,6 +591,20 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual(choice.provider, "openai")
         self.assertEqual(choice.model, "gpt-5.4")
+        self.assertEqual(choice.source, "auto")
+
+    def test_resolve_step_model_choice_prefers_execution_model_for_general_steps(self) -> None:
+        runtime = RuntimeOptions(model="gpt-5.4", execution_model="gpt-5.5", model_provider="openai")
+        step = ExecutionStep(
+            step_id="ST1",
+            title="Refactor orchestrator runtime overlay",
+            owned_paths=["src/jakal_flow/orchestrator.py"],
+        )
+
+        choice = resolve_step_model_choice(step, runtime)
+
+        self.assertEqual(choice.provider, "openai")
+        self.assertEqual(choice.model, "gpt-5.5")
         self.assertEqual(choice.source, "auto")
 
     def test_resolve_step_model_choice_prefers_claude_for_ensemble_ui_steps(self) -> None:
@@ -1336,6 +1426,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                         step_ids=["ST1", "ST2"],
                     )
                     lineage_state = read_json(context.paths.lineage_state_file, default={})
+                    block_entries = read_jsonl_tail(context.paths.block_log_file, 10)
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
 
@@ -1354,8 +1445,55 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             {item["lineage_id"]: item["head_commit"] for item in lineage_state["lineages"]},
             {"LN1": "ln1-head", "LN2": "ln2-head"},
         )
+        self.assertEqual(
+            sorted(
+                str(item.get("lineage_id", "")).strip()
+                for item in block_entries
+                if item.get("selected_task") in {"Frontend slice", "Backend slice"}
+            ),
+            ["LN1", "LN2"],
+        )
         self.assertEqual(mocked_push.call_count, 2)
         self.assertEqual(mocked_pr.call_count, 2)
+
+    def test_latest_logged_block_for_lineage_ignores_other_lineage_blocks(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_latest_lineage_block_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        temp_root.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(temp_root / "workspace")
+        block_log_file = temp_root / "blocks.jsonl"
+
+        try:
+            append_jsonl(
+                block_log_file,
+                {
+                    "block_index": 7,
+                    "lineage_id": "LN2",
+                    "status": "completed",
+                    "selected_task": "Backend slice",
+                    "test_summary": "lineage 2",
+                },
+            )
+            append_jsonl(
+                block_log_file,
+                {
+                    "block_index": 7,
+                    "lineage_id": "LN1",
+                    "status": "completed",
+                    "selected_task": "Frontend slice",
+                    "test_summary": "lineage 1",
+                },
+            )
+            selected = orchestrator._latest_logged_block_for_lineage(block_log_file, "LN2")
+            fallback = orchestrator._latest_logged_block_for_lineage(block_log_file, "")
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertIsNotNone(selected)
+        self.assertIsNotNone(fallback)
+        self.assertEqual(selected["lineage_id"], "LN2")
+        self.assertEqual(selected["test_summary"], "lineage 2")
+        self.assertEqual(fallback["lineage_id"], "LN1")
 
     def test_run_parallel_execution_batch_promotes_single_leaf_lineage_immediately(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_hybrid_lineage_single_promote_test"
@@ -2274,6 +2412,43 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(saved.steps[0].status, "running")
         self.assertEqual(checkpoint_state["checkpoints"][0]["status"], "running")
         self.assertEqual(checkpoint_state["checkpoints"][1]["status"], "pending")
+
+    def test_mark_checkpoint_if_due_records_lineage_id(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_checkpoint_lineage_id_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", execution_mode="parallel")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            write_json(
+                context.paths.checkpoint_state_file,
+                {
+                    "checkpoints": [
+                        {
+                            "checkpoint_id": "CP1",
+                            "title": "Initial stabilization checkpoint",
+                            "plan_refs": ["ST1"],
+                            "target_block": 1,
+                            "status": "pending",
+                        }
+                    ]
+                },
+            )
+            orchestrator._mark_checkpoint_if_due(context, 1, ["abc123"], lineage_id="LN9")
+            checkpoint_state = read_json(context.paths.checkpoint_state_file, default={})
+            checkpoint_view = ui_bridge_payloads.checkpoint_payload(context)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(checkpoint_state["checkpoints"][0]["status"], "awaiting_review")
+        self.assertEqual(checkpoint_state["checkpoints"][0]["lineage_id"], "LN9")
+        self.assertEqual(checkpoint_state["checkpoints"][0]["commit_hashes"], ["abc123"])
+        self.assertEqual(context.loop_state.current_checkpoint_lineage_id, "LN9")
+        self.assertEqual(checkpoint_view["current_checkpoint_lineage_id"], "LN9")
 
     def test_run_saved_execution_step_uses_step_reasoning_effort(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_reasoning_test"

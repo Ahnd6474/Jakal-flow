@@ -221,6 +221,8 @@ test("applyProjectDetailState preserves the current project_dir when a sparse de
       activeJob: null,
       defaultRuntime: {
         model_provider: "openai",
+        model: "gpt-5.4",
+        model_slug_input: "gpt-5.4",
       },
       planDirty: false,
     },
@@ -242,6 +244,7 @@ test("applyProjectDetailState preserves the current project_dir when a sparse de
   assert.equal(capturedProjectForm.project_dir, "C:/repo");
   assert.equal(capturedProjectForm.display_name, "Existing Repo");
   assert.equal(capturedProjectForm.runtime.model_provider, "openai");
+  assert.equal(capturedProjectForm.runtime.execution_model, "gpt-5.4");
 });
 
 test("applyProjectDetailState preserves local model and reasoning overrides on same-project refresh", () => {
@@ -254,6 +257,7 @@ test("applyProjectDetailState preserves local model and reasoning overrides on s
     runtime: {
       model_provider: "claude",
       model: "claude-sonnet-4-6",
+      execution_model: "claude-sonnet-4-6",
       model_slug_input: "claude-sonnet-4-6",
       effort: "xhigh",
       planning_effort: "high",
@@ -272,6 +276,7 @@ test("applyProjectDetailState preserves local model and reasoning overrides on s
       runtime: {
         model_provider: "openai",
         model: "gpt-5.4",
+        execution_model: "gpt-5.4",
         model_slug_input: "gpt-5.4",
         effort: "medium",
         planning_effort: "medium",
@@ -294,6 +299,7 @@ test("applyProjectDetailState preserves local model and reasoning overrides on s
         runtime: {
           model_provider: "openai",
           model: "gpt-5.4",
+          execution_model: "gpt-5.4",
           model_slug_input: "gpt-5.4",
           effort: "medium",
           planning_effort: "medium",
@@ -323,6 +329,7 @@ test("applyProjectDetailState preserves local model and reasoning overrides on s
 
   assert.equal(capturedProjectForm.runtime.model_provider, "claude");
   assert.equal(capturedProjectForm.runtime.model, "claude-sonnet-4-6");
+  assert.equal(capturedProjectForm.runtime.execution_model, "claude-sonnet-4-6");
   assert.equal(capturedProjectForm.runtime.model_slug_input, "claude-sonnet-4-6");
   assert.equal(capturedProjectForm.runtime.effort, "xhigh");
   assert.equal(capturedProjectForm.runtime.planning_effort, "high");

@@ -246,6 +246,7 @@ export const PROGRAM_RUNTIME_KEYS = [
   "ensemble_gemini_model",
   "ensemble_claude_model",
   "model",
+  "execution_model",
   "chat_model",
   "planning_effort",
   "model_preset",
@@ -308,6 +309,7 @@ const DEFAULT_PROGRAM_RUNTIME = {
   ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
   ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
   model: "gpt-5.4",
+  execution_model: "gpt-5.4",
   chat_model: "",
   planning_effort: "medium",
   model_preset: "",
@@ -447,6 +449,9 @@ export function programSettingsFromRuntime(runtime) {
   if (!String(settings.model_slug_input || "").trim() && fallbackModel) {
     settings.model_slug_input = fallbackModel;
   }
+  if (!String(settings.execution_model || "").trim()) {
+    settings.execution_model = String(settings.model || fallbackModel || "").trim().toLowerCase() || fallbackModel || "";
+  }
   return settings;
 }
 
@@ -509,6 +514,7 @@ export function syncProgramSettingsModel(programSettings = {}, runtime = {}) {
     ensemble_gemini_model: runtime?.ensemble_gemini_model ?? programSettings?.ensemble_gemini_model ?? base.ensemble_gemini_model,
     ensemble_claude_model: runtime?.ensemble_claude_model ?? programSettings?.ensemble_claude_model ?? base.ensemble_claude_model,
     model: runtime?.model ?? programSettings?.model ?? base.model,
+    execution_model: runtime?.execution_model ?? programSettings?.execution_model ?? base.execution_model,
     model_preset: runtime?.model_preset ?? programSettings?.model_preset ?? base.model_preset,
     model_selection_mode: runtime?.model_selection_mode ?? programSettings?.model_selection_mode ?? base.model_selection_mode,
     model_slug_input: runtime?.model_slug_input ?? programSettings?.model_slug_input ?? base.model_slug_input,
@@ -702,6 +708,7 @@ export function blankProjectForm(defaultRuntime) {
     runtimeSource.model_preset !== undefined
       ? String(runtimeSource.model_preset || "").trim().toLowerCase()
       : "";
+  const defaultExecutionModel = String(runtimeSource.execution_model ?? defaultModel).trim().toLowerCase() || defaultModel;
   return {
     project_dir: "",
     display_name: "",
@@ -711,6 +718,7 @@ export function blankProjectForm(defaultRuntime) {
     runtime: {
       ...runtimeDefaults,
       model: defaultModel,
+      execution_model: defaultExecutionModel,
       model_preset: defaultModelPreset,
       model_slug_input: defaultModelSlugInput,
       generate_word_report: runtimeDefaults.generate_word_report ?? true,
@@ -737,6 +745,13 @@ export function projectFormFromDetail(detail, defaultRuntime) {
         10,
       ) || 0,
   };
+  mergedRuntime.execution_model = String(
+    detail?.runtime?.execution_model
+    ?? detail?.runtime?.model
+    ?? defaultRuntime?.execution_model
+    ?? mergedRuntime.model
+    ?? "",
+  ).trim().toLowerCase() || mergedRuntime.model || "";
   return {
     project_dir: detail?.project?.repo_path || "",
     display_name: detail?.project?.display_name || detail?.project?.slug || "",
@@ -1861,6 +1876,7 @@ export function applyConfigRuntimeModelSelection(currentRuntime = {}, modelCatal
   return {
     ...currentRuntime,
     model,
+    execution_model: model,
     effort,
     planning_effort: planningEffort,
     effort_selection_mode: selection === AUTO_REASONING_OPTION ? AUTO_REASONING_OPTION : "explicit",
@@ -2184,6 +2200,7 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
   const provider = normalizedModelProvider(runtime);
   const providerPrefix = providerDisplayName(provider, normalizedLocalModelProvider(runtime));
   const selectedModel = String(runtime?.model || runtime?.model_slug_input || "").trim();
+  const executionModel = String(runtime?.execution_model || "").trim();
   const compactPlanningSuffix = runtime?.use_fast_mode ? ` | ${translate(language, "runtime.compactPlanning")}` : "";
   const workflowSuffix =
     String(runtime?.workflow_mode || "standard").trim().toLowerCase() === "ml"
@@ -2200,6 +2217,10 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
   }
   if (selectedModel) {
     const label = modelDisplayName(modelCatalog, selectedModel);
+    const executionModelLabel = executionModel && executionModel !== selectedModel ? modelDisplayName(modelCatalog, executionModel) : "";
+    const executionModelSuffix = executionModelLabel
+      ? (normalizeLanguage(language) === "ko" ? ` | 블록 ${executionModelLabel}` : ` | blocks ${executionModelLabel}`)
+      : "";
     const effortLabel =
       String(runtime?.effort_selection_mode || "").trim().toLowerCase() === AUTO_REASONING_OPTION
         ? reasoningEffortLabel(AUTO_REASONING_OPTION, language)
@@ -2209,10 +2230,10 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
         model: `${providerPrefix}${workflowSuffix} | ${label}`,
         effort: effortLabel,
       });
-      const nextSummary = `${summary}${executionSuffix}`;
+      const nextSummary = `${summary}${executionModelSuffix}${executionSuffix}`;
       return `${nextSummary}${compactPlanningSuffix}`;
     }
-    const summary = `${providerPrefix}${workflowSuffix} | ${label} | reasoning ${effortLabel}${executionSuffix}`;
+    const summary = `${providerPrefix}${workflowSuffix} | ${label} | reasoning ${effortLabel}${executionModelSuffix}${executionSuffix}`;
     return `${summary}${compactPlanningSuffix}`;
   }
   return translate(language, "runtime.noModelSelected");

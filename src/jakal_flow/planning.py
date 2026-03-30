@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -1644,6 +1645,160 @@ def attempt_history_entry(block_index: int, task: str, outcome: str, commit_hash
     return "\n".join(lines)
 
 
+def _flow_status_to_palette(status: str) -> str:
+    normalized = str(status).strip().lower()
+    mapping = {
+        "done": "completed",
+        "succeeded": "completed",
+        "success": "completed",
+        "in_progress": "running",
+        "running": "running",
+        "started": "running",
+        "integrating": "running",
+        "awaiting_review": "paused",
+        "paused_for_approval": "paused",
+        "blocked": "paused",
+        "failed": "failed",
+        "error": "failed",
+        "rolled_back": "failed",
+        "rolled_back_to_safe_revision": "failed",
+        "lineage_rolled_back_to_safe_revision": "failed",
+        "not_started": "pending",
+        "queued": "pending",
+    }
+    if normalized in {"completed", "running", "paused", "failed", "pending"}:
+        return normalized
+    return mapping.get(normalized, "pending")
+
+
+def _checkpoint_status_text(status: str | None) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"", "not_started", "queued"}:
+        return "pending"
+    return normalized
+
+
+def _positive_int(value: Any, default: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _latest_block_for_lineage(blocks: list[dict[str, Any]], lineage_id: str) -> dict[str, Any] | None:
+    lineage_key = str(lineage_id).strip()
+    if not lineage_key:
+        return None
+    for block in reversed(blocks):
+        if not isinstance(block, dict):
+            continue
+        if str(block.get("lineage_id", "")).strip() == lineage_key:
+            return block
+    return None
+
+
+def _latest_checkpoint_block(
+    block_entries: list[dict[str, Any]],
+    target_block: int,
+    lineage_id: str,
+) -> dict[str, Any] | None:
+    lineage_key = str(lineage_id).strip()
+    for block in reversed(block_entries):
+        if not isinstance(block, dict):
+            continue
+        block_index = _positive_int(block.get("block_index"), 0)
+        if block_index < target_block:
+            continue
+        block_lineage = str(block.get("lineage_id", "")).strip()
+        if lineage_key and block_lineage and block_lineage != lineage_key:
+            continue
+        return block
+    return None
+
+
+def reconcile_checkpoint_items_from_blocks(
+    checkpoint_items: list[dict[str, Any]],
+    block_entries: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    blocks = [entry for entry in (block_entries or []) if isinstance(entry, dict)]
+    reconciled: list[dict[str, Any]] = []
+    changed = False
+    for item in checkpoint_items:
+        if not isinstance(item, dict):
+            changed = True
+            continue
+        normalized = deepcopy(item)
+        raw_deadline_at = str(item.get("deadline_at", ""))
+        normalized["deadline_at"] = raw_deadline_at.strip()
+        if normalized["deadline_at"] != raw_deadline_at:
+            changed = True
+        raw_status = str(item.get("status", "")).strip().lower()
+        status = _checkpoint_status_text(item.get("status"))
+        normalized["status"] = status
+        if status != raw_status:
+            changed = True
+        target_block = _positive_int(normalized.get("target_block"), 0)
+        lineage_id = str(normalized.get("lineage_id", "")).strip()
+        if not blocks or target_block <= 0 or status in {"approved", "failed"}:
+            reconciled.append(normalized)
+            continue
+        latest_block = _latest_checkpoint_block(blocks, target_block, lineage_id)
+        if latest_block is None:
+            reconciled.append(normalized)
+            continue
+        block_status = str(latest_block.get("status", "")).strip().lower()
+        if block_status == "completed":
+            if status == "pending":
+                normalized["status"] = "awaiting_review"
+                changed = True
+            reached_at = str(latest_block.get("completed_at") or latest_block.get("started_at") or "").strip()
+            if reached_at and not str(normalized.get("reached_at", "")).strip():
+                normalized["reached_at"] = reached_at
+                changed = True
+            commit_hashes = latest_block.get("commit_hashes", [])
+            if isinstance(commit_hashes, list):
+                normalized_commit_hashes = [str(item).strip() for item in commit_hashes if str(item).strip()]
+                if normalized_commit_hashes and normalized.get("commit_hashes") != normalized_commit_hashes:
+                    normalized["commit_hashes"] = normalized_commit_hashes
+                    changed = True
+            candidate_lineage = str(latest_block.get("lineage_id", "")).strip()
+            if candidate_lineage and not lineage_id:
+                normalized["lineage_id"] = candidate_lineage
+                changed = True
+        reconciled.append(normalized)
+    return reconciled, changed
+
+
+def resolve_execution_flow_steps(
+    steps: list[ExecutionStep],
+    block_entries: list[dict[str, Any]] | None = None,
+) -> list[ExecutionStep]:
+    latest_blocks = block_entries if block_entries is not None else []
+    resolved: list[ExecutionStep] = []
+    for step in steps:
+        resolved_step = deepcopy(step)
+        step_metadata = resolved_step.metadata if isinstance(resolved_step.metadata, dict) else {}
+        lineage_id = str(step_metadata.get("lineage_id", "")).strip()
+        latest_block = _latest_block_for_lineage(latest_blocks, lineage_id)
+        if latest_block is not None:
+            resolved_step.status = _flow_status_to_palette(str(latest_block.get("status") or resolved_step.status))
+            resolved_step.notes = str(latest_block.get("test_summary") or resolved_step.notes or "").strip()
+            commit_hashes = latest_block.get("commit_hashes", [])
+            if isinstance(commit_hashes, list) and commit_hashes:
+                resolved_step.commit_hash = str(commit_hashes[-1]).strip() or resolved_step.commit_hash
+            completed_at = str(latest_block.get("completed_at") or "").strip()
+            if completed_at:
+                resolved_step.completed_at = completed_at
+            started_at = str(latest_block.get("started_at") or "").strip()
+            if started_at:
+                resolved_step.started_at = started_at
+        else:
+            resolved_step.status = _flow_status_to_palette(resolved_step.status)
+        resolved.append(resolved_step)
+    return resolved
+
+
 def build_checkpoint_timeline(plan_text: str, checkpoint_interval_blocks: int) -> list[Checkpoint]:
     items = [item for item in extract_plan_items(plan_text) if not item.text.lower().startswith("do not")]
     if not items:
@@ -1679,6 +1834,14 @@ def checkpoint_timeline_markdown(checkpoints: list[Checkpoint]) -> str:
         "This timeline is derived from the saved plan and is intended for user review at checkpoint boundaries.",
         "",
     ]
+    if not checkpoints:
+        lines.extend(
+            [
+                "No checkpoints recorded yet.",
+                "",
+            ]
+        )
+        return "\n".join(lines)
     for checkpoint in checkpoints:
         refs = ", ".join(checkpoint.plan_refs) if checkpoint.plan_refs else "none"
         lines.extend(
@@ -1686,6 +1849,7 @@ def checkpoint_timeline_markdown(checkpoints: list[Checkpoint]) -> str:
                 f"## {checkpoint.checkpoint_id}",
                 f"- Title: {checkpoint.title}",
                 f"- Target block: {checkpoint.target_block}",
+                f"- Lineage: {checkpoint.lineage_id or 'n/a'}",
                 f"- Deadline: {checkpoint.deadline_at or 'none'}",
                 f"- Plan refs: {refs}",
                 f"- Status: {checkpoint.status}",
@@ -1751,6 +1915,7 @@ def execution_plan_markdown(
                 f"  - Model provider: {configured_provider} -> {step_model.provider} ({step_model.reason})",
                 f"  - Model: {configured_model} -> {step_model.model or 'provider default'}",
                 f"  - GPT reasoning: {step.reasoning_effort or context.runtime.effort or 'high'}",
+                f"  - Status: {_checkpoint_status_text(step.status)}",
                 f"  - Parallel group: {step.parallel_group or 'none'}",
                 f"  - Depends on: {', '.join(step.depends_on) if step.depends_on else 'none'}",
                 f"  - Owned paths: {', '.join(step.owned_paths) if step.owned_paths else 'none declared'}",
@@ -1944,12 +2109,15 @@ def execution_plan_svg(title: str, steps: list[ExecutionStep], execution_mode: s
             if step.step_id not in positions:
                 continue
             x, y = positions[step.step_id]
-            status = step.status if step.status in palette else "pending"
+            status = _flow_status_to_palette(step.status)
             fill, text_fill = palette[status]
             title_lines = wrap_svg_text(compact_text(step.title, 90), 24, max_lines=2)
             detail_source = step.display_description or (", ".join(step.depends_on) if step.depends_on else "")
             if not detail_source and step.owned_paths:
                 detail_source = f"{len(step.owned_paths)} owned path(s)"
+            lineage_id = str((step.metadata or {}).get("lineage_id", "")).strip()
+            if lineage_id:
+                detail_source = f"{detail_source} | lineage {lineage_id}" if detail_source else f"lineage {lineage_id}"
             detail_lines = wrap_svg_text(compact_text(detail_source or "no DAG metadata", 96), 28, max_lines=2)
             parts.extend(
                 [
@@ -1967,11 +2135,21 @@ def execution_plan_svg(title: str, steps: list[ExecutionStep], execution_mode: s
         col = index % per_row
         x = margin_x + col * (box_width + gap_x)
         y = margin_y + row * (box_height + gap_y)
-        status = step.status if step.status in palette else "pending"
+        status = _flow_status_to_palette(step.status)
         fill, text_fill = palette[status]
         title_lines = wrap_svg_text(compact_text(step.title, 90), 24, max_lines=2)
         detail_lines = wrap_svg_text(
-            compact_text(step.display_description or step.parallel_group or step.test_command or "default verification", 96),
+            compact_text(
+                (
+                    f"{step.display_description or step.parallel_group or step.test_command or 'default verification'}"
+                    + (
+                        f" | lineage {str((step.metadata or {}).get('lineage_id', '')).strip()}"
+                        if str((step.metadata or {}).get("lineage_id", "")).strip()
+                        else ""
+                    )
+                ),
+                96,
+            ),
             28,
             max_lines=2,
         )

@@ -13,6 +13,10 @@ import {
   isSystemStep,
   KIMI_DEFAULT_MODEL,
   MINIMAX_DEFAULT_MODEL,
+  defaultModelForRuntime,
+  findModelCatalogEntry,
+  modelDisplayName,
+  providerDisplayName,
   planStepsWithCloseout,
   providerAvailable,
   providerUsable,
@@ -106,6 +110,23 @@ function stepModelPlaceholder(step, runtime) {
   return modelPlaceholder(step, runtime);
 }
 
+function executionModelLabel(modelCatalog = [], runtime = {}) {
+  const model = String(runtime?.execution_model || runtime?.model_slug_input || runtime?.model || "").trim();
+  return modelDisplayName(modelCatalog, model) || model || defaultModelForRuntime(modelCatalog, runtime) || "gpt-5.4";
+}
+
+function stepModelOptions(modelCatalog = [], runtime = {}, stepProvider = "") {
+  void runtime;
+  void stepProvider;
+  return (modelCatalog || []).filter((item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto");
+}
+
+function stepModelOptionLabel(item = {}) {
+  const model = item.display_name || item.model || "";
+  const provider = providerDisplayName(item.provider, item.local_provider);
+  return provider ? `${model} / ${provider}` : model;
+}
+
 function FlowNode({ step, projectStatus, selected, onSelect, language, t }) {
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const stepStatus = effectiveStepStatus(step, projectStatus);
@@ -179,6 +200,7 @@ export function RunControlView({
     successCriteria: t("reports.closeoutReport"),
   });
   const selectedStep = steps.find((step) => step.step_id === selectedStepId) || null;
+  const modelCatalog = codexStatus?.model_catalog || detail?.codex_status?.model_catalog || [];
   const runtimeInsights = detail?.runtime_insights || {};
   const executionEstimate = runtimeInsights?.execution || {};
   const costEstimate = runtimeInsights?.cost || {};
@@ -192,6 +214,14 @@ export function RunControlView({
   const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", executionJob);
   const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
   const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
+  const selectedStepModel = String(selectedStep?.model || "").trim();
+  const selectedStepModelProvider = String(selectedStep?.model_provider || detail?.runtime?.model_provider || "").trim();
+  const selectedStepModelOptions = stepModelOptions(modelCatalog, detail?.runtime || {}, selectedStepModelProvider);
+  const selectedStepModelVisible = selectedStepModel
+    ? selectedStepModelOptions.some((item) => String(item.model || "").trim().toLowerCase() === selectedStepModel.toLowerCase())
+    : false;
+  const selectedStepExecutionModelLabel = executionModelLabel(modelCatalog, detail?.runtime || {});
+  const selectedStepExecutionModel = String(detail?.runtime?.execution_model || detail?.runtime?.model_slug_input || detail?.runtime?.model || "").trim().toLowerCase();
   const stepNoteLabel = "Step note";
   const closeoutStatus = String(planDraft?.closeout_status || "not_started").trim().toLowerCase();
   const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
@@ -424,13 +454,38 @@ export function RunControlView({
                 </label>
                 <label className="field field--wide">
                   <span>{t("field.model")}</span>
-                  <input
-                    value={selectedStep.model || ""}
-                    placeholder={stepModelPlaceholder(selectedStep, detail?.runtime)}
-                    onChange={(event) => onUpdateStepField("model", event.target.value)}
-                    disabled={!editableStep}
-                  />
-                  <small className="muted">{stepAutoModelHint(language, detail?.runtime)}</small>
+                <select
+                  value={selectedStepModel}
+                  onChange={(event) => {
+                    const nextModel = String(event.target.value || "").trim();
+                    if (!nextModel || nextModel.toLowerCase() === selectedStepExecutionModel) {
+                      onUpdateStepField("model_provider", "");
+                      onUpdateStepField("model", "");
+                      return;
+                    }
+                    const nextEntry = findModelCatalogEntry(modelCatalog, nextModel);
+                    onUpdateStepField("model_provider", String(nextEntry?.provider || "").trim().toLowerCase());
+                    onUpdateStepField("model", nextModel);
+                  }}
+                  disabled={!editableStep}
+                >
+                  <option value="">{language === "ko" ? `실행 모델 사용 (${selectedStepExecutionModelLabel})` : `Use execution model (${selectedStepExecutionModelLabel})`}</option>
+                  {!selectedStepModelVisible && selectedStepModel ? (
+                    <option value={selectedStepModel}>
+                      {modelDisplayName(modelCatalog, selectedStepModel) || selectedStepModel}
+                    </option>
+                  ) : null}
+                  {selectedStepModelOptions.map((item) => (
+                    <option key={item.model} value={item.model}>
+                      {stepModelOptionLabel(item)}
+                    </option>
+                  ))}
+                </select>
+                  <small className="muted">
+                    {language === "ko"
+                      ? "기본은 실행 모델을 따르고, 다른 모델을 고르면 이 블록에만 덮어씁니다."
+                      : "Leave this synced with the execution model, or pick another model to override this block."}
+                  </small>
                 </label>
                 <label className="field">
                   <span>{t("field.parallelGroup")}</span>

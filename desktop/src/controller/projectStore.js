@@ -22,6 +22,7 @@ const PROJECT_RUNTIME_OVERRIDE_KEYS = [
   "ensemble_gemini_model",
   "ensemble_claude_model",
   "model",
+  "execution_model",
   "model_preset",
   "model_selection_mode",
   "model_slug_input",
@@ -37,6 +38,9 @@ function enforceProgramModelDefaults(form = null, defaultRuntime = null) {
   const defaultEffort = String(defaultRuntime?.effort || "").trim();
   if (defaultModel) {
     nextRuntime.model = defaultModel;
+  }
+  if (!String(nextRuntime.execution_model || "").trim()) {
+    nextRuntime.execution_model = defaultModel;
   }
   if (defaultEffort) {
     nextRuntime.effort = defaultEffort;

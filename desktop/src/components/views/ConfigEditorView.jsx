@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { useI18n } from "../../i18n";
-import { normalizeMemoryBudgetGiB } from "../../utils";
+import { defaultModelForRuntime, filterModelCatalogByProvider, modelDisplayName, normalizeMemoryBudgetGiB } from "../../utils";
 
 function ConfigHeaderIcon() {
   return (
@@ -113,7 +113,6 @@ export const ConfigEditorView = memo(function ConfigEditorView({
   onDeleteProject,
 }) {
   void modelPresets;
-  void modelCatalog;
   void codexStatus;
   void onChangeProgramSettings;
 
@@ -122,6 +121,15 @@ export const ConfigEditorView = memo(function ConfigEditorView({
   const isRunning = ["running", "queued"].includes(String(activeJob?.status || "").trim().toLowerCase());
   const liveRuntimeEditable = isRunning;
   const autoParallelWorkers = String(runtime.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
+  const executionModel = String(runtime.execution_model || "").trim();
+  const executionModelOptions = filterModelCatalogByProvider(modelCatalog, runtime).filter(
+    (item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto",
+  );
+  const defaultExecutionModel = defaultModelForRuntime(modelCatalog, runtime) || runtime.model || "gpt-5.4";
+  const selectedExecutionModel = executionModel || defaultExecutionModel;
+  const selectedExecutionModelVisible = executionModelOptions.some(
+    (item) => String(item.model || "").trim().toLowerCase() === selectedExecutionModel.toLowerCase(),
+  );
 
   return (
     <section className="workspace-view">
@@ -231,6 +239,36 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               title={language === "ko" ? "실행 설정" : "Execution Parameters"}
               description={language === "ko" ? "단계 수, 병렬 실행, 최적화" : "Step limits, parallel workers and optimization"}
             />
+
+            <label className="field field--wide" style={{ marginTop: "8px" }}>
+              <span>{language === "ko" ? "블록 실행 모델" : "Block execution model"}</span>
+              <select
+                value={selectedExecutionModel}
+                onChange={(event) =>
+                  onChangeForm((current) => ({
+                    ...current,
+                    runtime: { ...current.runtime, execution_model: event.target.value },
+                  }))
+                }
+                disabled={busy}
+              >
+                {!selectedExecutionModelVisible && selectedExecutionModel ? (
+                  <option value={selectedExecutionModel}>
+                    {modelDisplayName(modelCatalog, selectedExecutionModel) || selectedExecutionModel}
+                  </option>
+                ) : null}
+                {executionModelOptions.map((item) => (
+                  <option key={item.model} value={item.model}>
+                    {item.display_name || item.model}
+                  </option>
+                ))}
+              </select>
+              <small className="field-hint">
+                {language === "ko"
+                  ? "계획을 만든 뒤 저장된 블록을 실행할 때 우선 쓰는 모델입니다."
+                  : "Used when running saved blocks after planning."}
+              </small>
+            </label>
 
             {liveRuntimeEditable ? (
               <div className="info-callout" style={{ marginTop: "8px" }}>

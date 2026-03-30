@@ -76,6 +76,7 @@ from .planning import (
     prompt_to_execution_plan_prompt,
     optimization_prompt,
     reflection_markdown,
+    reconcile_checkpoint_items_from_blocks,
     scan_repository_inputs,
     select_candidate,
     load_step_execution_prompt_template,
@@ -3230,27 +3231,70 @@ class Orchestrator(
     def checkpoints(self, repo_url: str, branch: str) -> dict:
         context = self.status(repo_url, branch)
         data = read_json(context.paths.checkpoint_state_file, default=None)
+        needs_write = data is None
         if data is None:
             checkpoints = build_checkpoint_timeline(read_text(context.paths.plan_file), context.runtime.checkpoint_interval_blocks)
             data = {"checkpoints": [checkpoint.to_dict() for checkpoint in checkpoints]}
-            write_json(context.paths.checkpoint_state_file, data)
             write_text(context.paths.checkpoint_timeline_file, checkpoint_timeline_markdown(checkpoints))
+        if not isinstance(data, dict):
+            data = {"checkpoints": []}
+            needs_write = True
+        checkpoint_items = data.get("checkpoints", [])
+        reconciled_items, changed = reconcile_checkpoint_items_from_blocks(
+            checkpoint_items if isinstance(checkpoint_items, list) else [],
+            read_jsonl(context.paths.block_log_file),
+        )
+        data = dict(data)
+        data["checkpoints"] = reconciled_items
+        if changed:
+            needs_write = True
+        if needs_write:
+            write_json(context.paths.checkpoint_state_file, data)
+            write_text(
+                context.paths.checkpoint_timeline_file,
+                checkpoint_timeline_markdown([Checkpoint.from_dict(item) for item in reconciled_items]),
+            )
         return data
 
     def approve_checkpoint(self, repo_url: str, branch: str, review_notes: str = "", push: bool = True) -> dict:
         context = self.status(repo_url, branch)
         data = self.checkpoints(repo_url, branch)
         checkpoints = data.get("checkpoints", [])
-        target: dict | None = None
-        for checkpoint in checkpoints:
-            if checkpoint.get("status") == "awaiting_review":
-                target = checkpoint
-                break
+        active_lineage_id = str(context.loop_state.current_checkpoint_lineage_id or "").strip()
+        target: dict | None = next(
+            (
+                checkpoint
+                for checkpoint in checkpoints
+                if checkpoint.get("status") == "awaiting_review"
+                and active_lineage_id
+                and str(checkpoint.get("lineage_id", "")).strip() == active_lineage_id
+            ),
+            None,
+        )
+        if target is None:
+            target = next(
+                (
+                    checkpoint
+                    for checkpoint in checkpoints
+                    if checkpoint.get("status") == "awaiting_review"
+                    and not str(checkpoint.get("lineage_id", "")).strip()
+                ),
+                None,
+            )
         if target is None and context.loop_state.current_checkpoint_id:
-            for checkpoint in checkpoints:
-                if checkpoint.get("checkpoint_id") == context.loop_state.current_checkpoint_id:
-                    target = checkpoint
-                    break
+            target = next(
+                (
+                    checkpoint
+                    for checkpoint in checkpoints
+                    if checkpoint.get("checkpoint_id") == context.loop_state.current_checkpoint_id
+                    and (
+                        not active_lineage_id
+                        or not str(checkpoint.get("lineage_id", "")).strip()
+                        or str(checkpoint.get("lineage_id", "")).strip() == active_lineage_id
+                    )
+                ),
+                None,
+            )
         if target is None:
             raise RuntimeError("No checkpoint is awaiting approval.")
         target["status"] = "approved"
@@ -3272,6 +3316,7 @@ class Orchestrator(
         write_json(context.paths.checkpoint_state_file, data)
         plan_state = self.load_execution_plan_state(context)
         context.loop_state.current_checkpoint_id = None
+        context.loop_state.current_checkpoint_lineage_id = None
         context.loop_state.pending_checkpoint_approval = False
         context.loop_state.stop_requested = False
         context.loop_state.stop_reason = None
@@ -3373,6 +3418,7 @@ class Orchestrator(
                     status=status,
                     created_at=step.started_at or now_utc_iso(),
                     reached_at=step.completed_at if step.status == "completed" else step.started_at,
+                    lineage_id=self._execution_step_lineage_id(step),
                     approved_at=step.completed_at if step.status == "completed" else None,
                     review_notes=step.notes,
                     commit_hashes=[step.commit_hash] if step.commit_hash else [],
@@ -3573,7 +3619,12 @@ class Orchestrator(
         context.loop_state.last_commit_hash = block_commit_hashes[-1] if block_commit_hashes else context.loop_state.last_commit_hash
         context.loop_state.last_block_completed_at = now_utc_iso()
         if made_progress:
-            self._mark_checkpoint_if_due(context, block_index, block_commit_hashes)
+            self._mark_checkpoint_if_due(
+                context,
+                block_index,
+                block_commit_hashes,
+                lineage_id=self._execution_step_lineage_id(execution_step_override),
+            )
         if context.loop_state.pending_checkpoint_approval:
             context.metadata.current_status = "awaiting_checkpoint_approval"
             context.loop_state.stop_reason = "checkpoint approval required"
@@ -3784,23 +3835,43 @@ class Orchestrator(
             return f"too many empty cycles: {counters.empty_cycles}"
         return None
 
-    def _mark_checkpoint_if_due(self, context: ProjectContext, block_index: int, commit_hashes: list[str]) -> None:
+    def _mark_checkpoint_if_due(
+        self,
+        context: ProjectContext,
+        block_index: int,
+        commit_hashes: list[str],
+        *,
+        lineage_id: str = "",
+    ) -> None:
         if not context.runtime.require_checkpoint_approval:
             return
         data = read_json(context.paths.checkpoint_state_file, default={"checkpoints": []})
         checkpoints = data.get("checkpoints", [])
         changed = False
-        for checkpoint in checkpoints:
+        lineage_key = str(lineage_id).strip()
+        def _eligible(checkpoint: dict[str, object], *, exact: bool) -> bool:
             if checkpoint.get("status") != "pending":
-                continue
-            if int(checkpoint.get("target_block", 0)) <= block_index:
-                checkpoint["status"] = "awaiting_review"
-                checkpoint["reached_at"] = now_utc_iso()
-                checkpoint["commit_hashes"] = commit_hashes
-                context.loop_state.current_checkpoint_id = checkpoint.get("checkpoint_id")
-                context.loop_state.pending_checkpoint_approval = True
-                changed = True
-                break
+                return False
+            if int(checkpoint.get("target_block", 0)) > block_index:
+                return False
+            checkpoint_lineage = str(checkpoint.get("lineage_id", "")).strip()
+            if exact:
+                return bool(lineage_key) and checkpoint_lineage == lineage_key
+            return not checkpoint_lineage
+
+        checkpoint = next((item for item in checkpoints if _eligible(item, exact=True)), None)
+        if checkpoint is None:
+            checkpoint = next((item for item in checkpoints if _eligible(item, exact=False)), None)
+        if checkpoint is not None:
+            checkpoint["status"] = "awaiting_review"
+            checkpoint["reached_at"] = now_utc_iso()
+            checkpoint["commit_hashes"] = commit_hashes
+            if lineage_key:
+                checkpoint["lineage_id"] = lineage_key
+            context.loop_state.current_checkpoint_id = checkpoint.get("checkpoint_id")
+            context.loop_state.current_checkpoint_lineage_id = str(checkpoint.get("lineage_id", "")).strip() or None
+            context.loop_state.pending_checkpoint_approval = True
+            changed = True
         if changed:
             write_json(context.paths.checkpoint_state_file, data)
 
@@ -3828,6 +3899,7 @@ class Orchestrator(
 
         if context.loop_state.current_checkpoint_id or context.loop_state.pending_checkpoint_approval:
             context.loop_state.current_checkpoint_id = None
+            context.loop_state.current_checkpoint_lineage_id = None
             context.loop_state.pending_checkpoint_approval = False
             if context.loop_state.stop_reason == "checkpoint approval required":
                 context.loop_state.stop_reason = None

@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from .models import ExecutionPlanState, ProjectContext
 from .errors import SubprocessTimeoutError
-from .planning import execution_plan_svg
+from .planning import execution_plan_svg, resolve_execution_flow_steps
 from .run_control import load_run_control
 from .status_views import effective_project_status
 from .subprocess_utils import run_subprocess, windows_process_is_running
@@ -944,8 +944,9 @@ def public_remote_control_state(context: ProjectContext, plan_state: ExecutionPl
 
 
 def public_execution_flow_svg(context: ProjectContext, plan_state: ExecutionPlanState) -> str:
+    block_entries = read_jsonl_tail(context.paths.block_log_file, 120)
     safe_steps = []
-    for step in plan_state.steps:
+    for step in resolve_execution_flow_steps(plan_state.steps, block_entries):
         detail = mask_public_text(step.display_description or "", max_chars=96)
         if not detail and step.depends_on:
             detail = ", ".join(step.depends_on)

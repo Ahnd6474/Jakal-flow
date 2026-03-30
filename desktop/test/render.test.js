@@ -1145,6 +1145,110 @@ test("RightSidebarPane inspector uses the live plan when project status is runni
   assert.doesNotMatch(html, /Stale Build/);
 });
 
+test("CenterWorkspace and RightSidebarPane inspector keep the same live step visible while a run is active", async () => {
+  const sharedLivePlan = {
+    project_prompt: "Ship the live UI",
+    execution_mode: "parallel",
+    closeout_status: "not_started",
+    steps: [
+      { step_id: "ST1", title: "Plan", status: "completed" },
+      {
+        step_id: "ST2",
+        title: "Build",
+        status: "running",
+        display_description: "Use the live plan",
+        reasoning_effort: "medium",
+        depends_on: ["ST1"],
+      },
+    ],
+  };
+  const sharedDraftPlan = {
+    project_prompt: "Ship the stale UI",
+    execution_mode: "parallel",
+    closeout_status: "not_started",
+    steps: [
+      { step_id: "ST1", title: "Plan", status: "completed" },
+      {
+        step_id: "ST2",
+        title: "Stale Build",
+        status: "pending",
+        display_description: "Do not use the stale draft",
+        reasoning_effort: "medium",
+        depends_on: ["ST1"],
+      },
+    ],
+  };
+
+  const centerHtml = await renderBundledComponent(
+    "center-workspace-live-step-consistency-render",
+    "./src/components/layout/CenterWorkspace.jsx",
+    "CenterWorkspace",
+    baseWorkspaceProps({
+      detail: {
+        project: {
+          current_status: "running:parallel",
+        },
+        runtime: {
+          execution_mode: "parallel",
+          effort: "medium",
+        },
+        plan: sharedLivePlan,
+      },
+      planDraft: sharedDraftPlan,
+      selectedStepId: "ST2",
+      busy: true,
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+    }),
+  );
+
+  const sidebarHtml = await renderBundledComponent(
+    "right-sidebar-live-step-consistency-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      activeTab: "inspector",
+      collapsed: false,
+      detail: {
+        project: {
+          current_status: "running:parallel",
+          display_name: "Demo",
+          branch: "main",
+          repo_path: "C:/demo",
+        },
+        runtime: {
+          effort: "medium",
+        },
+        plan: sharedLivePlan,
+      },
+      planDraft: sharedDraftPlan,
+      selectedStepId: "ST2",
+      modelPresets: [],
+      modelCatalog: [],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+      busy: false,
+    },
+  );
+
+  assert.match(centerHtml, /ST2[\s\S]*Build/);
+  assert.match(centerHtml, /Use the live plan/);
+  assert.doesNotMatch(centerHtml, /Stale Build/);
+  assert.match(sidebarHtml, /ST2[\s\S]*Build/);
+  assert.match(sidebarHtml, /Use the live plan/);
+  assert.doesNotMatch(sidebarHtml, /Stale Build/);
+  assert.doesNotMatch(sidebarHtml, /Do not use the stale draft/);
+});
+
 test("RightSidebarPane keeps chat model choices independent from the project runtime provider", async () => {
   const html = await renderBundledComponent(
     "right-sidebar-chat-custom-model-render",
@@ -2017,6 +2121,132 @@ test("IdeToolbar prioritizes the debugging status over the generic active comman
   });
 
   assert.match(html, /Debugging/);
+});
+
+test("IdeToolbar, StatusBar, and RunProgressPanel agree on the debugging label", async () => {
+  const sharedRuntime = {
+    model_provider: "openai",
+    model: "gpt-5.4",
+    model_slug_input: "gpt-5.4",
+    effort: "medium",
+    execution_model: "gpt-5.4",
+  };
+  const sharedPlan = {
+    execution_mode: "serial",
+    closeout_status: "not_started",
+    steps: [
+      { step_id: "ST1", title: "Plan", status: "completed" },
+      { step_id: "ST2", title: "Build", status: "running" },
+    ],
+  };
+
+  const toolbarHtml = await renderBundledComponent(
+    "ide-toolbar-debugging-consistency-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projects: [
+        {
+          repo_id: "demo",
+          display_name: "Demo",
+          status: "running:debugging",
+        },
+      ],
+      selectedProjectId: "demo",
+      onSelectProject: noop,
+      onNewProject: noop,
+      projectDetail: {
+        project: {
+          display_name: "Demo",
+          branch: "main",
+          current_status: "running:debugging",
+        },
+        runtime: sharedRuntime,
+        plan: sharedPlan,
+      },
+      planDraft: sharedPlan,
+      pendingCheckpoint: null,
+      busy: true,
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+      activeCenterTab: "run",
+      projectPath: "C:/demo",
+      githubUrl: "",
+      shareUrl: "",
+      shareBusy: false,
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onGeneratePlan: noop,
+      onRunPlan: noop,
+      onApproveCheckpoint: noop,
+      onSmartShareLink: noop,
+      onOpenFolder: noop,
+      onOpenVsCode: noop,
+      onOpenGithub: noop,
+    },
+  );
+
+  const statusHtml = await renderBundledComponent(
+    "status-bar-debugging-consistency-render",
+    "./src/components/layout/StatusBar.jsx",
+    "StatusBar",
+    {
+      detail: {
+        project: {
+          branch: "main",
+          current_status: "running:debugging",
+        },
+        runtime: sharedRuntime,
+        runtime_insights: {
+          cost: {},
+        },
+      },
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+      queuedJobs: [],
+      modelPresets: [],
+      onToggleBottom: noop,
+      bottomCollapsed: true,
+    },
+  );
+
+  const runProgressHtml = await renderBundledComponent(
+    "run-progress-panel-debugging-consistency-render",
+    "./src/components/layout/RunProgressPanel.jsx",
+    "RunProgressPanel",
+    {
+      detail: {
+        project: {
+          current_status: "running:debugging",
+        },
+        runtime: sharedRuntime,
+        plan: sharedPlan,
+        runtime_insights: {
+          execution: {
+            remaining_seconds: 0,
+          },
+          cost: {},
+        },
+        activity: [
+          "debugger | debugger_invoked | Debugging ST2 - Build | python -m pytest exited with 1",
+        ],
+      },
+      planDraft: sharedPlan,
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+    },
+  );
+
+  assert.match(toolbarHtml, /Debugging/);
+  assert.match(statusHtml, /Debugging/);
+  assert.match(runProgressHtml, /Debugging/);
+  assert.doesNotMatch(runProgressHtml, /Working on ST2/);
 });
 
 test("IdeToolbar disables Run Remaining Steps when the project status is already running", async () => {
@@ -3378,6 +3608,180 @@ test("ConfigEditorView keeps checkpoint controls editable during an active run",
   assert.match(html, /Checkpoint Interval/);
   assert.match(html, /Require checkpoint approval/);
   assert.doesNotMatch(html, /Generate Word Report/);
+});
+
+test("ConfigEditorView renders project settings loaded from an existing project", async () => {
+  const html = await renderBundledComponent(
+    "config-editor-loaded-project-render",
+    "./src/components/views/ConfigEditorView.jsx",
+    "ConfigEditorView",
+    {
+      form: {
+        project_dir: "C:/work/demo",
+        display_name: "Demo App",
+        branch: "release",
+        github_mode: "manual",
+        origin_url: "https://github.com/openai/demo-app",
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4-mini",
+          model_preset: "",
+          model_slug_input: "gpt-5.4-mini",
+          effort: "high",
+          workflow_mode: "standard",
+          execution_model: "gpt-5.4-mini",
+          execution_mode: "parallel",
+          parallel_workers: 8,
+          parallel_memory_per_worker_gib: 4.5,
+          max_blocks: 7,
+          optimization_mode: "refactor",
+        },
+      },
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.4-mini",
+          display_name: "GPT-5.4 Mini",
+          hidden: false,
+          provider: "openai",
+          default_reasoning_effort: "high",
+          supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+        },
+      ],
+      busy: false,
+      onChangeForm: noop,
+      onSaveProject: noop,
+      onChooseDirectory: noop,
+      onArchiveProject: noop,
+      onDeleteProject: noop,
+    },
+  );
+
+  assert.match(html, /Demo App/);
+  assert.match(html, /C:\/work\/demo/);
+  assert.match(html, /release/);
+  assert.match(html, /value="gpt-5\.4-mini"/);
+  assert.match(html, /value="7"/);
+  assert.match(html, /value="8"/);
+  assert.match(html, /value="4\.5"/);
+  assert.match(html, /refactor/);
+});
+
+test("IdeToolbar, StatusBar, and ConfigEditorView stay aligned on the selected project", async () => {
+  const sharedRuntime = {
+    model_provider: "openai",
+    model: "gpt-5.4",
+    model_slug_input: "gpt-5.4",
+    effort: "medium",
+    workflow_mode: "standard",
+    execution_model: "gpt-5.4",
+  };
+
+  const toolbarHtml = await renderBundledComponent(
+    "ide-toolbar-project-alignment-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projects: [
+        {
+          repo_id: "demo",
+          display_name: "Demo Project",
+          status: "plan_ready",
+        },
+      ],
+      selectedProjectId: "demo",
+      onSelectProject: noop,
+      onNewProject: noop,
+      projectDetail: {
+        project: {
+          display_name: "Demo Project",
+          branch: "main",
+          current_status: "plan_ready",
+          repo_path: "C:/demo",
+        },
+        runtime: sharedRuntime,
+      },
+      planDraft: {
+        execution_mode: "serial",
+        closeout_status: "not_started",
+        steps: [],
+      },
+      pendingCheckpoint: null,
+      busy: false,
+      activeJob: null,
+      activeCenterTab: "app-settings",
+      projectPath: "C:/demo",
+      githubUrl: "https://github.com/openai/demo",
+      shareUrl: "",
+      shareBusy: false,
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onGeneratePlan: noop,
+      onRunPlan: noop,
+      onApproveCheckpoint: noop,
+      onSmartShareLink: noop,
+      onOpenFolder: noop,
+      onOpenVsCode: noop,
+      onOpenGithub: noop,
+    },
+  );
+
+  const statusHtml = await renderBundledComponent(
+    "status-bar-project-alignment-render",
+    "./src/components/layout/StatusBar.jsx",
+    "StatusBar",
+    {
+      detail: {
+        project: {
+          branch: "main",
+          current_status: "plan_ready",
+        },
+        runtime: sharedRuntime,
+        runtime_insights: {
+          cost: {},
+        },
+      },
+      activeJob: null,
+      queuedJobs: [],
+      modelPresets: [],
+      onToggleBottom: noop,
+      bottomCollapsed: true,
+    },
+  );
+
+  const configHtml = await renderBundledComponent(
+    "config-editor-project-alignment-render",
+    "./src/components/views/ConfigEditorView.jsx",
+    "ConfigEditorView",
+    {
+      form: {
+        project_dir: "C:/demo",
+        display_name: "Demo Project",
+        branch: "main",
+        github_mode: "existing",
+        origin_url: "https://github.com/openai/demo",
+        runtime: sharedRuntime,
+      },
+      modelPresets: [],
+      modelCatalog: [],
+      busy: false,
+      onChangeForm: noop,
+      onSaveProject: noop,
+      onChooseDirectory: noop,
+      onArchiveProject: noop,
+      onDeleteProject: noop,
+    },
+  );
+
+  assert.match(toolbarHtml, /Demo Project/);
+  assert.match(toolbarHtml, /Plan ready/);
+  assert.match(statusHtml, /Plan ready/);
+  assert.match(statusHtml, /main/);
+  assert.match(statusHtml, /gpt-5\.4/);
+  assert.match(configHtml, /Demo Project/);
+  assert.match(configHtml, /main/);
+  assert.match(configHtml, /C:\/demo/);
+  assert.match(configHtml, /<option value="gpt-5\.4" selected="">gpt-5\.4<\/option>/);
 });
 
 test("ModelPane shows the selected model when only model_slug_input is populated", async () => {

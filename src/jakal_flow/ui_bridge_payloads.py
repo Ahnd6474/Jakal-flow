@@ -19,9 +19,9 @@ from .contract_wave import (
 from .errors import ARTIFACT_READ_EXCEPTIONS
 from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER
 from .model_providers import normalize_local_model_provider, normalize_model_provider, provider_preset
-from .models import ExecutionPlanState, ProjectContext
+from .models import Checkpoint, ExecutionPlanState, ProjectContext
 from .orchestrator import Orchestrator
-from .planning import execution_plan_svg
+from .planning import checkpoint_timeline_markdown, execution_plan_svg, reconcile_checkpoint_items_from_blocks, resolve_execution_flow_steps
 from .runtime_insights import build_runtime_insights
 from .share import project_share_config_payload, project_share_payload
 from .status_views import effective_project_status
@@ -475,7 +475,7 @@ def progress_caption(plan_state: ExecutionPlanState) -> str:
             if step.status != "completed"
             and all(dependency in completed_ids for dependency in step.depends_on)
         ]
-        return f"Completed {completed}/{total} steps, ready: {', '.join(ready) if ready else 'blocked'}"
+        return f"Completed {completed}/{total} steps, pending: {', '.join(ready) if ready else 'blocked'}"
     next_step = next((step.step_id for step in plan_state.steps if step.status != "completed"), "done")
     return f"Completed {completed}/{total} steps, next: {next_step}"
 
@@ -513,6 +513,9 @@ def project_summary(
         f"Remaining Steps: {', '.join(remaining) if remaining else 'None'}",
         f"Closeout: {plan.closeout_status}",
     ]
+    execution_model = str(getattr(project.runtime, "execution_model", "") or "").strip()
+    if execution_model and execution_model != str(project.runtime.model or "").strip():
+        lines.append(f"Block Execution Model: {execution_model}")
     if plan.plan_title.strip():
         lines.append(f"Plan Title: {plan.plan_title.strip()}")
     if project.metadata.archived_at:
@@ -702,6 +705,7 @@ def _flow_svg_signature(context: ProjectContext, plan_state: ExecutionPlanState)
         "title": plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug,
         "execution_mode": str(plan_state.execution_mode or "").strip(),
         "closeout_status": str(plan_state.closeout_status or "").strip(),
+        "block_log_signature": _json_or_text_signature(context.paths.block_log_file),
         "steps": [],
     }
     for step in plan_state.steps:
@@ -729,7 +733,9 @@ def _flow_svg_payload(context: ProjectContext) -> dict[str, Any]:
     flow_svg_text = safe_text(context.paths.execution_flow_svg_file, default="")
     if marker not in flow_svg_text:
         flow_title = plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug
-        rendered = f"<!-- {marker} -->\n{execution_plan_svg(f'{flow_title} execution flow', plan_state.steps, plan_state.execution_mode)}"
+        block_entries = read_jsonl_tail(context.paths.block_log_file, 120)
+        flow_steps = resolve_execution_flow_steps(plan_state.steps, block_entries)
+        rendered = f"<!-- {marker} -->\n{execution_plan_svg(f'{flow_title} execution flow', flow_steps, plan_state.execution_mode)}"
         write_text_if_changed(context.paths.execution_flow_svg_file, rendered)
         flow_svg_text = safe_text(context.paths.execution_flow_svg_file, default=rendered)
     return {
@@ -969,10 +975,16 @@ def history_payload_from_snapshot(context: ProjectContext, snapshot: DetailLogSn
 def checkpoint_payload(context: ProjectContext) -> dict[str, Any]:
     raw = safe_json(context.paths.checkpoint_state_file, default={"checkpoints": []})
     raw_items = raw.get("checkpoints", []) if isinstance(raw, dict) else []
+    block_entries = read_jsonl_tail(context.paths.block_log_file, 240)
     waiting_for_approval = bool(context.loop_state.pending_checkpoint_approval)
     active_checkpoint_id = str(context.loop_state.current_checkpoint_id or "").strip()
+    active_checkpoint_lineage_id = str(context.loop_state.current_checkpoint_lineage_id or "").strip()
+    reconciled_items, _ = reconcile_checkpoint_items_from_blocks(
+        raw_items if isinstance(raw_items, list) else [],
+        block_entries,
+    )
     checkpoints: list[dict[str, Any]] = []
-    for item in raw_items:
+    for item in reconciled_items:
         if not isinstance(item, dict):
             continue
         normalized = deepcopy(item)
@@ -984,27 +996,56 @@ def checkpoint_payload(context: ProjectContext) -> dict[str, Any]:
     pending = None
     if waiting_for_approval and active_checkpoint_id:
         pending = next(
-            (item for item in checkpoints if item.get("checkpoint_id") == active_checkpoint_id),
+            (
+                item
+                for item in checkpoints
+                if item.get("checkpoint_id") == active_checkpoint_id
+                and (
+                    not active_checkpoint_lineage_id
+                    or not str(item.get("lineage_id", "")).strip()
+                    or str(item.get("lineage_id", "")).strip() == active_checkpoint_lineage_id
+                )
+            ),
             None,
         )
     if pending is None and waiting_for_approval:
-        pending = next((item for item in checkpoints if item.get("status") == "awaiting_review"), None)
+        pending = next(
+            (
+                item
+                for item in checkpoints
+                if item.get("status") == "awaiting_review"
+                and (
+                    not active_checkpoint_lineage_id
+                    or not str(item.get("lineage_id", "")).strip()
+                    or str(item.get("lineage_id", "")).strip() == active_checkpoint_lineage_id
+                )
+            ),
+            None,
+        )
     return {
         "items": checkpoints,
         "pending": pending,
-        "timeline_markdown": preview_text(context.paths.checkpoint_timeline_file, default="No checkpoints recorded yet.\n"),
+        "current_checkpoint_id": active_checkpoint_id,
+        "current_checkpoint_lineage_id": active_checkpoint_lineage_id,
+        "timeline_markdown": checkpoint_timeline_markdown([Checkpoint.from_dict(item) for item in checkpoints]),
     }
 
 
 def pending_checkpoint_payload(context: ProjectContext) -> dict[str, Any] | None:
     raw = safe_json(context.paths.checkpoint_state_file, default={"checkpoints": []})
     raw_items = raw.get("checkpoints", []) if isinstance(raw, dict) else []
+    block_entries = read_jsonl_tail(context.paths.block_log_file, 240)
     waiting_for_approval = bool(context.loop_state.pending_checkpoint_approval)
     active_checkpoint_id = str(context.loop_state.current_checkpoint_id or "").strip()
+    active_checkpoint_lineage_id = str(context.loop_state.current_checkpoint_lineage_id or "").strip()
     if not waiting_for_approval:
         return None
+    reconciled_items, _ = reconcile_checkpoint_items_from_blocks(
+        raw_items if isinstance(raw_items, list) else [],
+        block_entries,
+    )
     checkpoints: list[dict[str, Any]] = []
-    for item in raw_items:
+    for item in reconciled_items:
         if isinstance(item, dict):
             normalized = deepcopy(item)
             normalized["deadline_at"] = str(normalized.get("deadline_at", "")).strip()
@@ -1012,11 +1053,32 @@ def pending_checkpoint_payload(context: ProjectContext) -> dict[str, Any] | None
     pending = None
     if active_checkpoint_id:
         pending = next(
-            (item for item in checkpoints if str(item.get("checkpoint_id", "")).strip() == active_checkpoint_id),
+            (
+                item
+                for item in checkpoints
+                if str(item.get("checkpoint_id", "")).strip() == active_checkpoint_id
+                and (
+                    not active_checkpoint_lineage_id
+                    or not str(item.get("lineage_id", "")).strip()
+                    or str(item.get("lineage_id", "")).strip() == active_checkpoint_lineage_id
+                )
+            ),
             None,
         )
     if pending is None:
-        pending = next((item for item in checkpoints if item.get("status") == "awaiting_review"), None)
+        pending = next(
+            (
+                item
+                for item in checkpoints
+                if item.get("status") == "awaiting_review"
+                and (
+                    not active_checkpoint_lineage_id
+                    or not str(item.get("lineage_id", "")).strip()
+                    or str(item.get("lineage_id", "")).strip() == active_checkpoint_lineage_id
+                )
+            ),
+            None,
+        )
     return pending
 
 
@@ -1102,6 +1164,7 @@ def bottom_panel_payload(
             "safe_revision": context.metadata.current_safe_revision,
             "last_commit_hash": context.loop_state.last_commit_hash,
             "current_checkpoint_id": context.loop_state.current_checkpoint_id,
+            "current_checkpoint_lineage_id": context.loop_state.current_checkpoint_lineage_id,
             "pending_checkpoint_approval": context.loop_state.pending_checkpoint_approval,
         },
     }

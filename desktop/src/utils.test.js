@@ -169,6 +169,7 @@ test("applyConfigRuntimeModelSelection keeps a concrete model while supporting a
   );
 
   assert.equal(nextRuntime.model, "gpt-5.4");
+  assert.equal(nextRuntime.execution_model, "gpt-5.4");
   assert.equal(nextRuntime.model_slug_input, "gpt-5.4");
   assert.equal(nextRuntime.effort_selection_mode, "auto");
   assert.equal(selectedConfigReasoning(modelCatalog, nextRuntime), "auto");
@@ -203,6 +204,7 @@ test("projectFormFromDetail preserves the project's saved model when selecting a
 
   assert.equal(form.runtime.model_provider, "openai");
   assert.equal(form.runtime.model, "gpt-5.4");
+  assert.equal(form.runtime.execution_model, "gpt-5.4");
   assert.equal(form.runtime.model_slug_input, "gpt-5.4");
   assert.equal(form.runtime.effort, "medium");
   assert.equal(form.runtime.planning_effort, "medium");
@@ -233,6 +235,7 @@ test("projectFormFromDetail does not replace a different saved project provider 
 
   assert.equal(form.runtime.model_provider, "claude");
   assert.equal(form.runtime.model, "claude-sonnet-4-6");
+  assert.equal(form.runtime.execution_model, "claude-sonnet-4-6");
   assert.equal(form.runtime.model_slug_input, "claude-sonnet-4-6");
   assert.equal(form.runtime.effort, "high");
   assert.equal(form.runtime.planning_effort, "high");
