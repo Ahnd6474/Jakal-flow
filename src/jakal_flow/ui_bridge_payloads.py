@@ -976,6 +976,14 @@ def checkpoint_payload(context: ProjectContext) -> dict[str, Any]:
     raw = safe_json(context.paths.checkpoint_state_file, default={"checkpoints": []})
     raw_items = raw.get("checkpoints", []) if isinstance(raw, dict) else []
     block_entries = read_jsonl_tail(context.paths.block_log_file, 240)
+    return checkpoint_payload_from_blocks(context, raw_items, block_entries)
+
+
+def checkpoint_payload_from_blocks(
+    context: ProjectContext,
+    raw_items: list[dict[str, Any]] | list[Any],
+    block_entries: list[dict[str, Any]],
+) -> dict[str, Any]:
     waiting_for_approval = bool(context.loop_state.pending_checkpoint_approval)
     active_checkpoint_id = str(context.loop_state.current_checkpoint_id or "").strip()
     active_checkpoint_lineage_id = str(context.loop_state.current_checkpoint_lineage_id or "").strip()
@@ -1102,7 +1110,7 @@ def config_payload_from_snapshot(context: ProjectContext, snapshot: DetailLogSna
 
 def _load_detail_log_snapshot(context: ProjectContext) -> DetailLogSnapshot:
     ui_events = read_jsonl_tail(context.paths.ui_event_log_file, 40)
-    blocks = read_jsonl_tail(context.paths.block_log_file, 20)
+    blocks = read_jsonl_tail(context.paths.block_log_file, 240)
     passes = read_jsonl_tail(context.paths.pass_log_file, 30)
     test_runs = read_jsonl_tail(context.paths.logs_dir / "test_runs.jsonl", 20)
     return DetailLogSnapshot(
@@ -1440,7 +1448,13 @@ def _build_project_detail_base_payload(
         recent_passes = _tail_slice(log_snapshot.passes, 12)
         reports = report_payload(project)
         history = history_payload_from_snapshot(project, log_snapshot)
-        checkpoints = checkpoint_payload(project)
+        checkpoint_state = safe_json(project.paths.checkpoint_state_file, default={"checkpoints": []})
+        checkpoint_items = checkpoint_state.get("checkpoints", []) if isinstance(checkpoint_state, dict) else []
+        checkpoints = checkpoint_payload_from_blocks(
+            project,
+            checkpoint_items if isinstance(checkpoint_items, list) else [],
+            log_snapshot.blocks,
+        )
         config = config_payload_from_snapshot(project, log_snapshot)
         chat = chat_payload(project, message_limit=120)
         workspace_tree = managed_workspace_tree(project)

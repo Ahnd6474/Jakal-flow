@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { commandLabel, formatCheckpointDisplayId, isActiveExecutionStatus, isDebuggingStatus, isPlanningProgressRunning, projectStatusWithJob, statusTone, toolbarProgressCaptionDisplay, visibleExecutionJob } from "../../utils";
+import { formatCheckpointDisplayId, isActiveExecutionStatus, isDebuggingStatus, isPlanningProgressRunning, projectStatusWithJob, statusTone, toolbarProgressCaptionDisplay, visibleExecutionJob } from "../../utils";
 
 function RefreshIcon() {
   return (
@@ -388,7 +388,7 @@ export const IdeToolbar = memo(function IdeToolbar({
     String(executionJob?.status || "").trim().toLowerCase() === "running"
     && !isDebuggingStatus(projectDetail?.project?.current_status || "")
     && normalizedProjectStatus !== "running:merging"
-      ? commandLabel(executionJob?.command, language)
+      ? displayStatus("running", language)
       : planningRunning && !isDebuggingStatus(projectDetail?.project?.current_status || "") && normalizedProjectStatus !== "running:merging"
         ? displayStatus("running:generate-plan", language)
         : displayStatus(projectStatus, language);
@@ -399,7 +399,9 @@ export const IdeToolbar = memo(function IdeToolbar({
   });
 
   const tone = statusTone(projectStatus);
-  const runActionDisabled = busy || isActiveExecutionStatus(projectStatus) || planningRunning;
+  const runActionRunning = isActiveExecutionStatus(projectStatus) || planningRunning;
+  const runActionDisabled = busy || runActionRunning;
+  const runActionLabel = runActionRunning ? displayStatus("running", language) : t("action.run");
   const repoPath = String(projectPath || "").trim();
   const remoteUrl = String(githubUrl || "").trim();
 
@@ -510,10 +512,10 @@ export const IdeToolbar = memo(function IdeToolbar({
           onClick={onRunPlan}
           type="button"
           disabled={runActionDisabled}
-          title={t("action.runRemaining")}
+          title={runActionLabel}
         >
           <RunIcon />
-          <span>{t("action.runRemaining")}</span>
+          <span>{runActionLabel}</span>
         </button>
 
         {pendingCheckpoint ? (

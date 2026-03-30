@@ -1717,7 +1717,7 @@ test("CenterWorkspace shows debugging badges in yellow while debugger recovery i
   assert.match(html, /execution-flow-chart__node--warning/);
 });
 
-test("IdeToolbar renders the active command and DAG-ready progress text", async () => {
+test("IdeToolbar renders the active execution state and DAG-ready progress text", async () => {
   const html = await renderBundledComponent(
     "ide-toolbar-render",
     "./src/components/layout/IdeToolbar.jsx",
@@ -1752,7 +1752,7 @@ test("IdeToolbar renders the active command and DAG-ready progress text", async 
     onApproveCheckpoint: noop,
   });
 
-  assert.match(html, /Run Remaining Steps/);
+  assert.match(html, /Running/);
   assert.match(html, /Completed 1\/4 steps, ready: ST2, ST3/);
   assert.match(html, /Program Settings/);
   assert.doesNotMatch(html, />Closeout<\/button>/);
@@ -2249,7 +2249,7 @@ test("IdeToolbar, StatusBar, and RunProgressPanel agree on the debugging label",
   assert.doesNotMatch(runProgressHtml, /Working on ST2/);
 });
 
-test("IdeToolbar disables Run Remaining Steps when the project status is already running", async () => {
+test("IdeToolbar labels the run button as Running while execution is active", async () => {
   const html = await renderBundledComponent(
     "ide-toolbar-run-disabled-while-running-render",
     "./src/components/layout/IdeToolbar.jsx",
@@ -2280,9 +2280,173 @@ test("IdeToolbar disables Run Remaining Steps when the project status is already
     },
   );
 
-  const runMatch = html.match(/<button[^>]*toolbar-btn toolbar-btn--accent[^>]*>(?:<[^>]+>|[^<])*<span>Run Remaining Steps<\/span><\/button>/);
-  assert.ok(runMatch, "Run Remaining Steps button should exist");
+  const runMatch = html.match(/<button[^>]*toolbar-btn toolbar-btn--accent[^>]*>(?:<[^>]+>|[^<])*<span>Running<\/span><\/button>/);
+  assert.ok(runMatch, "Running button should exist");
   assert.match(runMatch[0], /disabled=""/);
+});
+
+test("IdeToolbar shows Run when execution is idle", async () => {
+  const html = await renderBundledComponent(
+    "ide-toolbar-run-idle-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projectDetail: {
+        project: {
+          display_name: "Demo",
+          current_status: "plan_ready",
+        },
+      },
+      planDraft: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", status: "pending" },
+        ],
+      },
+      busy: false,
+      activeJob: null,
+      activeCenterTab: "run",
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onGeneratePlan: noop,
+      onRunPlan: noop,
+      onRunCloseout: noop,
+      onApproveCheckpoint: noop,
+    },
+  );
+
+  const runMatch = html.match(/<button[^>]*toolbar-btn toolbar-btn--accent[^>]*>(?:<[^>]+>|[^<])*<span>Run<\/span><\/button>/);
+  assert.ok(runMatch, "Run button should exist");
+  assert.doesNotMatch(runMatch[0], /disabled=""/);
+});
+
+test("IdeToolbar, StatusBar, and RunProgressPanel agree on the running label", async () => {
+  const sharedRuntime = {
+    model_provider: "openai",
+    model: "gpt-5.4",
+    model_slug_input: "gpt-5.4",
+    effort: "medium",
+    execution_model: "gpt-5.4",
+  };
+  const sharedPlan = {
+    execution_mode: "parallel",
+    closeout_status: "not_started",
+    steps: [
+      { step_id: "ST1", title: "Plan", status: "completed" },
+      { step_id: "ST2", title: "Build", status: "running" },
+      { step_id: "ST3", title: "Backend", status: "running" },
+    ],
+  };
+
+  const toolbarHtml = await renderBundledComponent(
+    "ide-toolbar-running-consistency-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projects: [
+        {
+          repo_id: "demo",
+          display_name: "Demo",
+          status: "running",
+        },
+      ],
+      selectedProjectId: "demo",
+      onSelectProject: noop,
+      onNewProject: noop,
+      projectDetail: {
+        project: {
+          display_name: "Demo",
+          branch: "main",
+          current_status: "running",
+        },
+        runtime: sharedRuntime,
+        plan: sharedPlan,
+      },
+      planDraft: sharedPlan,
+      pendingCheckpoint: null,
+      busy: false,
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+      activeCenterTab: "run",
+      projectPath: "C:/demo",
+      githubUrl: "",
+      shareUrl: "",
+      shareBusy: false,
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onGeneratePlan: noop,
+      onRunPlan: noop,
+      onApproveCheckpoint: noop,
+      onSmartShareLink: noop,
+      onOpenFolder: noop,
+      onOpenVsCode: noop,
+      onOpenGithub: noop,
+    },
+  );
+
+  const statusHtml = await renderBundledComponent(
+    "status-bar-running-consistency-render",
+    "./src/components/layout/StatusBar.jsx",
+    "StatusBar",
+    {
+      detail: {
+        project: {
+          branch: "main",
+          current_status: "running",
+        },
+        runtime: sharedRuntime,
+        runtime_insights: {
+          cost: {},
+        },
+      },
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+      queuedJobs: [],
+      modelPresets: [],
+      onToggleBottom: noop,
+      bottomCollapsed: true,
+    },
+  );
+
+  const runProgressHtml = await renderBundledComponent(
+    "run-progress-panel-running-consistency-render",
+    "./src/components/layout/RunProgressPanel.jsx",
+    "RunProgressPanel",
+    {
+      detail: {
+        project: {
+          current_status: "running",
+        },
+        runtime: sharedRuntime,
+        plan: sharedPlan,
+        runtime_insights: {
+          execution: {
+            remaining_seconds: 0,
+          },
+          cost: {},
+        },
+        activity: [
+          "2026-03-26T09:01:00Z | step-started [ST3] | Running ST3: Build the backend",
+        ],
+      },
+      planDraft: sharedPlan,
+      activeJob: {
+        status: "running",
+        command: "run-plan",
+      },
+    },
+  );
+
+  assert.match(toolbarHtml, /Running/);
+  assert.match(statusHtml, /Running/);
+  assert.match(runProgressHtml, /Running/);
+  assert.match(runProgressHtml, /Completed 1\/4 steps, running: ST2, ST3/);
+  assert.match(runProgressHtml, /Working on ST2 .+ Build, ST3 .+ Backend/);
 });
 
 test("AppSettingsView omits the removed subsection helper copy", async () => {

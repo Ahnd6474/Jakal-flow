@@ -9,8 +9,10 @@ import {
   failureReasonLabel,
   isDuplicateProjectJobError,
   jobHasNewerActiveReplacement,
+  mergeModelCatalogs,
   projectFormFromDetail,
   selectedConfigReasoning,
+  stepModelSelectionPatch,
 } from "./utils.js";
 
 test("jobHasNewerActiveReplacement detects a newer active job for the same project", () => {
@@ -147,6 +149,44 @@ test("defaultModelForRuntime skips auto catalog entries for openai providers", (
   ];
 
   assert.equal(defaultModelForRuntime(modelCatalog, { model_provider: "openai" }), "gpt-5.4");
+});
+
+test("mergeModelCatalogs preserves both global and detail model catalogs without duplicating entries", () => {
+  const merged = mergeModelCatalogs(
+    [
+      { id: "openai:gpt-5.4", model: "gpt-5.4", provider: "openai", display_name: "GPT-5.4" },
+      { id: "claude:claude-sonnet-4-6", model: "claude-sonnet-4-6", provider: "claude", display_name: "Claude Sonnet 4.6" },
+    ],
+    [
+      { id: "claude:claude-sonnet-4-6", model: "claude-sonnet-4-6", provider: "claude", display_name: "Claude Sonnet 4.6" },
+      { id: "gemini:gemini-3-flash-preview", model: "gemini-3-flash-preview", provider: "gemini", display_name: "Gemini 3 Flash Preview" },
+    ],
+  );
+
+  assert.equal(merged.length, 3);
+  assert.equal(merged[0].model, "gpt-5.4");
+  assert.equal(merged[1].model, "claude-sonnet-4-6");
+  assert.equal(merged[2].model, "gemini-3-flash-preview");
+});
+
+test("stepModelSelectionPatch clears overrides when returning to the execution model", () => {
+  const modelCatalog = [
+    { id: "openai:gpt-5.4", model: "gpt-5.4", provider: "openai", display_name: "GPT-5.4" },
+    { id: "claude:claude-sonnet-4-6", model: "claude-sonnet-4-6", provider: "claude", display_name: "Claude Sonnet 4.6" },
+  ];
+
+  assert.deepEqual(
+    stepModelSelectionPatch(modelCatalog, { execution_model: "gpt-5.4" }, ""),
+    { model_provider: "", model: "" },
+  );
+  assert.deepEqual(
+    stepModelSelectionPatch(modelCatalog, { execution_model: "gpt-5.4" }, "gpt-5.4"),
+    { model_provider: "", model: "" },
+  );
+  assert.deepEqual(
+    stepModelSelectionPatch(modelCatalog, { execution_model: "gpt-5.4" }, "claude-sonnet-4-6"),
+    { model_provider: "claude", model: "claude-sonnet-4-6" },
+  );
 });
 
 test("applyConfigRuntimeModelSelection keeps a concrete model while supporting auto reasoning", () => {

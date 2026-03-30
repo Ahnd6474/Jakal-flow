@@ -786,6 +786,52 @@ function normalizeModelCatalog(value, fallback = []) {
   return Array.isArray(value) ? value : fallback;
 }
 
+function modelCatalogEntryKey(item = {}) {
+  const provider = String(item?.provider || "").trim().toLowerCase();
+  const localProvider = String(item?.local_provider || "").trim().toLowerCase();
+  const model = String(item?.model || "").trim().toLowerCase();
+  const id = String(item?.id || "").trim().toLowerCase();
+  return [provider, localProvider, model, id].join("::");
+}
+
+export function mergeModelCatalogs(...catalogs) {
+  const merged = [];
+  const seen = new Set();
+  for (const catalog of catalogs) {
+    if (!Array.isArray(catalog)) {
+      continue;
+    }
+    for (const item of catalog) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const key = modelCatalogEntryKey(item);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+export function stepModelSelectionPatch(modelCatalog = [], runtime = {}, nextModel = "") {
+  const selection = String(nextModel || "").trim();
+  const executionModel = String(runtime?.execution_model || runtime?.model_slug_input || runtime?.model || "").trim().toLowerCase();
+  if (!selection || selection.toLowerCase() === executionModel) {
+    return {
+      model_provider: "",
+      model: "",
+    };
+  }
+  const entry = findModelCatalogEntry(modelCatalog, selection);
+  return {
+    model_provider: String(entry?.provider || "").trim().toLowerCase(),
+    model: selection,
+  };
+}
+
 export function mergeProjectDetailCodexStatus(detail, fallbackCodexStatus = null, fallbackModelCatalog = []) {
   if (!detail) {
     return detail;

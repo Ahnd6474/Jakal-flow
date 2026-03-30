@@ -2843,6 +2843,75 @@ class UIBridgeTests(unittest.TestCase):
             self.assertIn("Status: awaiting_review", payload["timeline_markdown"])
             self.assertIn("Lineage: LN-1", payload["timeline_markdown"])
 
+    def test_checkpoint_and_flowchart_payloads_share_block_log_lineage_state(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            context = build_test_project_context(temp_dir)
+            ui_bridge_payloads._SECTION_PAYLOAD_MEMORY_CACHE.clear()
+            context.loop_state.current_checkpoint_id = "CP1"
+            context.loop_state.current_checkpoint_lineage_id = "LN-1"
+            context.loop_state.pending_checkpoint_approval = True
+
+            plan = ExecutionPlanState(
+                execution_mode="parallel",
+                closeout_status="not_started",
+                steps=[
+                    ExecutionStep(
+                        step_id="ST1",
+                        title="Frontend",
+                        status="pending",
+                        metadata={"lineage_id": "LN-1"},
+                    )
+                ],
+            )
+            context.paths.execution_plan_file.write_text(
+                json.dumps(plan.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            context.paths.checkpoint_state_file.write_text(
+                json.dumps(
+                    {
+                        "checkpoints": [
+                            {
+                                "checkpoint_id": "CP1",
+                                "title": "Review me",
+                                "target_block": 1,
+                                "status": "pending",
+                                "lineage_id": "LN-1",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            context.paths.block_log_file.write_text(
+                json.dumps(
+                    {
+                        "block_index": 1,
+                        "lineage_id": "LN-1",
+                        "status": "completed",
+                        "selected_task": "Review me",
+                        "test_summary": "Checkpoint ready.",
+                        "commit_hashes": ["abc123"],
+                        "completed_at": "2026-03-29T10:00:00+00:00",
+                        "started_at": "2026-03-29T09:59:00+00:00",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            checkpoint_payload = ui_bridge_payloads.checkpoint_payload(context)
+            history_payload = ui_bridge_payloads.history_payload(context)
+
+            self.assertEqual(checkpoint_payload["items"][0]["status"], "awaiting_review")
+            self.assertEqual(checkpoint_payload["items"][0]["lineage_id"], "LN-1")
+            self.assertEqual(checkpoint_payload["pending"]["status"], "awaiting_review")
+            self.assertEqual(checkpoint_payload["current_checkpoint_lineage_id"], "LN-1")
+            self.assertIn("Status: awaiting_review", checkpoint_payload["timeline_markdown"])
+            self.assertIn("Lineage: LN-1", checkpoint_payload["timeline_markdown"])
+            self.assertIn("execution-flow-signature:", history_payload["flow_svg_text"])
+            self.assertIn(">completed<", history_payload["flow_svg_text"])
+
     def test_approve_checkpoint_respects_string_push_flag_and_clears_pending_checkpoint(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

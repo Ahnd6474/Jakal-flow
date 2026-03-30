@@ -14,9 +14,10 @@ import {
   KIMI_DEFAULT_MODEL,
   MINIMAX_DEFAULT_MODEL,
   defaultModelForRuntime,
-  findModelCatalogEntry,
   modelDisplayName,
+  mergeModelCatalogs,
   providerDisplayName,
+  stepModelSelectionPatch,
   planStepsWithCloseout,
   providerAvailable,
   providerUsable,
@@ -200,7 +201,7 @@ export function RunControlView({
     successCriteria: t("reports.closeoutReport"),
   });
   const selectedStep = steps.find((step) => step.step_id === selectedStepId) || null;
-  const modelCatalog = codexStatus?.model_catalog || detail?.codex_status?.model_catalog || [];
+  const modelCatalog = mergeModelCatalogs(codexStatus?.model_catalog || [], detail?.codex_status?.model_catalog || []);
   const runtimeInsights = detail?.runtime_insights || {};
   const executionEstimate = runtimeInsights?.execution || {};
   const costEstimate = runtimeInsights?.cost || {};
@@ -458,14 +459,7 @@ export function RunControlView({
                   value={selectedStepModel}
                   onChange={(event) => {
                     const nextModel = String(event.target.value || "").trim();
-                    if (!nextModel || nextModel.toLowerCase() === selectedStepExecutionModel) {
-                      onUpdateStepField("model_provider", "");
-                      onUpdateStepField("model", "");
-                      return;
-                    }
-                    const nextEntry = findModelCatalogEntry(modelCatalog, nextModel);
-                    onUpdateStepField("model_provider", String(nextEntry?.provider || "").trim().toLowerCase());
-                    onUpdateStepField("model", nextModel);
+                    onUpdateStepField(stepModelSelectionPatch(modelCatalog, detail?.runtime || {}, nextModel));
                   }}
                   disabled={!editableStep}
                 >

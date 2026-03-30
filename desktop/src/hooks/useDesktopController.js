@@ -1331,17 +1331,23 @@ export function useDesktopController() {
     if (!selectedStepId) {
       return;
     }
-    syncPlan({
-      ...planDraft,
-      steps: (planDraft.steps || []).map((step) =>
+    const patch = field && typeof field === "object" && value === undefined
+      ? field
+      : {
+          [field]: value,
+        };
+    setPlanDraft((current) => ({
+      ...(current || {}),
+      steps: (current?.steps || []).map((step) =>
         step.step_id === selectedStepId
           ? {
               ...step,
-              [field]: value,
+              ...patch,
             }
           : step,
       ),
-    });
+    }));
+    setPlanDirty(true);
   }
 
   async function chooseDirectory() {

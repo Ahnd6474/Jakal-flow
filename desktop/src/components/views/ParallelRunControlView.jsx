@@ -22,9 +22,10 @@ import {
   KIMI_DEFAULT_MODEL,
   MINIMAX_DEFAULT_MODEL,
   defaultModelForRuntime,
-  findModelCatalogEntry,
   modelDisplayName,
+  mergeModelCatalogs,
   providerDisplayName,
+  stepModelSelectionPatch,
   parallelLimitDescription,
   parallelLimitTone,
   parallelWorkerLabel,
@@ -509,7 +510,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
     () => steps.find((step) => step.step_id === selectedStepId) || null,
     [selectedStepId, steps],
   );
-  const modelCatalog = detail?.codex_status?.model_catalog || codexStatus?.model_catalog || [];
+  const modelCatalog = mergeModelCatalogs(codexStatus?.model_catalog || [], detail?.codex_status?.model_catalog || []);
   const runtimeInsights = detail?.runtime_insights || {};
   const executionEstimate = runtimeInsights?.execution || {};
   const costEstimate = runtimeInsights?.cost || {};
@@ -799,14 +800,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                   value={selectedStepModel}
                   onChange={(event) => {
                     const nextModel = String(event.target.value || "").trim();
-                    if (!nextModel || nextModel.toLowerCase() === selectedStepExecutionModel) {
-                      onUpdateStepField("model_provider", "");
-                      onUpdateStepField("model", "");
-                      return;
-                    }
-                    const nextEntry = findModelCatalogEntry(modelCatalog, nextModel);
-                    onUpdateStepField("model_provider", String(nextEntry?.provider || "").trim().toLowerCase());
-                    onUpdateStepField("model", nextModel);
+                    onUpdateStepField(stepModelSelectionPatch(modelCatalog, detail?.runtime || {}, nextModel));
                   }}
                   disabled={!editableStep}
                 >
