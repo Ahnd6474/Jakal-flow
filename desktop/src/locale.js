@@ -480,7 +480,6 @@ const STRINGS = {
     "status.runningWithDetail": "Running: {detail}",
     "status.setup_ready": "Setup ready",
     "status.unknown": "Unknown",
-    "tab.aiChat": "AI Chat",
     "tab.config": "Project Settings",
     "tab.dashboard": "Dashboard",
     "tab.flow": "Flow",
@@ -1093,8 +1092,6 @@ KO_HIGH_QUALITY_OVERRIDES["message.commandQueued"] = "{command} 작업을 대기
 KO_HIGH_QUALITY_OVERRIDES["message.commandCancelled"] = "{command} 예약을 취소했습니다.";
 KO_HIGH_QUALITY_OVERRIDES["status.queued"] = "대기열에 있음";
 KO_HIGH_QUALITY_OVERRIDES["status.queuedWithDetail"] = "대기열에 있음: {detail}";
-
-KO_HIGH_QUALITY_OVERRIDES["tab.aiChat"] = "AI Chat";
 
 const STATIC_LANGUAGE_PACKS = new Map(
   ["en", "ko"].map((language) => [

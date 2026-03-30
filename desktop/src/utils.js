@@ -199,163 +199,6 @@ export function isActiveExecutionStatus(status = "") {
     || normalized.startsWith("queued:");
 }
 
-function normalizedUiEventType(value = "") {
-  return String(value || "").trim().toLowerCase();
-}
-
-function normalizedUiEventStepIds(details = {}) {
-  const stepIds = Array.isArray(details?.step_ids) ? details.step_ids : [];
-  const singleStepId = String(details?.step_id || "").trim();
-  const normalized = stepIds
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-  if (singleStepId && !normalized.includes(singleStepId)) {
-    normalized.push(singleStepId);
-  }
-  return normalized;
-}
-
-function replayUiEventIntoPlan(plan = null, rawEvent = null) {
-  if (!plan || typeof plan !== "object" || !rawEvent || typeof rawEvent !== "object") {
-    return plan;
-  }
-  const eventType = normalizedUiEventType(rawEvent.event_type || rawEvent.eventType);
-  if (!eventType) {
-    return plan;
-  }
-  const details = rawEvent.details && typeof rawEvent.details === "object" ? rawEvent.details : {};
-  const stepIds = normalizedUiEventStepIds(details);
-  const detailStatuses = details?.statuses && typeof details.statuses === "object" ? details.statuses : null;
-  const executionMode = String(details?.execution_mode || plan?.execution_mode || "").trim().toLowerCase();
-  const isParallel = executionMode === "parallel";
-  const steps = Array.isArray(plan.steps) ? plan.steps : [];
-  let changed = false;
-  const nextSteps = steps.map((step) => {
-    if (!step || typeof step !== "object") {
-      return step;
-    }
-    const stepId = String(step.step_id || "").trim();
-    const stepStatus = String(step.status || "").trim().toLowerCase();
-    if (!stepId) {
-      return step;
-    }
-    if (eventType === "step-started") {
-      if (stepIds.includes(stepId)) {
-        changed = true;
-        return {
-          ...step,
-          status: "running",
-          started_at: String(step.started_at || "").trim() || rawEvent.timestamp || step.started_at,
-          notes: "",
-        };
-      }
-      if (!isParallel && stepStatus === "running") {
-        changed = true;
-        return {
-          ...step,
-          status: "paused",
-        };
-      }
-      return step;
-    }
-    if (eventType === "batch-started" && stepIds.includes(stepId)) {
-      changed = true;
-      return {
-        ...step,
-        status: "running",
-        started_at: String(step.started_at || "").trim() || rawEvent.timestamp || step.started_at,
-        notes: "",
-      };
-    }
-    if (eventType === "step-finished" && stepIds.includes(stepId)) {
-      const nextStatus = String(details?.status || step.status || "completed").trim() || "completed";
-      changed = true;
-      return {
-        ...step,
-        status: nextStatus,
-        completed_at: ["completed", "failed"].includes(nextStatus.toLowerCase())
-          ? (rawEvent.timestamp || step.completed_at)
-          : step.completed_at,
-        commit_hash: String(details?.commit_hash || "").trim() || step.commit_hash,
-      };
-    }
-    if (eventType === "batch-finished" && detailStatuses && Object.hasOwn(detailStatuses, stepId)) {
-      const nextStatus = String(detailStatuses[stepId] || step.status).trim() || step.status;
-      changed = true;
-      return {
-        ...step,
-        status: nextStatus,
-        completed_at: ["completed", "failed"].includes(nextStatus.toLowerCase())
-          ? (rawEvent.timestamp || step.completed_at)
-          : step.completed_at,
-      };
-    }
-    if (eventType === "run-paused" && ["running", "integrating"].includes(stepStatus)) {
-      changed = true;
-      return {
-        ...step,
-        status: "paused",
-      };
-    }
-    return step;
-  });
-
-  let nextCloseoutStatus = plan.closeout_status;
-  if (eventType === "closeout-started" && String(nextCloseoutStatus || "").trim().toLowerCase() !== "running") {
-    nextCloseoutStatus = "running";
-    changed = true;
-  }
-  if (eventType === "closeout-finished") {
-    const finalStatus = String(details?.status || "").trim();
-    if (finalStatus && finalStatus !== String(nextCloseoutStatus || "").trim()) {
-      nextCloseoutStatus = finalStatus;
-      changed = true;
-    }
-  }
-
-  if (!changed) {
-    return plan;
-  }
-  return {
-    ...plan,
-    steps: nextSteps,
-    closeout_status: nextCloseoutStatus,
-  };
-}
-
-export function resolveExecutionDisplayPlan(detail = null, planDraft = null, activeJob = null) {
-  const liveExecution =
-    isActiveExecutionStatus(activeJob?.status)
-    || isActiveExecutionStatus(detail?.project?.current_status);
-  const livePlan = detail?.plan && typeof detail.plan === "object" ? detail.plan : null;
-  const fallbackPlan = planDraft && typeof planDraft === "object" ? planDraft : {};
-  const basePlan = (liveExecution && livePlan) ? livePlan : fallbackPlan;
-  if (!liveExecution || !livePlan) {
-    return basePlan;
-  }
-
-  const hasActiveSteps = Array.isArray(basePlan?.steps)
-    && basePlan.steps.some((step) => ["running", "integrating"].includes(String(step?.status || "").trim().toLowerCase()));
-  if (hasActiveSteps) {
-    return basePlan;
-  }
-
-  const historyUiEvents = Array.isArray(detail?.history?.ui_events) ? detail.history.ui_events : [];
-  if (!historyUiEvents.length) {
-    return basePlan;
-  }
-
-  let patchedPlan = cloneValue(basePlan) || {};
-  historyUiEvents
-    .filter((entry) => entry && typeof entry === "object")
-    .slice()
-    .reverse()
-    .forEach((entry) => {
-      patchedPlan = replayUiEventIntoPlan(patchedPlan, entry);
-    });
-  return patchedPlan;
-}
-
 export function projectStatusWithJob(status = "", activeJob = null) {
   const job = visibleExecutionJob(activeJob);
   const currentStatus = String(status || "").trim();
@@ -397,7 +240,6 @@ export const PROGRAM_RUNTIME_KEYS = [
   "ensemble_claude_model",
   "model",
   "chat_model",
-  "chat_effort",
   "planning_effort",
   "model_preset",
   "model_selection_mode",
@@ -460,7 +302,6 @@ const DEFAULT_PROGRAM_RUNTIME = {
   ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
   model: "gpt-5.4",
   chat_model: "",
-  chat_effort: "",
   planning_effort: "medium",
   model_preset: "",
   model_selection_mode: "slug",
@@ -487,22 +328,20 @@ const DEFAULT_PROGRAM_UI = {
 };
 
 function normalizeProgramSettingsProviderSelection(settings = {}) {
-  const provider = normalizedModelProvider(settings);
-  const localProvider = normalizedLocalModelProvider(settings);
-  const normalized = applyProviderDefaults(settings, provider, localProvider);
+  const normalized = applyProviderDefaults(settings, "openai");
   return {
     ...normalized,
-    model_provider: provider,
-    local_model_provider: localProvider,
-    provider_base_url: String(normalized?.provider_base_url || defaultProviderBaseUrl(provider)).trim(),
-    provider_api_key_env: String(normalized?.provider_api_key_env || defaultProviderApiKeyEnv(provider)).trim(),
-    ensemble_openai_model: String(normalized?.ensemble_openai_model || "gpt-5.4").trim().toLowerCase() || "gpt-5.4",
-    ensemble_gemini_model: String(normalized?.ensemble_gemini_model || GEMINI_DEFAULT_MODEL).trim().toLowerCase() || GEMINI_DEFAULT_MODEL,
-    ensemble_claude_model: String(normalized?.ensemble_claude_model || CLAUDE_DEFAULT_MODEL).trim().toLowerCase() || CLAUDE_DEFAULT_MODEL,
-    model: String(normalized?.model || defaultModelForProvider(provider, normalized)).trim().toLowerCase(),
-    model_preset: String(normalized?.model_preset || "").trim().toLowerCase(),
-    model_selection_mode: String(normalized?.model_selection_mode || "slug").trim().toLowerCase() || "slug",
-    model_slug_input: String(normalized?.model_slug_input || normalized?.model || defaultModelForProvider(provider, normalized)).trim(),
+    model_provider: "openai",
+    local_model_provider: "ollama",
+    provider_base_url: defaultProviderBaseUrl("openai"),
+    provider_api_key_env: defaultProviderApiKeyEnv("openai"),
+    ensemble_openai_model: "gpt-5.4",
+    ensemble_gemini_model: GEMINI_DEFAULT_MODEL,
+    ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
+    model: "gpt-5.4",
+    model_preset: "",
+    model_selection_mode: "slug",
+    model_slug_input: "gpt-5.4",
   };
 }
 
