@@ -156,6 +156,55 @@ test("applyProjectUiEvent clears the live pending checkpoint when approval finis
   assert.equal(updated.checkpoints.items[1].status, "approved");
 });
 
+test("applyProjectUiEvent clears the live checkpoint pulse when execution sync returns idle", () => {
+  const updated = applyProjectUiEvent(
+    {
+      project: { repo_id: "repo-1", current_status: "running:parallel", last_run_at: "2026-03-30T00:00:00+00:00" },
+      loop_state: {
+        current_task: "Run ST2",
+        current_checkpoint_id: "CP2",
+        pending_checkpoint_approval: true,
+      },
+      checkpoints: {
+        items: [
+          { checkpoint_id: "CP1", status: "approved" },
+          { checkpoint_id: "CP2", status: "awaiting_review", title: "Review integration" },
+        ],
+        pending: { checkpoint_id: "CP2", status: "awaiting_review", title: "Review integration" },
+        timeline_markdown: "",
+      },
+      snapshot: {
+        project: { current_status: "running:parallel", last_run_at: "2026-03-30T00:00:00+00:00" },
+        loop_state: {
+          current_task: "Run ST2",
+          current_checkpoint_id: "CP2",
+          pending_checkpoint_approval: true,
+        },
+      },
+    },
+    sampleEvent("project-state-synced", {
+      payload: {
+        project_status: "ready",
+      },
+      event: {
+        details: {
+          current_task: "",
+          current_checkpoint_id: "",
+          pending_checkpoint_approval: false,
+          last_run_at: "2026-03-30T00:00:05+00:00",
+        },
+      },
+    }),
+  );
+
+  assert.equal(updated.project.current_status, "ready");
+  assert.equal(updated.loop_state.current_task, "");
+  assert.equal(updated.loop_state.current_checkpoint_id, "");
+  assert.equal(updated.loop_state.pending_checkpoint_approval, false);
+  assert.equal(updated.checkpoints.pending, null);
+  assert.equal(updated.checkpoints.items[1].status, "approved");
+});
+
 test("applyProjectUiEvent updates planning progress from planning events", () => {
   const updated = applyProjectUiEvent(
     {
@@ -222,7 +271,9 @@ test("applyProjectUiEvent patches running step state from run events", () => {
 
 test("shouldRefreshProjectDetailForUiEvent only reloads for structural run updates", () => {
   assert.equal(shouldRefreshProjectDetailForUiEvent(sampleEvent("step-started")), true);
+  assert.equal(shouldRefreshProjectDetailForUiEvent(sampleEvent("batch-started")), true);
   assert.equal(shouldRefreshProjectDetailForUiEvent(sampleEvent("step-finished")), true);
+  assert.equal(shouldRefreshProjectDetailForUiEvent(sampleEvent("closeout-started")), true);
   assert.equal(
     shouldRefreshProjectDetailForUiEvent(
       sampleEvent("planner-agent-started", {

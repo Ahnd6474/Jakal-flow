@@ -269,6 +269,43 @@ class UIBridgeTests(unittest.TestCase):
 
             self.assertEqual(events, [])
 
+    def test_workspace_save_project_emits_bridge_ui_event_when_execution_transitions_to_idle(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            project_dir = temp_dir / "repo"
+            workspace = WorkspaceManager(workspace_root)
+            context = workspace.initialize_local_project(project_dir, "main", runtime_from_payload({}), display_name="Demo")
+            context.metadata.current_status = "running:st1"
+            context.metadata.last_run_at = "2026-03-28T10:00:00+00:00"
+            context.loop_state.current_task = "Execute ST1"
+            context.loop_state.current_checkpoint_id = "CP2"
+            context.loop_state.pending_checkpoint_approval = True
+            workspace.save_project(context)
+
+            latest = workspace.load_project_by_id(context.metadata.repo_id)
+            latest.metadata.current_status = "ready"
+            latest.loop_state.current_task = ""
+            latest.loop_state.current_checkpoint_id = ""
+            latest.loop_state.pending_checkpoint_approval = False
+
+            events: list[tuple[str, dict]] = []
+
+            class Sink:
+                def emit(self, event: str, payload: dict | None = None) -> None:
+                    events.append((event, payload or {}))
+
+            with bridge_event_context(Sink()):
+                workspace.save_project(latest)
+
+            self.assertEqual(len(events), 1)
+            event_name, payload = events[0]
+            self.assertEqual(event_name, "project.ui_event")
+            self.assertEqual(payload["project_status"], "ready")
+            self.assertEqual(payload["event"]["event_type"], "project-state-synced")
+            self.assertEqual(payload["event"]["details"]["current_task"], "")
+            self.assertEqual(payload["event"]["details"]["current_checkpoint_id"], "")
+            self.assertFalse(payload["event"]["details"]["pending_checkpoint_approval"])
+
     def test_local_project_logs_are_written_under_repo_root_folder(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

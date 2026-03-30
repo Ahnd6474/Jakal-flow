@@ -8,7 +8,9 @@ const DEFAULT_PLANNING_STAGE_LABELS = Object.freeze({
 const REFRESH_EVENT_TYPES = new Set([
   "step-started",
   "step-finished",
+  "batch-started",
   "batch-finished",
+  "closeout-started",
   "closeout-finished",
   "run-paused",
   "ml-cycle-stopped",

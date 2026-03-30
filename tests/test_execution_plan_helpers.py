@@ -116,7 +116,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(run_calls.count(["config", "user.email", "jakal@example.com"]), 1)
         self.assertEqual(run_calls.count(["rev-parse", "HEAD"]), 1)
 
-    def test_git_ops_uses_feature_specific_timeouts(self) -> None:
+    def test_git_ops_uses_uniform_git_timeouts(self) -> None:
         git = GitOps()
         repo_dir = Path(__file__).resolve().parents[1]
         observed_timeouts: list[tuple[list[str], float | None]] = []
@@ -128,17 +128,19 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         with mock.patch("jakal_flow.git_ops.run_subprocess", side_effect=fake_run_subprocess):
             git.run(["branch", "--show-current"], cwd=repo_dir, check=False)
+            git.run(["rev-parse", "--verify", "HEAD"], cwd=repo_dir, check=False)
             git.run(["status", "--porcelain"], cwd=repo_dir, check=False)
             git.run(["fetch", "origin", "main"], cwd=repo_dir, check=False)
             git.run(["cherry-pick", "abc123"], cwd=repo_dir, check=False)
             git.run(["clone", "--branch", "main", "demo", "target"], cwd=repo_dir, check=False)
 
         timeout_map = {tuple(args[:2] if len(args) > 1 else args): timeout for args, timeout in observed_timeouts}
-        self.assertEqual(timeout_map[("branch", "--show-current")], 10.0)
+        self.assertEqual(timeout_map[("branch", "--show-current")], 30.0)
+        self.assertEqual(timeout_map[("rev-parse", "--verify")], 30.0)
         self.assertEqual(timeout_map[("status", "--porcelain")], 30.0)
-        self.assertEqual(timeout_map[("fetch", "origin")], 180.0)
-        self.assertEqual(timeout_map[("cherry-pick", "abc123")], 180.0)
-        self.assertEqual(timeout_map[("clone", "--branch")], 300.0)
+        self.assertEqual(timeout_map[("fetch", "origin")], 30.0)
+        self.assertEqual(timeout_map[("cherry-pick", "abc123")], 30.0)
+        self.assertEqual(timeout_map[("clone", "--branch")], 30.0)
 
     def test_verification_runner_uses_explicit_state_fingerprint(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_verification_state_fingerprint_test"

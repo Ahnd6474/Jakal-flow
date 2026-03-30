@@ -46,6 +46,7 @@ _REPO_INPUTS_CACHE_VERSION = 2
 _PROMPT_BUNDLE_CACHE_VERSION = 1
 _REPO_INPUTS_MEMORY_CACHE: dict[str, tuple[str, dict[str, str], dict[str, Any]]] = {}
 _PROMPT_BUNDLE_MEMORY_CACHE: dict[str, tuple[str, dict[str, str]]] = {}
+PLANNING_GIT_TIMEOUT_SECONDS = 30.0
 
 
 def source_docs_dir() -> Path:
@@ -152,7 +153,7 @@ def _git_relative_paths(repo_dir: Path, pathspecs: list[str]) -> list[str] | Non
             encoding="utf-8",
             errors="replace",
             check=False,
-            timeout_seconds=2.0,
+            timeout_seconds=PLANNING_GIT_TIMEOUT_SECONDS,
         )
     except (OSError, SubprocessTimeoutError):
         return None
@@ -181,7 +182,7 @@ def _git_status_signature(repo_dir: Path) -> str:
             encoding="utf-8",
             errors="replace",
             check=False,
-            timeout_seconds=2.0,
+            timeout_seconds=PLANNING_GIT_TIMEOUT_SECONDS,
         )
     except (OSError, RuntimeError):
         return "git-status-error"

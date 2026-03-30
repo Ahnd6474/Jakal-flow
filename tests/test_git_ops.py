@@ -6,15 +6,25 @@ import tempfile
 import unittest
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from jakal_flow.errors import SubprocessTimeoutError
 from jakal_flow.git_ops import GitCommandError, GitOps
 from jakal_flow.models import CommandResult
 
 
 class GitOpsTests(unittest.TestCase):
+    def test_safe_directory_args_only_include_the_worktree_root(self) -> None:
+        git = GitOps()
+        repo_dir = Path(__file__).resolve().parents[1] / "nested" / "repo"
+
+        args = git._safe_directory_args(repo_dir)
+
+        self.assertEqual(args, ["-c", f"safe.directory={repo_dir.resolve().as_posix()}"])
+
     def _create_repo_with_merge_blocker(
         self,
         tracked_contents: str,
@@ -128,6 +138,46 @@ class GitOpsTests(unittest.TestCase):
                 },
             ),
         )
+
+    def test_current_branch_falls_back_when_show_current_times_out(self) -> None:
+        repo_dir = Path(__file__).resolve().parents[1]
+        git = GitOps()
+
+        def fake_run(
+            args: list[str],
+            cwd: Path,
+            check: bool = True,
+            env: dict[str, str] | None = None,
+        ) -> CommandResult:
+            if args == ["branch", "--show-current"]:
+                raise SubprocessTimeoutError("Command timed out after 30.0 seconds: git branch --show-current")
+            if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="main\n", stderr="")
+            raise AssertionError(f"Unexpected git command: {args}")
+
+        with mock.patch.object(git, "run", side_effect=fake_run):
+            branch = git.current_branch(repo_dir)
+
+        self.assertEqual(branch, "main")
+
+    def test_has_commits_retries_rev_parse_timeout_once(self) -> None:
+        repo_dir = Path(__file__).resolve().parents[1]
+        git = GitOps()
+        observed_timeouts: list[float | None] = []
+
+        def fake_run_subprocess(command, cwd, capture_output, check, env, timeout_seconds):
+            observed_timeouts.append(timeout_seconds)
+            if len(observed_timeouts) == 1:
+                raise SubprocessTimeoutError(
+                    "Command timed out after 30.0 seconds: git -c safe.directory=repo rev-parse --verify HEAD"
+                )
+            return SimpleNamespace(returncode=0, stdout=b"abc123\n", stderr=b"")
+
+        with mock.patch("jakal_flow.git_ops.run_subprocess", side_effect=fake_run_subprocess):
+            has_commits = git.has_commits(repo_dir)
+
+        self.assertTrue(has_commits)
+        self.assertEqual(observed_timeouts, [30.0, 30.0])
 
     def test_merge_ff_only_retries_when_identical_untracked_file_blocks_merge(self) -> None:
         git, temp_dir, repo_dir = self._create_repo_with_merge_blocker(

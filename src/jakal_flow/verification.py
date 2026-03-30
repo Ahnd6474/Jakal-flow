@@ -28,7 +28,7 @@ RELEVANT_ENV_FILES = (
     "Gemfile.lock",
     "composer.lock",
 )
-GIT_FINGERPRINT_TIMEOUT_SECONDS = 20.0
+GIT_FINGERPRINT_TIMEOUT_SECONDS = 30.0
 IGNORED_RUNTIME_PATH_PARTS = frozenset(
     {
         ".git",

@@ -4,6 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from .errors import SubprocessTimeoutError
 from .models import CommandResult
 from .subprocess_utils import run_subprocess
 from .utils import decode_process_output, remove_tree
@@ -15,13 +16,15 @@ class GitCommandError(RuntimeError):
 
 UNTRACKED_OVERWRITE_MARKER = "The following untracked working tree files would be overwritten by merge:"
 MISSING_REGISTERED_WORKTREE_MARKER = "is a missing but already registered worktree"
-GIT_QUERY_TIMEOUT_SECONDS = 10.0
+GIT_QUERY_TIMEOUT_SECONDS = 30.0
+GIT_REV_PARSE_TIMEOUT_SECONDS = 30.0
+GIT_REV_PARSE_RETRY_TIMEOUT_SECONDS = 30.0
 GIT_STATUS_TIMEOUT_SECONDS = 30.0
-GIT_LOCAL_MUTATION_TIMEOUT_SECONDS = 90.0
-GIT_MERGE_TIMEOUT_SECONDS = 180.0
-GIT_NETWORK_TIMEOUT_SECONDS = 180.0
-GIT_CLONE_TIMEOUT_SECONDS = 300.0
-GIT_WORKTREE_TIMEOUT_SECONDS = 180.0
+GIT_LOCAL_MUTATION_TIMEOUT_SECONDS = 30.0
+GIT_MERGE_TIMEOUT_SECONDS = 30.0
+GIT_NETWORK_TIMEOUT_SECONDS = 30.0
+GIT_CLONE_TIMEOUT_SECONDS = 30.0
+GIT_WORKTREE_TIMEOUT_SECONDS = 30.0
 
 
 class GitOps:
@@ -85,15 +88,11 @@ class GitOps:
 
     def _safe_directory_args(self, cwd: Path) -> list[str]:
         resolved = cwd.resolve()
-        args: list[str] = []
-        seen: set[str] = set()
-        for candidate in (resolved, *resolved.parents):
-            normalized = candidate.as_posix()
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            args.extend(["-c", f"safe.directory={normalized}"])
-        return args
+        normalized = resolved.as_posix()
+        # Git only needs the actual working tree path trusted here. Expanding all
+        # ancestors to the drive root produces very long commands and has caused
+        # avoidable timeout pressure on Windows/OneDrive repos.
+        return ["-c", f"safe.directory={normalized}"]
 
     def _commit_env(self, author_name: str | None = None) -> dict[str, str] | None:
         normalized = str(author_name or "").strip()
@@ -117,14 +116,28 @@ class GitOps:
         if env:
             process_env = os.environ.copy()
             process_env.update(env)
-        completed = run_subprocess(
-            command,
-            cwd=cwd,
-            capture_output=True,
-            check=False,
-            env=process_env,
-            timeout_seconds=self._timeout_seconds_for_args(args, timeout_seconds),
-        )
+        effective_timeout = self._timeout_seconds_for_args(args, timeout_seconds)
+        try:
+            completed = run_subprocess(
+                command,
+                cwd=cwd,
+                capture_output=True,
+                check=False,
+                env=process_env,
+                timeout_seconds=effective_timeout,
+            )
+        except SubprocessTimeoutError:
+            retry_timeout = self._retry_timeout_seconds_for_args(args, timeout_seconds)
+            if retry_timeout is None:
+                raise
+            completed = run_subprocess(
+                command,
+                cwd=cwd,
+                capture_output=True,
+                check=False,
+                env=process_env,
+                timeout_seconds=retry_timeout,
+            )
         stdout = decode_process_output(completed.stdout)
         stderr = self._filter_benign_stderr(decode_process_output(completed.stderr))
         result = CommandResult(
@@ -149,6 +162,8 @@ class GitOps:
         primary = str(args[0]).strip().lower()
         secondary = str(args[1]).strip().lower() if len(args) > 1 else ""
         prefix = (primary, secondary) if secondary else (primary,)
+        if primary == "rev-parse":
+            return GIT_REV_PARSE_TIMEOUT_SECONDS
         if prefix in self._STATUS_COMMANDS:
             return GIT_STATUS_TIMEOUT_SECONDS
         if prefix in self._FAST_QUERY_COMMANDS or (primary,) in self._FAST_QUERY_COMMANDS:
@@ -162,6 +177,14 @@ class GitOps:
         if primary in self._MERGE_COMMANDS:
             return GIT_MERGE_TIMEOUT_SECONDS
         return GIT_LOCAL_MUTATION_TIMEOUT_SECONDS
+
+    def _retry_timeout_seconds_for_args(self, args: list[str], override: float | None = None) -> float | None:
+        if override is not None or not args:
+            return None
+        primary = str(args[0]).strip().lower()
+        if primary == "rev-parse":
+            return GIT_REV_PARSE_RETRY_TIMEOUT_SECONDS
+        return None
 
     def _filter_benign_stderr(self, stderr: str) -> str:
         filtered_lines = [
@@ -226,10 +249,13 @@ class GitOps:
         return result.returncode == 0
 
     def current_branch(self, repo_dir: Path) -> str:
-        result = self.run(["branch", "--show-current"], cwd=repo_dir, check=False)
-        branch = result.stdout.strip()
-        if branch:
-            return branch
+        try:
+            result = self.run(["branch", "--show-current"], cwd=repo_dir, check=False)
+            branch = result.stdout.strip()
+            if branch:
+                return branch
+        except SubprocessTimeoutError:
+            pass
         fallback = self.run(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_dir, check=False).stdout.strip()
         return "" if fallback == "HEAD" else fallback
 

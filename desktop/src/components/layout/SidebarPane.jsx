@@ -675,6 +675,14 @@ function ChatPanel({
 function CheckpointsPanel({ checkpoints, visibleCheckpoints, language, t }) {
   const [expandedIds, setExpandedIds] = useState(new Set());
 
+  function displayCheckpointId(checkpointId) {
+    const rawId = String(checkpointId || "").trim();
+    if (!rawId) {
+      return "";
+    }
+    return rawId.replace(/^cp/i, (prefix) => (prefix === prefix.toUpperCase() ? "ST" : "st"));
+  }
+
   useEffect(() => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
@@ -740,7 +748,7 @@ function CheckpointsPanel({ checkpoints, visibleCheckpoints, language, t }) {
                     <span className="sidebar-checkpoint-row__arrow" aria-hidden="true">
                       {hasDetails ? (isExpanded ? "▾" : "▸") : "·"}
                     </span>
-                    <strong className="sidebar-checkpoint-row__id">{checkpoint.checkpoint_id}</strong>
+                    <strong className="sidebar-checkpoint-row__id">{displayCheckpointId(checkpoint.checkpoint_id)}</strong>
                     <span className={`status-badge status-badge--${tone} ${isPendingCheckpoint ? "status-badge--pulse" : ""}`.trim()}>
                       {displayStatus(checkpoint.status, language)}
                     </span>
@@ -786,6 +794,21 @@ function FlowStepsPanel({
   language,
   t,
 }) {
+  void steps;
+  void selectedStepId;
+  void onSelectStep;
+  void projectStatus;
+
+  return (
+    <CheckpointsPanel
+      checkpoints={checkpoints}
+      visibleCheckpoints={visibleCheckpoints}
+      language={language}
+      t={t}
+    />
+  );
+
+  /*
   return (
     <>
       <div className="sidebar-panel__header">
@@ -846,6 +869,7 @@ function FlowStepsPanel({
       ) : null}
     </>
   );
+  */
 }
 
 /* ── Main SidebarPane ── */

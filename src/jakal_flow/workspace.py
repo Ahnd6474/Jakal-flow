@@ -448,17 +448,40 @@ class WorkspaceManager:
             "display_name": str(context.metadata.display_name or context.metadata.slug),
         }
 
-    def _should_emit_project_state_sync(self, context: ProjectContext) -> bool:
-        status = str(context.metadata.current_status or "").strip().lower()
-        current_task = str(context.loop_state.current_task or "").strip()
+    @staticmethod
+    def _project_state_sync_fields(context: ProjectContext) -> tuple[str, str, str, bool, str]:
         return (
-            status.startswith("running:")
-            or bool(current_task)
-            or bool(context.loop_state.pending_checkpoint_approval)
+            str(context.metadata.current_status or "").strip(),
+            str(context.loop_state.current_task or "").strip(),
+            str(context.loop_state.current_checkpoint_id or "").strip(),
+            bool(context.loop_state.pending_checkpoint_approval),
+            str(context.metadata.last_run_at or "").strip(),
         )
 
-    def _emit_project_state_sync(self, context: ProjectContext) -> None:
-        if not self._should_emit_project_state_sync(context):
+    @classmethod
+    def _project_state_sync_active(cls, context: ProjectContext) -> bool:
+        status, current_task, _checkpoint_id, pending_checkpoint_approval, _last_run_at = cls._project_state_sync_fields(
+            context
+        )
+        return status.lower().startswith("running:") or bool(current_task) or pending_checkpoint_approval
+
+    def _should_emit_project_state_sync(
+        self,
+        context: ProjectContext,
+        previous_context: ProjectContext | None = None,
+    ) -> bool:
+        if self._project_state_sync_active(context):
+            return True
+        if previous_context is None or not self._project_state_sync_active(previous_context):
+            return False
+        return self._project_state_sync_fields(previous_context) != self._project_state_sync_fields(context)
+
+    def _emit_project_state_sync(
+        self,
+        context: ProjectContext,
+        previous_context: ProjectContext | None = None,
+    ) -> None:
+        if not self._should_emit_project_state_sync(context, previous_context):
             return
         emit_bridge_event(
             "project.ui_event",
@@ -481,17 +504,23 @@ class WorkspaceManager:
         )
 
     def save_project(self, context: ProjectContext) -> None:
+        previous_context: ProjectContext | None = None
+        try:
+            if context.paths.metadata_file.exists() and context.paths.loop_state_file.exists():
+                previous_context = self.load_project_from_root(context.paths.project_root)
+        except FileNotFoundError:
+            previous_context = None
         self._write_project_files(context)
         registry = self._read_registry()
         if context.metadata.archived and context.metadata.archive_id:
             registry["history"][context.metadata.archive_id] = self._history_registry_item(context)
             self._write_registry(registry)
-            self._emit_project_state_sync(context)
+            self._emit_project_state_sync(context, previous_context)
             return
         if context.metadata.repo_id in registry["projects"]:
             registry["projects"][context.metadata.repo_id] = self._active_registry_item(context)
             self._write_registry(registry)
-        self._emit_project_state_sync(context)
+        self._emit_project_state_sync(context, previous_context)
 
     def load_project_by_id(self, repo_id: str) -> ProjectContext:
         registry = self._read_registry()
