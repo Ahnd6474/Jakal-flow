@@ -82,6 +82,31 @@ export function isDuplicateProjectJobError(error = null) {
   return String(error || "").trim().toLowerCase().includes("already active for this project");
 }
 
+export function normalizedChatMode(mode = "") {
+  const normalized = String(mode || "").trim().toLowerCase();
+  return ["conversation", "review", "debugger", "merger"].includes(normalized) ? normalized : "conversation";
+}
+
+export function jobLaneForRequest(command = "", payload = null) {
+  const normalizedCommand = String(command || "").trim().toLowerCase();
+  if (normalizedCommand === "send-chat-message" && ["conversation", "review"].includes(normalizedChatMode(payload?.chat_mode))) {
+    return "chat";
+  }
+  return "execution";
+}
+
+export function jobLane(job = null) {
+  const explicitLane = String(job?.job_lane || "").trim().toLowerCase();
+  if (explicitLane === "chat" || explicitLane === "execution") {
+    return explicitLane;
+  }
+  return jobLaneForRequest(job?.command, job);
+}
+
+export function isChatJob(job = null) {
+  return jobLane(job) === "chat";
+}
+
 export function jobMatchesProject(job = null, project = {}) {
   if (!job || !project) {
     return false;
@@ -102,7 +127,7 @@ export function projectJobFromJobs(jobs = [], project = {}) {
     running: 0,
     queued: 1,
   };
-  const matches = jobItems.filter((job) => jobMatchesProject(job, project));
+  const matches = jobItems.filter((job) => jobMatchesProject(job, project) && !isChatJob(job));
   if (!matches.length) {
     return null;
   }
@@ -120,12 +145,32 @@ export function projectJobFromJobs(jobs = [], project = {}) {
   })[0] || null;
 }
 
+export function projectChatJobFromJobs(jobs = [], project = {}) {
+  const jobItems = Array.isArray(jobs) ? jobs.filter(Boolean) : [];
+  const statusRank = {
+    running: 0,
+    queued: 1,
+  };
+  const matches = jobItems.filter((job) => jobMatchesProject(job, project) && isChatJob(job));
+  if (!matches.length) {
+    return null;
+  }
+  return [...matches].sort((left, right) => {
+    const leftRank = statusRank[String(left?.status || "").trim().toLowerCase()] ?? 9;
+    const rightRank = statusRank[String(right?.status || "").trim().toLowerCase()] ?? 9;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+    return (Number(right?.updated_at_ms || 0) || 0) - (Number(left?.updated_at_ms || 0) || 0);
+  })[0] || null;
+}
+
 export function jobHasNewerActiveReplacement(job = null, jobs = []) {
   const targetJobId = String(job?.id || "").trim();
   if (!targetJobId) {
     return false;
   }
-  const replacement = projectJobFromJobs(jobs, {
+  const replacement = (isChatJob(job) ? projectChatJobFromJobs : projectJobFromJobs)(jobs, {
     repo_id: job?.repo_id,
     project_dir: job?.project_dir,
   });
@@ -140,7 +185,7 @@ export function isChatCommand(command = "") {
 }
 
 export function visibleExecutionJob(job = null) {
-  if (!job || isChatCommand(job?.command)) {
+  if (!job || isChatJob(job)) {
     return null;
   }
   return job;
@@ -514,6 +559,24 @@ export function basename(path) {
     .pop() || "";
 }
 
+export function formatChatSessionTitle(title = "", fallback = "Conversation") {
+  const rawTitle = String(title || "").trim();
+  if (!rawTitle) {
+    return fallback;
+  }
+  const withoutExtension = rawTitle.replace(/\.txt$/i, "").trim();
+  const withoutTimestamp = withoutExtension.replace(/(?:\s+|[_-])\d{10,20}$/, "").trim();
+  return withoutTimestamp || withoutExtension || fallback;
+}
+
+export function formatCheckpointDisplayId(checkpointId = "") {
+  const normalized = String(checkpointId || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return normalized.replace(/^CP/i, "ST");
+}
+
 export function deriveGithubMode(originUrl) {
   return originUrl ? "manual" : "existing";
 }
@@ -816,24 +879,25 @@ export function blankProjectForm(defaultRuntime) {
 }
 
 export function projectFormFromDetail(detail, defaultRuntime) {
+  const mergedRuntime = {
+    ...(cloneValue(defaultRuntime) || {}),
+    ...(cloneValue(detail?.runtime) || {}),
+    execution_mode: "parallel",
+    allow_background_queue:
+      detail?.runtime?.allow_background_queue ?? defaultRuntime?.allow_background_queue ?? true,
+    background_queue_priority:
+      Number.parseInt(
+        String(detail?.runtime?.background_queue_priority ?? defaultRuntime?.background_queue_priority ?? 0),
+        10,
+      ) || 0,
+  };
   return {
     project_dir: detail?.project?.repo_path || "",
     display_name: detail?.project?.display_name || detail?.project?.slug || "",
     branch: detail?.project?.branch || "main",
     origin_url: detail?.project?.origin_url || "",
     github_mode: deriveGithubMode(detail?.project?.origin_url),
-    runtime: {
-      ...(cloneValue(defaultRuntime) || {}),
-      ...(cloneValue(detail?.runtime) || {}),
-      execution_mode: "parallel",
-      allow_background_queue:
-        detail?.runtime?.allow_background_queue ?? defaultRuntime?.allow_background_queue ?? true,
-      background_queue_priority:
-        Number.parseInt(
-          String(detail?.runtime?.background_queue_priority ?? defaultRuntime?.background_queue_priority ?? 0),
-          10,
-        ) || 0,
-    },
+    runtime: mergedRuntime,
   };
 }
 

@@ -40,6 +40,8 @@ class BridgeJobSnapshot:
     id: str
     command: str
     status: str
+    job_lane: str = "execution"
+    chat_mode: str = ""
     error: str | None = None
     result: dict[str, Any] | None = None
     updated_at_ms: int = 0

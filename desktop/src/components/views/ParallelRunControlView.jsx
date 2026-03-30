@@ -513,6 +513,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
   const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
   const selectedStepFailureReason = failureReasonLabel(selectedStep, language);
   const selectedStepFailureCode = failureReasonCode(selectedStep);
+  const stepNoteLabel = "Step note";
   const closeoutStatus = String(livePlan?.closeout_status || "not_started").trim().toLowerCase();
   const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
   const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
@@ -712,7 +713,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                   {selectedStepFailureCode ? <small className="field-hint"><code>{selectedStepFailureCode}</code></small> : null}
                 </div>
               ) : null}
-              {selectedStep.notes ? <div className="field field--wide"><span>{t("common.status")}</span><p>{selectedStep.notes}</p></div> : null}
+              {selectedStep.notes ? <div className="field field--wide"><span>{stepNoteLabel}</span><p>{selectedStep.notes}</p></div> : null}
               {selectedStep.step_id === CLOSEOUT_STEP_ID ? (
                 <div className="field field--wide">
                   <span>{language === "ko" ? "보고서 형식" : "Report Formats"}</span>
@@ -781,7 +782,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                   {selectedStepFailureCode ? <small className="field-hint"><code>{selectedStepFailureCode}</code></small> : null}
                 </div>
               ) : null}
-              {selectedStep.notes ? <div className="field field--wide"><span>{t("common.status")}</span><p>{selectedStep.notes}</p></div> : null}
+              {selectedStep.notes ? <div className="field field--wide"><span>{stepNoteLabel}</span><p>{selectedStep.notes}</p></div> : null}
 
               <div className="action-row field--wide" style={{ paddingTop: "6px", borderTop: "1px solid var(--border)" }}>
                 <button className="toolbar-btn toolbar-btn--accent" onClick={onSaveStepLocal} type="button" disabled={busy}><SaveIcon /><span>{t("action.saveLocal")}</span></button>

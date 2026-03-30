@@ -38,16 +38,15 @@ import {
   buildRunPlanPayloadFromDetail,
   cloneValue,
   commandLabel,
-  filterModelCatalogByProvider,
   inheritProjectIdentityForm,
   isActiveExecutionStatus,
+  isChatJob,
   isDuplicateProjectJobError,
-  isChatCommand,
   isPlanningProgressRunning,
+  jobLaneForRequest,
   jobHasNewerActiveReplacement,
-  normalizedLocalModelProvider,
-  normalizedModelProvider,
   planDependencyValidationMessage,
+  projectChatJobFromJobs,
   projectJobFromJobs,
   programSettingsEqual,
   programSettingsFromRuntime,
@@ -176,15 +175,21 @@ export function useDesktopController() {
   );
   const activeJob = useMemo(() => visibleExecutionJob(projectJob), [projectJob]);
   const chatJob = useMemo(
-    () => (isChatCommand(projectJob?.command) ? projectJob : null),
-    [projectJob],
+    () =>
+      projectChatJobFromJobs(jobs, {
+        repo_id: selectedProjectId,
+        project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
+        current_status: projectDetail?.project?.current_status || "",
+        last_run_at: projectDetail?.project?.last_run_at || "",
+      }),
+    [jobs, projectDetail?.project?.current_status, projectDetail?.project?.last_run_at, projectDetail?.project?.repo_path, projectForm?.project_dir, selectedProjectId],
   );
   const stoppableJob = activeJob || chatJob || null;
   const activeJobId = activeJob?.id || "";
   const queuedJobs = useMemo(
     () =>
       [...jobs]
-        .filter((job) => String(job?.status || "").trim().toLowerCase() === "queued" && !isChatCommand(job?.command))
+        .filter((job) => String(job?.status || "").trim().toLowerCase() === "queued" && !isChatJob(job))
         .sort((left, right) => {
           const leftPosition = Number.parseInt(String(left?.queue_position || 0), 10) || Number.MAX_SAFE_INTEGER;
           const rightPosition = Number.parseInt(String(right?.queue_position || 0), 10) || Number.MAX_SAFE_INTEGER;
@@ -196,7 +201,7 @@ export function useDesktopController() {
     [jobs],
   );
 
-  const busy = Boolean(pendingAction || startingJobCount > 0 || ["queued", "running"].includes(String(projectJob?.status || "").trim().toLowerCase()));
+  const busy = Boolean(pendingAction || startingJobCount > 0 || ["queued", "running"].includes(String(activeJob?.status || "").trim().toLowerCase()));
   const canRequestStop = String(stoppableJob?.status || "").trim().toLowerCase() === "running";
   const canCancelReservation = String(activeJob?.status || "").trim().toLowerCase() === "queued";
   const shareBusy = pendingAction === "create_share_session" || pendingAction === "revoke_share_session";
@@ -576,7 +581,12 @@ export function useDesktopController() {
         setHistoryProjects((current) => reuseProjectListingItems(current, listing?.history || []));
         projectsRef.current = nextProjects;
         if (!nextProjects.some((item) => item.repo_id === selectedProjectId)) {
-          setSelectedProjectId(nextProjects[0]?.repo_id || "");
+          const nextProjectId = nextProjects[0]?.repo_id || "";
+          if (nextProjectId) {
+            setSelectedProjectId(nextProjectId);
+          } else {
+            clearSelectedProjectState(applyProgramSettings(bootstrap.default_runtime, nextProgramSettings), { preserveProjectIdentity: false });
+          }
         }
         if (!selectedHistoryId && (listing?.history || []).length) {
           setSelectedHistoryId(listing.history[0].archive_id || "");
@@ -1156,6 +1166,8 @@ export function useDesktopController() {
     projectsRef.current = nextProjects;
     if (!selectedProjectId && nextProjects.length) {
       setSelectedProjectId(nextProjects[0].repo_id);
+    } else if (!nextProjects.length) {
+      clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: false });
     }
   }
 
@@ -1225,6 +1237,8 @@ export function useDesktopController() {
             setHistoryDetail(historyDetail);
           } else if (!selectedHistoryId && nextProjects.length) {
             setSelectedProjectId(nextProjects[0].repo_id);
+          } else if (!nextProjects.length) {
+            clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: false });
           }
         });
       }
@@ -1292,10 +1306,11 @@ export function useDesktopController() {
     setPlanDirty(true);
   }
 
-  function clearSelectedProjectState(nextRuntime = defaultRuntime) {
+  function clearSelectedProjectState(nextRuntime = defaultRuntime, options = {}) {
+    const preserveProjectIdentity = options.preserveProjectIdentity ?? true;
     clearProjectSelectionState({
       defaultRuntime: nextRuntime,
-      nextProjectForm: inheritProjectIdentityForm(projectForm, nextRuntime),
+      nextProjectForm: preserveProjectIdentity ? inheritProjectIdentityForm(projectForm, nextRuntime) : blankProjectForm(nextRuntime),
       refs: {
         lastAppliedDetailSignatureRef,
       },
@@ -1350,7 +1365,7 @@ export function useDesktopController() {
 
   function startNewProject() {
     setMessage(null);
-    clearSelectedProjectState(defaultRuntime);
+    clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: false });
     setCenterTab("config");
     setSidebarTab("workspace");
   }
@@ -1370,32 +1385,25 @@ export function useDesktopController() {
   }
 
   function setChatModelSelection(selection = null) {
-    const nextSettings = programSettingsFromRuntime({
-      ...programSettings,
-      chat_model_provider: String(selection?.provider || "").trim().toLowerCase(),
-      chat_local_model_provider: String(selection?.localProvider || "").trim().toLowerCase(),
-      chat_model: String(selection?.model || "").trim().toLowerCase(),
-    });
-    setStoredProgramSettings(nextSettings);
-    setProgramSettings(nextSettings);
     setProjectForm((current) => ({
       ...(current || {}),
       runtime: {
         ...(current?.runtime || {}),
-        chat_model_provider: nextSettings.chat_model_provider,
-        chat_local_model_provider: nextSettings.chat_local_model_provider,
-        chat_model: nextSettings.chat_model,
+        chat_model_provider: String(selection?.provider || "").trim().toLowerCase(),
+        chat_local_model_provider: String(selection?.localProvider || "").trim().toLowerCase(),
+        chat_model: String(selection?.model || "").trim().toLowerCase(),
       },
     }));
   }
 
   function setChatReasoningEffort(value = "") {
-    const nextSettings = programSettingsFromRuntime({
-      ...programSettings,
-      chat_effort: String(value || "").trim().toLowerCase(),
-    });
-    setStoredProgramSettings(nextSettings);
-    setProgramSettings(nextSettings);
+    setProjectForm((current) => ({
+      ...(current || {}),
+      runtime: {
+        ...(current?.runtime || {}),
+        chat_effort: String(value || "").trim().toLowerCase(),
+      },
+    }));
   }
 
   function saveProgramSettings(settingsOverride = null) {
@@ -1501,9 +1509,11 @@ export function useDesktopController() {
       setProjects(result.projects || []);
       setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
-      clearSelectedProjectState(defaultRuntime);
-      restoreProjectForm(nextForm);
-      restoreProjectPrompt(planDraft);
+      clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: (result.projects || []).length > 0 });
+      if ((result.projects || []).length > 0) {
+        restoreProjectForm(nextForm);
+        restoreProjectPrompt(planDraft);
+      }
       setSelectedHistoryId(result.archived?.archive_id || "");
       setMessage(messagePayload("success", translate(language, "message.projectArchived")));
     });
@@ -1529,8 +1539,8 @@ export function useDesktopController() {
       setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
       if (repoId === selectedProjectId) {
-        clearSelectedProjectState(defaultRuntime);
-        if (nextForm) {
+        clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: (result.projects || []).length > 0 });
+        if (nextForm && (result.projects || []).length > 0) {
           restoreProjectForm(nextForm);
           restoreProjectPrompt(planDraft);
         }
@@ -1560,9 +1570,11 @@ export function useDesktopController() {
       setProjects(result.projects || []);
       setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
-      clearSelectedProjectState(defaultRuntime);
-      restoreProjectForm(nextForm);
-      restoreProjectPrompt(planDraft);
+      clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: (result.projects || []).length > 0 });
+      if ((result.projects || []).length > 0) {
+        restoreProjectForm(nextForm);
+        restoreProjectPrompt(planDraft);
+      }
       setMessage(messagePayload("success", translate(language, "message.projectDeleted")));
     });
   }
@@ -1587,8 +1599,8 @@ export function useDesktopController() {
       setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
       if (repoId === selectedProjectId) {
-        clearSelectedProjectState(defaultRuntime);
-        if (nextForm) {
+        clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: (result.projects || []).length > 0 });
+        if (nextForm && (result.projects || []).length > 0) {
           restoreProjectForm(nextForm);
           restoreProjectPrompt(planDraft);
         }
@@ -1609,7 +1621,7 @@ export function useDesktopController() {
       setProjects(result.projects || []);
       setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
-      clearSelectedProjectState(defaultRuntime);
+      clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: false });
       setSelectedHistoryId((result.history || [])[0]?.archive_id || "");
       setMessage(messagePayload("success", translate(language, "message.allProjectsArchived")));
     });
@@ -1627,7 +1639,7 @@ export function useDesktopController() {
       setProjects(result.projects || []);
       setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
-      clearSelectedProjectState(defaultRuntime);
+      clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: false });
       setMessage(messagePayload("success", translate(language, "message.allProjectsDeleted")));
     });
   }
@@ -1710,8 +1722,14 @@ export function useDesktopController() {
       repo_id: String(payload?.repo_id || "").trim(),
       project_dir: String(payload?.project_dir || "").trim(),
     };
-    const currentProjectJob = () => projectJobFromJobs(jobsRef.current, targetProject);
-    const projectJobKey = backgroundJobProjectKey(payload, workspaceRoot || "");
+    const requestedLane = jobLaneForRequest(command, payload);
+    const currentProjectJob = () => (
+      requestedLane === "chat"
+        ? projectChatJobFromJobs(jobsRef.current, targetProject)
+        : projectJobFromJobs(jobsRef.current, targetProject)
+    );
+    const baseProjectJobKey = backgroundJobProjectKey(payload, workspaceRoot || "");
+    const projectJobKey = baseProjectJobKey ? `${baseProjectJobKey}|${requestedLane}` : "";
     const existingJob = currentProjectJob();
     if (["queued", "running"].includes(String(existingJob?.status || "").trim().toLowerCase())) {
       return existingJob;
@@ -1775,7 +1793,11 @@ export function useDesktopController() {
           const jobSnapshot = await syncRunningJobSnapshot(blockingJobRef.current?.id || "");
           applyCurrentJobSnapshot(jobSnapshot);
           reapplyProjectJobState(jobSnapshot?.jobs || []);
-          const recoveredJob = projectJobFromJobs(jobSnapshot?.jobs || [], targetProject);
+          const recoveredJob = (
+            requestedLane === "chat"
+              ? projectChatJobFromJobs(jobSnapshot?.jobs || [], targetProject)
+              : projectJobFromJobs(jobSnapshot?.jobs || [], targetProject)
+          );
           if (["queued", "running"].includes(String(recoveredJob?.status || "").trim().toLowerCase())) {
             return recoveredJob;
           }
@@ -1969,7 +1991,7 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.openProjectFirst")));
       return null;
     }
-    if (["queued", "running"].includes(String(projectJob?.status || "").trim().toLowerCase())) {
+    if (["debugger", "merger"].includes(normalizedMode) && ["queued", "running"].includes(String(projectJob?.status || "").trim().toLowerCase())) {
       setMessage(
         messagePayload(
           "error",
@@ -1992,23 +2014,20 @@ export function useDesktopController() {
       },
       planDraft,
     );
-    const chatProviderRuntime = {
-      ...(basePayload.runtime || {}),
-      model_provider: normalizedModelProvider(programSettings),
-      local_model_provider: normalizedLocalModelProvider(programSettings),
-      model: String(programSettings?.model || "").trim().toLowerCase(),
-      model_slug_input: String(programSettings?.model_slug_input || programSettings?.model || "").trim(),
-    };
-    const scopedChatCatalog = filterModelCatalogByProvider(modelCatalog, chatProviderRuntime);
-    const requestedChatProvider = String(programSettings?.chat_model_provider || "").trim().toLowerCase();
-    const requestedChatLocalProvider = String(programSettings?.chat_local_model_provider || "").trim().toLowerCase();
-    const requestedChatModel = String(programSettings?.chat_model || "").trim().toLowerCase();
-    const allowedChatEntry = scopedChatCatalog.find((item) => (
+    const chatRuntime = basePayload.runtime || {};
+    const visibleChatCatalog = (modelCatalog || []).filter((item) => {
+      const model = String(item?.model || "").trim();
+      return Boolean(model) && !item?.hidden;
+    });
+    const requestedChatProvider = String(chatRuntime?.chat_model_provider || "").trim().toLowerCase();
+    const requestedChatLocalProvider = String(chatRuntime?.chat_local_model_provider || "").trim().toLowerCase();
+    const requestedChatModel = String(chatRuntime?.chat_model || "").trim().toLowerCase();
+    const allowedChatEntry = visibleChatCatalog.find((item) => (
       String(item?.provider || "").trim().toLowerCase() === requestedChatProvider
       && String(item?.local_provider || "").trim().toLowerCase() === requestedChatLocalProvider
       && String(item?.model || "").trim().toLowerCase() === requestedChatModel
     )) || null;
-    const chatEffort = String(programSettings?.chat_effort || "").trim().toLowerCase();
+    const chatEffort = String(chatRuntime?.chat_effort || "").trim().toLowerCase();
     return startJob(
       BRIDGE_COMMANDS.SEND_CHAT_MESSAGE,
       {

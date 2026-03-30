@@ -47,16 +47,22 @@ import {
   programSettingsFromRuntime,
   normalizedModelProvider,
   filterModelCatalogByProvider,
+  formatChatSessionTitle,
+  formatCheckpointDisplayId,
   providerAvailable,
   providerUsable,
   providerStatusReason,
   providerSupportsCatalog,
+  projectChatJobFromJobs,
   projectJobFromJobs,
   projectFormFromDetail,
   projectStatusWithJob,
   resolveProjectDirectory,
   runtimeSummary,
   isChatCommand,
+  isChatJob,
+  jobLane,
+  jobLaneForRequest,
   QWEN_CODE_DEFAULT_MODEL,
   sanitizeProjectDetailForJobState,
   sanitizeProjectListForJobState,
@@ -92,6 +98,20 @@ test("basename handles Windows, POSIX, and empty paths", () => {
   assert.equal(basename("C:\\work\\repo"), "repo");
   assert.equal(basename("/tmp/demo/"), "demo");
   assert.equal(basename(""), "");
+});
+
+test("formatChatSessionTitle strips txt suffixes and trailing timestamp slugs for UI labels", () => {
+  assert.equal(formatChatSessionTitle("코드 설명해줘 20260330101705.txt", "Conversation"), "코드 설명해줘");
+  assert.equal(formatChatSessionTitle("Release_notes-20260330101705.txt", "Conversation"), "Release_notes");
+  assert.equal(formatChatSessionTitle("Conversation.txt", "Conversation"), "Conversation");
+  assert.equal(formatChatSessionTitle("", "Conversation"), "Conversation");
+});
+
+test("formatCheckpointDisplayId aliases checkpoint labels to ST for the UI", () => {
+  assert.equal(formatCheckpointDisplayId("CP1"), "ST1");
+  assert.equal(formatCheckpointDisplayId("cp24"), "ST24");
+  assert.equal(formatCheckpointDisplayId("ST3"), "ST3");
+  assert.equal(formatCheckpointDisplayId(""), "");
 });
 
 test("detailApplySignature tracks payload identity and running job state", () => {
@@ -183,6 +203,7 @@ test("chat command helpers keep send-chat-message jobs out of execution widgets"
     id: "job-chat",
     status: "running",
     command: "send-chat-message",
+    job_lane: "chat",
   };
   const runJob = {
     id: "job-run",
@@ -192,8 +213,46 @@ test("chat command helpers keep send-chat-message jobs out of execution widgets"
 
   assert.equal(isChatCommand("send-chat-message"), true);
   assert.equal(isChatCommand("run-plan"), false);
+  assert.equal(jobLaneForRequest("send-chat-message", { chat_mode: "conversation" }), "chat");
+  assert.equal(jobLaneForRequest("send-chat-message", { chat_mode: "debugger" }), "execution");
+  assert.equal(jobLane(chatJob), "chat");
+  assert.equal(isChatJob(chatJob), true);
   assert.equal(visibleExecutionJob(chatJob), null);
   assert.equal(visibleExecutionJob(runJob), runJob);
+});
+
+test("project chat job helpers keep execution and conversational chat lanes separate", () => {
+  const jobs = [
+    {
+      id: "job-run",
+      status: "running",
+      command: "run-plan",
+      repo_id: "repo-1",
+      updated_at_ms: 100,
+    },
+    {
+      id: "job-chat",
+      status: "running",
+      command: "send-chat-message",
+      job_lane: "chat",
+      chat_mode: "review",
+      repo_id: "repo-1",
+      updated_at_ms: 120,
+    },
+    {
+      id: "job-recovery",
+      status: "queued",
+      command: "send-chat-message",
+      job_lane: "execution",
+      chat_mode: "debugger",
+      repo_id: "repo-2",
+      updated_at_ms: 140,
+    },
+  ];
+
+  assert.equal(projectJobFromJobs(jobs, { repo_id: "repo-1" })?.id, "job-run");
+  assert.equal(projectChatJobFromJobs(jobs, { repo_id: "repo-1" })?.id, "job-chat");
+  assert.equal(projectJobFromJobs(jobs, { repo_id: "repo-2" })?.id, "job-recovery");
 });
 
 test("backgroundJobProjectKey normalizes workspace and project paths for deduping", () => {

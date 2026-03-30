@@ -1,19 +1,7 @@
-import { memo, useMemo } from "react";
+import { memo } from "react";
 import { useI18n } from "../../i18n";
-import {
-  applyConfigRuntimeModelSelection,
-  clampReasoningEffort,
-  configReasoningOptions,
-  defaultModelForRuntime,
-  filterModelCatalogByProvider,
-  findModelCatalogEntry,
-  normalizeMemoryBudgetGiB,
-  normalizedModelProvider,
-  reasoningEffortLabel,
-  selectedConfigReasoning,
-} from "../../utils";
+import { normalizeMemoryBudgetGiB } from "../../utils";
 
-/* ── View header icon ── */
 function ConfigHeaderIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -27,7 +15,6 @@ function ConfigHeaderIcon() {
   );
 }
 
-/* ── Toggle row ── */
 function ToggleRow({ checked, onChange, disabled, label, hint }) {
   return (
     <label className="toggle-row">
@@ -43,7 +30,6 @@ function ToggleRow({ checked, onChange, disabled, label, hint }) {
   );
 }
 
-/* ── Section icons ── */
 function ProjectIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none">
@@ -126,66 +112,16 @@ export const ConfigEditorView = memo(function ConfigEditorView({
   onArchiveProject,
   onDeleteProject,
 }) {
+  void modelPresets;
+  void modelCatalog;
+  void codexStatus;
+  void onChangeProgramSettings;
+
   const runtime = form.runtime || {};
   const { language, t } = useI18n();
   const isRunning = ["running", "queued"].includes(String(activeJob?.status || "").trim().toLowerCase());
   const liveRuntimeEditable = isRunning;
-  const planningReasoningLabel = language === "ko" ? "계획 추론" : "Planning Reasoning";
-  const selectedProvider = normalizedModelProvider(runtime);
   const autoParallelWorkers = String(runtime.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
-
-  const planningRuntime =
-    selectedProvider === "ensemble"
-      ? {
-          ...runtime,
-          model_provider: "openai",
-          model: runtime.ensemble_openai_model || runtime.model || defaultModelForRuntime(modelCatalog, { ...runtime, model_provider: "openai" }) || "gpt-5.4",
-          model_slug_input: runtime.ensemble_openai_model || runtime.model_slug_input || runtime.model || "",
-        }
-      : runtime;
-  const planningCatalog = useMemo(
-    () => filterModelCatalogByProvider(modelCatalog, planningRuntime),
-    [modelCatalog, planningRuntime],
-  );
-  const planningModel = planningRuntime.model || planningRuntime.model_slug_input || defaultModelForRuntime(modelCatalog, planningRuntime) || runtime.model || "";
-  const planningEntry = useMemo(
-    () => findModelCatalogEntry(planningCatalog, planningModel),
-    [planningCatalog, planningModel],
-  );
-  const planningSupportedEfforts = useMemo(
-    () => (
-      planningEntry?.supported_reasoning_efforts?.length
-        ? planningEntry.supported_reasoning_efforts
-        : ["low", "medium", "high", "xhigh"]
-    ).filter((effort) => ["low", "medium", "high", "xhigh"].includes(effort)),
-    [planningEntry],
-  );
-  const planningSelectedEffort = useMemo(
-    () => clampReasoningEffort(
-      planningCatalog,
-      planningModel,
-      runtime.planning_effort || runtime.effort || "medium",
-      runtime.effort || "medium",
-    ),
-    [planningCatalog, planningModel, runtime.effort, runtime.planning_effort],
-  );
-  const runtimeCatalog = useMemo(
-    () => filterModelCatalogByProvider(modelCatalog, runtime),
-    [modelCatalog, runtime],
-  );
-  const runtimeVisibleModels = useMemo(
-    () => runtimeCatalog.filter((item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto"),
-    [runtimeCatalog],
-  );
-  const runtimeModel = String(runtime.model_slug_input || runtime.model || defaultModelForRuntime(modelCatalog, runtime) || "").trim();
-  const runtimeReasoningOptions = useMemo(
-    () => configReasoningOptions(runtimeCatalog, runtimeModel, runtime.effort || "medium"),
-    [runtimeCatalog, runtimeModel, runtime.effort],
-  );
-  const runtimeSelectedReasoning = useMemo(
-    () => selectedConfigReasoning(runtimeCatalog, runtime),
-    [runtimeCatalog, runtime],
-  );
 
   return (
     <section className="workspace-view">
@@ -229,7 +165,6 @@ export const ConfigEditorView = memo(function ConfigEditorView({
         </div>
       </div>
 
-      {/* Project info summary card */}
       {form.display_name || form.project_dir ? (
         <div className="project-summary-card">
           <div className="field">
@@ -248,9 +183,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
       ) : null}
 
       <div className="form-layout">
-        {/* ── Left column — Project & Execution ── */}
         <div className="form-section">
-          {/* Project basics */}
           <div className="subsection">
             <SectionHeader
               icon={<ProjectIcon />}
@@ -292,7 +225,6 @@ export const ConfigEditorView = memo(function ConfigEditorView({
             </label>
           </div>
 
-          {/* Execution params */}
           <div className="subsection">
             <SectionHeader
               icon={<ExecutionIcon />}
@@ -305,7 +237,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 <InfoIcon />
                 <span>
                   {language === "ko"
-                    ? "실행 중에도 체크포인트와 보고서처럼 안전한 런타임 설정은 저장해서 다음 단계부터 반영할 수 있습니다."
+                    ? "실행 중에는 체크포인트나 보고서 같은 안전한 설정만 저장되고, 나머지는 다음 단계부터 반영됩니다."
                     : "Safe runtime settings like checkpoints and report output can still be saved while a run is active."}
                 </span>
               </div>
@@ -329,7 +261,6 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 </select>
               </label>
 
-              {/* Unified step limit: max steps for standard, ML cycles for ml mode */}
               {runtime.workflow_mode === "ml" ? (
                 <label className="field">
                   <span>{t("field.mlMaxCycles")}</span>
@@ -369,24 +300,6 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                   </small>
                 </label>
               )}
-
-              <label className="field">
-                <span>{planningReasoningLabel}</span>
-                <select
-                  value={planningSelectedEffort}
-                  onChange={(event) =>
-                    onChangeForm((current) => ({
-                      ...current,
-                      runtime: { ...current.runtime, planning_effort: event.target.value },
-                    }))
-                  }
-                  disabled={busy}
-                >
-                  {planningSupportedEfforts.map((effort) => (
-                    <option key={effort} value={effort}>{reasoningEffortLabel(effort, language)}</option>
-                  ))}
-                </select>
-              </label>
 
               <label className="field">
                 <span>{t("field.parallelWorkers")}</span>
@@ -484,7 +397,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                   }))
                 }
                 label={t("preset.auto")}
-                hint={language === "ko" ? "병렬 작업자 수를 자동으로 결정" : "Automatically determine parallel worker count"}
+                hint={language === "ko" ? "병렬 작업 수를 자동으로 결정" : "Automatically determine parallel worker count"}
                 disabled={busy}
               />
               <ToggleRow
@@ -521,7 +434,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 label={t("option.useFastMode")}
                 hint={
                   language === "ko"
-                    ? "계획 생성 시간을 줄이기 위해 Planner Agent A를 생략하고 빠른 계획 경로를 사용합니다."
+                    ? "계획 생성 시간을 줄이기 위해 Planner Agent A를 건너뛰고 빠른 계획 경로를 사용합니다."
                     : "Reduce plan generation time by skipping Planner Agent A and using the faster planning path."
                 }
                 disabled={busy}
@@ -530,9 +443,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
           </div>
         </div>
 
-        {/* ── Right column — GitHub + Model ── */}
         <div className="form-section">
-          {/* GitHub */}
           <div className="subsection">
             <SectionHeader
               icon={<GithubIcon />}
@@ -569,79 +480,8 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               </label>
             ) : null}
           </div>
-
-          <div className="subsection">
-            <SectionHeader
-              icon={<ExecutionIcon />}
-              title={language === "ko" ? "모델 설정" : "Model Settings"}
-              description={language === "ko" ? "프로젝트 생성 후에도 실행 모델과 추론 수준을 변경합니다." : "Change the runtime model and reasoning after project setup."}
-            />
-
-            {runtimeVisibleModels.length ? (
-              <label className="field" style={{ marginTop: "8px" }}>
-                <span>{t("field.model")}</span>
-                <select
-                  value={runtimeModel}
-                  onChange={(event) =>
-                    onChangeForm((current) => ({
-                      ...current,
-                      runtime: applyConfigRuntimeModelSelection(current.runtime || {}, runtimeCatalog, event.target.value),
-                    }))
-                  }
-                  disabled={busy && !liveRuntimeEditable}
-                >
-                  {runtimeVisibleModels.map((item) => (
-                    <option key={item.model} value={item.model}>
-                      {item.display_name || item.model}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-
-            <label className="field">
-              <span>{t("field.customModelSlug")}</span>
-              <input
-                value={runtime.model_slug_input || runtime.model || ""}
-                onChange={(event) =>
-                  onChangeForm((current) => ({
-                    ...current,
-                    runtime: applyConfigRuntimeModelSelection(current.runtime || {}, runtimeCatalog, event.target.value),
-                  }))
-                }
-                disabled={busy && !liveRuntimeEditable}
-              />
-            </label>
-
-            <label className="field">
-              <span>{t("field.gptReasoning")}</span>
-              <select
-                value={runtimeSelectedReasoning}
-                onChange={(event) =>
-                  onChangeForm((current) => ({
-                    ...current,
-                    runtime: applyConfigRuntimeModelSelection(
-                      current.runtime || {},
-                      runtimeCatalog,
-                      String(current.runtime?.model_slug_input || current.runtime?.model || runtimeModel),
-                      event.target.value,
-                    ),
-                  }))
-                }
-                disabled={busy && !liveRuntimeEditable}
-              >
-                {runtimeReasoningOptions.map((effort) => (
-                  <option key={effort} value={effort}>
-                    {reasoningEffortLabel(effort, language)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
         </div>
       </div>
     </section>
   );
 }, configEditorViewPropsEqual);
-

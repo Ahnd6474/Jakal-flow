@@ -487,7 +487,7 @@ export default function App() {
                   queuedJobs={controller.queuedJobs}
                   onChangeForm={controller.setProjectForm}
                   chat={detail?.chat}
-                  chatSettings={controller.programSettings}
+                  chatSettings={controller.projectForm?.runtime || {}}
                   selectedChatSessionId={controller.selectedChatSessionId}
                   chatDraftSession={controller.chatDraftSession}
                   onSelectChatSession={controller.loadChatSession}

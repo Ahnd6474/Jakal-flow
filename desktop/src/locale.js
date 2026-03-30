@@ -143,6 +143,9 @@ AVAILABLE_LANGUAGE_OPTIONS.splice(
   { value: "lv", label: "Latvian" },
 );
 
+LANGUAGE_OPTIONS[0] = { value: "ko", label: "한국어" };
+AVAILABLE_LANGUAGE_OPTIONS[0] = { value: "ko", label: "한국어" };
+
 const LANGUAGE_ALIASES = {
   "en-us": "en",
   "en-gb": "en",

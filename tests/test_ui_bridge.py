@@ -476,6 +476,40 @@ class UIBridgeTests(unittest.TestCase):
 
         self.assertEqual(status, "running:merging")
 
+    def test_history_payload_refreshes_flow_svg_when_step_status_changes(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            context = build_test_project_context(
+                temp_dir,
+                repo_id="repo-flow",
+                slug="repo-flow",
+                display_name="Flow Demo",
+            )
+            ui_bridge_payloads._SECTION_PAYLOAD_MEMORY_CACHE.clear()
+
+            initial_plan = ExecutionPlanState(
+                execution_mode="parallel",
+                steps=[ExecutionStep(step_id="ST1", title="Plan work", status="pending")],
+            )
+            context.paths.execution_plan_file.write_text(
+                json.dumps(initial_plan.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            first_history = ui_bridge_payloads.history_payload(context)
+
+            updated_plan = ExecutionPlanState(
+                execution_mode="parallel",
+                steps=[ExecutionStep(step_id="ST1", title="Plan work", status="running")],
+            )
+            context.paths.execution_plan_file.write_text(
+                json.dumps(updated_plan.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            second_history = ui_bridge_payloads.history_payload(context)
+
+            self.assertIn(">pending<", first_history["flow_svg_text"])
+            self.assertIn(">running<", second_history["flow_svg_text"])
+            self.assertNotEqual(first_history["flow_svg_text"], second_history["flow_svg_text"])
+
     def test_effective_project_status_clears_stale_running_step_when_plan_is_idle(self) -> None:
         status = effective_project_status(
             "running:st1",
@@ -1316,7 +1350,8 @@ class UIBridgeTests(unittest.TestCase):
             self.assertIn("checkpoints", detail)
             self.assertIn("bottom_panels", detail)
             self.assertIn("github", detail)
-            self.assertEqual(detail["codex_status"]["account"]["email"], "demo@example.com")
+            self.assertIn("provider_statuses", detail["codex_status"])
+            self.assertNotIn("account", detail["codex_status"])
             self.assertIn("runtime_insights", detail)
             self.assertIn("runtime_insights", detail["bottom_panels"])
             self.assertIn("parallel", detail["runtime_insights"])
@@ -4891,6 +4926,40 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(loaded["workspace_tree"], [])
             self.assertEqual(loaded["checkpoints"]["items"], [])
             self.assertTrue(loaded["activity"])
+
+    def test_save_project_setup_skips_codex_refresh_without_shrinking_detail(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Lean Save Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=AssertionError("save-project-setup should not force a Codex status refresh"),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            self.assertEqual(detail["detail_level"], "full")
+            self.assertEqual(detail["project"]["display_name"], "Lean Save Demo")
+            self.assertIn("provider_statuses", detail["codex_status"])
+            self.assertFalse(detail["codex_status"].get("model_catalog"))
+            self.assertIn("powerpoint_report_target_path", detail["reports"])
+            self.assertTrue(detail["workspace_tree"])
+            self.assertTrue(detail["activity"])
 
     def test_load_project_exposes_structured_planning_progress(self) -> None:
         with TemporaryTestDir() as temp_dir:

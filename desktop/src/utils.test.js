@@ -8,6 +8,7 @@ import {
   failureReasonCode,
   failureReasonLabel,
   jobHasNewerActiveReplacement,
+  projectFormFromDetail,
   selectedConfigReasoning,
 } from "./utils.js";
 
@@ -143,4 +144,95 @@ test("applyConfigRuntimeModelSelection keeps a concrete model while supporting a
   assert.equal(nextRuntime.model_slug_input, "gpt-5.4");
   assert.equal(nextRuntime.effort_selection_mode, "auto");
   assert.equal(selectedConfigReasoning(modelCatalog, nextRuntime), "auto");
+});
+
+test("projectFormFromDetail preserves the project's saved model when selecting a project", () => {
+  const form = projectFormFromDetail(
+    {
+      project: {
+        repo_path: "C:/repo",
+        display_name: "Repo",
+        branch: "main",
+        origin_url: "https://example.com/repo.git",
+      },
+      runtime: {
+        model_provider: "openai",
+        model: "gpt-5.4",
+        model_slug_input: "gpt-5.4",
+        effort: "medium",
+        planning_effort: "medium",
+      },
+    },
+    {
+      model_provider: "openai",
+      model: "gpt-5.5",
+      model_slug_input: "gpt-5.5",
+      effort: "xhigh",
+      planning_effort: "high",
+      effort_selection_mode: "explicit",
+    },
+  );
+
+  assert.equal(form.runtime.model_provider, "openai");
+  assert.equal(form.runtime.model, "gpt-5.4");
+  assert.equal(form.runtime.model_slug_input, "gpt-5.4");
+  assert.equal(form.runtime.effort, "medium");
+  assert.equal(form.runtime.planning_effort, "medium");
+});
+
+test("projectFormFromDetail does not replace a different saved project provider and model with program defaults", () => {
+  const form = projectFormFromDetail(
+    {
+      project: {
+        repo_path: "C:/repo",
+      },
+      runtime: {
+        model_provider: "claude",
+        model: "claude-sonnet-4-6",
+        model_slug_input: "claude-sonnet-4-6",
+        effort: "high",
+        planning_effort: "high",
+      },
+    },
+    {
+      model_provider: "openai",
+      model: "gpt-5.5",
+      model_slug_input: "gpt-5.5",
+      effort: "xhigh",
+      planning_effort: "xhigh",
+    },
+  );
+
+  assert.equal(form.runtime.model_provider, "claude");
+  assert.equal(form.runtime.model, "claude-sonnet-4-6");
+  assert.equal(form.runtime.model_slug_input, "claude-sonnet-4-6");
+  assert.equal(form.runtime.effort, "high");
+  assert.equal(form.runtime.planning_effort, "high");
+});
+
+test("projectFormFromDetail still falls back to program defaults for missing runtime fields", () => {
+  const form = projectFormFromDetail(
+    {
+      project: {
+        repo_path: "C:/repo",
+      },
+      runtime: {
+        model_provider: "openai",
+      },
+    },
+    {
+      model_provider: "openai",
+      model: "gpt-5.5",
+      model_slug_input: "gpt-5.5",
+      effort: "xhigh",
+      planning_effort: "high",
+      effort_selection_mode: "explicit",
+    },
+  );
+
+  assert.equal(form.runtime.model_provider, "openai");
+  assert.equal(form.runtime.model, "gpt-5.5");
+  assert.equal(form.runtime.model_slug_input, "gpt-5.5");
+  assert.equal(form.runtime.effort, "xhigh");
+  assert.equal(form.runtime.planning_effort, "high");
 });

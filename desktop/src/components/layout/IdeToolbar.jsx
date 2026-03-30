@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { commandLabel, isActiveExecutionStatus, isDebuggingStatus, isPlanningProgressRunning, projectStatusWithJob, statusTone, toolbarProgressCaptionDisplay, visibleExecutionJob } from "../../utils";
+import { commandLabel, formatCheckpointDisplayId, isActiveExecutionStatus, isDebuggingStatus, isPlanningProgressRunning, projectStatusWithJob, statusTone, toolbarProgressCaptionDisplay, visibleExecutionJob } from "../../utils";
 
 function RefreshIcon() {
   return (
@@ -442,7 +442,7 @@ export const IdeToolbar = memo(function IdeToolbar({
             <ChevronRight />
             <span className="breadcrumb-segment breadcrumb-segment--warning">
               <span className="chip-dot chip-dot--warning" />
-              {pendingCheckpoint.checkpoint_id || t("dashboard.checkpointPending")}
+              {formatCheckpointDisplayId(pendingCheckpoint.checkpoint_id) || t("dashboard.checkpointPending")}
             </span>
           </>
         ) : null}

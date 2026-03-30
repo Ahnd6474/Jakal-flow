@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { openInSystem } from "../../api";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { effectiveStepStatus, reasoningEffortLabel, runtimeSummary, statusTone } from "../../utils";
+import { effectiveStepStatus, formatCheckpointDisplayId, reasoningEffortLabel, runtimeSummary, statusTone } from "../../utils";
 
 function RailTerminalIcon() {
   return (
@@ -772,7 +772,7 @@ export const InspectorPanel = memo(function InspectorPanel({
             </span>
           </div>
           <div className="details-text">
-            <strong>{pendingCheckpoint.checkpoint_id}</strong>
+            <strong>{formatCheckpointDisplayId(pendingCheckpoint.checkpoint_id)}</strong>
             {pendingCheckpoint.title ? <p style={{ margin: "4px 0" }}>{pendingCheckpoint.title}</p> : null}
             {pendingCheckpoint.target_block ? <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>Block {pendingCheckpoint.target_block}</p> : null}
             {pendingCheckpoint.deadline_at ? <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>Deadline: {pendingCheckpoint.deadline_at}</p> : null}

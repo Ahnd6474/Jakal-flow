@@ -78,6 +78,40 @@ class GitOpsTests(unittest.TestCase):
 
         self.assertEqual(branch, "main")
 
+    def test_current_revision_reads_head_without_git_subprocess(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+        revision = "0123456789abcdef0123456789abcdef01234567"
+        (repo_dir / ".git" / "refs" / "heads").mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (repo_dir / ".git" / "refs" / "heads" / "main").write_text(f"{revision}\n", encoding="utf-8")
+
+        try:
+            with mock.patch.object(git, "run", side_effect=AssertionError("git subprocess should not run")):
+                head_revision = git.current_revision(repo_dir)
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(head_revision, revision)
+
+    def test_has_commits_reads_head_without_git_subprocess(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+        revision = "0123456789abcdef0123456789abcdef01234567"
+        (repo_dir / ".git" / "refs" / "heads").mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (repo_dir / ".git" / "refs" / "heads" / "main").write_text(f"{revision}\n", encoding="utf-8")
+
+        try:
+            with mock.patch.object(git, "run", side_effect=AssertionError("git subprocess should not run")):
+                has_commits = git.has_commits(repo_dir)
+        finally:
+            temp_dir.cleanup()
+
+        self.assertTrue(has_commits)
+
     def test_current_branch_returns_empty_when_git_queries_time_out(self) -> None:
         temp_dir = tempfile.TemporaryDirectory()
         repo_dir = Path(temp_dir.name)
@@ -95,6 +129,177 @@ class GitOpsTests(unittest.TestCase):
 
         self.assertEqual(branch, "")
 
+    def test_remote_url_falls_back_to_git_config_when_query_times_out(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+        (repo_dir / ".git").mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".git" / "config").write_text(
+            '[remote "origin"]\n\turl = https://github.com/example/project.git\n',
+            encoding="utf-8",
+        )
+
+        try:
+            with mock.patch.object(
+                git,
+                "run",
+                side_effect=SubprocessTimeoutError("Command timed out after 60.0 seconds: git remote get-url origin"),
+            ):
+                remote_url = git.remote_url(repo_dir)
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(remote_url, "https://github.com/example/project.git")
+
+    def test_remote_url_returns_none_when_query_times_out_without_configured_remote(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+        (repo_dir / ".git").mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".git" / "config").write_text("", encoding="utf-8")
+
+        try:
+            with mock.patch.object(
+                git,
+                "run",
+                side_effect=SubprocessTimeoutError("Command timed out after 60.0 seconds: git remote get-url origin"),
+            ):
+                remote_url = git.remote_url(repo_dir)
+        finally:
+            temp_dir.cleanup()
+
+        self.assertIsNone(remote_url)
+
+    def test_configure_local_identity_skips_matching_git_config_without_subprocess(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+        (repo_dir / ".git").mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".git" / "config").write_text(
+            "[user]\n\tname = Test User\n\temail = test@example.com\n",
+            encoding="utf-8",
+        )
+
+        try:
+            with mock.patch.object(git, "run", side_effect=AssertionError("git subprocess should not run")):
+                git.configure_local_identity(repo_dir, "Test User", "test@example.com")
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(
+            git._configured_identity_cache[str(repo_dir.resolve())],
+            ("Test User", "test@example.com"),
+        )
+
+    def test_configure_local_identity_updates_only_changed_field(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+        (repo_dir / ".git").mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".git" / "config").write_text(
+            "[user]\n\tname = Test User\n\temail = stale@example.com\n",
+            encoding="utf-8",
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(
+            args: list[str],
+            cwd: Path,
+            check: bool = True,
+            env: dict[str, str] | None = None,
+        ) -> CommandResult:
+            calls.append(args)
+            return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+
+        try:
+            with mock.patch.object(git, "run", side_effect=fake_run):
+                git.configure_local_identity(repo_dir, "Test User", "test@example.com")
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(calls, [["config", "user.email", "test@example.com"]])
+
+    def test_set_remote_url_skips_matching_git_config_without_subprocess(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+        (repo_dir / ".git").mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".git" / "config").write_text(
+            '[remote "origin"]\n\turl = https://github.com/example/project.git\n',
+            encoding="utf-8",
+        )
+
+        try:
+            with mock.patch.object(git, "run", side_effect=AssertionError("git subprocess should not run")):
+                git.set_remote_url(repo_dir, "origin", "https://github.com/example/project.git")
+        finally:
+            temp_dir.cleanup()
+
+    def test_set_remote_url_updates_when_git_config_differs(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+        (repo_dir / ".git").mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".git" / "config").write_text(
+            '[remote "origin"]\n\turl = https://github.com/example/old.git\n',
+            encoding="utf-8",
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(
+            args: list[str],
+            cwd: Path,
+            check: bool = True,
+            env: dict[str, str] | None = None,
+        ) -> CommandResult:
+            calls.append(args)
+            return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+
+        try:
+            with mock.patch.object(git, "run", side_effect=fake_run):
+                git.set_remote_url(repo_dir, "origin", "https://github.com/example/project.git")
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(
+            calls,
+            [["remote", "set-url", "origin", "https://github.com/example/project.git"]],
+        )
+
+    def test_current_revision_returns_empty_when_git_query_times_out(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+
+        try:
+            with mock.patch.object(
+                git,
+                "run",
+                side_effect=SubprocessTimeoutError("Command timed out after 10.0 seconds: git rev-parse HEAD"),
+            ):
+                revision = git.current_revision(repo_dir)
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(revision, "")
+
+    def test_has_commits_returns_false_when_git_query_times_out(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+
+        try:
+            with mock.patch.object(
+                git,
+                "run",
+                side_effect=SubprocessTimeoutError("Command timed out after 10.0 seconds: git rev-parse --verify HEAD"),
+            ):
+                has_commits = git.has_commits(repo_dir)
+        finally:
+            temp_dir.cleanup()
+
+        self.assertFalse(has_commits)
+
     def test_commit_all_uses_custom_author_name(self) -> None:
         repo_dir = Path(__file__).resolve().parents[1]
         git = GitOps()
@@ -111,7 +316,11 @@ class GitOpsTests(unittest.TestCase):
                 return CommandResult(command=["git", *args], returncode=0, stdout="abc123\n", stderr="")
             return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
 
-        with mock.patch.object(git, "run", side_effect=fake_run):
+        with mock.patch.object(git, "_current_revision_from_head", return_value=""), mock.patch.object(
+            git,
+            "run",
+            side_effect=fake_run,
+        ):
             revision = git.commit_all(repo_dir, "Desktop slice", author_name="Jakal-Flow-node-a")
 
         self.assertEqual(revision, "abc123")
@@ -143,7 +352,11 @@ class GitOpsTests(unittest.TestCase):
                 return CommandResult(command=["git", *args], returncode=0, stdout="merge123\n", stderr="")
             return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
 
-        with mock.patch.object(git, "run", side_effect=fake_run):
+        with mock.patch.object(git, "_current_revision_from_head", return_value=""), mock.patch.object(
+            git,
+            "run",
+            side_effect=fake_run,
+        ):
             revision = git.commit_staged(
                 repo_dir,
                 "Desktop slice, Backend slice conflict resolution",
@@ -192,8 +405,8 @@ class GitOpsTests(unittest.TestCase):
         self.assertEqual(blocker_contents, "dist/\n")
 
     def test_changed_files_ignores_untracked_tmp_scratch_directories(self) -> None:
-        repo_dir = Path(__file__).resolve().parents[1] / ".tmp_git_ops_runtime_scratch_filter_test"
-        shutil.rmtree(repo_dir, ignore_errors=True)
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
         git = GitOps()
         git.ensure_repository(repo_dir, "main")
         git.configure_local_identity(repo_dir, "Test User", "test@example.com")
@@ -208,7 +421,7 @@ class GitOpsTests(unittest.TestCase):
             changed_files = git.changed_files(repo_dir)
             has_changes = git.has_changes(repo_dir)
         finally:
-            shutil.rmtree(repo_dir, ignore_errors=True)
+            temp_dir.cleanup()
 
         self.assertEqual(len(changed_files), 1)
         self.assertEqual(changed_files[0].replace("\\", "/").rstrip("/"), "docs")
@@ -216,8 +429,8 @@ class GitOpsTests(unittest.TestCase):
         self.assertTrue(has_changes)
 
     def test_has_changes_returns_false_for_only_untracked_tmp_scratch_directories(self) -> None:
-        repo_dir = Path(__file__).resolve().parents[1] / ".tmp_git_ops_runtime_only_scratch_filter_test"
-        shutil.rmtree(repo_dir, ignore_errors=True)
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
         git = GitOps()
         git.ensure_repository(repo_dir, "main")
         git.configure_local_identity(repo_dir, "Test User", "test@example.com")
@@ -230,7 +443,7 @@ class GitOpsTests(unittest.TestCase):
             changed_files = git.changed_files(repo_dir)
             has_changes = git.has_changes(repo_dir)
         finally:
-            shutil.rmtree(repo_dir, ignore_errors=True)
+            temp_dir.cleanup()
 
         self.assertEqual(changed_files, [])
         self.assertFalse(has_changes)

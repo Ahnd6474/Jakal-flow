@@ -195,6 +195,7 @@ export function RunControlView({
   const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
   const runActionDisabled = busy || isActiveExecutionStatus(projectStatus) || isPlanningProgressRunning(detail?.planning_progress);
   const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
+  const stepNoteLabel = "Step note";
   const closeoutStatus = String(planDraft?.closeout_status || "not_started").trim().toLowerCase();
   const showCloseoutStatus = closeoutStatus && closeoutStatus !== "not_started";
   const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
@@ -372,7 +373,7 @@ export function RunControlView({
                 </div>
                 {selectedStep.notes ? (
                   <div className="field field--wide">
-                    <span>{t("common.status")}</span>
+                    <span>{stepNoteLabel}</span>
                     <p>{selectedStep.notes}</p>
                   </div>
                 ) : null}

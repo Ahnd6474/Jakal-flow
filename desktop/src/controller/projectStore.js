@@ -185,17 +185,10 @@ function preserveProjectRuntimeOverrides(currentForm = null, nextForm = null, pr
     return nextForm;
   }
   const currentRuntime = current.runtime && typeof current.runtime === "object" ? current.runtime : {};
-  const previousRuntime = previousDetail?.runtime && typeof previousDetail.runtime === "object" ? previousDetail.runtime : {};
   const nextRuntime = next.runtime && typeof next.runtime === "object" ? { ...next.runtime } : {};
   let changed = false;
   PROJECT_RUNTIME_OVERRIDE_KEYS.forEach((key) => {
     if (!hasOwnValue(currentRuntime, key)) {
-      return;
-    }
-    if (!hasOwnValue(previousRuntime, key)) {
-      return;
-    }
-    if (Object.is(currentRuntime[key], previousRuntime[key])) {
       return;
     }
     const nextValue = cloneValue(currentRuntime[key]);

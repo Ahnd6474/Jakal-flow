@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import { arePropsEqualExceptFunctions } from "../../shallowProps";
-import { codexUsageBuckets, formatUsd, rateLimitRemainingLabel, rateLimitWindowSummary, shouldShowEstimatedCost, statusTone } from "../../utils";
+import { codexUsageBuckets, formatCheckpointDisplayId, formatUsd, rateLimitRemainingLabel, rateLimitWindowSummary, shouldShowEstimatedCost, statusTone } from "../../utils";
 
 const JSON_PREVIEW_MAX_CHARS = 24000;
 const JSON_PREVIEW_MAX_DEPTH = 4;
@@ -229,7 +229,7 @@ export const BottomToolPanel = memo(function BottomToolPanel({ activeTab, onChan
             </div>
             <div className="dense-row">
               <strong>{t("sidebar.checkpoints")}</strong>
-              <span>{gitStatus.current_checkpoint_id || t("common.none")}</span>
+              <span>{formatCheckpointDisplayId(gitStatus.current_checkpoint_id) || t("common.none")}</span>
             </div>
             <div className="dense-row">
               <strong>{language === "ko" ? "승인 대기" : "Approval Pending"}</strong>

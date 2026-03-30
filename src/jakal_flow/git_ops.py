@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 import os
 import subprocess
 from pathlib import Path
@@ -17,8 +18,8 @@ class GitCommandError(RuntimeError):
 UNTRACKED_OVERWRITE_MARKER = "The following untracked working tree files would be overwritten by merge:"
 MISSING_REGISTERED_WORKTREE_MARKER = "is a missing but already registered worktree"
 GIT_QUERY_TIMEOUT_SECONDS = 10.0
-GIT_REMOTE_QUERY_TIMEOUT_SECONDS = 30.0
-GIT_STATUS_TIMEOUT_SECONDS = 30.0
+GIT_REMOTE_QUERY_TIMEOUT_SECONDS = 60.0
+GIT_STATUS_TIMEOUT_SECONDS = 60.0
 GIT_LOCAL_MUTATION_TIMEOUT_SECONDS = 90.0
 GIT_MERGE_TIMEOUT_SECONDS = 180.0
 GIT_NETWORK_TIMEOUT_SECONDS = 180.0
@@ -202,8 +203,15 @@ class GitOps:
         normalized = (str(name).strip(), str(email).strip())
         if self._configured_identity_cache.get(repo_key) == normalized:
             return
-        self.run(["config", "user.name", name], cwd=repo_dir)
-        self.run(["config", "user.email", email], cwd=repo_dir)
+        configured_name = self._read_git_config_value(repo_dir, "user", "name")
+        configured_email = self._read_git_config_value(repo_dir, "user", "email")
+        if configured_name == normalized[0] and configured_email == normalized[1]:
+            self._configured_identity_cache[repo_key] = normalized
+            return
+        if configured_name != normalized[0]:
+            self.run(["config", "user.name", normalized[0]], cwd=repo_dir)
+        if configured_email != normalized[1]:
+            self.run(["config", "user.email", normalized[1]], cwd=repo_dir)
         self._configured_identity_cache[repo_key] = normalized
 
     def current_revision(self, repo_dir: Path) -> str:
@@ -211,13 +219,23 @@ class GitOps:
         cached = self._current_revision_cache.get(repo_key)
         if cached:
             return cached
-        revision = self.run(["rev-parse", "HEAD"], cwd=repo_dir).stdout.strip()
+        revision = self._current_revision_from_head(repo_dir)
+        if not revision:
+            try:
+                revision = self.run(["rev-parse", "HEAD"], cwd=repo_dir).stdout.strip()
+            except SubprocessTimeoutError:
+                revision = ""
         if revision:
             self._current_revision_cache[repo_key] = revision
         return revision
 
     def has_commits(self, repo_dir: Path) -> bool:
-        result = self.run(["rev-parse", "--verify", "HEAD"], cwd=repo_dir, check=False)
+        if self._current_revision_from_head(repo_dir):
+            return True
+        try:
+            result = self.run(["rev-parse", "--verify", "HEAD"], cwd=repo_dir, check=False)
+        except SubprocessTimeoutError:
+            return False
         return result.returncode == 0
 
     def _git_dir_for_repo(self, repo_dir: Path) -> Path | None:
@@ -259,6 +277,88 @@ class GitOps:
             return ""
         return ref_name[len(branch_prefix) :].strip()
 
+    def _current_revision_from_head(self, repo_dir: Path) -> str:
+        git_dir = self._git_dir_for_repo(repo_dir)
+        if git_dir is None:
+            return ""
+        head_contents = self._read_git_head(git_dir)
+        if not head_contents:
+            return ""
+        if head_contents.lower().startswith("ref:"):
+            ref_name = head_contents[4:].strip()
+            return self._read_git_ref_revision(git_dir, ref_name)
+        return head_contents if self._looks_like_git_revision(head_contents) else ""
+
+    def _read_git_head(self, git_dir: Path) -> str:
+        try:
+            return (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
+    def _read_git_ref_revision(self, git_dir: Path, ref_name: str) -> str:
+        normalized_ref = str(ref_name or "").strip()
+        if not normalized_ref:
+            return ""
+        ref_path = git_dir / Path(normalized_ref)
+        try:
+            revision = ref_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            revision = ""
+        if self._looks_like_git_revision(revision):
+            return revision
+        packed_refs_path = git_dir / "packed-refs"
+        try:
+            packed_refs = packed_refs_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return ""
+        for line in packed_refs:
+            raw = line.strip()
+            if not raw or raw.startswith("#") or raw.startswith("^"):
+                continue
+            revision_text, _, packed_ref = raw.partition(" ")
+            if packed_ref.strip() != normalized_ref:
+                continue
+            revision_text = revision_text.strip()
+            return revision_text if self._looks_like_git_revision(revision_text) else ""
+        return ""
+
+    def _git_config_path_for_repo(self, repo_dir: Path) -> Path | None:
+        git_dir = self._git_dir_for_repo(repo_dir)
+        if git_dir is None:
+            return None
+        return git_dir / "config"
+
+    def _read_git_config(self, repo_dir: Path) -> configparser.ConfigParser | None:
+        config_path = self._git_config_path_for_repo(repo_dir)
+        if config_path is None:
+            return None
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            with config_path.open("r", encoding="utf-8") as handle:
+                parser.read_file(handle)
+        except (OSError, UnicodeError, configparser.Error):
+            return None
+        return parser
+
+    def _read_git_config_value(self, repo_dir: Path, section: str, option: str) -> str | None:
+        parser = self._read_git_config(repo_dir)
+        if parser is None:
+            return None
+        if not parser.has_section(section):
+            return None
+        value = parser.get(section, option, fallback="").strip()
+        return value or None
+
+    def _git_config_has_section(self, repo_dir: Path, section: str) -> bool:
+        parser = self._read_git_config(repo_dir)
+        return bool(parser is not None and parser.has_section(section))
+
+    def _looks_like_git_revision(self, value: str) -> bool:
+        normalized = str(value or "").strip()
+        if len(normalized) < 7:
+            return False
+        return all(character in "0123456789abcdefABCDEF" for character in normalized)
+
     def current_branch(self, repo_dir: Path) -> str:
         head_branch = self._current_branch_from_head(repo_dir)
         if head_branch:
@@ -277,16 +377,28 @@ class GitOps:
         return "" if fallback == "HEAD" else fallback
 
     def remote_url(self, repo_dir: Path, remote_name: str = "origin") -> str | None:
-        result = self.run(["remote", "get-url", remote_name], cwd=repo_dir, check=False)
+        section = f'remote "{str(remote_name or "").strip()}"'
+        try:
+            result = self.run(["remote", "get-url", remote_name], cwd=repo_dir, check=False)
+        except SubprocessTimeoutError:
+            return self._read_git_config_value(repo_dir, section, "url")
         url = result.stdout.strip()
-        return url or None
+        return url or self._read_git_config_value(repo_dir, section, "url")
 
     def set_remote_url(self, repo_dir: Path, remote_name: str, remote_url: str) -> None:
-        existing = self.run(["remote"], cwd=repo_dir, check=False).stdout.splitlines()
-        if remote_name in {item.strip() for item in existing}:
-            self.run(["remote", "set-url", remote_name, remote_url], cwd=repo_dir)
+        normalized_remote_name = str(remote_name or "").strip()
+        normalized_remote_url = str(remote_url or "").strip()
+        section = f'remote "{normalized_remote_name}"'
+        configured_remote_url = self._read_git_config_value(repo_dir, section, "url")
+        if configured_remote_url == normalized_remote_url:
             return
-        self.run(["remote", "add", remote_name, remote_url], cwd=repo_dir)
+        existing_remote_url = configured_remote_url or self.remote_url(repo_dir, normalized_remote_name)
+        if existing_remote_url == normalized_remote_url:
+            return
+        if existing_remote_url is not None or self._git_config_has_section(repo_dir, section):
+            self.run(["remote", "set-url", normalized_remote_name, normalized_remote_url], cwd=repo_dir)
+            return
+        self.run(["remote", "add", normalized_remote_name, normalized_remote_url], cwd=repo_dir)
 
     def has_changes(self, repo_dir: Path) -> bool:
         output = self.run(["status", "--porcelain"], cwd=repo_dir).stdout.splitlines()

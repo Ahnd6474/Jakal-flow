@@ -57,6 +57,19 @@ def _job_queue_settings(payload: dict[str, Any]) -> tuple[bool, int, str]:
     return bool(runtime.allow_background_queue), int(runtime.background_queue_priority), display_name
 
 
+def _normalized_chat_mode(payload: dict[str, Any] | None) -> str:
+    request_payload = payload if isinstance(payload, dict) else {}
+    raw_mode = str(request_payload.get("chat_mode", "conversation")).strip().lower()
+    return raw_mode if raw_mode in {"conversation", "review", "debugger", "merger"} else "conversation"
+
+
+def _job_lane(command: str, payload: dict[str, Any] | None = None) -> str:
+    normalized_command = str(command or "").strip().lower()
+    if normalized_command == "send-chat-message" and _normalized_chat_mode(payload) in {"conversation", "review"}:
+        return "chat"
+    return "execution"
+
+
 class _StreamBridgeEventSink(BridgeEventSink):
     def __init__(self, send_message) -> None:
         self._send_message = send_message
@@ -182,13 +195,25 @@ class BridgeJobStore:
             "jobs": active_jobs,
         }
 
-    def _matching_active_job_unlocked(self, *, repo_id: str, project_dir: str, workspace_root: Path) -> BridgeJobSnapshot | None:
+    def _matching_active_job_unlocked(
+        self,
+        *,
+        repo_id: str,
+        project_dir: str,
+        workspace_root: Path,
+        command: str,
+        payload: dict[str, Any] | None = None,
+    ) -> BridgeJobSnapshot | None:
         normalized_project_dir = _normalized_project_path(project_dir)
         workspace_key = str(workspace_root)
+        requested_lane = _job_lane(command, payload)
         for job in self._jobs.values():
             if job.workspace_root != workspace_key:
                 continue
             if str(job.status).strip().lower() not in {"queued", "running"}:
+                continue
+            existing_lane = str(getattr(job, "job_lane", "") or "execution").strip().lower() or "execution"
+            if existing_lane != requested_lane:
                 continue
             if repo_id and job.repo_id and job.repo_id == repo_id:
                 return job
@@ -250,6 +275,8 @@ class BridgeJobStore:
         repo_id = str(request_payload.get("repo_id", "")).strip()
         project_dir = _normalized_project_path(str(request_payload.get("project_dir", "")).strip())
         allow_background_queue, queue_priority, display_name = _job_queue_settings(request_payload)
+        job_lane = _job_lane(command, request_payload)
+        chat_mode = _normalized_chat_mode(request_payload) if str(command).strip().lower() == "send-chat-message" else ""
         timestamp_ms = now_ms()
         created_at = now_utc_iso()
         publish_updates: list[BridgeJobSnapshot] = []
@@ -261,6 +288,8 @@ class BridgeJobStore:
                 repo_id=repo_id,
                 project_dir=project_dir,
                 workspace_root=workspace_root,
+                command=command,
+                payload=request_payload,
             )
             if existing is not None:
                 raise RuntimeError("Another background task is already active for this project.")
@@ -272,6 +301,8 @@ class BridgeJobStore:
                 id=job_id,
                 command=command,
                 status=status,
+                job_lane=job_lane,
+                chat_mode=chat_mode,
                 updated_at_ms=timestamp_ms,
                 repo_id=repo_id,
                 project_dir=project_dir,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { effectiveStepStatus, reasoningEffortLabel, resolveExecutionDisplayPlan, runtimeSummary, statusTone } from "../../utils";
+import { effectiveStepStatus, formatCheckpointDisplayId, reasoningEffortLabel, resolveExecutionDisplayPlan, runtimeSummary, statusTone } from "../../utils";
 
 function DocumentIcon() {
   return (
@@ -202,7 +202,7 @@ export function DetailsPane({ detail, planDraft, selectedStepId, modelPresets, o
             </span>
           </div>
           <div className="details-text">
-            <strong>{pendingCheckpoint.checkpoint_id}</strong>
+            <strong>{formatCheckpointDisplayId(pendingCheckpoint.checkpoint_id)}</strong>
             {pendingCheckpoint.title ? <p style={{ margin: "4px 0" }}>{pendingCheckpoint.title}</p> : null}
             <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
               Block {pendingCheckpoint.target_block}

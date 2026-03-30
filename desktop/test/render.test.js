@@ -733,7 +733,7 @@ test("RightSidebarPane renders the project chat on the right rail by default", a
       busy: false,
       chat: {
         sessions: [
-          { session_id: "chat-1", title: "Release", message_count: 2 },
+          { session_id: "chat-1", title: "코드 설명해줘 20260330101705.txt", message_count: 11 },
         ],
         active_session_id: "chat-1",
         messages: [
@@ -758,7 +758,9 @@ test("RightSidebarPane renders the project chat on the right rail by default", a
   assert.match(html, /AI Chat/);
   assert.match(html, /Chat model/);
   assert.match(html, /GPT-5\.4 Mini \/ OpenAI/);
-  assert.match(html, /Release/);
+  assert.match(html, /코드 설명해줘/);
+  assert.doesNotMatch(html, /20260330101705\.txt/);
+  assert.doesNotMatch(html, /코드 설명해줘\s*\/\s*11/);
   assert.match(html, /Hello from the right side\./);
   assert.match(html, /chat\.summary\.txt/);
   assert.match(html, /title="Choose chat mode"/);
@@ -1143,7 +1145,7 @@ test("RightSidebarPane inspector uses the live plan when project status is runni
   assert.doesNotMatch(html, /Stale Build/);
 });
 
-test("RightSidebarPane scopes chat models to the provider selected in program settings", async () => {
+test("RightSidebarPane keeps chat model choices independent from the project runtime provider", async () => {
   const html = await renderBundledComponent(
     "right-sidebar-chat-custom-model-render",
     "./src/components/layout/RightSidebarPane.jsx",
@@ -1205,7 +1207,7 @@ test("RightSidebarPane scopes chat models to the provider selected in program se
 
   assert.match(html, /Chat model/);
   assert.match(html, /Gemini 2\.5 Pro/);
-  assert.doesNotMatch(html, /GPT-5\.4 Mini/);
+  assert.match(html, /GPT-5\.4 Mini/);
 });
 
 test("RightSidebarPane can exclude the AI chat tab from the right rail", async () => {
@@ -1975,7 +1977,8 @@ test("IdeToolbar exposes checkpoint approval when a checkpoint is waiting for re
     },
   );
 
-  assert.match(html, /CP2/);
+  assert.match(html, /ST2/);
+  assert.doesNotMatch(html, /CP2/);
   assert.match(html, /Approve Checkpoint/);
 });
 
@@ -2428,6 +2431,59 @@ test("RightSidebarPane shows chat responding state with elapsed time", async () 
   assert.match(html, /\d+[smh]/);
 });
 
+test("RightSidebarPane keeps the chat composer editable while an execution job is active", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-pane-chat-during-run-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      activeTab: "chat",
+      collapsed: false,
+      includeChatTab: true,
+      detail: {
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          model_slug_input: "gpt-5.4",
+          effort: "medium",
+        },
+      },
+      planDraft: null,
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [],
+      form: {},
+      activeJob: {
+        id: "job-run-1",
+        status: "running",
+        command: "run-plan",
+      },
+      chatJob: null,
+      busy: true,
+      chat: {
+        active_session_id: "chat-1",
+        summary_file: "",
+        sessions: [],
+        messages: [],
+      },
+      chatSettings: {},
+      selectedChatSessionId: "chat-1",
+      chatDraftSession: false,
+      onChangeTab: noop,
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+      onChangeChatModelSelection: noop,
+      onChangeChatReasoningEffort: noop,
+      onGeneratePlan: noop,
+      onRequestStop: noop,
+    },
+  );
+
+  assert.doesNotMatch(html, /<textarea[^>]*disabled/);
+});
+
 test("SidebarPane renders a filtered workspace tree without unrelated nodes", async () => {
   const html = await renderBundledComponent(
     "sidebar-pane-render",
@@ -2483,7 +2539,7 @@ test("SidebarPane renders a filtered workspace tree without unrelated nodes", as
   assert.doesNotMatch(html, /README\.md/);
 });
 
-test("SidebarPane renders live flow steps and keeps a pending checkpoint visible", async () => {
+test("SidebarPane renders only checkpoints and keeps a pending checkpoint visible", async () => {
   const html = await renderBundledComponent(
     "sidebar-pane-pending-checkpoint-render",
     "./src/components/layout/SidebarPane.jsx",
@@ -2567,13 +2623,11 @@ test("SidebarPane renders live flow steps and keeps a pending checkpoint visible
     },
   );
 
-  assert.match(html, /Flow/);
+  assert.match(html, /Checkpoints/);
   assert.match(html, /ST2/);
-  assert.match(html, /ST3/);
-  assert.match(html, /Core UI/);
-  assert.match(html, /Runtime/);
-  assert.match(html, /Running/);
-  assert.match(html, /CP2/);
+  assert.doesNotMatch(html, /CP2/);
+  assert.doesNotMatch(html, /Core UI/);
+  assert.doesNotMatch(html, /Runtime/);
   assert.match(html, /Review the merged work/);
   assert.match(html, /sidebar-item--checkpoint-live/);
   assert.match(html, /status-badge--pulse/);
@@ -3203,7 +3257,7 @@ test("AppSettingsView keeps share actions enabled while a run is active", async 
   assert.match(html, /Revoke Link/);
 });
 
-test("ConfigEditorView shows project-level model controls without the legacy advanced settings section", async () => {
+test("ConfigEditorView removes project-level model controls without restoring the legacy advanced settings section", async () => {
   const html = await renderBundledComponent(
     "config-editor-view-render",
     "./src/components/views/ConfigEditorView.jsx",
@@ -3250,13 +3304,14 @@ test("ConfigEditorView shows project-level model controls without the legacy adv
   );
 
   assert.doesNotMatch(html, /Advanced Settings/);
-  assert.match(html, /Model Settings/);
-  assert.match(html, /Custom Model Slug/);
-  assert.match(html, /GPT-5\.4/);
-  assert.match(html, /GPT Reasoning/);
   assert.match(html, />Save Configuration<\/button>/);
-  assert.match(html, /Planning Reasoning/);
   assert.match(html, /Memory \/ Worker \(GiB\)/);
+  assert.match(html, /GitHub Connection/);
+  assert.match(html, /Execution Parameters/);
+  assert.doesNotMatch(html, /Model Settings/);
+  assert.doesNotMatch(html, /Custom Model Slug/);
+  assert.doesNotMatch(html, /GPT Reasoning/);
+  assert.doesNotMatch(html, /Planning Reasoning/);
   assert.doesNotMatch(html, /Extra Prompt/);
   assert.match(html, />Archive Project<\/button>/);
   assert.match(html, />Delete Project<\/button>/);
@@ -3422,7 +3477,7 @@ test("DetailsPane shows report documents and checkpoint deadlines in the inspect
   assert.match(html, /2026-04-05 18:00/);
 });
 
-test("ConfigEditorView shows provider-specific project model controls after setup", async () => {
+test("ConfigEditorView hides project-level model controls after setup", async () => {
   const html = await renderBundledComponent(
     "config-editor-no-execution-model-controls-render",
     "./src/components/views/ConfigEditorView.jsx",
@@ -3480,11 +3535,12 @@ test("ConfigEditorView shows provider-specific project model controls after setu
     },
   );
 
-  assert.match(html, /Planning Reasoning/);
-  assert.match(html, /Model Settings/);
-  assert.match(html, /GPT-5\.4 Mini/);
-  assert.match(html, /Custom Model Slug/);
-  assert.match(html, /GPT Reasoning/);
+  assert.doesNotMatch(html, /Planning Reasoning/);
+  assert.doesNotMatch(html, /Model Settings/);
+  assert.doesNotMatch(html, /Custom Model Slug/);
+  assert.doesNotMatch(html, /GPT Reasoning/);
+  assert.match(html, /Execution Parameters/);
+  assert.match(html, /GitHub Connection/);
 });
 
 test("AppSettingsView keeps direct model slug editing for OpenRouter only", async () => {

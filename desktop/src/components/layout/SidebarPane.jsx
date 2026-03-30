@@ -4,6 +4,8 @@ import { displayStatus } from "../../locale";
 import { arePropsEqualExceptFunctions } from "../../shallowProps";
 import {
   effectiveStepStatus,
+  formatCheckpointDisplayId,
+  formatChatSessionTitle,
   planStepsWithCloseout,
   projectStatusWithJob,
   resolveExecutionDisplayPlan,
@@ -585,9 +587,10 @@ function ChatPanel({
   }
 
   function sessionLabel(session) {
-    const title = String(session?.title || "").trim() || (language === "ko" ? "대화" : "Conversation");
-    const count = Number.parseInt(String(session?.message_count || 0), 10) || 0;
-    return `${title} · ${count}`;
+    return formatChatSessionTitle(
+      session?.title,
+      language === "ko" ? "대화" : "Conversation",
+    );
   }
 
   function handleSend() {
@@ -842,7 +845,7 @@ function CheckpointsPanel({ checkpoints, visibleCheckpoints, language, t }) {
                     <span className="sidebar-checkpoint-row__arrow" aria-hidden="true">
                       {hasDetails ? (isExpanded ? "▾" : "▸") : "·"}
                     </span>
-                    <strong className="sidebar-checkpoint-row__id">{checkpoint.checkpoint_id}</strong>
+                    <strong className="sidebar-checkpoint-row__id">{formatCheckpointDisplayId(checkpoint.checkpoint_id)}</strong>
                     <span className={`status-badge status-badge--${tone} ${isPendingCheckpoint ? "status-badge--pulse" : ""}`.trim()}>
                       {displayStatus(checkpoint.status, language)}
                     </span>
@@ -1258,11 +1261,7 @@ export const SidebarPane = memo(function SidebarPane({
 
           {/* ── Checkpoints tab ── */}
           {activeTab === "plans" ? (
-            <FlowStepsPanel
-              steps={flowSteps}
-              selectedStepId={selectedStepId}
-              onSelectStep={onSelectStep}
-              projectStatus={projectStatus}
+            <CheckpointsPanel
               checkpoints={checkpoints}
               visibleCheckpoints={visibleCheckpoints}
               language={language}

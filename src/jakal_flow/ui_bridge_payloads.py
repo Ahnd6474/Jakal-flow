@@ -30,7 +30,7 @@ from .utils import append_jsonl, compact_text, normalize_workflow_mode, now_utc_
 from .workspace import LOCAL_PROJECT_LOG_DIRNAME
 
 
-DETAIL_CACHE_VERSION = 14
+DETAIL_CACHE_VERSION = 15
 LIST_ITEM_CACHE_VERSION = 1
 WORKSPACE_LISTING_CACHE_VERSION = 1
 PROJECT_TREE_EXCLUDED_NAMES = frozenset({".git", LOCAL_PROJECT_LOG_DIRNAME, "ui_bridge_perf.jsonl"})
@@ -72,6 +72,29 @@ def _path_signature(path: Path) -> str:
         return f"{path.name}:unavailable"
     kind = "dir" if path.is_dir() else "file"
     return f"{path.name}:{kind}:{stat.st_size}:{stat.st_mtime_ns}"
+
+
+def _json_or_text_signature(path: Path) -> str:
+    base_signature = _path_signature(path)
+    if not path.exists() or path.is_dir():
+        return base_signature
+    try:
+        payload = read_json(path, default=None)
+    except ARTIFACT_READ_EXCEPTIONS:
+        try:
+            normalized = read_text(path, default="")
+        except ARTIFACT_READ_EXCEPTIONS:
+            return f"{base_signature}:unavailable"
+    else:
+        if payload is None:
+            try:
+                normalized = read_text(path, default="")
+            except ARTIFACT_READ_EXCEPTIONS:
+                normalized = ""
+        else:
+            normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+    return f"{base_signature}:{digest}"
 
 
 def _preview_tree_signature(path: Path, max_entries: int = 16, child_limit: int = 8) -> str:
@@ -183,6 +206,7 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
     lightweight_pre_digest.update(str(project.metadata.last_run_at or "").encode("utf-8"))
     lightweight_pre_digest.update(str(project.metadata.current_safe_revision or "").encode("utf-8"))
     lightweight_pre_digest.update(str(project.loop_state.current_task or "").encode("utf-8"))
+    lightweight_pre_digest.update(_json_or_text_signature(project.paths.execution_plan_file).encode("utf-8"))
     tracked_files = [
         project.paths.metadata_file,
         project.paths.project_config_file,
@@ -677,11 +701,12 @@ def _flow_svg_signature(context: ProjectContext, plan_state: ExecutionPlanState)
     payload = {
         "title": plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug,
         "execution_mode": str(plan_state.execution_mode or "").strip(),
+        "closeout_status": str(plan_state.closeout_status or "").strip(),
         "steps": [],
     }
     for step in plan_state.steps:
         step_payload = step.to_dict()
-        for transient_key in ("status", "started_at", "completed_at", "commit_hash", "notes"):
+        for transient_key in ("started_at", "completed_at", "commit_hash", "notes"):
             step_payload.pop(transient_key, None)
         payload["steps"].append(step_payload)
     return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
@@ -915,7 +940,7 @@ def history_payload(context: ProjectContext) -> dict[str, Any]:
             _path_signature(context.paths.block_log_file),
             _path_signature(context.paths.pass_log_file),
             _path_signature(context.paths.logs_dir / "test_runs.jsonl"),
-            _path_signature(context.paths.execution_plan_file),
+            _json_or_text_signature(context.paths.execution_plan_file),
         )
     )
     cached = _section_payload_from_cache(cache_key, signature)

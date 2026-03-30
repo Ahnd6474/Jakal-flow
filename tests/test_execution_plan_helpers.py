@@ -104,7 +104,11 @@ class ExecutionPlanHelperTests(unittest.TestCase):
                 return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
             raise AssertionError(f"unexpected git args: {args}")
 
-        with mock.patch.object(git, "run", side_effect=fake_run):
+        with mock.patch.object(git, "_current_revision_from_head", return_value=""), mock.patch.object(
+            git,
+            "run",
+            side_effect=fake_run,
+        ):
             git.configure_local_identity(repo_dir, "Jakal Flow", "jakal@example.com")
             git.configure_local_identity(repo_dir, "Jakal Flow", "jakal@example.com")
             self.assertEqual(git.current_revision(repo_dir), "abc123")
@@ -136,8 +140,8 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         timeout_map = {tuple(args[:2] if len(args) > 1 else args): timeout for args, timeout in observed_timeouts}
         self.assertEqual(timeout_map[("branch", "--show-current")], 10.0)
-        self.assertEqual(timeout_map[("remote",)], 30.0)
-        self.assertEqual(timeout_map[("status", "--porcelain")], 30.0)
+        self.assertEqual(timeout_map[("remote",)], 60.0)
+        self.assertEqual(timeout_map[("status", "--porcelain")], 60.0)
         self.assertEqual(timeout_map[("fetch", "origin")], 180.0)
         self.assertEqual(timeout_map[("cherry-pick", "abc123")], 180.0)
         self.assertEqual(timeout_map[("clone", "--branch")], 300.0)
@@ -639,6 +643,62 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         mocked_attach.assert_called_once_with(context.paths.repo_dir, lineage.worktree_dir, lineage.branch_name)
         mocked_add.assert_not_called()
         self.assertEqual(lineage_context.metadata.branch, lineage.branch_name)
+
+    def test_build_lineage_context_sanitizes_parent_active_plan_state(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_lineage_plan_sync_sanitization_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest", execution_mode="parallel")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(step_id="ST1", title="Parent active step", status="running", started_at="2026-03-30T00:00:00+00:00"),
+                        ExecutionStep(step_id="ST2", title="Sibling already done", status="completed", completed_at="2026-03-29T00:00:00+00:00"),
+                    ],
+                ),
+            )
+            lineage = LineageState(
+                lineage_id="LN1",
+                branch_name="jakal-flow-lineage-ln1",
+                worktree_dir=temp_root / "lineages" / "ln1" / "repo",
+                project_root=temp_root / "lineages" / "ln1",
+                created_at="2026-03-28T00:00:00+00:00",
+                updated_at="2026-03-28T00:00:00+00:00",
+                head_commit="ln1-head",
+                safe_revision="ln1-head",
+            )
+            step = ExecutionStep(step_id="ST1", title="Parent active step", owned_paths=["desktop/src"])
+            with mock.patch.object(orchestrator.git, "branch_exists", return_value=True), mock.patch.object(
+                orchestrator.git,
+                "attach_worktree",
+            ), mock.patch.object(
+                orchestrator.git,
+                "add_worktree",
+            ):
+                lineage_context = orchestrator._build_lineage_context(context, runtime, step, lineage)
+                lineage_plan = orchestrator.load_execution_plan_state(lineage_context)
+                checkpoint_state = read_json(lineage_context.paths.checkpoint_state_file, default={})
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual([item.status for item in lineage_plan.steps], ["pending", "completed"])
+        self.assertIsNone(lineage_plan.steps[0].started_at)
+        self.assertEqual(checkpoint_state["checkpoints"][0]["status"], "pending")
+        self.assertEqual(checkpoint_state["checkpoints"][1]["status"], "approved")
+        self.assertEqual(lineage_context.metadata.current_status, "lineage_ready")
 
     def test_cleanup_lineage_worktree_unregisters_missing_worktree_path(self) -> None:
         orchestrator = Orchestrator(Path.cwd() / ".tmp_cleanup_lineage_worktree_test")

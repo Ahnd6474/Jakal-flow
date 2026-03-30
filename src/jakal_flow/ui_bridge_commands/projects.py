@@ -103,7 +103,11 @@ def build_project_command_handlers(
         )
         save_run_control(project, default_run_control())
         append_ui_event(project, "project-saved", "Saved project setup from the desktop shell.")
-        return ctx.detail_payload(project)
+        return ctx.detail_payload(
+            project,
+            refresh_codex_status=False,
+            detail_level="full",
+        )
 
     def generate_plan(ctx: BridgeCommandContext) -> dict:
         project_dir, runtime, branch, origin_url, _display_name = common_project_inputs(ctx.payload, ctx.orchestrator)

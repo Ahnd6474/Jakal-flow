@@ -241,7 +241,7 @@ test("applyProjectDetailState preserves the current project_dir when a sparse de
 
   assert.equal(capturedProjectForm.project_dir, "C:/repo");
   assert.equal(capturedProjectForm.display_name, "Existing Repo");
-  assert.equal(capturedProjectForm.runtime.model_provider, "gemini");
+  assert.equal(capturedProjectForm.runtime.model_provider, "openai");
 });
 
 test("applyProjectDetailState preserves local model and reasoning overrides on same-project refresh", () => {

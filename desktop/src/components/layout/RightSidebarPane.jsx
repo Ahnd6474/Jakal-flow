@@ -3,7 +3,7 @@ import { ChatMessageContent } from "../../chatMarkdown";
 import { useI18n } from "../../i18n";
 import {
   defaultModelForRuntime,
-  filterModelCatalogByProvider,
+  formatChatSessionTitle,
   formatDurationCompact,
   normalizedLocalModelProvider,
   normalizedModelProvider,
@@ -420,14 +420,14 @@ const ProjectChatPane = memo(function ProjectChatPane({
   const deferredRemoteMessages = useDeferredValue(remoteMessages);
   const activeSessionId = String(selectedChatSessionId || chat?.active_session_id || "").trim();
   const summaryFile = String(chat?.summary_file || "").trim();
-  const currentProvider = normalizedModelProvider(chatSettings);
-  const currentLocalProvider = normalizedLocalModelProvider(chatSettings);
+  const projectRuntime = detail?.runtime || {};
+  const currentProvider = normalizedModelProvider(projectRuntime);
+  const currentLocalProvider = normalizedLocalModelProvider(projectRuntime);
   const selectedChatProvider = String(chatSettings?.chat_model_provider || "").trim().toLowerCase();
   const selectedChatLocalProvider = String(chatSettings?.chat_local_model_provider || "").trim().toLowerCase();
   const selectedChatModel = String(chatSettings?.chat_model || "").trim().toLowerCase();
   const selectedChatEffort = String(chatSettings?.chat_effort || "").trim().toLowerCase();
   const chatJobStatus = String(chatJob?.status || "").trim().toLowerCase();
-  const projectRuntime = detail?.runtime || {};
   const [input, setInput] = useState("");
   const [pendingMode, setPendingMode] = useState(DEFAULT_CHAT_MODE);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -448,22 +448,22 @@ const ProjectChatPane = memo(function ProjectChatPane({
     const startedAtMs = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
     return Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
   });
-  const providerScopedRuntime = useMemo(
+  const projectDefaultRuntime = useMemo(
     () => ({
       ...projectRuntime,
       model_provider: currentProvider,
       local_model_provider: currentLocalProvider,
-      model: String(chatSettings?.model || projectRuntime?.model || "").trim().toLowerCase(),
-      model_slug_input: String(chatSettings?.model_slug_input || chatSettings?.model || projectRuntime?.model_slug_input || projectRuntime?.model || "").trim(),
+      model: String(projectRuntime?.model || "").trim().toLowerCase(),
+      model_slug_input: String(projectRuntime?.model_slug_input || projectRuntime?.model || "").trim(),
     }),
-    [chatSettings?.model, chatSettings?.model_slug_input, currentLocalProvider, currentProvider, projectRuntime],
+    [currentLocalProvider, currentProvider, projectRuntime],
   );
   const availableChatModels = useMemo(
-    () => filterModelCatalogByProvider(modelCatalog, providerScopedRuntime).filter((item) => {
+    () => (modelCatalog || []).filter((item) => {
       const model = String(item?.model || "").trim();
       return Boolean(model) && !item?.hidden;
     }),
-    [modelCatalog, providerScopedRuntime],
+    [modelCatalog],
   );
   const selectedChatKey = useMemo(
     () => (selectedChatModel ? [selectedChatProvider, selectedChatLocalProvider, selectedChatModel].join("::") : ""),
@@ -478,8 +478,8 @@ const ProjectChatPane = memo(function ProjectChatPane({
     [selectedChatIsAllowed, selectedChatKey],
   );
   const effectiveDefaultChatModel = useMemo(
-    () => defaultModelForRuntime(modelCatalog, providerScopedRuntime),
-    [modelCatalog, providerScopedRuntime],
+    () => defaultModelForRuntime(modelCatalog, projectDefaultRuntime),
+    [modelCatalog, projectDefaultRuntime],
   );
   const selectedChatEntry = useMemo(
     () => (
@@ -507,15 +507,15 @@ const ProjectChatPane = memo(function ProjectChatPane({
   const projectDefaultSummary = useMemo(
     () => runtimeSummary(
       {
-        ...providerScopedRuntime,
-        model: effectiveDefaultChatModel || providerScopedRuntime.model,
-        model_slug_input: providerScopedRuntime.model_slug_input || effectiveDefaultChatModel || providerScopedRuntime.model,
+        ...projectDefaultRuntime,
+        model: effectiveDefaultChatModel || projectDefaultRuntime.model,
+        model_slug_input: projectDefaultRuntime.model_slug_input || effectiveDefaultChatModel || projectDefaultRuntime.model,
       },
       modelPresets,
       language,
       modelCatalog,
     ),
-    [effectiveDefaultChatModel, language, modelCatalog, modelPresets, providerScopedRuntime],
+    [effectiveDefaultChatModel, language, modelCatalog, modelPresets, projectDefaultRuntime],
   );
   const chatTargetSummary = useMemo(
     () => (
@@ -655,9 +655,10 @@ const ProjectChatPane = memo(function ProjectChatPane({
   }, [menuOpen]);
 
   function sessionLabel(session) {
-    const title = String(session?.title || "").trim() || (language === "ko" ? "Conversation" : "Conversation");
-    const count = Number.parseInt(String(session?.message_count || 0), 10) || 0;
-    return `${title} / ${count}`;
+    return formatChatSessionTitle(
+      session?.title,
+      language === "ko" ? "Conversation" : "Conversation",
+    );
   }
 
   function handleMessagesScroll(event) {
@@ -680,7 +681,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
 
   function handleSend() {
     const text = input.trim();
-    if (!text || busy) {
+    if (!text || chatJobActive || executionBlocksPendingMode) {
       return;
     }
     const mode = pendingMode;
@@ -737,7 +738,10 @@ const ProjectChatPane = memo(function ProjectChatPane({
   }
 
   const selectedSessionValue = chatDraftSession ? "" : activeSessionId;
+  const chatJobActive = ["queued", "running"].includes(chatJobStatus);
   const showRespondingState = chatJobStatus === "running";
+  const executionBlocksPendingMode = busy && !["conversation", "review"].includes(pendingMode);
+  const chatControlsDisabled = chatJobActive;
   const respondingLabel = language === "ko" ? "응답 중" : "Responding";
   const stopLabel = language === "ko" ? "중단" : "Stop";
   const composerPlaceholder =
@@ -806,7 +810,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
               className="sidebar-chat-session-select chat-center__session-select"
               value={selectedSessionValue}
               onChange={handleSessionChange}
-              disabled={busy}
+              disabled={chatControlsDisabled}
             >
               <option value="">{language === "ko" ? "New conversation" : "New conversation"}</option>
               {deferredSessions.map((session) => (
@@ -819,7 +823,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
               className="sidebar-chat-new"
               onClick={() => { setPendingMode(DEFAULT_CHAT_MODE); setMenuOpen(false); onStartNewChatSession?.(); }}
               type="button"
-              disabled={busy}
+              disabled={chatControlsDisabled}
             >
               {language === "ko" ? "New" : "New"}
             </button>
@@ -857,7 +861,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
             className="sidebar-chat-session-select"
             value={selectedSessionValue}
             onChange={handleSessionChange}
-            disabled={busy}
+            disabled={chatControlsDisabled}
           >
             <option value="">{language === "ko" ? "New conversation" : "New conversation"}</option>
             {deferredSessions.map((session) => (
@@ -874,7 +878,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
               onStartNewChatSession?.();
             }}
             type="button"
-            disabled={busy}
+            disabled={chatControlsDisabled}
           >
             {language === "ko" ? "New" : "New"}
           </button>
@@ -932,7 +936,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
               className="sidebar-chat-plus"
               onClick={() => setMenuOpen((current) => !current)}
               type="button"
-              disabled={busy}
+              disabled={chatControlsDisabled}
               title={language === "ko" ? "채팅 모드 선택" : "Choose chat mode"}
             >
               <PlusIcon />
@@ -1034,14 +1038,14 @@ const ProjectChatPane = memo(function ProjectChatPane({
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={composerPlaceholder}
-            disabled={busy}
+            disabled={chatControlsDisabled}
             rows={centerMode ? 3 : 2}
           />
           <button
             className={centerMode ? "chat-center__send-btn" : "sidebar-chat-send"}
             onClick={handleSend}
             type="button"
-            disabled={busy || !input.trim()}
+            disabled={chatJobActive || executionBlocksPendingMode || !input.trim()}
             title={sendButtonTitle}
           >
             <SendIcon />

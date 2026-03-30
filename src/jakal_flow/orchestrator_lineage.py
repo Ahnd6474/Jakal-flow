@@ -208,8 +208,6 @@ class OrchestratorLineageMixin:
             if source_dir.exists():
                 shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
         for source_path, target_path in [
-            (context.paths.execution_plan_file, lineage_paths.execution_plan_file),
-            (context.paths.checkpoint_state_file, lineage_paths.checkpoint_state_file),
             (context.paths.spine_file, lineage_paths.spine_file),
             (context.paths.common_requirements_file, lineage_paths.common_requirements_file),
             (context.paths.ml_mode_state_file, lineage_paths.ml_mode_state_file),
@@ -222,6 +220,34 @@ class OrchestratorLineageMixin:
         if context.paths.lineage_manifests_dir.exists():
             ensure_dir(lineage_paths.lineage_manifests_dir)
             shutil.copytree(context.paths.lineage_manifests_dir, lineage_paths.lineage_manifests_dir, dirs_exist_ok=True)
+    def _sanitize_child_execution_plan_state(self, plan_state: ExecutionPlanState) -> ExecutionPlanState:
+        sanitized = deepcopy(plan_state)
+        for step in sanitized.steps:
+            if step.status not in {"running", "integrating"}:
+                continue
+            step.status = "pending"
+            step.started_at = None
+            step.completed_at = None
+            step.commit_hash = None
+            step.notes = ""
+            self._clear_step_failure_metadata(step)
+        if sanitized.closeout_status == "running":
+            sanitized.closeout_status = "not_started"
+            sanitized.closeout_started_at = None
+            sanitized.closeout_completed_at = None
+            sanitized.closeout_commit_hash = None
+            sanitized.closeout_notes = ""
+        return sanitized
+    def _sync_child_execution_plan_state(
+        self,
+        source_context: ProjectContext,
+        child_context: ProjectContext,
+    ) -> None:
+        parent_plan_state = self.load_execution_plan_state(source_context)
+        self.save_execution_plan_state(
+            child_context,
+            self._sanitize_child_execution_plan_state(parent_plan_state),
+        )
     def _persist_context_files(self, context: ProjectContext) -> None:
         write_json(context.paths.metadata_file, context.metadata.to_dict())
         write_json(context.paths.project_config_file, context.runtime.to_dict())
@@ -309,6 +335,7 @@ class OrchestratorLineageMixin:
             paths=lineage_paths,
             loop_state=lineage_loop_state,
         )
+        self._sync_child_execution_plan_state(context, lineage_context)
         self._ensure_project_documents(lineage_context)
         self._persist_context_files(lineage_context)
         return lineage_context
@@ -1220,6 +1247,7 @@ class OrchestratorLineageMixin:
             paths=integration_paths,
             loop_state=integration_loop_state,
         )
+        self._sync_child_execution_plan_state(context, integration_context)
         self._ensure_project_documents(integration_context)
         self._persist_context_files(integration_context)
         return {

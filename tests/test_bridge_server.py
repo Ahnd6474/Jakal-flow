@@ -38,6 +38,68 @@ class CaptureBridgeServer(BridgeServer):
 
 
 class BridgeServerTests(unittest.TestCase):
+    def test_chat_conversation_job_can_run_alongside_execution_job_for_same_project(self) -> None:
+        with TemporaryTestDir() as workspace_root:
+            workspace_root.mkdir(parents=True, exist_ok=True)
+            repo_dir = workspace_root / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            server = CaptureBridgeServer()
+
+            run_snapshot = server._jobs.create(
+                "run-plan",
+                workspace_root,
+                {"project_dir": str(repo_dir)},
+            )
+            chat_snapshot = server._jobs.create(
+                "send-chat-message",
+                workspace_root,
+                {"project_dir": str(repo_dir), "chat_mode": "conversation"},
+            )
+
+            self.assertEqual(run_snapshot.job_lane, "execution")
+            self.assertEqual(chat_snapshot.job_lane, "chat")
+            self.assertEqual(chat_snapshot.chat_mode, "conversation")
+
+    def test_chat_conversation_job_still_rejects_duplicate_chat_lane_for_same_project(self) -> None:
+        with TemporaryTestDir() as workspace_root:
+            workspace_root.mkdir(parents=True, exist_ok=True)
+            repo_dir = workspace_root / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            server = CaptureBridgeServer()
+
+            server._jobs.create(
+                "send-chat-message",
+                workspace_root,
+                {"project_dir": str(repo_dir), "chat_mode": "review"},
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "already active for this project"):
+                server._jobs.create(
+                    "send-chat-message",
+                    workspace_root,
+                    {"project_dir": str(repo_dir), "chat_mode": "conversation"},
+                )
+
+    def test_chat_debugger_job_stays_in_execution_lane_and_conflicts_with_execution_job(self) -> None:
+        with TemporaryTestDir() as workspace_root:
+            workspace_root.mkdir(parents=True, exist_ok=True)
+            repo_dir = workspace_root / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            server = CaptureBridgeServer()
+
+            server._jobs.create(
+                "run-plan",
+                workspace_root,
+                {"project_dir": str(repo_dir)},
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "already active for this project"):
+                server._jobs.create(
+                    "send-chat-message",
+                    workspace_root,
+                    {"project_dir": str(repo_dir), "chat_mode": "debugger"},
+                )
+
     def test_bridge_request_skips_project_changed_event_when_result_disables_it(self) -> None:
         with TemporaryTestDir() as workspace_root:
             server = CaptureBridgeServer()
