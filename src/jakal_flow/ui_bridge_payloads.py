@@ -39,7 +39,8 @@ _LIST_ITEM_PAYLOAD_MEMORY_CACHE: dict[str, tuple[int, str, dict[str, Any]]] = {}
 _WORKSPACE_LISTING_MEMORY_CACHE: dict[str, tuple[int, str, dict[str, Any]]] = {}
 _PROVIDER_STATUSES_FETCH_CACHE: tuple[float, dict[str, dict[str, Any]]] | None = None
 _PROVIDER_STATUSES_FETCH_CACHE_TTL_SECONDS = 10.0
-_DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE: dict[str, tuple[str, str]] = {}
+_DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE: dict[str, tuple[str, str, str, float]] = {}
+_DETAIL_CONTENT_SIGNATURE_RECENT_WINDOW_SECONDS = 1.0
 _SECTION_PAYLOAD_MEMORY_CACHE: dict[str, tuple[str, dict[str, Any]]] = {}
 
 PLANNING_STAGE_DEFINITIONS = (
@@ -176,12 +177,12 @@ def _store_section_payload(cache_key: str, signature: str, payload: dict[str, An
 def project_detail_content_signature(project: ProjectContext, detail_level: str) -> str:
     normalized_detail_level = "core" if str(detail_level).strip().lower() == "core" else "full"
     cache_key = f"{project.paths.project_root.resolve()}|{normalized_detail_level}"
-    pre_digest = hashlib.sha1()
-    pre_digest.update(f"detail-cache-v{DETAIL_CACHE_VERSION}:{normalized_detail_level}".encode("utf-8"))
-    pre_digest.update(str(project.metadata.current_status).encode("utf-8"))
-    pre_digest.update(str(project.metadata.last_run_at or "").encode("utf-8"))
-    pre_digest.update(str(project.metadata.current_safe_revision or "").encode("utf-8"))
-    pre_digest.update(str(project.loop_state.current_task or "").encode("utf-8"))
+    lightweight_pre_digest = hashlib.sha1()
+    lightweight_pre_digest.update(f"detail-cache-v{DETAIL_CACHE_VERSION}:{normalized_detail_level}".encode("utf-8"))
+    lightweight_pre_digest.update(str(project.metadata.current_status).encode("utf-8"))
+    lightweight_pre_digest.update(str(project.metadata.last_run_at or "").encode("utf-8"))
+    lightweight_pre_digest.update(str(project.metadata.current_safe_revision or "").encode("utf-8"))
+    lightweight_pre_digest.update(str(project.loop_state.current_task or "").encode("utf-8"))
     tracked_files = [
         project.paths.metadata_file,
         project.paths.project_config_file,
@@ -224,9 +225,22 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
             ]
         )
     for path in tracked_files:
-        pre_digest.update(_path_signature(path).encode("utf-8"))
+        lightweight_pre_digest.update(_path_signature(path).encode("utf-8"))
+    lightweight_pre_signature = lightweight_pre_digest.hexdigest()
+    cached = _DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE.get(cache_key)
+    now_monotonic = monotonic()
+    if (
+        normalized_detail_level == "full"
+        and cached is not None
+        and cached[0] == lightweight_pre_signature
+        and (now_monotonic - cached[3]) <= _DETAIL_CONTENT_SIGNATURE_RECENT_WINDOW_SECONDS
+    ):
+        return cached[2]
+
     tracked_tree_roots: list[Path] = []
     if normalized_detail_level == "full":
+        pre_digest = hashlib.sha1()
+        pre_digest.update(lightweight_pre_signature.encode("utf-8"))
         tracked_tree_roots = [
             project.paths.repo_dir,
             project.paths.docs_dir,
@@ -237,10 +251,12 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
         ]
         for path in tracked_tree_roots:
             pre_digest.update(_preview_tree_structure_token(path).encode("utf-8"))
-    pre_signature = pre_digest.hexdigest()
-    cached = _DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE.get(cache_key)
-    if cached is not None and cached[0] == pre_signature:
-        return cached[1]
+        pre_signature = pre_digest.hexdigest()
+    else:
+        pre_signature = lightweight_pre_signature
+    if cached is not None and cached[1] == pre_signature:
+        _DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE[cache_key] = (cached[0], cached[1], cached[2], now_monotonic)
+        return cached[2]
 
     digest = hashlib.sha1()
     digest.update(pre_signature.encode("utf-8"))
@@ -249,7 +265,12 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
         for path in tracked_tree_roots:
             digest.update(_preview_tree_signature(path).encode("utf-8"))
     signature = digest.hexdigest()
-    _DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE[cache_key] = (pre_signature, signature)
+    _DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE[cache_key] = (
+        lightweight_pre_signature,
+        pre_signature,
+        signature,
+        now_monotonic,
+    )
     return signature
 
 

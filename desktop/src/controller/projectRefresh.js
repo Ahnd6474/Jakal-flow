@@ -35,3 +35,12 @@ export function shouldRefreshListingForProjectEvent(selectedProjectId = "", even
   }
   return eventRepo !== selected;
 }
+
+export function shouldRefreshListingForManualRefresh(selectedProjectId = "") {
+  return !normalizedRepoId(selectedProjectId);
+}
+
+export function shouldForceCodexRefreshForManualRefresh(centerTab = "") {
+  const normalizedTab = String(centerTab || "").trim().toLowerCase();
+  return normalizedTab === "config" || normalizedTab === "app-settings";
+}

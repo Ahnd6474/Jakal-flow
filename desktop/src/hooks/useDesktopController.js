@@ -6,6 +6,8 @@ import { bridgeEventJob, bridgeEventProject, compactBridgeEventQueue, isJobUpdat
 import {
   mergeRefreshRepoId,
   projectRefreshDebounceMs,
+  shouldForceCodexRefreshForManualRefresh,
+  shouldRefreshListingForManualRefresh,
   shouldRefreshListingForProjectEvent,
   shouldRefreshSelectedProject,
 } from "../controller/projectRefresh";
@@ -995,7 +997,9 @@ export function useDesktopController() {
       if (isProjectUiEvent(eventPayload)) {
         const project = bridgeEventProject(eventPayload);
         const eventRepoId = String(project?.repo_id || "").trim();
-        const detailPatched = project ? applySelectedProjectDelta(project) : false;
+        if (project) {
+          applySelectedProjectDelta(project);
+        }
         if (project) {
           applyProjectListingDelta(project, jobsRef.current);
         }
@@ -1006,7 +1010,9 @@ export function useDesktopController() {
           });
         }
         if (shouldPatchSelectedProject && shouldRefreshProjectDetailForUiEvent(eventPayload)) {
-          scheduleBridgeRefresh(eventRepoId, { refreshListing: false, refreshDetail: !detailPatched });
+          // UI events only carry a shallow project delta, so structural run
+          // updates still need a core detail reload to refresh plan state.
+          scheduleBridgeRefresh(eventRepoId, { refreshListing: false, refreshDetail: true });
         }
       }
     }
@@ -1092,7 +1098,22 @@ export function useDesktopController() {
 
   async function forceRefresh() {
     try {
-      const jobSnapshot = await syncRunningJobSnapshot(activeJobId);
+      const refreshCodexStatus = shouldForceCodexRefreshForManualRefresh(centerTab);
+      const refreshListing = shouldRefreshListingForManualRefresh(selectedProjectId);
+      const jobSnapshotPromise = syncRunningJobSnapshot(activeJobId);
+      const projectStatePromise = selectedProjectId
+        ? refreshVisibleProjectState(
+            bridgeRequest,
+            workspaceRoot,
+            selectedProjectId,
+            {
+              refreshCodexStatus,
+              detailLevel: wantsExpandedDetail ? "full" : "core",
+              refreshListing,
+            },
+          )
+        : loadProjectListing(bridgeRequest, workspaceRoot);
+      const [jobSnapshot, refreshedState] = await Promise.all([jobSnapshotPromise, projectStatePromise]);
       applyCurrentJobSnapshot(jobSnapshot);
       const selectedJob = projectJobFromJobs(jobsRef.current, {
         repo_id: selectedProjectId,
@@ -1101,46 +1122,46 @@ export function useDesktopController() {
         last_run_at: projectDetail?.project?.last_run_at || "",
       });
       if (selectedProjectId) {
-        const { listing, detail } = await refreshVisibleProjectState(
-          bridgeRequest,
-          workspaceRoot,
-          selectedProjectId,
-          {
-            refreshCodexStatus: true,
-            detailLevel: wantsExpandedDetail ? "full" : "core",
-            refreshListing: true,
-          },
-        );
-        const nextProjects = applyListingState({
-          listing,
-          runningJob: jobsRef.current,
-          setProjects,
-          setWorkspaceStats,
-        });
-        setHistoryProjects(listing?.history || []);
-        projectsRef.current = nextProjects;
-        if (detail) {
+        const { listing, detail } = refreshedState || {};
+        if (listing) {
+          const nextProjects = applyListingState({
+            listing,
+            runningJob: jobsRef.current,
+            setProjects,
+            setWorkspaceStats,
+          });
+          startTransition(() => {
+            setHistoryProjects(listing?.history || []);
+            projectsRef.current = nextProjects;
+            if (detail) {
+              applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob });
+            }
+          });
+        } else if (detail) {
           applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob });
         }
       } else {
-        const listing = await loadProjectListing(bridgeRequest, workspaceRoot);
+        const listing = refreshedState;
         const nextProjects = applyListingState({
           listing,
           runningJob: jobsRef.current,
           setProjects,
           setWorkspaceStats,
         });
-        setHistoryProjects(listing?.history || []);
-        projectsRef.current = nextProjects;
-
-        if (selectedHistoryId) {
-          const detail = await fetchHistoryDetailOnce(selectedHistoryId, {
+        const historyDetail = selectedHistoryId
+          ? await fetchHistoryDetailOnce(selectedHistoryId, {
             detailLevel: centerTab === "history" ? "full" : "core",
-          });
-          setHistoryDetail(detail);
-        } else if (nextProjects.length) {
-          setSelectedProjectId(nextProjects[0].repo_id);
-        }
+          })
+          : null;
+        startTransition(() => {
+          setHistoryProjects(listing?.history || []);
+          projectsRef.current = nextProjects;
+          if (selectedHistoryId && historyDetail) {
+            setHistoryDetail(historyDetail);
+          } else if (!selectedHistoryId && nextProjects.length) {
+            setSelectedProjectId(nextProjects[0].repo_id);
+          }
+        });
       }
 
       setMessage(messagePayload("info", activeJobId ? translate(language, "message.runStateRefreshed") : translate(language, "message.projectStateRefreshed")));
@@ -2219,7 +2240,9 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.noProjectOpen")));
       return;
     }
-    await loadProject(selectedProjectId, { refreshCodexStatus: true });
+    await loadProject(selectedProjectId, {
+      refreshCodexStatus: shouldForceCodexRefreshForManualRefresh(centerTab),
+    });
     setMessage(messagePayload("success", translate(language, "message.projectReloaded")));
   }
 

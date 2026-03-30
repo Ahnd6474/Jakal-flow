@@ -571,6 +571,43 @@ test("CenterWorkspace renders the parallel execution flow chart for parallel pla
   assert.doesNotMatch(html, /Layer 1/);
 });
 
+test("ExecutionFlowChart centers sparse columns and keeps a fan-out/fan-in DAG visually balanced", async () => {
+  const module = await importBundledModule(
+    "execution-flow-chart-topology",
+    `
+      import { __executionFlowChartTestables } from "./src/components/common/ExecutionFlowChart.jsx";
+
+      export function buildTopology(steps) {
+        return __executionFlowChartTestables.buildChartTopology(steps);
+      }
+    `,
+  );
+  const topology = module.buildTopology([
+    { step_id: "ST1", title: "Freeze", depends_on: [], owned_paths: ["a"] },
+    { step_id: "ST2", title: "Core", depends_on: ["ST1"], owned_paths: ["b"] },
+    { step_id: "ST3", title: "Workspace", depends_on: ["ST1"], owned_paths: ["c"] },
+    { step_id: "ST5", title: "Runtime", depends_on: ["ST1"], owned_paths: ["d"] },
+    { step_id: "ST4", title: "Reconcile", depends_on: ["ST2", "ST3", "ST5"], owned_paths: ["e"] },
+    { step_id: "CO1", title: "Closeout", depends_on: ["ST4"], owned_paths: ["docs"] },
+  ]);
+  const positionById = new Map(topology.nodes.map((node) => [node.step.step_id, { x: node.x, y: node.y }]));
+
+  assert.equal(positionById.get("ST2").x, positionById.get("ST3").x);
+  assert.equal(positionById.get("ST3").x, positionById.get("ST5").x);
+  assert.ok(positionById.get("ST2").y < positionById.get("ST3").y);
+  assert.ok(positionById.get("ST3").y < positionById.get("ST5").y);
+  assert.equal(positionById.get("ST1").y, positionById.get("ST4").y);
+  assert.equal(positionById.get("ST4").y, positionById.get("CO1").y);
+
+  const edgeByKey = new Map(topology.edgeSegments.map((segment) => [segment.key, segment.d]));
+  assert.equal(edgeByKey.get("ST2-ST4"), "M 608 140 H 690");
+  assert.equal(edgeByKey.get("ST3-ST4"), "M 608 306 H 690");
+  assert.equal(edgeByKey.get("ST5-ST4"), "M 608 472 H 690");
+
+  const mergeBusByKey = new Map(topology.mergeBusSegments.map((segment) => [segment.key, segment.d]));
+  assert.equal(mergeBusByKey.get("ST4-merge-bus"), "M 690 140 V 472");
+});
+
 test("CenterWorkspace keeps the step editor hidden until a block is selected", async () => {
   const html = await renderBundledComponent(
     "parallel-workspace-no-selection-render",

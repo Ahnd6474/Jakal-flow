@@ -110,6 +110,91 @@ function buildChartLevels(steps = []) {
   return levels;
 }
 
+function levelRowOrderSignature(level = []) {
+  return level.map((step) => String(step?.step_id || "")).join("|");
+}
+
+function averageIndex(values = []) {
+  if (!values.length) {
+    return null;
+  }
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function orderChartLevels(levels = []) {
+  const normalizedLevels = (levels || []).map((level) => [...level]);
+  if (normalizedLevels.length <= 2) {
+    return normalizedLevels;
+  }
+  let changed = true;
+  let guard = 0;
+  while (changed && guard < 6) {
+    changed = false;
+    guard += 1;
+    for (let levelIndex = 1; levelIndex < normalizedLevels.length; levelIndex += 1) {
+      const previousLevel = normalizedLevels[levelIndex - 1] || [];
+      const indexByStepId = new Map(previousLevel.map((step, index) => [step.step_id, index]));
+      const nextOrder = [...normalizedLevels[levelIndex]].sort((left, right) => {
+        const leftParents = (left.depends_on || []).map((dependency) => indexByStepId.get(dependency)).filter((value) => Number.isFinite(value));
+        const rightParents = (right.depends_on || []).map((dependency) => indexByStepId.get(dependency)).filter((value) => Number.isFinite(value));
+        const leftScore = averageIndex(leftParents);
+        const rightScore = averageIndex(rightParents);
+        if (leftScore == null && rightScore == null) {
+          return String(left.step_id || "").localeCompare(String(right.step_id || ""));
+        }
+        if (leftScore == null) {
+          return 1;
+        }
+        if (rightScore == null) {
+          return -1;
+        }
+        if (leftScore !== rightScore) {
+          return leftScore - rightScore;
+        }
+        return String(left.step_id || "").localeCompare(String(right.step_id || ""));
+      });
+      if (levelRowOrderSignature(nextOrder) !== levelRowOrderSignature(normalizedLevels[levelIndex])) {
+        normalizedLevels[levelIndex] = nextOrder;
+        changed = true;
+      }
+    }
+    for (let levelIndex = normalizedLevels.length - 2; levelIndex >= 0; levelIndex -= 1) {
+      const nextLevel = normalizedLevels[levelIndex + 1] || [];
+      const childIndexById = new Map(nextLevel.map((step, index) => [step.step_id, index]));
+      const nextOrder = [...normalizedLevels[levelIndex]].sort((left, right) => {
+        const leftChildren = nextLevel
+          .filter((step) => (step.depends_on || []).includes(left.step_id))
+          .map((step) => childIndexById.get(step.step_id))
+          .filter((value) => Number.isFinite(value));
+        const rightChildren = nextLevel
+          .filter((step) => (step.depends_on || []).includes(right.step_id))
+          .map((step) => childIndexById.get(step.step_id))
+          .filter((value) => Number.isFinite(value));
+        const leftScore = averageIndex(leftChildren);
+        const rightScore = averageIndex(rightChildren);
+        if (leftScore == null && rightScore == null) {
+          return String(left.step_id || "").localeCompare(String(right.step_id || ""));
+        }
+        if (leftScore == null) {
+          return 1;
+        }
+        if (rightScore == null) {
+          return -1;
+        }
+        if (leftScore !== rightScore) {
+          return leftScore - rightScore;
+        }
+        return String(left.step_id || "").localeCompare(String(right.step_id || ""));
+      });
+      if (levelRowOrderSignature(nextOrder) !== levelRowOrderSignature(normalizedLevels[levelIndex])) {
+        normalizedLevels[levelIndex] = nextOrder;
+        changed = true;
+      }
+    }
+  }
+  return normalizedLevels;
+}
+
 function orthogonalPath(startX, startY, endX, endY) {
   if (startX === endX && startY === endY) {
     return `M ${startX} ${startY}`;
@@ -132,16 +217,19 @@ function chartTopologySignature(steps = []) {
 }
 
 function buildChartTopology(steps = []) {
-  const levels = buildChartLevels(steps);
+  const levels = orderChartLevels(buildChartLevels(steps));
   const positions = new Map();
   const maxRows = Math.max(1, ...levels.map((level) => level.length));
+  const contentHeight = maxRows * BOX_HEIGHT + Math.max(0, maxRows - 1) * GAP_Y;
   const width = Math.max(960, MARGIN_X * 2 + levels.length * BOX_WIDTH + Math.max(0, levels.length - 1) * GAP_X);
-  const height = Math.max(320, MARGIN_Y * 2 + maxRows * BOX_HEIGHT + Math.max(0, maxRows - 1) * GAP_Y);
+  const height = Math.max(320, MARGIN_Y * 2 + contentHeight);
 
   levels.forEach((level, levelIndex) => {
     const x = MARGIN_X + levelIndex * (BOX_WIDTH + GAP_X);
+    const levelHeight = level.length * BOX_HEIGHT + Math.max(0, level.length - 1) * GAP_Y;
+    const offsetY = MARGIN_Y + Math.max(0, (contentHeight - levelHeight) / 2);
     level.forEach((step, rowIndex) => {
-      const y = MARGIN_Y + rowIndex * (BOX_HEIGHT + GAP_Y);
+      const y = offsetY + rowIndex * (BOX_HEIGHT + GAP_Y);
       positions.set(step.step_id, { x, y });
     });
   });
@@ -180,6 +268,7 @@ function buildChartTopology(steps = []) {
   const splitJunctions = [];
   const mergeJunctions = [];
   const nodeToSplitSegments = [];
+  const mergeBusSegments = [];
   const mergeToNodeSegments = [];
   const edgeSegments = [];
 
@@ -207,6 +296,19 @@ function buildChartTopology(steps = []) {
       const junction = { x: x - MERGE_GAP, y: centerY };
       mergeById.set(step.step_id, junction);
       mergeJunctions.push(junction);
+      const parentCenterYs = parents
+        .map((parentId) => positions.get(parentId))
+        .filter(Boolean)
+        .map((position) => position.y + BOX_HEIGHT / 2);
+      const mergeSpanYs = [...parentCenterYs, centerY];
+      const minY = Math.min(...mergeSpanYs);
+      const maxY = Math.max(...mergeSpanYs);
+      if (Number.isFinite(minY) && Number.isFinite(maxY) && minY !== maxY) {
+        mergeBusSegments.push({
+          key: `${step.step_id}-merge-bus`,
+          d: `M ${junction.x} ${minY} V ${maxY}`,
+        });
+      }
       mergeToNodeSegments.push({
         key: `${step.step_id}-merge`,
         d: `M ${junction.x} ${junction.y} H ${x}`,
@@ -235,10 +337,11 @@ function buildChartTopology(steps = []) {
         y: targetPosition.y + BOX_HEIGHT / 2,
       };
       const mergePoint = mergeById.get(targetId);
-      const endPoint = mergePoint || targetCenter;
       edgeSegments.push({
         key: `${step.step_id}-${targetId}`,
-        d: orthogonalPath(startPoint.x, startPoint.y, endPoint.x, endPoint.y),
+        d: mergePoint
+          ? `M ${startPoint.x} ${startPoint.y} H ${mergePoint.x}`
+          : orthogonalPath(startPoint.x, startPoint.y, targetCenter.x, targetCenter.y),
         arrow: !mergePoint,
       });
     });
@@ -250,6 +353,7 @@ function buildChartTopology(steps = []) {
     nodes,
     edgeSegments,
     nodeToSplitSegments,
+    mergeBusSegments,
     mergeToNodeSegments,
     splitJunctions,
     mergeJunctions,
@@ -346,6 +450,9 @@ function ExecutionFlowChartComponent({ steps = [], projectStatus = "", language 
               markerEnd={segment.arrow ? `url(#${arrowId})` : undefined}
             />
           ))}
+          {chart.mergeBusSegments.map((segment) => (
+            <path key={segment.key} d={segment.d} stroke="#64748b" strokeWidth="3" fill="none" strokeLinecap="round" />
+          ))}
           {chart.mergeToNodeSegments.map((segment) => (
             <path
               key={segment.key}
@@ -401,3 +508,8 @@ function ExecutionFlowChartComponent({ steps = [], projectStatus = "", language 
 }
 
 export const ExecutionFlowChart = memo(ExecutionFlowChartComponent);
+export const __executionFlowChartTestables = {
+  buildChartLevels,
+  orderChartLevels,
+  buildChartTopology,
+};
