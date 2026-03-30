@@ -146,6 +146,54 @@ class FailureReportingTests(unittest.TestCase):
             self.assertFalse(result["posted"])
             self.assertEqual(result["reason"], "missing_github_token")
 
+    def test_reporter_writes_logx_and_updates_existing_index(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            _detail, _orchestrator, project = create_project(workspace_root, repo_dir)
+            reporter = Reporter(project)
+
+            append_jsonl(
+                project.paths.pass_log_file,
+                {
+                    "block_index": 1,
+                    "status": "failed",
+                    "selected_task": "Investigate failure",
+                },
+            )
+            block_dir = project.paths.logs_dir / "block_0001"
+            block_dir.mkdir(parents=True, exist_ok=True)
+            (block_dir / "block-search-pass.stderr.log").write_text("traceback: failing test", encoding="utf-8")
+
+            logx_path = reporter.write_logx(max_artifacts=500)
+            first_payload = json.loads(logx_path.read_text(encoding="utf-8"))
+            first_entries = {
+                item["path"]: item for item in first_payload.get("entries", []) if isinstance(item, dict) and str(item.get("path"))
+            }
+            self.assertIn(str(project.paths.pass_log_file), first_entries)
+            self.assertIn(str(block_dir / "block-search-pass.stderr.log"), first_entries)
+            first_pass_size = int(first_entries[str(project.paths.pass_log_file)].get("size_bytes", 0))
+
+            append_jsonl(
+                project.paths.pass_log_file,
+                {
+                    "block_index": 2,
+                    "status": "completed",
+                    "selected_task": "Fix failure",
+                },
+            )
+
+            logx_path = reporter.write_logx(max_artifacts=500)
+            second_payload = json.loads(logx_path.read_text(encoding="utf-8"))
+            second_entries = {
+                item["path"]: item for item in second_payload.get("entries", []) if isinstance(item, dict) and str(item.get("path"))
+            }
+            second_pass_size = int(second_entries.get(str(project.paths.pass_log_file), {}).get("size_bytes", 0))
+
+            self.assertGreater(second_pass_size, first_pass_size)
+            self.assertGreaterEqual(int(second_payload.get("stats", {}).get("updated_count", 0)), 1)
+
     def test_reporter_ensure_pull_request_creates_missing_pull_request(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

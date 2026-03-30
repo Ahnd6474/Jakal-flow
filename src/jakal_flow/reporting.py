@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -13,6 +14,17 @@ from .utils import append_jsonl, append_text, compact_text, now_utc_iso, read_js
 
 
 class Reporter:
+    _LOGX_TEXT_PREVIEW_SUFFIXES = {
+        ".json",
+        ".jsonl",
+        ".log",
+        ".md",
+        ".prompt",
+        ".stderr",
+        ".stdout",
+        ".txt",
+    }
+
     def __init__(self, context: ProjectContext) -> None:
         self.context = context
 
@@ -103,6 +115,162 @@ class Reporter:
         }
         path = self.context.paths.reports_dir / "latest_report.json"
         write_json(path, report)
+        return path
+
+    @staticmethod
+    def _logx_kind(path: Path) -> str:
+        name = path.name.lower()
+        if name.endswith(".stderr.log"):
+            return "stderr_log"
+        if name.endswith(".stdout.log"):
+            return "stdout_log"
+        if name.endswith(".events.jsonl"):
+            return "event_log"
+        if name.endswith(".jsonl"):
+            return "jsonl"
+        if name.endswith(".json"):
+            return "json"
+        if name.endswith(".md"):
+            return "markdown"
+        if name.endswith(".txt"):
+            return "text"
+        return "file"
+
+    @classmethod
+    def _logx_entry(cls, path: Path, *, max_preview_chars: int) -> dict[str, object]:
+        try:
+            stat_result = path.stat()
+            size_bytes = int(stat_result.st_size)
+            mtime_ns = int(stat_result.st_mtime_ns)
+        except OSError:
+            return {
+                "path": str(path),
+                "name": path.name,
+                "kind": cls._logx_kind(path),
+                "size_bytes": 0,
+                "mtime_ns": 0,
+                "checksum": "",
+                "preview": "",
+            }
+
+        digest = hashlib.sha256()
+        try:
+            with path.open("rb") as handle:
+                while True:
+                    chunk = handle.read(2 ** 20)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+            checksum = digest.hexdigest()
+        except OSError:
+            checksum = ""
+
+        suffixes = {suffix.lower() for suffix in path.suffixes}
+        preview = ""
+        if suffixes.intersection(cls._LOGX_TEXT_PREVIEW_SUFFIXES):
+            try:
+                preview = compact_text(
+                    path.read_text(encoding="utf-8", errors="replace"),
+                    max_chars=max_preview_chars,
+                )
+            except OSError:
+                preview = ""
+
+        return {
+            "path": str(path),
+            "name": path.name,
+            "kind": cls._logx_kind(path),
+            "size_bytes": size_bytes,
+            "mtime_ns": mtime_ns,
+            "checksum": checksum,
+            "preview": preview,
+        }
+
+    def _collect_logx_candidates(self, *, max_artifacts: int) -> list[Path]:
+        candidates: list[Path] = []
+        if self.context.paths.logs_dir.exists():
+            candidates.extend(
+                sorted(path for path in self.context.paths.logs_dir.rglob("*") if path.is_file())
+            )
+        for path in [
+            self.context.paths.metadata_file,
+            self.context.paths.project_config_file,
+            self.context.paths.loop_state_file,
+            self.context.paths.execution_plan_file,
+            self.context.paths.planning_inputs_cache_file,
+            self.context.paths.planning_prompt_cache_file,
+            self.context.paths.block_plan_cache_file,
+            self.context.paths.checkpoint_state_file,
+            self.context.paths.spine_file,
+            self.context.paths.common_requirements_file,
+            self.context.paths.reports_dir / "latest_report.json",
+        ]:
+            if path.exists():
+                candidates.append(path)
+        if max_artifacts > 0:
+            return sorted(set(candidates), key=lambda item: (item.parent.as_posix(), item.name))[: max_artifacts]
+        return sorted(set(candidates), key=lambda item: (item.parent.as_posix(), item.name))
+
+    def _logx_index(self, path: Path, *, artifacts: list[dict[str, object]]) -> tuple[dict[str, object], int]:
+        existing_payload = read_json(path, default={})
+        previous_entries = existing_payload.get("entries", [])
+        existing_by_path: dict[str, dict[str, object]] = {}
+        if isinstance(previous_entries, list):
+            for entry in previous_entries:
+                if not isinstance(entry, dict):
+                    continue
+                entry_path = str(entry.get("path", "")).strip()
+                if entry_path:
+                    existing_by_path[entry_path] = entry
+
+        merged: dict[str, dict[str, object]] = {}
+        updated_count = 0
+        for entry in artifacts:
+            key = str(entry.get("path") or "").strip()
+            if not key:
+                continue
+            previous = existing_by_path.get(key)
+            if (
+                not isinstance(previous, dict)
+                or previous.get("checksum") != entry.get("checksum")
+                or previous.get("size_bytes") != entry.get("size_bytes")
+                or previous.get("mtime_ns") != entry.get("mtime_ns")
+            ):
+                updated_count += 1
+            merged[key] = entry
+
+        ordered_entries = [merged[key] for key in sorted(merged.keys())]
+        return {
+            "generated_at": now_utc_iso(),
+            "repository": self.context.metadata.to_dict(),
+            "loop_state": self.context.loop_state.to_dict(),
+            "project_root": str(self.context.paths.project_root),
+            "repo_url": str(self.context.metadata.repo_url),
+            "repo_branch": str(self.context.metadata.branch),
+            "project_logs_dir": str(self.context.paths.logs_dir),
+            "entries": ordered_entries,
+            "stats": {
+                "candidate_count": len(artifacts),
+                "tracked_count": len(ordered_entries),
+                "updated_count": updated_count,
+            },
+        }, updated_count
+
+    def write_logx(
+        self,
+        *,
+        max_artifacts: int = 400,
+        max_preview_chars: int = 2_400,
+    ) -> Path:
+        candidates = self._collect_logx_candidates(max_artifacts=max_artifacts)
+        if not candidates:
+            path = self.context.paths.reports_dir / "logx.json"
+            write_json(path, {"generated_at": now_utc_iso(), "entries": []})
+            return path
+        artifacts = [self._logx_entry(path, max_preview_chars=max_preview_chars) for path in candidates]
+        path = self.context.paths.reports_dir / "logx.json"
+        payload, _ = self._logx_index(path, artifacts=artifacts)
+        write_json(path, payload)
         return path
 
     def write_closeout_word_report(self) -> Path:
