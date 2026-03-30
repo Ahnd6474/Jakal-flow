@@ -62,7 +62,6 @@ from .planning import (
     checkpoint_timeline_markdown,
     debugger_prompt,
     execution_plan_markdown,
-    execution_plan_svg,
     execution_steps_to_plan_items,
     finalization_prompt,
     ensure_scope_guard,
@@ -104,6 +103,16 @@ UTC = getattr(datetime, "UTC", timezone.utc)
 
 class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, OrchestratorMlMixin, OrchestratorRecoveryMixin):
     _STALE_CLOSEOUT_TIMEOUT = timedelta(hours=6)
+    _DEBUGGER_INFRASTRUCTURE_FAILURE_MARKERS = (
+        "command not found",
+        "is not recognized as the name of a cmdlet",
+        "no such file or directory",
+        "pytest: error",
+        "error: file or directory not found",
+        "collected 0 items",
+        "no tests ran",
+        "modulenotfounderror: no module named 'pytest'",
+    )
 
     def __init__(self, workspace_root: Path) -> None:
         self.workspace = WorkspaceManager(workspace_root)
@@ -111,6 +120,12 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
         self.verification = VerificationRunner()
         self._execution_plan_state_cache: dict[str, tuple[tuple[object, ...], ExecutionPlanState]] = {}
         self._static_plan_artifact_signature_cache: dict[str, tuple[object, ...]] = {}
+
+    @staticmethod
+    def _plan_state_content_signature(state: ExecutionPlanState) -> str:
+        payload = state.to_dict()
+        payload.pop("last_updated_at", None)
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
     def _create_codex_runner(self, codex_path: Path | str) -> CodexRunner:
         return CodexRunner(codex_path)
@@ -203,7 +218,6 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
                 context.paths.plan_file,
                 context.paths.mid_term_plan_file,
                 context.paths.scope_guard_file,
-                context.paths.execution_flow_svg_file,
             )
         )
 
@@ -226,11 +240,6 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
         )
         write_text_if_changed(context.paths.mid_term_plan_file, mid_term_text)
         write_text_if_changed(context.paths.scope_guard_file, ensure_scope_guard(context))
-        flow_title = state.plan_title or context.metadata.display_name or context.metadata.slug
-        write_text_if_changed(
-            context.paths.execution_flow_svg_file,
-            execution_plan_svg(f"{flow_title} execution flow", state.steps, state.execution_mode),
-        )
 
     def _save_execution_plan_runtime_artifacts(self, context: ProjectContext, state: ExecutionPlanState) -> None:
         checkpoints = self._checkpoints_from_execution_steps(state.steps)
@@ -267,7 +276,8 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
         cached = read_json(context.paths.block_plan_cache_file, default=None)
         if not isinstance(cached, dict):
             return None
-        if int(cached.get("version", 0) or 0) != 2:
+        cached_version = int(cached.get("version", 0) or 0)
+        if cached_version not in {2, 3}:
             return None
         signature = self._block_plan_cache_signature(
             context,
@@ -278,6 +288,27 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
         )
         if str(cached.get("signature", "")).strip() != json.dumps(signature, ensure_ascii=False, sort_keys=True):
             return None
+        block_offset = max(0, int(context.loop_state.block_index or 0) - 1)
+        if cached_version >= 3:
+            prefetched_blocks = cached.get("prefetched_blocks", [])
+            if isinstance(prefetched_blocks, list):
+                for prefetched in prefetched_blocks:
+                    if not isinstance(prefetched, dict):
+                        continue
+                    if int(prefetched.get("block_offset", -1) or -1) != block_offset:
+                        continue
+                    prefetched_text = str(prefetched.get("mid_term_text", "")).strip()
+                    prefetched_items = prefetched.get("items", [])
+                    parsed_prefetched_items: list[PlanItem] = []
+                    if isinstance(prefetched_items, list):
+                        for item in prefetched_items:
+                            if isinstance(item, dict):
+                                item_id = str(item.get("item_id", "")).strip()
+                                text = str(item.get("text", "")).strip()
+                                if item_id and text:
+                                    parsed_prefetched_items.append(PlanItem(item_id=item_id, text=text))
+                    if prefetched_text and parsed_prefetched_items:
+                        return parsed_prefetched_items, prefetched_text
         mid_term_text = str(cached.get("mid_term_text", ""))
         raw_items = cached.get("items", [])
         if not mid_term_text or not isinstance(raw_items, list):
@@ -291,7 +322,6 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
                     parsed_items.append(PlanItem(item_id=item_id, text=text))
         if not parsed_items:
             return None
-        block_offset = max(0, int(context.loop_state.block_index or 0) - 1)
         remaining_items = parsed_items[block_offset:]
         if not remaining_items:
             return None
@@ -304,6 +334,45 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
         rebuilt_mid_term_text, rebuilt_items = build_mid_term_plan_from_plan_items(selected_items, description)
         return rebuilt_items, rebuilt_mid_term_text
         return None
+
+    @staticmethod
+    def _serialize_plan_items(items: list[PlanItem]) -> list[dict[str, str]]:
+        return [
+            {
+                "item_id": str(getattr(item, "item_id", "")).strip(),
+                "text": str(getattr(item, "text", "")).strip(),
+            }
+            for item in items
+            if str(getattr(item, "item_id", "")).strip() and str(getattr(item, "text", "")).strip()
+        ]
+
+    def _prefetched_block_plan_windows(
+        self,
+        context: ProjectContext,
+        *,
+        mid_items: list[PlanItem],
+        description: str,
+        window_count: int = 2,
+    ) -> list[dict[str, object]]:
+        current_offset = max(0, int(context.loop_state.block_index or 0) - 1)
+        prefetched_blocks: list[dict[str, object]] = []
+        for relative_offset in range(1, max(1, window_count) + 1):
+            block_offset = current_offset + relative_offset
+            remaining_items = mid_items[block_offset:]
+            if not remaining_items:
+                break
+            prefetched_text, prefetched_items = build_mid_term_plan_from_plan_items(remaining_items, description)
+            serialized_items = self._serialize_plan_items(prefetched_items)
+            if not prefetched_text.strip() or not serialized_items:
+                continue
+            prefetched_blocks.append(
+                {
+                    "block_offset": block_offset,
+                    "mid_term_text": prefetched_text,
+                    "items": serialized_items,
+                }
+            )
+        return prefetched_blocks
 
     def _store_block_plan_cache(
         self,
@@ -324,21 +393,20 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
             repo_inputs=repo_inputs,
             work_items=work_items,
         )
+        serialized_items = self._serialize_plan_items(mid_items)
         write_json_if_changed(
             context.paths.block_plan_cache_file,
             {
-                "version": 2,
+                "version": 3,
                 "signature": json.dumps(signature, ensure_ascii=False, sort_keys=True),
                 "description": description,
                 "mid_term_text": mid_term_text,
-                "items": [
-                    {
-                        "item_id": str(getattr(item, "item_id", "")).strip(),
-                        "text": str(getattr(item, "text", "")).strip(),
-                    }
-                    for item in mid_items
-                    if str(getattr(item, "item_id", "")).strip() and str(getattr(item, "text", "")).strip()
-                ],
+                "items": serialized_items,
+                "prefetched_blocks": self._prefetched_block_plan_windows(
+                    context,
+                    mid_items=mid_items,
+                    description=description,
+                ),
             },
         )
 
@@ -491,7 +559,15 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
             details={"cache_file": str(context.paths.planning_inputs_cache_file)},
         )
         runner = CodexRunner(context.runtime.codex_path)
-        skip_planner_a = self._should_skip_planner_decomposition(context, planning_effort, workflow_mode)
+        skip_planner_a = self._should_skip_planner_decomposition(
+            context,
+            planning_effort,
+            workflow_mode,
+            repo_inputs=repo_inputs,
+            project_prompt=project_prompt,
+            previous_plan_state=previous_plan_state,
+            max_steps=max_steps,
+        )
         planner_outline = ""
         if skip_planner_a:
             report_progress(
@@ -717,12 +793,53 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
         context: ProjectContext,
         planning_effort: str,
         workflow_mode: str,
+        *,
+        repo_inputs: dict[str, str],
+        project_prompt: str,
+        previous_plan_state: ExecutionPlanState,
+        max_steps: int,
     ) -> bool:
         if workflow_mode == "ml":
             return False
         if planning_effort == "xhigh":
             return False
-        return bool(getattr(context.runtime, "use_fast_mode", False))
+        if bool(getattr(context.runtime, "use_fast_mode", False)):
+            return True
+        return self._should_use_adaptive_single_pass(
+            repo_inputs=repo_inputs,
+            project_prompt=project_prompt,
+            previous_plan_state=previous_plan_state,
+            max_steps=max_steps,
+            planning_effort=planning_effort,
+        )
+
+    @staticmethod
+    def _should_use_adaptive_single_pass(
+        *,
+        repo_inputs: dict[str, str],
+        project_prompt: str,
+        previous_plan_state: ExecutionPlanState,
+        max_steps: int,
+        planning_effort: str,
+    ) -> bool:
+        if planning_effort not in {"low", "medium"}:
+            return False
+        if max_steps > 4:
+            return False
+        if len(project_prompt.split()) > 18:
+            return False
+        if len(previous_plan_state.steps) == 0 or len(previous_plan_state.steps) > 6:
+            return False
+        repo_size = sum(len(str(repo_inputs.get(key, ""))) for key in ("readme", "agents", "docs", "source"))
+        if repo_size > 5200:
+            return False
+        source_summary = str(repo_inputs.get("source", "")).lower()
+        if "plus many more" in source_summary:
+            return False
+        docs_summary = str(repo_inputs.get("docs", "")).lower()
+        if "additional markdown doc files omitted" in docs_summary:
+            return False
+        return True
 
     def _planning_effort_for_runtime(self, runtime: RuntimeOptions, planning_effort: str) -> str:
         selected_provider = str(getattr(runtime, "model_provider", "") or "").strip().lower()
@@ -870,7 +987,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
             workflow_mode=workflow_mode,
             execution_mode=execution_mode,
             default_test_command=plan_state.default_test_command.strip() or context.runtime.test_cmd,
-            last_updated_at=now_utc_iso(),
+            last_updated_at="",
             closeout_status=closeout_status,
             closeout_started_at=closeout_started_at,
             closeout_completed_at=closeout_completed_at,
@@ -878,7 +995,13 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
             closeout_notes=closeout_notes,
             steps=normalized_steps,
         )
-        write_json(context.paths.execution_plan_file, state.to_dict())
+        cached_entry = self._execution_plan_state_cache.get(self._execution_plan_cache_key(context))
+        cached_state = cached_entry[1] if cached_entry else None
+        if cached_state is not None and self._plan_state_content_signature(cached_state) == self._plan_state_content_signature(state):
+            state.last_updated_at = cached_state.last_updated_at
+        else:
+            state.last_updated_at = now_utc_iso()
+        write_json_if_changed(context.paths.execution_plan_file, state.to_dict())
         static_signature = self._static_plan_artifact_signature(context, state)
         if self._static_plan_artifacts_need_refresh(context, static_signature):
             self._save_execution_plan_static_artifacts(context, state)
@@ -886,6 +1009,41 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
         self._save_execution_plan_runtime_artifacts(context, state)
         self._cache_execution_plan_state(context, state)
         return state
+
+    def _current_verify_state_fingerprint(self, context: ProjectContext, changed_files: list[str] | None = None) -> str:
+        try:
+            head_revision = self.git.current_revision(context.paths.repo_dir)
+        except Exception:
+            head_revision = ""
+        return self.verification.build_state_fingerprint(
+            context.paths.repo_dir,
+            head_revision=head_revision,
+            changed_paths=changed_files,
+        )
+
+    def _debugger_skip_reason(
+        self,
+        *,
+        changed_files: list[str] | None,
+        test_result: TestRunResult,
+        partial_failure: bool = False,
+    ) -> str | None:
+        if partial_failure:
+            return "partial_failure_prefers_serial_recovery"
+        normalized_changed_files = [str(path).strip() for path in changed_files or [] if str(path).strip()]
+        if not normalized_changed_files:
+            return "no_changed_files"
+        detail_text = " ".join(
+            (
+                str(test_result.summary or "").strip(),
+                str(test_result.failure_reason or "").strip(),
+                read_text(test_result.stderr_file),
+            )
+        ).lower()
+        for marker in self._DEBUGGER_INFRASTRUCTURE_FAILURE_MARKERS:
+            if marker in detail_text:
+                return "verification_infrastructure_failure"
+        return None
 
     def pending_execution_batches(self, plan_state: ExecutionPlanState) -> list[list[ExecutionStep]]:
         return execution_plan_support.pending_execution_batches(
@@ -1537,42 +1695,45 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
                         final_status = "completed"
                 else:
                     try:
+                        batch_changed_files = sorted(
+                            {
+                                str(path).strip()
+                                for result in worker_results
+                                for path in (result.get("changed_files") or [])
+                                if str(path).strip()
+                            }
+                        )
                         if any(commit_hash.strip() for commit_hash in merged_commit_hashes):
                             close_block_index = max(1, context.loop_state.block_index + len(ordered_targets))
-                            group_test_result = self._run_test_command(context, close_block_index, "parallel-batch-pass")
+                            group_test_result = self._run_test_command(
+                                context,
+                                close_block_index,
+                                "parallel-batch-pass",
+                                state_fingerprint=self._current_verify_state_fingerprint(context, batch_changed_files),
+                            )
                             reporter.save_test_result(close_block_index, "parallel-batch-pass", group_test_result)
                         else:
-                            group_test_result = self._run_test_command(context, verification_block_index, "parallel-batch-pass")
+                            group_test_result = self._run_test_command(
+                                context,
+                                verification_block_index,
+                                "parallel-batch-pass",
+                                state_fingerprint=self._current_verify_state_fingerprint(context, batch_changed_files),
+                            )
                             reporter.save_test_result(verification_block_index, "parallel-batch-pass", group_test_result)
                         if group_test_result and group_test_result.returncode != 0:
-                            debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
-                                context=context,
-                                runner=batch_runner,
-                                reporter=reporter,
-                                block_index=verification_block_index,
-                                candidate=batch_candidate,
-                                execution_step=batch_debug_step,
-                                memory_context=batch_memory_context,
-                                failing_pass_name="parallel-batch-pass",
-                                failing_test_result=group_test_result,
+                            debugger_skip_reason = self._debugger_skip_reason(
+                                changed_files=batch_changed_files,
+                                test_result=group_test_result,
+                                partial_failure=partial_failure,
                             )
-                            if debug_run_result.returncode != 0 or debug_test_result is None or debug_test_result.returncode != 0:
+                            if debugger_skip_reason:
                                 self.git.hard_reset(context.paths.repo_dir, base_revision)
-                                rollback_status = "serial_recovery_after_batch_debugger"
-                                batch_summary = "Parallel batch verification failed and debugger recovery did not fix it."
-                                group_test_result = None
-                                self._log_pass_result(
-                                    context=context,
-                                    reporter=reporter,
-                                    block_index=verification_block_index,
-                                    candidate=batch_candidate,
-                                    pass_name=debug_pass_name,
-                                    run_result=debug_run_result,
-                                    test_result=debug_test_result,
-                                    commit_hash=None,
-                                    rollback_status=rollback_status,
-                                    search_enabled=False,
+                                rollback_status = "serial_recovery_after_batch_verification"
+                                batch_summary = (
+                                    "Parallel batch verification failed and debugger recovery was skipped: "
+                                    f"{debugger_skip_reason}."
                                 )
+                                group_test_result = None
                                 recovery_ids = [step.step_id for step in ordered_targets]
                                 plan_state, ordered_targets, recovery_status, recovery_summary = self._run_parallel_serial_recovery(
                                     context=context,
@@ -1590,54 +1751,42 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
                                 else:
                                     final_status = "completed"
                             else:
-                                self._log_pass_result(
+                                debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
                                     context=context,
+                                    runner=batch_runner,
                                     reporter=reporter,
                                     block_index=verification_block_index,
                                     candidate=batch_candidate,
-                                    pass_name=debug_pass_name,
-                                    run_result=debug_run_result,
-                                    test_result=debug_test_result,
-                                    commit_hash=debug_commit_hash,
-                                    rollback_status="not_needed",
-                                    search_enabled=False,
+                                    execution_step=batch_debug_step,
+                                    memory_context=batch_memory_context,
+                                    failing_pass_name="parallel-batch-pass",
+                                    failing_test_result=group_test_result,
                                 )
-                                if debug_commit_hash:
-                                    merged_commit_hashes.append(debug_commit_hash)
-                                group_test_result = debug_test_result
-                                batch_summary = debug_test_result.summary
-                                if partial_failure:
-                                    partial_summary, partial_extra = self._parallel_partial_failure_details(ordered_targets, worker_results)
-                                    rollback_status = "serial_recovery_after_worker_failure"
-                                    recovery_ids = [step.step_id for step in ordered_targets if step.step_id not in completed_step_ids]
-                                    failure_extra = {
-                                        **(failure_extra or {}),
-                                        **partial_extra,
-                                    }
-                                merged_commits = [item for item in merged_commit_hashes if item]
-                                if merged_commits:
-                                    last_commit = merged_commits[-1]
-                                    context.metadata.current_safe_revision = last_commit
-                                    context.loop_state.current_safe_revision = last_commit
-                                    context.loop_state.last_commit_hash = last_commit
-                                self._apply_parallel_batch_outcomes(
-                                    ordered_targets,
-                                    worker_results,
-                                    completed_step_ids=completed_step_ids,
-                                    merged_commit_by_step_id=merged_commit_by_step_id,
-                                    completed_note=debug_test_result.summary,
-                                )
-                                plan_state = self.save_execution_plan_state(context, plan_state)
-                                ordered_targets = self._refresh_ordered_targets(plan_state, ordered_targets)
-                                context.metadata.current_status = self._status_from_plan_state(plan_state)
-                                if partial_failure:
+                                if debug_run_result.returncode != 0 or debug_test_result is None or debug_test_result.returncode != 0:
+                                    self.git.hard_reset(context.paths.repo_dir, base_revision)
+                                    rollback_status = "serial_recovery_after_batch_debugger"
+                                    batch_summary = "Parallel batch verification failed and debugger recovery did not fix it."
+                                    group_test_result = None
+                                    self._log_pass_result(
+                                        context=context,
+                                        reporter=reporter,
+                                        block_index=verification_block_index,
+                                        candidate=batch_candidate,
+                                        pass_name=debug_pass_name,
+                                        run_result=debug_run_result,
+                                        test_result=debug_test_result,
+                                        commit_hash=None,
+                                        rollback_status=rollback_status,
+                                        search_enabled=False,
+                                    )
+                                    recovery_ids = [step.step_id for step in ordered_targets]
                                     plan_state, ordered_targets, recovery_status, recovery_summary = self._run_parallel_serial_recovery(
                                         context=context,
                                         runtime=runtime,
                                         ordered_targets=ordered_targets,
                                         recovery_step_ids=recovery_ids,
                                     )
-                                    batch_summary = f"{partial_summary} | {debug_test_result.summary} | {recovery_summary}".strip(" |")
+                                    batch_summary = f"{batch_summary} | {recovery_summary}".strip(" |")
                                     if recovery_status == "paused":
                                         final_status = "paused"
                                         rollback_status = "rolled_back_to_safe_revision"
@@ -1647,7 +1796,64 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
                                     else:
                                         final_status = "completed"
                                 else:
+                                    self._log_pass_result(
+                                        context=context,
+                                        reporter=reporter,
+                                        block_index=verification_block_index,
+                                        candidate=batch_candidate,
+                                        pass_name=debug_pass_name,
+                                        run_result=debug_run_result,
+                                        test_result=debug_test_result,
+                                        commit_hash=debug_commit_hash,
+                                        rollback_status="not_needed",
+                                        search_enabled=False,
+                                    )
+                                    if debug_commit_hash:
+                                        merged_commit_hashes.append(debug_commit_hash)
+                                    group_test_result = debug_test_result
                                     batch_summary = debug_test_result.summary
+                                    if partial_failure:
+                                        partial_summary, partial_extra = self._parallel_partial_failure_details(ordered_targets, worker_results)
+                                        rollback_status = "serial_recovery_after_worker_failure"
+                                        recovery_ids = [step.step_id for step in ordered_targets if step.step_id not in completed_step_ids]
+                                        failure_extra = {
+                                            **(failure_extra or {}),
+                                            **partial_extra,
+                                        }
+                                    merged_commits = [item for item in merged_commit_hashes if item]
+                                    if merged_commits:
+                                        last_commit = merged_commits[-1]
+                                        context.metadata.current_safe_revision = last_commit
+                                        context.loop_state.current_safe_revision = last_commit
+                                        context.loop_state.last_commit_hash = last_commit
+                                    self._apply_parallel_batch_outcomes(
+                                        ordered_targets,
+                                        worker_results,
+                                        completed_step_ids=completed_step_ids,
+                                        merged_commit_by_step_id=merged_commit_by_step_id,
+                                        completed_note=debug_test_result.summary,
+                                    )
+                                    plan_state = self.save_execution_plan_state(context, plan_state)
+                                    ordered_targets = self._refresh_ordered_targets(plan_state, ordered_targets)
+                                    context.metadata.current_status = self._status_from_plan_state(plan_state)
+                                    if partial_failure:
+                                        plan_state, ordered_targets, recovery_status, recovery_summary = self._run_parallel_serial_recovery(
+                                            context=context,
+                                            runtime=runtime,
+                                            ordered_targets=ordered_targets,
+                                            recovery_step_ids=recovery_ids,
+                                        )
+                                        batch_summary = f"{partial_summary} | {debug_test_result.summary} | {recovery_summary}".strip(" |")
+                                        if recovery_status == "paused":
+                                            final_status = "paused"
+                                            rollback_status = "rolled_back_to_safe_revision"
+                                        elif recovery_status == "deferred":
+                                            final_status = "deferred"
+                                            rollback_status = "parallel_recovery_deferred"
+                                        else:
+                                            final_status = "completed"
+                                    else:
+                                        batch_summary = debug_test_result.summary
                         else:
                             batch_summary = group_test_result.summary if group_test_result else "Parallel batch completed successfully."
                             if partial_failure:
@@ -3637,11 +3843,6 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
             )
         if not context.paths.ml_mode_state_file.exists():
             write_json(context.paths.ml_mode_state_file, self._default_ml_mode_state(context).to_dict())
-        if not context.paths.execution_flow_svg_file.exists():
-            write_text(
-                context.paths.execution_flow_svg_file,
-                execution_plan_svg(f"{context.metadata.display_name or context.metadata.slug} execution flow", []),
-            )
         if not context.paths.ml_experiment_results_svg_file.exists():
             write_text(context.paths.ml_experiment_results_svg_file, self._ml_results_svg([]))
 
@@ -3968,7 +4169,12 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
             return run_result, None, None
 
         try:
-            test_result = self._run_test_command(context, block_index, pass_name)
+            test_result = self._run_test_command(
+                context,
+                block_index,
+                pass_name,
+                state_fingerprint=self._current_verify_state_fingerprint(context, run_result.changed_files),
+            )
         except ImmediateStopRequested:
             self.git.hard_reset(context.paths.repo_dir, safe_revision)
             raise
@@ -3976,6 +4182,10 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
         commit_hash: str | None = None
         rollback_status = "not_needed"
         if test_result.returncode != 0:
+            debugger_skip_reason = self._debugger_skip_reason(
+                changed_files=run_result.changed_files,
+                test_result=test_result,
+            )
             self._log_pass_result(
                 context=context,
                 reporter=reporter,
@@ -3985,9 +4195,12 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
                 run_result=run_result,
                 test_result=test_result,
                 commit_hash=None,
-                rollback_status="debugger_invoked",
+                rollback_status=f"debugger_skipped_{debugger_skip_reason}" if debugger_skip_reason else "debugger_invoked",
                 search_enabled=search_enabled,
             )
+            if debugger_skip_reason:
+                self.git.hard_reset(context.paths.repo_dir, safe_revision)
+                return run_result, None, None
             try:
                 debug_pass_name, debug_run_result, debug_test_result, debug_commit_hash = self._run_debugger_pass(
                     context=context,
@@ -4061,12 +4274,20 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
         )
         return run_result, test_result, commit_hash
 
-    def _run_test_command(self, context: ProjectContext, block_index: int, label: str) -> TestRunResult:
+    def _run_test_command(
+        self,
+        context: ProjectContext,
+        block_index: int,
+        label: str,
+        *,
+        state_fingerprint: str | None = None,
+    ) -> TestRunResult:
         return self.verification.run(
             context=context,
             block_index=block_index,
             label=label,
             command=context.runtime.test_cmd,
+            state_fingerprint=state_fingerprint,
         )
 
     def _stop_reason(self, context: ProjectContext) -> str | None:

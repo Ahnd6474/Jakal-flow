@@ -182,8 +182,12 @@ def build_test_project_context(
         task_summaries_file=memory_dir / "task_summaries.jsonl",
         pass_log_file=logs_dir / "passes.jsonl",
         block_log_file=logs_dir / "blocks.jsonl",
+        planning_metrics_file=logs_dir / "planning_metrics.jsonl",
         checkpoint_state_file=state_dir / "CHECKPOINTS.json",
         execution_plan_file=state_dir / "EXECUTION_PLAN.json",
+        planning_inputs_cache_file=state_dir / "PLANNING_INPUTS_CACHE.json",
+        planning_prompt_cache_file=state_dir / "PLANNING_PROMPT_CACHE.json",
+        block_plan_cache_file=state_dir / "BLOCK_PLAN_CACHE.json",
         lineage_state_file=state_dir / "LINEAGES.json",
         spine_file=state_dir / "SPINE.json",
         common_requirements_file=state_dir / "COMMON_REQUIREMENTS.json",
@@ -1358,6 +1362,32 @@ class UIBridgeTests(unittest.TestCase):
     def test_report_payload_includes_contract_wave_artifacts(self) -> None:
         with TemporaryTestDir() as temp_dir:
             context = build_test_project_context(temp_dir, display_name="Contract Wave Demo")
+            context.paths.planning_metrics_file.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "generated_at": "2026-03-29T00:40:00+00:00",
+                                "flow": "planning",
+                                "stage": "context_scan",
+                                "duration_ms": 42.5,
+                                "block_index": 0,
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "generated_at": "2026-03-29T00:41:00+00:00",
+                                "flow": "planning",
+                                "stage": "planner_b",
+                                "duration_ms": 128.0,
+                                "block_index": 0,
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             context.paths.spine_file.write_text(
                 json.dumps(
                     {
@@ -1456,8 +1486,51 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(reports["lineage_manifest_summary"]["total"], 1)
             self.assertEqual(reports["lineage_manifests"][0]["manifest_id"], "MAN-1")
             self.assertEqual(reports["lineage_manifests"][0]["common_requirement_request_id"], "CRR1")
+            self.assertEqual(reports["planning_metrics"]["entry_count"], 2)
+            self.assertEqual(reports["planning_metrics"]["slowest_item"]["stage"], "planner_b")
+            self.assertEqual(reports["planning_metrics"]["stage_summary"][0]["stage"], "planner_b")
             self.assertIn("api/payments", reports["shared_contracts_text"])
             self.assertEqual(reports["contract_wave_audit"]["recent_items"][0]["entity_type"], "common_requirement")
+
+    def test_history_payload_renders_execution_flow_svg_lazily(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            context = build_test_project_context(temp_dir, display_name="Flow Demo")
+            context.paths.execution_plan_file.write_text(
+                json.dumps(
+                    ExecutionPlanState(
+                        plan_title="Flow Demo",
+                        execution_mode="parallel",
+                        steps=[
+                            ExecutionStep(
+                                step_id="ST1",
+                                title="First step",
+                                display_description="Do the first thing.",
+                                codex_description="Implement the first change.",
+                                owned_paths=["src/app.py"],
+                            ),
+                            ExecutionStep(
+                                step_id="ST2",
+                                title="Join step",
+                                display_description="Integrate the work.",
+                                codex_description="Merge the work carefully.",
+                                depends_on=["ST1"],
+                                metadata={"step_kind": "join"},
+                            ),
+                        ],
+                    ).to_dict(),
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            if context.paths.execution_flow_svg_file.exists():
+                context.paths.execution_flow_svg_file.unlink()
+
+            history = ui_bridge_payloads.history_payload(context)
+
+            self.assertTrue(context.paths.execution_flow_svg_file.exists())
+            self.assertEqual(history["flow_svg_path"], str(context.paths.execution_flow_svg_file))
+            self.assertIn("execution-flow-signature:", history["flow_svg_text"])
+            self.assertIn("<svg", history["flow_svg_text"])
 
     def test_contract_wave_bridge_commands_update_crr_and_spine_state(self) -> None:
         with TemporaryTestDir() as temp_dir:

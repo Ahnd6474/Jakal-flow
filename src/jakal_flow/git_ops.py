@@ -24,6 +24,28 @@ class GitOps:
         "LF will be replaced by CRLF the next time Git touches it",
         "CRLF will be replaced by LF the next time Git touches it",
     )
+    _REVISION_MUTATING_COMMANDS = {
+        "add",
+        "checkout",
+        "cherry-pick",
+        "clean",
+        "clone",
+        "commit",
+        "config",
+        "fetch",
+        "init",
+        "merge",
+        "pull",
+        "push",
+        "reset",
+        "revert",
+        "switch",
+        "worktree",
+    }
+
+    def __init__(self) -> None:
+        self._current_revision_cache: dict[str, str] = {}
+        self._configured_identity_cache: dict[str, tuple[str, str]] = {}
 
     def _safe_directory_args(self, cwd: Path) -> list[str]:
         resolved = cwd.resolve()
@@ -53,6 +75,7 @@ class GitOps:
         check: bool = True,
         env: dict[str, str] | None = None,
     ) -> CommandResult:
+        repo_key = str(cwd.resolve())
         command = ["git", *self._safe_directory_args(cwd), *args]
         process_env = None
         if env:
@@ -78,6 +101,8 @@ class GitOps:
             raise GitCommandError(
                 f"git {' '.join(args)} failed with code {completed.returncode}: {stderr.strip()}"
             )
+        if args and args[0] in self._REVISION_MUTATING_COMMANDS:
+            self._invalidate_repo_caches(cwd)
         return result
 
     def _filter_benign_stderr(self, stderr: str) -> str:
@@ -120,11 +145,23 @@ class GitOps:
         return created
 
     def configure_local_identity(self, repo_dir: Path, name: str, email: str) -> None:
+        repo_key = str(repo_dir.resolve())
+        normalized = (str(name).strip(), str(email).strip())
+        if self._configured_identity_cache.get(repo_key) == normalized:
+            return
         self.run(["config", "user.name", name], cwd=repo_dir)
         self.run(["config", "user.email", email], cwd=repo_dir)
+        self._configured_identity_cache[repo_key] = normalized
 
     def current_revision(self, repo_dir: Path) -> str:
-        return self.run(["rev-parse", "HEAD"], cwd=repo_dir).stdout.strip()
+        repo_key = str(repo_dir.resolve())
+        cached = self._current_revision_cache.get(repo_key)
+        if cached:
+            return cached
+        revision = self.run(["rev-parse", "HEAD"], cwd=repo_dir).stdout.strip()
+        if revision:
+            self._current_revision_cache[repo_key] = revision
+        return revision
 
     def has_commits(self, repo_dir: Path) -> bool:
         result = self.run(["rev-parse", "--verify", "HEAD"], cwd=repo_dir, check=False)
@@ -454,3 +491,12 @@ class GitOps:
     def hard_reset(self, repo_dir: Path, revision: str) -> None:
         self.run(["reset", "--hard", revision], cwd=repo_dir)
         self.run(["clean", "-fd"], cwd=repo_dir)
+        normalized_revision = str(revision).strip()
+        if normalized_revision:
+            self._current_revision_cache[str(repo_dir.resolve())] = normalized_revision
+
+    def _invalidate_repo_caches(self, repo_dir: Path) -> None:
+        repo_key = str(repo_dir.resolve())
+        self._current_revision_cache.pop(repo_key, None)
+        if not (repo_dir / ".git").exists():
+            self._configured_identity_cache.pop(repo_key, None)

@@ -9,6 +9,14 @@ function promotionLabel(value) {
   return normalized ? normalized.toUpperCase() : "N/A";
 }
 
+function formatDuration(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "0 ms";
+  }
+  return `${numeric.toFixed(numeric >= 100 ? 0 : 1)} ms`;
+}
+
 function SectionList({ items, emptyText, renderItem }) {
   if (!items.length) {
     return <p>{emptyText}</p>;
@@ -42,6 +50,10 @@ export function ReportsView({ reports }) {
   const resolvedRequirements = Array.isArray(commonRequirements?.resolved_items) ? commonRequirements.resolved_items : [];
   const recentHistory = Array.isArray(spine?.recent_history) ? spine.recent_history : [];
   const sharedContractsText = String(reports?.shared_contracts_text || "").trim();
+  const planningMetrics = reports?.planning_metrics || {};
+  const planningStageSummary = Array.isArray(planningMetrics?.stage_summary) ? planningMetrics.stage_summary : [];
+  const recentPlanningItems = Array.isArray(planningMetrics?.recent_items) ? planningMetrics.recent_items : [];
+  const slowestPlanningItem = planningMetrics?.slowest_item || null;
 
   return (
     <section className="workspace-view">
@@ -83,6 +95,30 @@ export function ReportsView({ reports }) {
               <p>
                 G {Number(lineageManifestSummary?.green_count || 0)} / Y {Number(lineageManifestSummary?.yellow_count || 0)} / R{" "}
                 {Number(lineageManifestSummary?.red_count || 0)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="content-card">
+          <div className="content-card__header">
+            <strong>Planning Metrics</strong>
+          </div>
+          <div style={{ display: "grid", gap: "10px" }}>
+            <div>
+              <strong>Captured stages</strong>
+              <p>{Number(planningMetrics?.entry_count || 0)}</p>
+            </div>
+            <div>
+              <strong>Latest sample</strong>
+              <p>{String(planningMetrics?.latest_generated_at || "No planning metrics yet.")}</p>
+            </div>
+            <div>
+              <strong>Slowest recent stage</strong>
+              <p>
+                {slowestPlanningItem
+                  ? `${String(slowestPlanningItem.flow || "planning")} / ${String(slowestPlanningItem.stage || "stage")} (${formatDuration(slowestPlanningItem.duration_ms)})`
+                  : "No planning metrics yet."}
               </p>
             </div>
           </div>
@@ -165,6 +201,48 @@ export function ReportsView({ reports }) {
                 {item.common_requirement_request_id ? (
                   <span style={{ fontSize: "12px" }}>CRR: {String(item.common_requirement_request_id)}</span>
                 ) : null}
+              </div>
+            )}
+          />
+        </div>
+
+        <div className="content-card">
+          <div className="content-card__header">
+            <strong>Planning Stage Summary</strong>
+          </div>
+          <SectionList
+            items={planningStageSummary}
+            emptyText="No planning stage timings recorded yet."
+            renderItem={(item) => (
+              <div style={{ display: "grid", gap: "4px" }}>
+                <strong>
+                  {String(item.flow || "planning")} / {String(item.stage || "stage")}
+                </strong>
+                <span style={{ fontSize: "12px", opacity: 0.75 }}>
+                  Count {Number(item.count || 0)} | Avg {formatDuration(item.avg_ms)} | Max {formatDuration(item.max_ms)}
+                </span>
+                <span style={{ fontSize: "12px" }}>Total {formatDuration(item.total_ms)}</span>
+              </div>
+            )}
+          />
+        </div>
+
+        <div className="content-card">
+          <div className="content-card__header">
+            <strong>Recent Planning Timings</strong>
+          </div>
+          <SectionList
+            items={recentPlanningItems}
+            emptyText="No planning timings recorded yet."
+            renderItem={(item) => (
+              <div style={{ display: "grid", gap: "4px" }}>
+                <strong>
+                  {String(item.flow || "planning")} / {String(item.stage || "stage")}
+                </strong>
+                <span style={{ fontSize: "12px", opacity: 0.75 }}>
+                  {String(item.generated_at || "unknown time")} | Block {String(item.block_index ?? "-")}
+                </span>
+                <span style={{ fontSize: "12px" }}>{formatDuration(item.duration_ms)}</span>
               </div>
             )}
           />

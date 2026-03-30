@@ -10,7 +10,7 @@ from .bridge_events import emit_bridge_event
 from .models import LoopCounters, LoopState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions
 from .parallel_resources import normalize_parallel_worker_mode
 from .runtime_config import runtime_from_payload
-from .utils import ensure_dir, now_utc_iso, read_json, remove_tree, stable_repo_identity, write_json
+from .utils import ensure_dir, now_utc_iso, read_json, remove_tree, stable_repo_identity, write_json, write_json_if_changed
 
 LOCAL_PROJECT_LOG_DIRNAME = "jakal-flow-logs"
 
@@ -104,7 +104,7 @@ class WorkspaceManager:
             "projects": registry.get("projects", {}),
             "history": registry.get("history", {}),
         }
-        write_json(self.registry_file, normalized)
+        write_json_if_changed(self.registry_file, normalized)
         self._registry_cache_token = self._path_cache_token(self.registry_file)
         self._registry_cache_value = deepcopy(normalized)
 
@@ -390,9 +390,9 @@ class WorkspaceManager:
         return self.load_project_by_id(repo_id)
 
     def _write_project_files(self, context: ProjectContext) -> None:
-        write_json(context.paths.metadata_file, context.metadata.to_dict())
-        write_json(context.paths.project_config_file, context.runtime.to_dict())
-        write_json(context.paths.loop_state_file, context.loop_state.to_dict())
+        write_json_if_changed(context.paths.metadata_file, context.metadata.to_dict())
+        write_json_if_changed(context.paths.project_config_file, context.runtime.to_dict())
+        write_json_if_changed(context.paths.loop_state_file, context.loop_state.to_dict())
         self._cache_project_context(context)
 
     def _managed_root_is_within(self, project_root: Path, expected_parent: Path) -> bool:

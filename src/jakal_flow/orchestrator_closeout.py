@@ -22,12 +22,50 @@ from .planning import (
     scan_repository_inputs,
 )
 from .reporting import Reporter
-from .utils import normalize_workflow_mode, now_utc_iso, read_json, read_last_jsonl, write_json
+from .utils import normalize_workflow_mode, now_utc_iso, read_json, read_jsonl_tail, read_last_jsonl, write_json
 
 UTC = getattr(datetime, "UTC", timezone.utc)
 
 
 class OrchestratorCloseoutMixin:
+    def _reusable_closeout_result(self, context: ProjectContext, safe_revision: str) -> dict[str, object] | None:
+        try:
+            current_revision = self.git.current_revision(context.paths.repo_dir)
+        except Exception:
+            return None
+        if not current_revision:
+            return None
+        recent_passes = read_jsonl_tail(context.paths.pass_log_file, 20)
+        for entry in reversed(recent_passes):
+            pass_type = str(entry.get("pass_type") or "").strip()
+            if not pass_type.startswith("project-closeout-pass"):
+                continue
+            if int(entry.get("codex_return_code", 1)) != 0:
+                continue
+            commit_hash = str(entry.get("commit_hash") or "").strip()
+            if not commit_hash or commit_hash != current_revision:
+                continue
+            rollback_status = str(entry.get("rollback_status") or "").strip()
+            if rollback_status not in {"", "not_needed"}:
+                continue
+            test_results = entry.get("test_results")
+            if not isinstance(test_results, dict) or int(test_results.get("returncode", 1)) != 0:
+                continue
+            notes = str(test_results.get("summary") or "").strip() or "Closeout verification passed."
+            changed_files = entry.get("changed_files")
+            return {
+                "success": True,
+                "notes": notes,
+                "run_result": None,
+                "test_result": None,
+                "commit_hash": commit_hash,
+                "changed_files": list(changed_files) if isinstance(changed_files, list) else [],
+                "rollback_status": "not_needed",
+                "safe_revision": safe_revision,
+                "reused_logged_closeout": True,
+            }
+        return None
+
     def _stale_closeout_note(self, context: ProjectContext, plan_state: ExecutionPlanState) -> str:
         note_parts = [
             "Closeout appears to have stopped before it finished; the saved running state was recovered as failed."
@@ -462,25 +500,11 @@ class OrchestratorCloseoutMixin:
         self.save_execution_plan_state(context, plan_state)
         self.workspace.save_project(context)
 
-        runner = self._create_codex_runner(context.runtime.codex_path)
         reporter = Reporter(context)
-        repo_inputs = scan_repository_inputs(context.paths.repo_dir)
         safe_revision = context.metadata.current_safe_revision or self.git.current_revision(context.paths.repo_dir)
-        next_block_index = self._next_logged_block_index(context)
-        safe_revision, next_block_index = self._run_optional_closeout_optimization(
-            context=context,
-            plan_state=plan_state,
-            runner=runner,
-            reporter=reporter,
-            safe_revision=safe_revision,
-            block_index=next_block_index,
-        )
-        prompt = finalization_prompt(
-            context=context,
-            plan_state=plan_state,
-            repo_inputs=repo_inputs,
-        )
-        closeout_block_index = next_block_index
+        reused_closeout = self._reusable_closeout_result(context, safe_revision)
+        runner = self._create_codex_runner(context.runtime.codex_path)
+        closeout_block_index = self._next_logged_block_index(context)
         closeout_task = "Project closeout"
         context.loop_state.current_task = closeout_task
         self.workspace.save_project(context)
@@ -495,18 +519,36 @@ class OrchestratorCloseoutMixin:
             "safe_revision": safe_revision,
         }
         closeout_interrupted = False
+        closeout_reused = reused_closeout is not None
 
         try:
-            closeout_result = self._execute_verified_repo_pass(
-                context=context,
-                runner=runner,
-                reporter=reporter,
-                prompt=prompt,
-                pass_type="project-closeout-pass",
-                block_index=closeout_block_index,
-                task_name=closeout_task,
-                safe_revision=safe_revision,
-            )
+            if reused_closeout is not None:
+                closeout_result = reused_closeout
+            else:
+                repo_inputs = scan_repository_inputs(context.paths.repo_dir)
+                safe_revision, closeout_block_index = self._run_optional_closeout_optimization(
+                    context=context,
+                    plan_state=plan_state,
+                    runner=runner,
+                    reporter=reporter,
+                    safe_revision=safe_revision,
+                    block_index=closeout_block_index,
+                )
+                prompt = finalization_prompt(
+                    context=context,
+                    plan_state=plan_state,
+                    repo_inputs=repo_inputs,
+                )
+                closeout_result = self._execute_verified_repo_pass(
+                    context=context,
+                    runner=runner,
+                    reporter=reporter,
+                    prompt=prompt,
+                    pass_type="project-closeout-pass",
+                    block_index=closeout_block_index,
+                    task_name=closeout_task,
+                    safe_revision=safe_revision,
+                )
             if bool(closeout_result.get("success")):
                 plan_state.closeout_status = "completed"
                 plan_state.closeout_completed_at = now_utc_iso()
@@ -529,7 +571,7 @@ class OrchestratorCloseoutMixin:
             raise
         finally:
             closeout_result["notes"] = plan_state.closeout_notes
-            if not closeout_interrupted:
+            if not closeout_interrupted and not closeout_reused:
                 self._record_repo_pass(
                     context=context,
                     reporter=reporter,

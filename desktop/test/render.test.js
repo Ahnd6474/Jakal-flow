@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test, { after } from "node:test";
@@ -646,7 +646,7 @@ test("RightSidebarPane renders the project chat on the right rail by default", a
 
   assert.match(html, /AI Chat/);
   assert.match(html, /Chat model/);
-  assert.match(html, /GPT-5\.4 Mini · OpenAI/);
+  assert.match(html, /GPT-5\.4 Mini \/ OpenAI/);
   assert.match(html, /Release/);
   assert.match(html, /Hello from the right side\./);
   assert.match(html, /chat\.summary\.txt/);
@@ -695,6 +695,40 @@ test("RightSidebarPane keeps the icon rail visible when the right panel is colla
   assert.match(html, /title="AI Chat"/);
   assert.doesNotMatch(html, /Chat model/);
   assert.doesNotMatch(html, /Hello from the right side\./);
+});
+
+test("RightSidebarPane renders process output through the deferred detail panel", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-output-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      activeTab: "output",
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+        process_log: "step-1\\nstep-2",
+      },
+      planDraft: {
+        steps: [],
+      },
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: null,
+      busy: false,
+    },
+  );
+
+  assert.match(html, /details-output-pre/);
+  assert.match(html, /step-1/);
+  assert.match(html, /step-2/);
 });
 
 test("RightSidebarPane keeps an out-of-catalog chat model visible in the selector", async () => {
@@ -871,7 +905,8 @@ test("RightSidebarPane limits long chat transcripts and shows an earlier-message
 
   assert.match(html, /Show 10 earlier messages/);
   assert.doesNotMatch(html, />Message 10</);
-  assert.match(html, />Message 11</);
+  assert.doesNotMatch(html, />Message 11</);
+  assert.match(html, />Message 119</);
   assert.match(html, />Message 130</);
 });
 
@@ -3077,3 +3112,4 @@ test("IdeToolbar keeps the remote link button enabled without a selected project
   assert.ok(remoteButton, "expected remote link button to render");
   assert.doesNotMatch(remoteButton, /\sdisabled(?:=|>|\s)/);
 });
+

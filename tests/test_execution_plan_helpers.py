@@ -28,6 +28,7 @@ from jakal_flow.errors import (
     execution_failure_from_reason,
 )
 from jakal_flow.execution_control import ImmediateStopRequested
+from jakal_flow.git_ops import GitOps
 from jakal_flow.memory import MemoryStore
 from jakal_flow.model_selection import (
     DEFAULT_MODEL_PRESET_ID,
@@ -84,9 +85,67 @@ from jakal_flow.planning import (
 from jakal_flow.reporting import Reporter
 from jakal_flow.step_models import CLAUDE_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL, resolve_step_model_choice
 from jakal_flow.utils import append_jsonl, read_json, read_jsonl_tail, read_last_jsonl, write_json
+from jakal_flow.verification import VerificationRunner
 
 
 class ExecutionPlanHelperTests(unittest.TestCase):
+    def test_git_ops_caches_current_revision_and_local_identity(self) -> None:
+        git = GitOps()
+        repo_dir = Path(__file__).resolve().parents[1]
+        run_calls: list[list[str]] = []
+
+        def fake_run(args, cwd, check=True, env=None):
+            run_calls.append(list(args))
+            if args[:2] == ["config", "user.name"] or args[:2] == ["config", "user.email"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+            if args[:2] == ["rev-parse", "HEAD"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="abc123\n", stderr="")
+            if args[:2] == ["reset", "--hard"] or args[:1] == ["clean"]:
+                return CommandResult(command=["git", *args], returncode=0, stdout="", stderr="")
+            raise AssertionError(f"unexpected git args: {args}")
+
+        with mock.patch.object(git, "run", side_effect=fake_run):
+            git.configure_local_identity(repo_dir, "Jakal Flow", "jakal@example.com")
+            git.configure_local_identity(repo_dir, "Jakal Flow", "jakal@example.com")
+            self.assertEqual(git.current_revision(repo_dir), "abc123")
+            self.assertEqual(git.current_revision(repo_dir), "abc123")
+            git.hard_reset(repo_dir, "safe-revision")
+            self.assertEqual(git.current_revision(repo_dir), "safe-revision")
+
+        self.assertEqual(run_calls.count(["config", "user.name", "Jakal Flow"]), 1)
+        self.assertEqual(run_calls.count(["config", "user.email", "jakal@example.com"]), 1)
+        self.assertEqual(run_calls.count(["rev-parse", "HEAD"]), 1)
+
+    def test_verification_runner_uses_explicit_state_fingerprint(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_verification_state_fingerprint_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+
+        try:
+            with mock.patch.object(
+                orchestrator.verification,
+                "_compute_state_fingerprint",
+                side_effect=AssertionError("should not recompute state fingerprint"),
+            ), mock.patch(
+                "jakal_flow.verification.run_subprocess_capture",
+                return_value=SimpleNamespace(returncode=0, stdout=b"ok\n", stderr=b""),
+            ):
+                result = orchestrator.verification.run(
+                    context=context,
+                    block_index=1,
+                    label="demo",
+                    state_fingerprint="precomputed-fingerprint",
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(result.state_fingerprint, "precomputed-fingerprint")
+
     def test_execution_failure_from_reason_maps_known_failure_codes(self) -> None:
         cases = {
             "preflight_failed": ExecutionPreflightError,
@@ -2917,6 +2976,83 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(pass_entries[1]["rollback_status"], "not_needed")
         self.assertEqual(observed_statuses, ["initialized", "running:debugging"])
 
+    def test_execute_pass_skips_debugger_when_verification_fails_without_changed_files(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_debugger_skip_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            candidate = CandidateTask(candidate_id="task-1", title="Implement fix", rationale="demo", plan_refs=["PL1"], score=1.0)
+            runner = mock.Mock()
+            reporter = Reporter(context)
+            failing_stdout = workspace_root / "no-change.stdout.log"
+            failing_stderr = workspace_root / "no-change.stderr.log"
+            failing_stdout.parent.mkdir(parents=True, exist_ok=True)
+            failing_stdout.write_text("no tests ran\n", encoding="utf-8")
+            failing_stderr.write_text("ERROR: file or directory not found: tests/missing.py\n", encoding="utf-8")
+            failing_test = TestRunResult(
+                command="python -m pytest",
+                returncode=1,
+                stdout_file=failing_stdout,
+                stderr_file=failing_stderr,
+                summary="python -m pytest exited with 1",
+            )
+
+            with mock.patch.object(
+                orchestrator,
+                "_run_pass_with_provider_fallback",
+                return_value=CodexRunResult(
+                    pass_type="block-search-pass",
+                    prompt_file=workspace_root / "pass.prompt.md",
+                    output_file=workspace_root / "pass.last_message.txt",
+                    event_file=workspace_root / "pass.events.jsonl",
+                    returncode=0,
+                    search_enabled=True,
+                    changed_files=[],
+                    usage={},
+                    last_message="pass completed",
+                ),
+            ), mock.patch.object(
+                orchestrator.git,
+                "changed_files",
+                return_value=[],
+            ), mock.patch.object(
+                orchestrator,
+                "_run_test_command",
+                return_value=failing_test,
+            ), mock.patch.object(
+                orchestrator,
+                "_run_debugger_pass",
+            ) as mocked_debugger, mock.patch.object(
+                orchestrator.git,
+                "hard_reset",
+            ) as mocked_reset:
+                run_result, test_result, commit_hash = orchestrator._execute_pass(
+                    context=context,
+                    runner=runner,
+                    reporter=reporter,
+                    block_index=1,
+                    candidate=candidate,
+                    pass_name="block-search-pass",
+                    safe_revision="safe-revision",
+                    search_enabled=True,
+                )
+                pass_entries = read_jsonl_tail(context.paths.pass_log_file, 2)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(run_result.returncode, 0)
+        self.assertIsNone(test_result)
+        self.assertIsNone(commit_hash)
+        mocked_debugger.assert_not_called()
+        mocked_reset.assert_called_once_with(repo_dir, "safe-revision")
+        self.assertEqual(pass_entries[-1]["rollback_status"], "debugger_skipped_no_changed_files")
+
     def test_execute_pass_falls_back_to_openai_after_auto_gemini_runtime_failure(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_step_provider_fallback_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -3660,6 +3796,79 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(mocked_reset.call_count, 1)
         mocked_commit.assert_called_once()
 
+    def test_run_execution_closeout_reuses_successful_logged_closeout_pass(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_reuse_closeout_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            context.metadata.current_safe_revision = "closeout-commit"
+            context.loop_state.current_safe_revision = "closeout-commit"
+            orchestrator.workspace.save_project(context)
+            plan_state = orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Reuse closeout demo",
+                    summary="All work is already finished.",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(
+                            step_id="ST1",
+                            title="Ship it",
+                            status="completed",
+                            completed_at="2026-03-30T00:00:00+00:00",
+                            commit_hash="closeout-commit",
+                            owned_paths=["src"],
+                        )
+                    ],
+                ),
+            )
+            append_jsonl(
+                context.paths.pass_log_file,
+                {
+                    "block_index": 7,
+                    "pass_type": "project-closeout-pass",
+                    "selected_task": "Project closeout",
+                    "changed_files": ["README.md"],
+                    "test_results": {
+                        "command": "python -m pytest",
+                        "returncode": 0,
+                        "summary": "python -m pytest exited with 0",
+                    },
+                    "codex_return_code": 0,
+                    "commit_hash": "closeout-commit",
+                    "rollback_status": "not_needed",
+                },
+            )
+            with mock.patch.object(
+                orchestrator.git,
+                "current_revision",
+                return_value="closeout-commit",
+            ), mock.patch.object(
+                orchestrator,
+                "_execute_verified_repo_pass",
+            ) as mocked_execute_closeout, mock.patch.object(
+                orchestrator,
+                "_publish_closeout_pull_request",
+            ) as mocked_publish:
+                _context, saved = orchestrator.run_execution_closeout(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        mocked_execute_closeout.assert_not_called()
+        mocked_publish.assert_called_once()
+        self.assertEqual(saved.closeout_status, "completed")
+        self.assertEqual(saved.closeout_commit_hash, "closeout-commit")
+        self.assertIn("python -m pytest exited with 0", saved.closeout_notes)
+
     def test_run_result_failure_detail_prefers_event_error_over_empty_output_warning(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_run_result_failure_detail_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -4156,6 +4365,137 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         mocked_report.assert_not_called()
         self.assertEqual(steps[0].notes, "worker 1 ok")
         self.assertEqual(steps[1].notes, "worker 2 recovered serially")
+
+    def test_parallel_batch_partial_failure_skips_batch_debugger(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_batch_skip_debugger_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            test_cmd="python -m pytest",
+            execution_mode="parallel",
+            parallel_workers=2,
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(
+                project_dir=repo_dir,
+                branch="main",
+                runtime=runtime,
+            )
+            context.metadata.current_safe_revision = "safe-revision"
+            context.loop_state.current_safe_revision = "safe-revision"
+            orchestrator.workspace.save_project(context)
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Parallel Skip Debugger Demo",
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(step_id="ST1", title="Desktop slice", test_command="python -m pytest", owned_paths=["desktop/src"]),
+                        ExecutionStep(step_id="ST2", title="Backend slice", test_command="python -m pytest", owned_paths=["src/jakal_flow"]),
+                    ],
+                ),
+            )
+
+            failing_stdout = workspace_root / "parallel-batch-pass.stdout.log"
+            failing_stderr = workspace_root / "parallel-batch-pass.stderr.log"
+            failing_stdout.parent.mkdir(parents=True, exist_ok=True)
+            failing_stdout.write_text("integration assertion failed\n", encoding="utf-8")
+            failing_stderr.write_text("parallel batch traceback\n", encoding="utf-8")
+            failing_test = TestRunResult(
+                command="python -m pytest",
+                returncode=1,
+                stdout_file=failing_stdout,
+                stderr_file=failing_stderr,
+                summary="python -m pytest exited with 1",
+            )
+            worker_results = [
+                {
+                    "step_id": "ST1",
+                    "status": "completed",
+                    "notes": "worker 1 ok",
+                    "commit_hash": "worker-1-commit",
+                    "changed_files": ["desktop/src/app.jsx"],
+                    "pass_log": {"pass_type": "block-search-pass"},
+                    "block_log": {"status": "completed"},
+                    "test_summary": "worker 1 ok",
+                },
+                {
+                    "step_id": "ST2",
+                    "status": "failed",
+                    "notes": "worker 2 failed badly",
+                    "commit_hash": None,
+                    "changed_files": ["src/jakal_flow/orchestrator.py"],
+                    "pass_log": {"pass_type": "block-search-pass"},
+                    "block_log": {"status": "failed"},
+                    "test_summary": "",
+                },
+            ]
+
+            def fake_serial_recovery(*args, **kwargs):
+                recovery_context = kwargs["context"]
+                current = orchestrator.load_execution_plan_state(recovery_context)
+                target = next(step for step in current.steps if step.step_id == "ST2")
+                target.status = "completed"
+                target.completed_at = "2026-03-30T00:00:00+00:00"
+                target.commit_hash = "serial-recovery-commit"
+                target.notes = "worker 2 recovered serially"
+                recovery_context.metadata.current_safe_revision = "serial-recovery-commit"
+                recovery_context.loop_state.current_safe_revision = "serial-recovery-commit"
+                recovery_context.loop_state.last_commit_hash = "serial-recovery-commit"
+                saved = orchestrator.save_execution_plan_state(recovery_context, current)
+                return recovery_context, saved, next(step for step in saved.steps if step.step_id == "ST2")
+
+            with mock.patch.object(orchestrator, "_run_parallel_step_worker", side_effect=worker_results), mock.patch.object(
+                orchestrator,
+                "_run_test_command",
+                return_value=failing_test,
+            ), mock.patch.object(
+                orchestrator.git,
+                "try_cherry_pick",
+                return_value=CommandResult(command=["git", "cherry-pick"], returncode=0, stdout="", stderr=""),
+            ), mock.patch.object(
+                orchestrator.git,
+                "current_revision",
+                return_value="merge-commit-1",
+            ), mock.patch.object(
+                orchestrator,
+                "_push_if_ready",
+                return_value=(False, "already_up_to_date"),
+            ), mock.patch.object(
+                orchestrator,
+                "_run_saved_execution_step_with_context",
+                side_effect=fake_serial_recovery,
+            ), mock.patch.object(
+                orchestrator.git,
+                "hard_reset",
+            ), mock.patch.object(
+                orchestrator,
+                "_run_debugger_pass",
+            ) as mocked_debugger, mock.patch.object(
+                orchestrator,
+                "setup_local_project",
+                return_value=context,
+            ):
+                context, plan_state, steps = orchestrator.run_parallel_execution_batch(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_ids=["ST1", "ST2"],
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        mocked_debugger.assert_not_called()
+        self.assertEqual(context.metadata.current_safe_revision, "serial-recovery-commit")
+        recovered_step = next(step for step in plan_state.steps if step.step_id == "ST2")
+        self.assertEqual(recovered_step.status, "completed")
+        self.assertIn("worker 2 recovered serially", recovered_step.notes)
 
     def test_parallel_batch_defers_step_when_serial_recovery_still_fails(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_parallel_batch_deferred_recovery_test"
@@ -5246,6 +5586,31 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("doc v1", first["docs"])
         self.assertIn("doc v2", second["docs"])
 
+    def test_source_inventory_uses_git_index_fast_path_before_scandir_fallback(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_source_inventory_git_fast_path_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        repo_dir = temp_root / "repo"
+        (repo_dir / "src").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "src" / "main.py").write_text("def run() -> None:\n    pass\n", encoding="utf-8")
+        subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"],
+            cwd=repo_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        try:
+            with mock.patch("jakal_flow.planning._sorted_scandir", side_effect=AssertionError("git fast path should avoid the filesystem fallback for tracked source inventory.")):
+                summary = planning_module._summarize_source_inventory(repo_dir)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertIn("src/main.py", summary)
+        self.assertIn("Existing implementation files detected.", summary)
+
     def test_prompt_to_execution_plan_prompt_reuses_prompt_bundle_cache(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_prompt_bundle_cache_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -5475,6 +5840,56 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual([item.item_id for item in second_items], ["PL1"])
 
+    def test_plan_block_items_prefetches_next_windows_into_cache(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_block_plan_prefetch_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+        context.loop_state.block_index = 1
+        plan_text = "# Project Plan\n\n- [ ] PL1: First task\n- [ ] PL2: Second task\n- [ ] PL3: Third task\n- [ ] PL4: Fourth task\n"
+        planned_items = [
+            PlanItem(item_id="PL1", text="First task"),
+            PlanItem(item_id="PL2", text="Second task"),
+            PlanItem(item_id="PL3", text="Third task"),
+            PlanItem(item_id="PL4", text="Fourth task"),
+        ]
+
+        try:
+            with mock.patch.object(orchestrator, "_generate_codex_work_items", return_value=planned_items):
+                orchestrator._plan_block_items(
+                    context=context,
+                    runner=mock.Mock(),
+                    plan_text=plan_text,
+                    work_items=None,
+                    max_items=4,
+                    repo_inputs={"readme": "r", "agents": "a", "docs": "d", "source": "s"},
+                )
+            cached = read_json(context.paths.block_plan_cache_file, default={})
+            context.loop_state.block_index = 2
+            with mock.patch(
+                "jakal_flow.orchestrator.build_mid_term_plan_from_plan_items",
+                side_effect=AssertionError("prefetched next-block windows should avoid rebuilding mid-term text."),
+            ):
+                second_items, second_text = orchestrator._plan_block_items(
+                    context=context,
+                    runner=mock.Mock(),
+                    plan_text=plan_text,
+                    work_items=None,
+                    max_items=3,
+                    repo_inputs={"readme": "r", "agents": "a", "docs": "d", "source": "s"},
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(int(cached.get("version", 0) or 0), 3)
+        self.assertEqual(len(cached.get("prefetched_blocks", [])), 2)
+        self.assertEqual([item.item_id for item in second_items], ["PL2", "PL3", "PL4"])
+        self.assertIn("Second task", second_text)
+
     def test_generate_codex_work_items_uses_supplied_repo_inputs_without_rescan(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_generate_codex_work_items_scan_test"
         shutil.rmtree(temp_root, ignore_errors=True)
@@ -5609,10 +6024,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
             ) as mocked_mid_term, mock.patch(
                 "jakal_flow.orchestrator.ensure_scope_guard",
                 return_value="scope guard\n",
-            ) as mocked_scope_guard, mock.patch(
-                "jakal_flow.orchestrator.execution_plan_svg",
-                return_value="<svg />\n",
-            ) as mocked_svg:
+            ) as mocked_scope_guard:
                 orchestrator.save_execution_plan_state(context, initial_state)
                 saved = orchestrator.save_execution_plan_state(context, running_state)
                 checkpoint_payload = read_json(context.paths.checkpoint_state_file, default={})
@@ -5622,9 +6034,41 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(mocked_plan_markdown.call_count, 1)
         self.assertEqual(mocked_mid_term.call_count, 1)
         self.assertEqual(mocked_scope_guard.call_count, 1)
-        self.assertEqual(mocked_svg.call_count, 1)
         self.assertEqual(saved.steps[0].status, "running")
         self.assertEqual(checkpoint_payload["checkpoints"][0]["status"], "running")
+        self.assertFalse(context.paths.execution_flow_svg_file.exists())
+
+    def test_save_execution_plan_state_preserves_timestamp_when_content_is_unchanged(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_plan_timestamp_stability_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+        initial_state = ExecutionPlanState(
+            plan_title="Stable timestamp demo",
+            project_prompt="Keep identical plan saves cheap.",
+            summary="Repeated identical saves should not churn timestamps.",
+            default_test_command="python -m pytest",
+            steps=[
+                ExecutionStep(
+                    step_id="ST1",
+                    title="Keep state stable",
+                    codex_description="Avoid rewriting identical execution plan state.",
+                    owned_paths=["src/jakal_flow/orchestrator.py"],
+                )
+            ],
+        )
+
+        try:
+            first = orchestrator.save_execution_plan_state(context, initial_state)
+            second = orchestrator.save_execution_plan_state(context, initial_state)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(first.last_updated_at, second.last_updated_at)
 
     def test_parallel_worker_summary_prefers_logged_failure_detail(self) -> None:
         orchestrator = Orchestrator(Path(__file__).resolve().parents[1] / ".tmp_parallel_worker_summary_test")
@@ -5885,6 +6329,103 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         )
         self.assertTrue(planning_events[2][2]["skipped"])
         self.assertEqual(plan_state.plan_title, "Fast planner demo")
+        self.assertEqual([step.step_id for step in plan_state.steps], ["ST1"])
+
+    def test_generate_execution_plan_skips_planner_agent_a_for_compact_existing_plan(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_adaptive_fast_planner_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
+        (repo_dir / "AGENTS.md").write_text("AGENTS summary", encoding="utf-8")
+        (repo_dir / "src").mkdir(parents=True, exist_ok=True)
+        (repo_dir / "src" / "planner.py").write_text("def run() -> None:\n    pass\n", encoding="utf-8")
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(
+            model="gpt-5.4",
+            effort="medium",
+            planning_effort="medium",
+            execution_mode="parallel",
+            use_fast_mode=False,
+            test_cmd="python -m pytest",
+        )
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Existing compact plan",
+                    project_prompt="Keep the plan compact.",
+                    summary="A previously reviewed compact plan already exists.",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(
+                            step_id="ST1",
+                            title="Keep the compact plan current",
+                            display_description="Refresh the small saved plan.",
+                            codex_description="Refresh the compact saved plan without widening scope.",
+                            owned_paths=["src/planner.py"],
+                        )
+                    ],
+                ),
+            )
+            planning_events: list[tuple[str, str, dict[str, object] | None]] = []
+            final_plan_json = """
+            {
+              "title": "Adaptive fast planner demo",
+              "summary": "Reuse the compact outline and emit the final DAG directly.",
+              "tasks": [
+                {
+                  "step_id": "ST1",
+                  "task_title": "Refresh the compact planning path",
+                  "display_description": "Keep the planning path current.",
+                  "codex_description": "Update the compact planning path while preserving traceability.",
+                  "reasoning_effort": "medium",
+                  "depends_on": [],
+                  "owned_paths": ["src/planner.py"],
+                  "success_criteria": "The planning path is updated safely."
+                }
+              ]
+            }
+            """
+            run_result = CodexRunResult(
+                pass_type="plan-agent-b-packing",
+                prompt_file=context.paths.logs_dir / "b.prompt.md",
+                output_file=context.paths.logs_dir / "b.last_message.txt",
+                event_file=context.paths.logs_dir / "b.events.jsonl",
+                returncode=0,
+                search_enabled=False,
+                changed_files=[],
+                usage={"input_tokens": 8},
+                last_message=final_plan_json,
+            )
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch(
+                "jakal_flow.orchestrator.CodexRunner.run_pass",
+                return_value=run_result,
+            ) as mocked_run_pass:
+                _context, plan_state = orchestrator.generate_execution_plan(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    project_prompt="Refresh the planner.",
+                    max_steps=4,
+                    progress_callback=lambda _context, event_type, message, details=None: planning_events.append(
+                        (event_type, message, details)
+                    ),
+                )
+                prompt = mocked_run_pass.call_args.kwargs["prompt"]
+                outline_text = (context.paths.docs_dir / "PLAN_AGENT_A_OUTLINE.md").read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(mocked_run_pass.call_count, 1)
+        self.assertEqual(mocked_run_pass.call_args.kwargs["pass_type"], "plan-agent-b-packing")
+        self.assertIn("Compact planning mode", outline_text)
+        self.assertIn("Planner Agent A decomposition artifact:", prompt)
+        self.assertTrue(planning_events[2][2]["skipped"])
+        self.assertEqual(plan_state.plan_title, "Adaptive fast planner demo")
         self.assertEqual([step.step_id for step in plan_state.steps], ["ST1"])
 
     def test_generate_execution_plan_uses_selected_planning_model_and_downgrades_gpt_54_effort(self) -> None:

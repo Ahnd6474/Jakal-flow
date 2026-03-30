@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .contract_wave import DEFAULT_SPINE_VERSION, load_spine_state, normalize_execution_step_policy, policy_summary
+from .errors import SubprocessTimeoutError
 from .model_selection import normalize_reasoning_effort
 from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, ProjectContext
 from .subprocess_utils import run_subprocess
@@ -126,6 +127,46 @@ def _important_invalidation_files(repo_dir: Path) -> list[Path]:
         repo_dir / "docker-compose.yml",
         repo_dir / "docker-compose.yaml",
     ]
+
+
+def _git_relative_paths(repo_dir: Path, pathspecs: list[str]) -> list[str] | None:
+    if not (repo_dir / ".git").exists():
+        return None
+    if not pathspecs:
+        return []
+    command = [
+        "git",
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        *pathspecs,
+    ]
+    try:
+        completed = run_subprocess(
+            command,
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout_seconds=2.0,
+        )
+    except (OSError, SubprocessTimeoutError):
+        return None
+    if completed.returncode != 0:
+        return None
+    values: list[str] = []
+    seen: set[str] = set()
+    for line in str(completed.stdout or "").splitlines():
+        relative = line.strip().replace("\\", "/")
+        if not relative or relative in seen:
+            continue
+        seen.add(relative)
+        values.append(relative)
+    return values
 
 
 def _git_status_signature(repo_dir: Path) -> str:
@@ -318,6 +359,27 @@ def _summarize_source_inventory(repo_dir: Path, limit: int = 10) -> str:
     total = 0
     truncated = False
     scan_limit = max(limit + 200, limit * 20)
+    git_paths = _git_relative_paths(repo_dir, ["src", "app", "lib", "desktop/src"])
+
+    if git_paths:
+        for relative in git_paths:
+            path = repo_dir / relative.replace("/", os.sep)
+            if Path(relative).suffix.lower() not in allowed_suffixes:
+                continue
+            if any(part in excluded_parts for part in path.parts):
+                continue
+            if relative in seen:
+                continue
+            seen.add(relative)
+            total += 1
+            if len(samples) < limit:
+                samples.append(relative)
+        if total:
+            suffix = "" if total <= limit else f", plus {total - limit} more"
+            return (
+                "Existing implementation files detected. Prefer extending or editing these paths instead of adding "
+                f"scaffold-only skeleton steps unless a genuinely new boundary is required: {', '.join(samples)}{suffix}."
+            )
 
     for root in roots:
         if not root.exists():
@@ -382,20 +444,28 @@ def _summarize_docs_inventory(
     docs_dir = repo_dir / "docs"
     if not docs_dir.exists():
         return "No markdown files under repo/docs.", []
+    git_paths = _git_relative_paths(repo_dir, ["docs"])
     doc_paths: list[Path] = []
-    stack = [docs_dir]
-    while stack and len(doc_paths) < max_files + 1:
-        current = stack.pop()
-        child_dirs: list[Path] = []
-        for entry in _sorted_scandir(current):
-            if entry.is_dir(follow_symlinks=False):
-                child_dirs.append(Path(entry.path))
-                continue
-            if entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(".md"):
-                doc_paths.append(Path(entry.path))
+    if git_paths:
+        for relative in git_paths:
+            if relative.lower().endswith(".md"):
+                doc_paths.append(repo_dir / relative.replace("/", os.sep))
                 if len(doc_paths) >= max_files + 1:
                     break
-        stack.extend(reversed(child_dirs))
+    if not doc_paths:
+        stack = [docs_dir]
+        while stack and len(doc_paths) < max_files + 1:
+            current = stack.pop()
+            child_dirs: list[Path] = []
+            for entry in _sorted_scandir(current):
+                if entry.is_dir(follow_symlinks=False):
+                    child_dirs.append(Path(entry.path))
+                    continue
+                if entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(".md"):
+                    doc_paths.append(Path(entry.path))
+                    if len(doc_paths) >= max_files + 1:
+                        break
+            stack.extend(reversed(child_dirs))
     if not doc_paths:
         return "No markdown files under repo/docs.", []
 

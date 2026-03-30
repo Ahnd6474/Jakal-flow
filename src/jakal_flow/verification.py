@@ -40,9 +40,13 @@ IGNORED_RUNTIME_PATH_PARTS = frozenset(
     }
 )
 SHORT_CACHE_KEY_LENGTH = 16
+ENVIRONMENT_FINGERPRINT_CACHE_TTL_SECONDS = 30.0
 
 
 class VerificationRunner:
+    def __init__(self) -> None:
+        self._environment_fingerprint_cache: dict[str, tuple[tuple[object, ...], str, float]] = {}
+
     def _failure_reason(self, stdout: str, stderr: str, max_chars: int = 280) -> str:
         source = stderr if str(stderr).strip() else stdout
         lines = [line.strip() for line in str(source).splitlines() if line.strip()]
@@ -66,14 +70,17 @@ class VerificationRunner:
         block_index: int,
         label: str,
         command: str | None = None,
+        state_fingerprint: str | None = None,
     ) -> TestRunResult:
         verify_command = str(command or context.runtime.test_cmd).strip() or context.runtime.test_cmd
         block_dir = context.paths.logs_dir / f"block_{block_index:04d}"
         stdout_file = block_dir / f"{label}.test.stdout.log"
         stderr_file = block_dir / f"{label}.test.stderr.log"
-        state_fingerprint = self._compute_state_fingerprint(context.paths.repo_dir)
-        environment_fingerprint = self._environment_fingerprint(context.paths.repo_dir)
-        cache_key = self._cache_key(verify_command, state_fingerprint, environment_fingerprint)
+        normalized_state_fingerprint = str(state_fingerprint or "").strip()
+        if not normalized_state_fingerprint:
+            normalized_state_fingerprint = self._compute_state_fingerprint(context.paths.repo_dir)
+        environment_fingerprint = self._cached_environment_fingerprint(context.paths.repo_dir)
+        cache_key = self._cache_key(verify_command, normalized_state_fingerprint, environment_fingerprint)
         cache_root = ensure_dir(context.paths.state_dir / "verification_cache")
         cache_entry_file = self._cache_entry_file(cache_root, cache_key)
         cached = read_json(cache_entry_file, default=None)
@@ -85,7 +92,7 @@ class VerificationRunner:
                 stdout_file=stdout_file,
                 stderr_file=stderr_file,
                 verify_command=verify_command,
-                state_fingerprint=state_fingerprint,
+                state_fingerprint=normalized_state_fingerprint,
                 cache_key=cache_key,
             )
             if cached_result is not None:
@@ -120,7 +127,7 @@ class VerificationRunner:
                 "returncode": completed.returncode,
                 "summary": summary,
                 "failure_reason": failure_reason,
-                "state_fingerprint": state_fingerprint,
+                "state_fingerprint": normalized_state_fingerprint,
                 "environment_fingerprint": environment_fingerprint,
                 "duration_seconds": duration_seconds,
                 "stdout_cache_file": str(cache_stdout_file),
@@ -137,9 +144,27 @@ class VerificationRunner:
             duration_seconds=duration_seconds,
             source_duration_seconds=duration_seconds,
             cache_hit=False,
-            state_fingerprint=state_fingerprint,
+            state_fingerprint=normalized_state_fingerprint,
             cache_key=cache_key,
         )
+
+    def build_state_fingerprint(
+        self,
+        repo_dir: Path,
+        *,
+        head_revision: str = "",
+        changed_paths: list[str] | None = None,
+    ) -> str:
+        normalized_head = str(head_revision).strip()
+        normalized_paths = sorted({str(path).strip() for path in changed_paths or [] if str(path).strip()})
+        if not normalized_head and not normalized_paths:
+            return self._compute_state_fingerprint(repo_dir)
+        digest = hashlib.sha1()
+        digest.update(f"head:{normalized_head}\n".encode("utf-8"))
+        for relative_path in normalized_paths:
+            digest.update(f"path:{relative_path}\n".encode("utf-8"))
+            self._update_path_hash(digest, repo_dir / relative_path)
+        return digest.hexdigest()
 
     def _replay_cached_result(
         self,
@@ -244,6 +269,26 @@ class VerificationRunner:
             digest.update(hashlib.sha1(path.read_bytes()).hexdigest().encode("utf-8"))
         return digest.hexdigest()
 
+    def _cached_environment_fingerprint(self, repo_dir: Path) -> str:
+        cache_key = str(repo_dir.resolve())
+        signature = self._environment_fingerprint_signature(repo_dir)
+        cached = self._environment_fingerprint_cache.get(cache_key)
+        now = monotonic()
+        if cached is not None:
+            cached_signature, cached_value, cached_at = cached
+            if cached_signature == signature and (now - cached_at) <= ENVIRONMENT_FINGERPRINT_CACHE_TTL_SECONDS:
+                return cached_value
+        value = self._environment_fingerprint(repo_dir)
+        self._environment_fingerprint_cache[cache_key] = (signature, value, now)
+        return value
+
+    def _environment_fingerprint_signature(self, repo_dir: Path) -> tuple[object, ...]:
+        return (
+            sys.executable,
+            platform.platform(),
+            tuple((name, self._path_token(repo_dir / name)) for name in RELEVANT_ENV_FILES),
+        )
+
     def _fallback_tree_fingerprint(self, repo_dir: Path) -> str:
         digest = hashlib.sha1()
         for path in sorted(repo_dir.rglob("*")):
@@ -320,3 +365,10 @@ class VerificationRunner:
         except ValueError:
             relative_parts = path.parts
         return any(part in IGNORED_RUNTIME_PATH_PARTS for part in relative_parts)
+
+    def _path_token(self, path: Path) -> tuple[int, int, int]:
+        try:
+            stat_result = path.stat()
+        except OSError:
+            return (0, 0, 0)
+        return (1, int(stat_result.st_mtime_ns), int(stat_result.st_size))

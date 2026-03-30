@@ -21,11 +21,12 @@ from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER
 from .model_providers import normalize_local_model_provider, normalize_model_provider, provider_preset
 from .models import ExecutionPlanState, ProjectContext
 from .orchestrator import Orchestrator
+from .planning import execution_plan_svg
 from .runtime_insights import build_runtime_insights
 from .share import project_share_config_payload, project_share_payload
 from .status_views import effective_project_status
 from .step_models import provider_statuses_payload
-from .utils import append_jsonl, compact_text, normalize_workflow_mode, now_utc_iso, read_json, read_jsonl_tail, read_last_jsonl, read_text, write_json
+from .utils import append_jsonl, compact_text, normalize_workflow_mode, now_utc_iso, read_json, read_jsonl_tail, read_last_jsonl, read_text, write_json, write_text_if_changed
 from .workspace import LOCAL_PROJECT_LOG_DIRNAME
 
 
@@ -196,7 +197,6 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
         project.paths.common_requirements_file,
         project.paths.contract_wave_audit_file,
         project.paths.ml_mode_state_file,
-        project.paths.execution_flow_svg_file,
         chat_sessions_registry_file(project),
         chat_active_session_file(project),
     ]
@@ -220,6 +220,7 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
                 project.paths.research_notes_file,
                 project.paths.shared_contracts_file,
                 project.paths.lineage_manifests_dir,
+                project.paths.planning_metrics_file,
             ]
         )
     for path in tracked_files:
@@ -570,6 +571,127 @@ def preview_tree(path: Path, max_entries: int = 16) -> list[dict[str, Any]]:
     return entries
 
 
+def _planning_metric_entries(path: Path, limit: int = 80) -> list[dict[str, Any]]:
+    entries = read_jsonl_tail(path, limit)
+    normalized: list[dict[str, Any]] = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        stage = str(item.get("stage", "")).strip()
+        if not stage:
+            continue
+        flow = str(item.get("flow", "")).strip() or "planning"
+        try:
+            duration_ms = float(item.get("duration_ms", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            duration_ms = 0.0
+        normalized.append(
+            {
+                "generated_at": str(item.get("generated_at", "")).strip(),
+                "flow": flow,
+                "stage": stage,
+                "duration_ms": round(duration_ms, 3),
+                "block_index": item.get("block_index"),
+                "repo_id": str(item.get("repo_id", "")).strip(),
+                "repo_slug": str(item.get("repo_slug", "")).strip(),
+            }
+        )
+    return normalized
+
+
+def _planning_metrics_report_payload(context: ProjectContext) -> dict[str, Any]:
+    entries = _planning_metric_entries(context.paths.planning_metrics_file)
+    if not entries:
+        return {
+            "path": str(context.paths.planning_metrics_file),
+            "entry_count": 0,
+            "recent_items": [],
+            "stage_summary": [],
+            "slowest_item": None,
+            "latest_generated_at": "",
+        }
+    recent_items = list(reversed(entries[-16:]))
+    summary_index: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in entries:
+        key = (str(item.get("flow", "")).strip(), str(item.get("stage", "")).strip())
+        bucket = summary_index.setdefault(
+            key,
+            {
+                "flow": key[0],
+                "stage": key[1],
+                "count": 0,
+                "total_ms": 0.0,
+                "max_ms": 0.0,
+            },
+        )
+        duration_ms = float(item.get("duration_ms", 0.0) or 0.0)
+        bucket["count"] += 1
+        bucket["total_ms"] += duration_ms
+        bucket["max_ms"] = max(float(bucket["max_ms"]), duration_ms)
+    stage_summary = sorted(
+        (
+            {
+                **bucket,
+                "avg_ms": round(float(bucket["total_ms"]) / max(1, int(bucket["count"])), 3),
+                "total_ms": round(float(bucket["total_ms"]), 3),
+                "max_ms": round(float(bucket["max_ms"]), 3),
+            }
+            for bucket in summary_index.values()
+        ),
+        key=lambda item: (float(item["total_ms"]), float(item["max_ms"])),
+        reverse=True,
+    )[:10]
+    slowest_item = max(entries, key=lambda item: float(item.get("duration_ms", 0.0) or 0.0))
+    return {
+        "path": str(context.paths.planning_metrics_file),
+        "entry_count": len(entries),
+        "recent_items": recent_items,
+        "stage_summary": stage_summary,
+        "slowest_item": slowest_item,
+        "latest_generated_at": str(recent_items[0].get("generated_at", "")).strip() if recent_items else "",
+    }
+
+
+def _flow_svg_signature(context: ProjectContext, plan_state: ExecutionPlanState) -> str:
+    payload = {
+        "title": plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug,
+        "execution_mode": str(plan_state.execution_mode or "").strip(),
+        "steps": [],
+    }
+    for step in plan_state.steps:
+        step_payload = step.to_dict()
+        for transient_key in ("status", "started_at", "completed_at", "commit_hash", "notes"):
+            step_payload.pop(transient_key, None)
+        payload["steps"].append(step_payload)
+    return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _load_execution_plan_state_for_flow(context: ProjectContext) -> ExecutionPlanState:
+    payload = safe_json(context.paths.execution_plan_file, default=None)
+    if isinstance(payload, dict):
+        try:
+            return ExecutionPlanState.from_dict(payload)
+        except (TypeError, ValueError, KeyError):
+            pass
+    return ExecutionPlanState(default_test_command=str(context.runtime.test_cmd or "").strip())
+
+
+def _flow_svg_payload(context: ProjectContext) -> dict[str, Any]:
+    plan_state = _load_execution_plan_state_for_flow(context)
+    signature = _flow_svg_signature(context, plan_state)
+    marker = f"execution-flow-signature:{signature}"
+    flow_svg_text = safe_text(context.paths.execution_flow_svg_file, default="")
+    if marker not in flow_svg_text:
+        flow_title = plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug
+        rendered = f"<!-- {marker} -->\n{execution_plan_svg(f'{flow_title} execution flow', plan_state.steps, plan_state.execution_mode)}"
+        write_text_if_changed(context.paths.execution_flow_svg_file, rendered)
+        flow_svg_text = safe_text(context.paths.execution_flow_svg_file, default=rendered)
+    return {
+        "flow_svg_path": str(context.paths.execution_flow_svg_file),
+        "flow_svg_text": flow_svg_text,
+    }
+
+
 def managed_workspace_tree(context: ProjectContext) -> list[dict[str, Any]]:
     cache_key = f"workspace-tree|{context.metadata.repo_id}"
     signature = "|".join(
@@ -727,6 +849,7 @@ def report_payload(context: ProjectContext) -> dict[str, Any]:
             _path_signature(context.paths.common_requirements_file),
             _path_signature(context.paths.contract_wave_audit_file),
             _path_signature(context.paths.lineage_manifests_dir),
+            _path_signature(context.paths.planning_metrics_file),
             _path_signature(context.paths.reports_dir / "latest_pr_failure_status.json"),
         )
     )
@@ -748,6 +871,7 @@ def report_payload(context: ProjectContext) -> dict[str, Any]:
         "powerpoint_report_path": str(context.paths.closeout_report_pptx_file) if context.paths.closeout_report_pptx_file.exists() else "",
         "powerpoint_report_target_path": str(context.paths.closeout_report_pptx_file),
         "ml_results_svg_path": str(context.paths.ml_experiment_results_svg_file) if context.paths.ml_experiment_results_svg_file.exists() else "",
+        "planning_metrics": _planning_metrics_report_payload(context),
         **_contract_wave_report_payload(context),
         "latest_failure": _latest_failure_details(context),
     }
@@ -757,14 +881,6 @@ def report_payload(context: ProjectContext) -> dict[str, Any]:
 def latest_failure_payload(context: ProjectContext) -> dict[str, Any]:
     return _latest_failure_details(context)
 
-
-def _flow_svg_payload(context: ProjectContext) -> dict[str, Any]:
-    return {
-        "flow_svg_path": str(context.paths.execution_flow_svg_file) if context.paths.execution_flow_svg_file.exists() else "",
-        "flow_svg_text": safe_text(context.paths.execution_flow_svg_file, default=""),
-    }
-
-
 def history_payload(context: ProjectContext) -> dict[str, Any]:
     cache_key = f"history|{context.metadata.repo_id}"
     signature = "|".join(
@@ -773,7 +889,7 @@ def history_payload(context: ProjectContext) -> dict[str, Any]:
             _path_signature(context.paths.block_log_file),
             _path_signature(context.paths.pass_log_file),
             _path_signature(context.paths.logs_dir / "test_runs.jsonl"),
-            _path_signature(context.paths.execution_flow_svg_file),
+            _path_signature(context.paths.execution_plan_file),
         )
     )
     cached = _section_payload_from_cache(cache_key, signature)

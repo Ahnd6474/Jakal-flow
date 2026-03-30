@@ -5048,6 +5048,11 @@ select:focus {
   flex-direction: column;
 }
 
+.rsb-panel__loading {
+  flex: 1;
+  min-height: 0;
+}
+
 /* Icon rail — mirrors .sidebar-rail but on the right edge */
 .rsb-rail {
   width: 36px;
