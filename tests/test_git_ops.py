@@ -211,7 +211,7 @@ class GitOpsTests(unittest.TestCase):
             shutil.rmtree(repo_dir, ignore_errors=True)
 
         self.assertEqual(len(changed_files), 1)
-        self.assertTrue(changed_files[0].endswith("docs/"))
+        self.assertEqual(changed_files[0].replace("\\", "/").rstrip("/"), "docs")
         self.assertNotIn("_tmp_remote_experiment_repo", changed_files[0])
         self.assertTrue(has_changes)
 

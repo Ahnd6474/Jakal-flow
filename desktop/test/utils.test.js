@@ -900,7 +900,7 @@ test("inheritProjectIdentityForm keeps project links but resets runtime to app d
   assert.equal(form.runtime.ml_max_cycles, 3);
   assert.equal(form.runtime.checkpoint_interval_blocks, 1);
   assert.equal(form.runtime.require_checkpoint_approval, false);
-  assert.equal(form.runtime.model_preset, "auto");
+  assert.equal(form.runtime.model_preset, "");
   assert.equal(form.runtime.model_selection_mode, "slug");
   assert.equal(form.runtime.planning_effort, "medium");
   assert.equal(form.runtime.provider_base_url, "");
