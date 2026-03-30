@@ -70,6 +70,39 @@ function PlusIcon() {
   );
 }
 
+function ChevronRightIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function TreeFolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function TreeFileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function EmptyProjectsIcon() {
   return (
     <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
@@ -188,6 +221,46 @@ function normalizeTree(node) {
   };
 }
 
+function treeStructureSignature(nodes = []) {
+  return (Array.isArray(nodes) ? nodes : []).map((node) => [
+    String(node?.kind || ""),
+    String(node?.path || ""),
+    String(node?.label || ""),
+    treeStructureSignature(node?.children || []),
+  ].join("::")).join("|");
+}
+
+function collectTreePaths(nodes = [], paths = []) {
+  (nodes || []).forEach((node) => {
+    const path = String(node?.path || "").trim();
+    if (path) {
+      paths.push(path);
+    }
+    collectTreePaths(node?.children || [], paths);
+  });
+  return paths;
+}
+
+function fileExtension(label = "") {
+  const normalized = String(label || "").trim();
+  const dotIndex = normalized.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === normalized.length - 1) {
+    return "";
+  }
+  return normalized.slice(dotIndex + 1).toUpperCase();
+}
+
+function parentPathLabel(path = "") {
+  const segments = String(path || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean);
+  if (segments.length <= 1) {
+    return "";
+  }
+  return segments.slice(Math.max(0, segments.length - 3), segments.length - 1).join(" / ");
+}
+
 function filterPreparedTree(node, normalizedQuery) {
   if (!normalizedQuery) {
     return node;
@@ -205,7 +278,7 @@ function filterPreparedTree(node, normalizedQuery) {
   return null;
 }
 
-const TREE_ROW_HEIGHT = 28;
+const TREE_ROW_HEIGHT = 36;
 const TREE_OVERSCAN_ROWS = 10;
 const TREE_DEFAULT_VIEWPORT_HEIGHT = 420;
 
@@ -222,6 +295,9 @@ function buildVisibleTreeRows(nodes = [], expandedPaths = {}, normalizedQuery = 
     const isFolder = isTreeFolder(node);
     const path = String(node?.path || `${node?.label || "node"}-${depth}`).trim();
     const isExpanded = normalizedQuery ? true : expandedPaths[path] ?? defaultTreeExpanded(path, depth);
+    const extension = isFolder ? "" : fileExtension(node?.label || "");
+    const parentLabel = parentPathLabel(path);
+    const childCount = Array.isArray(node?.children) ? node.children.length : 0;
     rows.push({
       key: path || `${node?.label || "node"}-${depth}-${rows.length}`,
       path,
@@ -230,6 +306,10 @@ function buildVisibleTreeRows(nodes = [], expandedPaths = {}, normalizedQuery = 
       depth,
       isFolder,
       isExpanded,
+      extension,
+      metaLabel: isFolder
+        ? (childCount > 0 ? `${childCount} item${childCount === 1 ? "" : "s"}` : "")
+        : parentLabel,
     });
     if (isFolder && node?.children?.length && isExpanded) {
       buildVisibleTreeRows(node.children, expandedPaths, normalizedQuery, depth + 1, rows);
@@ -326,13 +406,24 @@ const WorkspaceTreeView = memo(function WorkspaceTreeView({
             }}
             type="button"
             style={{
-              paddingLeft: `${12 + row.depth * 16}px`,
+              "--tree-depth": row.depth,
+              paddingLeft: `${10 + row.depth * 18}px`,
               minHeight: `${TREE_ROW_HEIGHT}px`,
             }}
             title={row.path || row.label}
           >
-            <span className="tree-node__prefix">{row.isFolder ? (row.isExpanded ? "▾" : "▸") : "·"}</span>
-            <span>{row.label}</span>
+            <span className="tree-node__guide" aria-hidden="true" />
+            <span className="tree-node__prefix" aria-hidden="true">
+              {row.isFolder ? (row.isExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />) : null}
+            </span>
+            <span className="tree-node__icon" aria-hidden="true">
+              {row.isFolder ? <TreeFolderIcon /> : <TreeFileIcon />}
+            </span>
+            <span className="tree-node__content">
+              <span className="tree-node__label">{row.label}</span>
+              {row.metaLabel ? <span className="tree-node__meta">{row.metaLabel}</span> : null}
+            </span>
+            {row.extension ? <span className="tree-node__badge">{row.extension}</span> : null}
           </button>
         ))}
       </div>
@@ -888,9 +979,17 @@ export const SidebarPane = memo(function SidebarPane({
   const workspaceFilterCacheRef = useRef(new Map());
   const workspaceRowsCacheRef = useRef(new Map());
   const [expandedWorkspacePaths, setExpandedWorkspacePaths] = useState({});
+  const workspaceTreeSignature = useMemo(
+    () => (workspaceTabActive ? treeStructureSignature(workspaceTree || []) : ""),
+    [workspaceTabActive, workspaceTree],
+  );
   const normalizedWorkspaceTree = useMemo(
     () => (workspaceTabActive ? (workspaceTree || []).map((node) => normalizeTree(node)) : []),
-    [workspaceTabActive, workspaceTree],
+    [workspaceTabActive, workspaceTree, workspaceTreeSignature],
+  );
+  const workspaceTreePaths = useMemo(
+    () => (workspaceTabActive ? collectTreePaths(normalizedWorkspaceTree) : []),
+    [normalizedWorkspaceTree, workspaceTabActive],
   );
 
   const visibleCheckpoints = useMemo(() => {
@@ -920,10 +1019,21 @@ export const SidebarPane = memo(function SidebarPane({
   useEffect(() => {
     workspaceFilterCacheRef.current.clear();
     workspaceRowsCacheRef.current.clear();
-  }, [normalizedWorkspaceTree]);
+  }, [workspaceTreeSignature]);
   useEffect(() => {
-    setExpandedWorkspacePaths({});
-  }, [normalizedWorkspaceTree]);
+    const validPaths = new Set(workspaceTreePaths);
+    setExpandedWorkspacePaths((current) => {
+      const entries = Object.entries(current);
+      if (!entries.length) {
+        return current;
+      }
+      const nextEntries = entries.filter(([path]) => validPaths.has(path));
+      if (nextEntries.length === entries.length) {
+        return current;
+      }
+      return Object.fromEntries(nextEntries);
+    });
+  }, [workspaceTreePaths, workspaceTreeSignature]);
 
   const filteredWorkspaceTree = useMemo(() => {
     if (!workspaceTabActive) {
