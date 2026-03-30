@@ -5170,6 +5170,96 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertEqual(first_text, second_text)
         self.assertTrue(cache_exists)
 
+    def test_plan_block_items_advances_through_cached_breakdown_queue(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_block_plan_cache_queue_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+        context.loop_state.block_index = 1
+        plan_text = "# Project Plan\n\n- [ ] PL1: First task\n- [ ] PL2: Second task\n- [ ] PL3: Third task\n"
+        planned_items = [
+            PlanItem(item_id="PL1", text="First task"),
+            PlanItem(item_id="PL2", text="Second task"),
+            PlanItem(item_id="PL3", text="Third task"),
+        ]
+
+        try:
+            with mock.patch.object(orchestrator, "_generate_codex_work_items", return_value=planned_items):
+                first_items, _ = orchestrator._plan_block_items(
+                    context=context,
+                    runner=mock.Mock(),
+                    plan_text=plan_text,
+                    work_items=None,
+                    max_items=3,
+                    repo_inputs={"readme": "r", "agents": "a", "docs": "d", "source": "s"},
+                )
+            context.loop_state.block_index = 2
+            with mock.patch.object(
+                orchestrator,
+                "_generate_codex_work_items",
+                side_effect=AssertionError("cached block plan queue should avoid another breakdown pass."),
+            ):
+                second_items, second_text = orchestrator._plan_block_items(
+                    context=context,
+                    runner=mock.Mock(),
+                    plan_text=plan_text,
+                    work_items=None,
+                    max_items=2,
+                    repo_inputs={"readme": "r", "agents": "a", "docs": "d", "source": "s"},
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual([item.item_id for item in first_items], ["PL1", "PL2", "PL3"])
+        self.assertEqual([item.item_id for item in second_items], ["PL2", "PL3"])
+        self.assertIn("MT1 -> PL2: Second task", second_text)
+        self.assertNotIn("MT1 -> PL1: First task", second_text)
+
+    def test_plan_block_items_cache_survives_task_summary_updates(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_block_plan_cache_memory_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+        plan_text = "# Project Plan\n\n- [ ] PL1: Narrow task\n"
+        planned_items = [PlanItem(item_id="PL1", text="Narrow task")]
+
+        try:
+            with mock.patch.object(orchestrator, "_generate_codex_work_items", return_value=planned_items):
+                orchestrator._plan_block_items(
+                    context=context,
+                    runner=mock.Mock(),
+                    plan_text=plan_text,
+                    work_items=None,
+                    max_items=3,
+                    repo_inputs={"readme": "r", "agents": "a", "docs": "d", "source": "s"},
+                )
+            context.paths.task_summaries_file.write_text("updated task summary\n", encoding="utf-8")
+            with mock.patch.object(
+                orchestrator,
+                "_generate_codex_work_items",
+                side_effect=AssertionError("task summary updates should not invalidate the cached breakdown queue."),
+            ):
+                second_items, _ = orchestrator._plan_block_items(
+                    context=context,
+                    runner=mock.Mock(),
+                    plan_text=plan_text,
+                    work_items=None,
+                    max_items=3,
+                    repo_inputs={"readme": "r", "agents": "a", "docs": "d", "source": "s"},
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual([item.item_id for item in second_items], ["PL1"])
+
     def test_generate_codex_work_items_uses_supplied_repo_inputs_without_rescan(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_generate_codex_work_items_scan_test"
         shutil.rmtree(temp_root, ignore_errors=True)

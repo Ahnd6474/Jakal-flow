@@ -91,6 +91,7 @@ workspace_root/
 This keeps multi-repository history and traceability separate by design.
 
 Contract-wave metadata stays inside each project's `state/` and `docs/` folders, including `SPINE.json`, `COMMON_REQUIREMENTS.json`, `CONTRACT_WAVE_AUDIT.jsonl`, `state/lineage_manifests/`, and `docs/SHARED_CONTRACTS.md`.
+Planning caches and telemetry are persisted alongside the project as `state/PLANNING_INPUTS_CACHE.json`, `state/PLANNING_PROMPT_CACHE.json`, `state/BLOCK_PLAN_CACHE.json`, and `logs/planning_metrics.jsonl`.
 
 ## Desktop UI
 

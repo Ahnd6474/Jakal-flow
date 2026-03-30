@@ -91,6 +91,7 @@ workspace_root/
 이 구조 덕분에 멀티 리포지토리 이력과 추적 정보가 프로젝트별로 분리됩니다.
 
 Contract-wave 메타데이터는 각 프로젝트의 `state/` 와 `docs/` 아래에 유지되며, `SPINE.json`, `COMMON_REQUIREMENTS.json`, `CONTRACT_WAVE_AUDIT.jsonl`, `state/lineage_manifests/`, `docs/SHARED_CONTRACTS.md`를 포함합니다.
+계획 작성 캐시와 telemetry도 같은 프로젝트 아래에 저장되며 `state/PLANNING_INPUTS_CACHE.json`, `state/PLANNING_PROMPT_CACHE.json`, `state/BLOCK_PLAN_CACHE.json`, `logs/planning_metrics.jsonl` 파일을 사용합니다.
 
 ## 데스크톱 UI
 
