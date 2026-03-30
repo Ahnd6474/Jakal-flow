@@ -141,8 +141,47 @@ test("applyProjectUiEvent updates planning progress from planning events", () =>
   assert.equal(updated.planning_progress.stages[1].label, "Planner Agent A");
 });
 
+test("applyProjectUiEvent patches running step state from run events", () => {
+  const updated = applyProjectUiEvent(
+    {
+      project: { repo_id: "repo-1", current_status: "running:parallel" },
+      plan: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "pending" },
+          { step_id: "ST3", title: "API", status: "pending" },
+        ],
+      },
+      snapshot: {
+        plan: {
+          execution_mode: "parallel",
+          closeout_status: "not_started",
+          steps: [
+            { step_id: "ST1", title: "Plan", status: "completed" },
+            { step_id: "ST2", title: "Build", status: "pending" },
+            { step_id: "ST3", title: "API", status: "pending" },
+          ],
+        },
+      },
+    },
+    sampleEvent("step-started", {
+      event: {
+        details: {
+          step_id: "ST2",
+          execution_mode: "parallel",
+        },
+      },
+    }),
+  );
+
+  assert.equal(updated.plan.steps[1].status, "running");
+  assert.equal(updated.snapshot.plan.steps[1].status, "running");
+});
+
 test("shouldRefreshProjectDetailForUiEvent only reloads for structural run updates", () => {
-  assert.equal(shouldRefreshProjectDetailForUiEvent(sampleEvent("step-started")), false);
+  assert.equal(shouldRefreshProjectDetailForUiEvent(sampleEvent("step-started")), true);
   assert.equal(shouldRefreshProjectDetailForUiEvent(sampleEvent("step-finished")), true);
   assert.equal(
     shouldRefreshProjectDetailForUiEvent(

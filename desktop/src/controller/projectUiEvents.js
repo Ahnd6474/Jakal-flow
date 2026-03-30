@@ -6,6 +6,7 @@ const DEFAULT_PLANNING_STAGE_LABELS = Object.freeze({
 });
 
 const REFRESH_EVENT_TYPES = new Set([
+  "step-started",
   "step-finished",
   "batch-finished",
   "closeout-finished",
@@ -58,6 +59,123 @@ function uniquePrepend(items = [], nextItem, limit = 8) {
   const serialized = JSON.stringify(nextItem);
   const filtered = nextItems.filter((item) => JSON.stringify(item) !== serialized);
   return [nextItem, ...filtered].slice(0, limit);
+}
+
+function normalizedExecutionMode(plan = null, record = null) {
+  const eventMode = normalizedText(record?.details?.execution_mode).toLowerCase();
+  if (eventMode) {
+    return eventMode;
+  }
+  return normalizedText(plan?.execution_mode).toLowerCase();
+}
+
+function terminalStepStatus(status = "") {
+  return ["completed", "failed"].includes(normalizedText(status).toLowerCase());
+}
+
+function patchPlanFromRunEvent(plan = null, record = null) {
+  if (!plan || typeof plan !== "object" || !record) {
+    return plan;
+  }
+  const steps = Array.isArray(plan.steps) ? plan.steps : [];
+  const eventType = record.eventType;
+  const executionMode = normalizedExecutionMode(plan, record);
+  const isParallel = executionMode === "parallel";
+  const detailStepId = normalizedText(record.details?.step_id);
+  const detailStepIds = Array.isArray(record.details?.step_ids)
+    ? record.details.step_ids.map((value) => normalizedText(value)).filter(Boolean)
+    : [];
+  const detailStatuses = record.details?.statuses && typeof record.details.statuses === "object"
+    ? record.details.statuses
+    : null;
+  let changed = false;
+  const nextSteps = steps.map((step) => {
+    if (!step || typeof step !== "object") {
+      return step;
+    }
+    const stepId = normalizedText(step.step_id);
+    const stepStatus = normalizedText(step.status).toLowerCase();
+    if (!stepId) {
+      return step;
+    }
+    if (eventType === "step-started") {
+      if (stepId === detailStepId) {
+        changed = true;
+        return {
+          ...step,
+          status: "running",
+          started_at: normalizedText(step.started_at) || record.timestamp || step.started_at,
+          notes: "",
+        };
+      }
+      if (!isParallel && stepStatus === "running") {
+        changed = true;
+        return {
+          ...step,
+          status: "paused",
+        };
+      }
+      return step;
+    }
+    if (eventType === "step-finished" && stepId === detailStepId) {
+      const nextStatus = normalizedText(record.details?.status) || step.status || "completed";
+      changed = true;
+      return {
+        ...step,
+        status: nextStatus,
+        completed_at: terminalStepStatus(nextStatus) ? (record.timestamp || step.completed_at) : step.completed_at,
+        commit_hash: normalizedText(record.details?.commit_hash) || step.commit_hash,
+      };
+    }
+    if (eventType === "batch-finished" && detailStatuses && Object.hasOwn(detailStatuses, stepId)) {
+      const nextStatus = normalizedText(detailStatuses[stepId]) || step.status;
+      changed = true;
+      return {
+        ...step,
+        status: nextStatus,
+        completed_at: terminalStepStatus(nextStatus) ? (record.timestamp || step.completed_at) : step.completed_at,
+      };
+    }
+    if (eventType === "run-paused" && ["running", "integrating"].includes(stepStatus)) {
+      changed = true;
+      return {
+        ...step,
+        status: "paused",
+      };
+    }
+    if (eventType === "batch-started" && detailStepIds.includes(stepId)) {
+      changed = true;
+      return {
+        ...step,
+        status: "running",
+        started_at: normalizedText(step.started_at) || record.timestamp || step.started_at,
+        notes: "",
+      };
+    }
+    return step;
+  });
+
+  let nextCloseoutStatus = plan.closeout_status;
+  if (eventType === "closeout-started" && normalizedText(nextCloseoutStatus).toLowerCase() !== "running") {
+    nextCloseoutStatus = "running";
+    changed = true;
+  }
+  if (eventType === "closeout-finished") {
+    const finalStatus = normalizedText(record.details?.status);
+    if (finalStatus && finalStatus !== normalizedText(nextCloseoutStatus)) {
+      nextCloseoutStatus = finalStatus;
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return plan;
+  }
+  return {
+    ...plan,
+    steps: nextSteps,
+    closeout_status: nextCloseoutStatus,
+  };
 }
 
 export function projectUiEventRecord(eventPayload) {
@@ -176,6 +294,7 @@ export function applyProjectUiEvent(detail, eventPayload, options = {}) {
   const activityLimit = Math.max(1, parsePositiveInt(options.activityLimit, 8));
   const historyLimit = Math.max(1, parsePositiveInt(options.historyLimit, 40));
   const activityLine = projectUiEventActivityLine(record);
+  const nextPlan = patchPlanFromRunEvent(detail.plan, record);
 
   const nextProject = detail.project
     ? {
@@ -258,6 +377,7 @@ export function applyProjectUiEvent(detail, eventPayload, options = {}) {
                   : detail.snapshot.loop_state.pending_checkpoint_approval,
             }
           : detail.snapshot.loop_state,
+        plan: patchPlanFromRunEvent(detail.snapshot.plan, record),
       }
     : detail.snapshot;
 
@@ -269,6 +389,7 @@ export function applyProjectUiEvent(detail, eventPayload, options = {}) {
     history: nextHistory,
     bottom_panels: nextBottomPanels,
     snapshot: nextSnapshot,
+    plan: nextPlan,
     planning_progress: updatePlanningProgress(detail.planning_progress, record),
   };
 }

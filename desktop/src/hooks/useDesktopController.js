@@ -997,7 +997,9 @@ export function useDesktopController() {
       if (isProjectUiEvent(eventPayload)) {
         const project = bridgeEventProject(eventPayload);
         const eventRepoId = String(project?.repo_id || "").trim();
-        const detailPatched = project ? applySelectedProjectDelta(project) : false;
+        if (project) {
+          applySelectedProjectDelta(project);
+        }
         if (project) {
           applyProjectListingDelta(project, jobsRef.current);
         }
@@ -1008,7 +1010,9 @@ export function useDesktopController() {
           });
         }
         if (shouldPatchSelectedProject && shouldRefreshProjectDetailForUiEvent(eventPayload)) {
-          scheduleBridgeRefresh(eventRepoId, { refreshListing: false, refreshDetail: !detailPatched });
+          // UI events only carry a shallow project delta, so structural run
+          // updates still need a core detail reload to refresh plan state.
+          scheduleBridgeRefresh(eventRepoId, { refreshListing: false, refreshDetail: true });
         }
       }
     }
