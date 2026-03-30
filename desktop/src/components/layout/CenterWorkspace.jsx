@@ -287,6 +287,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
   onDeleteStep,
   onMoveStep,
   activeJob,
+  hidePromptStrip = false,
 }) {
   const { t } = useI18n();
   const developerMode = Boolean(programSettings?.developer_mode);
@@ -387,6 +388,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
             onSaveStepLocal={onSaveStepLocal}
             onAddStep={onAddStep}
             onDeleteStep={onDeleteStep}
+            hidePromptStrip={hidePromptStrip}
           />
         ) : null}
         {activeTab === "dashboard" ? (

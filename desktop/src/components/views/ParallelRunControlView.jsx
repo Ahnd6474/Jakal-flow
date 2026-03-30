@@ -271,6 +271,7 @@ function parallelRunControlViewPropsEqual(previousProps, nextProps) {
     && previousProps.canRequestStop === nextProps.canRequestStop
     && previousProps.canCancelReservation === nextProps.canCancelReservation
     && sameQueuedJobs(previousProps.queuedJobs, nextProps.queuedJobs)
+    && previousProps.hidePromptStrip === nextProps.hidePromptStrip
   );
 }
 
@@ -426,6 +427,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
   canRequestStop = false,
   canCancelReservation = false,
   queuedJobs = [],
+  hidePromptStrip = false,
   onPromptChange,
   onChangeForm,
   onGeneratePlan,
@@ -773,8 +775,8 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
           )}
         </div>
       ) : null}
-      {/* ── Prompt strip (bottom) ── */}
-      <div className={`run-prompt-strip run-prompt-strip--bottom${promptExpanded ? "" : " run-prompt-strip--collapsed"}`}>
+      {/* ── Prompt strip (bottom) — hidden when prompt lives in chat pane ── */}
+      {hidePromptStrip ? null : <div className={`run-prompt-strip run-prompt-strip--bottom${promptExpanded ? "" : " run-prompt-strip--collapsed"}`}>
         {promptExpanded ? (
           /* Expanded: full textarea */
           <div className="run-prompt-strip__inner">
@@ -832,7 +834,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
             <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} />
           </div>
         )}
-      </div>
+      </div>}
     </section>
   );
 }, parallelRunControlViewPropsEqual);

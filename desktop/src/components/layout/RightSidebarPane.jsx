@@ -142,6 +142,12 @@ function rightSidebarPanePropsEqual(previousProps, nextProps) {
   if (previousProps.activeTab !== nextProps.activeTab || previousProps.collapsed !== nextProps.collapsed) {
     return false;
   }
+  if (previousProps.chatCenterMode !== nextProps.chatCenterMode) {
+    return false;
+  }
+  if (previousProps.promptValue !== nextProps.promptValue) {
+    return false;
+  }
 
   const previousProcessOutput = previousProps.detail?.subprocess_output || previousProps.detail?.agent_output || previousProps.detail?.process_log || "";
   const nextProcessOutput = nextProps.detail?.subprocess_output || nextProps.detail?.agent_output || nextProps.detail?.process_log || "";
@@ -315,6 +321,11 @@ const ProjectChatPane = memo(function ProjectChatPane({
   onChangeChatModelSelection,
   busy,
   language,
+  centerMode = false,
+  promptValue = "",
+  onPromptChange,
+  onGeneratePlan,
+  onRunPlan,
 }) {
   const sessions = Array.isArray(chat?.sessions) ? chat.sessions : [];
   const remoteMessages = Array.isArray(chat?.messages) ? chat.messages : [];
@@ -331,6 +342,8 @@ const ProjectChatPane = memo(function ProjectChatPane({
   const [menuOpen, setMenuOpen] = useState(false);
   const [localMessages, setLocalMessages] = useState(deferredRemoteMessages);
   const [visibleMessageCount, setVisibleMessageCount] = useState(MAX_VISIBLE_CHAT_MESSAGES);
+  const [promptDraft, setPromptDraft] = useState(promptValue);
+  const [promptExpanded, setPromptExpanded] = useState(!promptValue);
   const messagesRef = useRef(null);
   const menuRef = useRef(null);
   const scrollFrameRef = useRef(0);
@@ -414,6 +427,10 @@ const ProjectChatPane = memo(function ProjectChatPane({
   useEffect(() => {
     setVisibleMessageCount(MAX_VISIBLE_CHAT_MESSAGES);
   }, [activeSessionId, chatDraftSession]);
+
+  useEffect(() => {
+    setPromptDraft(promptValue);
+  }, [promptValue]);
 
   useEffect(() => {
     if (!virtualizationEnabled || !messagesRef.current || typeof ResizeObserver === "undefined") {
@@ -559,13 +576,45 @@ const ProjectChatPane = memo(function ProjectChatPane({
   const selectedSessionValue = chatDraftSession ? "" : activeSessionId;
 
   return (
-    <div className="rsb-chat">
-      <div className="sidebar-panel__header" style={{ padding: "10px 10px 0" }}>
-        <strong>{language === "ko" ? "AI Chat" : "AI Chat"}</strong>
-        <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
-          {language === "ko" ? "Conversation or manual recovery" : "Conversation or manual recovery"}
-        </span>
-      </div>
+    <div className={centerMode ? "rsb-chat rsb-chat--center" : "rsb-chat"}>
+      {!centerMode ? (
+        <div className="sidebar-panel__header" style={{ padding: "10px 10px 0" }}>
+          <strong>{language === "ko" ? "AI Chat" : "AI Chat"}</strong>
+          <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
+            {language === "ko" ? "Conversation or manual recovery" : "Conversation or manual recovery"}
+          </span>
+        </div>
+      ) : (
+        <div className="chat-center__header">
+          <div className="chat-center__title-row">
+            <RailChatIcon />
+            <strong>{language === "ko" ? "AI Chat" : "AI Chat"}</strong>
+          </div>
+          <div className="chat-center__toolbar">
+            <select
+              className="sidebar-chat-session-select chat-center__session-select"
+              value={selectedSessionValue}
+              onChange={handleSessionChange}
+              disabled={busy}
+            >
+              <option value="">{language === "ko" ? "New conversation" : "New conversation"}</option>
+              {deferredSessions.map((session) => (
+                <option key={session.session_id} value={session.session_id}>
+                  {sessionLabel(session)}
+                </option>
+              ))}
+            </select>
+            <button
+              className="sidebar-chat-new"
+              onClick={() => { setPendingMode("conversation"); setMenuOpen(false); onStartNewChatSession?.(); }}
+              type="button"
+              disabled={busy}
+            >
+              {language === "ko" ? "New" : "New"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="sidebar-chat-config" style={{ margin: "8px 10px 0" }}>
         <div className="sidebar-chat-config__header">
@@ -714,18 +763,18 @@ const ProjectChatPane = memo(function ProjectChatPane({
           )}
         </div>
 
-        <div className="sidebar-chat-input-row">
+        <div className={centerMode ? "chat-center__input-row" : "sidebar-chat-input-row"}>
           <textarea
-            className="sidebar-chat-input"
+            className={centerMode ? "chat-center__textarea" : "sidebar-chat-input"}
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={language === "ko" ? "Type a message... (Enter to send)" : "Type a message... (Enter to send)"}
+            placeholder={language === "ko" ? "메시지를 입력하세요... (Enter로 전송)" : "Type a message… (Enter to send)"}
             disabled={busy}
-            rows={2}
+            rows={centerMode ? 3 : 2}
           />
           <button
-            className="sidebar-chat-send"
+            className={centerMode ? "chat-center__send-btn" : "sidebar-chat-send"}
             onClick={handleSend}
             type="button"
             disabled={busy || !input.trim()}
@@ -735,6 +784,51 @@ const ProjectChatPane = memo(function ProjectChatPane({
           </button>
         </div>
       </div>
+
+      {/* Prompt section — only in center mode */}
+      {centerMode ? (
+        <div className="chat-center__prompt-section">
+          <div className="chat-center__prompt-header">
+            <svg viewBox="0 0 24 24" fill="none" style={{ width: 14, height: 14, color: "var(--text-dim)" }}>
+              <path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            <span>{language === "ko" ? "계획 생성용 프롬프트" : "Plan generation prompt"}</span>
+            <span className="chat-center__prompt-count">{promptDraft.length}</span>
+          </div>
+          <textarea
+            className="chat-center__prompt-textarea"
+            value={promptDraft}
+            onChange={(event) => setPromptDraft(event.target.value)}
+            onBlur={() => {
+              if (promptDraft !== promptValue) onPromptChange?.(promptDraft);
+            }}
+            disabled={busy}
+            placeholder={language === "ko" ? "프로젝트 프롬프트를 입력하세요…" : "Enter your project prompt…"}
+            rows={4}
+          />
+          <div className="chat-center__prompt-actions">
+            <button
+              className="toolbar-button toolbar-button--accent"
+              onClick={() => {
+                if (promptDraft !== promptValue) onPromptChange?.(promptDraft);
+                onGeneratePlan?.();
+              }}
+              type="button"
+              disabled={busy || !promptDraft.trim()}
+            >
+              {language === "ko" ? "계획 생성" : "Generate Plan"}
+            </button>
+            <button
+              className="toolbar-button"
+              onClick={onRunPlan}
+              type="button"
+              disabled={busy}
+            >
+              {language === "ko" ? "실행" : "Run"}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }, (previousProps, nextProps) => (
@@ -759,6 +853,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
 export const RightSidebarPane = memo(function RightSidebarPane({
   activeTab = "chat",
   collapsed = false,
+  chatCenterMode = false,
   onChangeTab,
   detail,
   planDraft,
@@ -784,6 +879,10 @@ export const RightSidebarPane = memo(function RightSidebarPane({
   onDeleteCommonRequirement,
   onUpdateSpineCheckpoint,
   onDeleteSpineCheckpoint,
+  promptValue = "",
+  onPromptChange,
+  onGeneratePlan,
+  onRunPlan,
 }) {
   const { language } = useI18n();
   const processOutput = detail?.subprocess_output || detail?.agent_output || detail?.process_log || "";
@@ -840,6 +939,33 @@ export const RightSidebarPane = memo(function RightSidebarPane({
       dot: false,
     },
   ];
+
+  if (chatCenterMode) {
+    return (
+      <div className="chat-center-pane">
+        <ProjectChatPane
+          chat={chat}
+          detail={detail}
+          modelCatalog={modelCatalog}
+          modelPresets={modelPresets}
+          chatSettings={chatSettings}
+          selectedChatSessionId={selectedChatSessionId}
+          chatDraftSession={chatDraftSession}
+          onSelectChatSession={onSelectChatSession}
+          onStartNewChatSession={onStartNewChatSession}
+          onSendChatMessage={onSendChatMessage}
+          onChangeChatModelSelection={onChangeChatModelSelection}
+          busy={busy}
+          language={language}
+          centerMode
+          promptValue={promptValue}
+          onPromptChange={onPromptChange}
+          onGeneratePlan={onGeneratePlan}
+          onRunPlan={onRunPlan}
+        />
+      </div>
+    );
+  }
 
   return (
     <aside className={`details-pane rsb ${collapsed ? "rsb--collapsed" : ""}`.trim()}>

@@ -4,17 +4,18 @@ import { IdeToolbar } from "./components/layout/IdeToolbar";
 import { RunProgressPanel } from "./components/layout/RunProgressPanel";
 import { Splitter } from "./components/layout/Splitter";
 import { StatusBar } from "./components/layout/StatusBar";
-import { nextRightSidebarState, nextSidebarTab } from "./controllerHelpers";
+import { nextSidebarTab } from "./controllerHelpers";
 import { useDesktopController } from "./hooks/useDesktopController";
 import { useI18n } from "./i18n";
 import { toggleStepSelection } from "./utils";
 
+/* ── Layout mode constants ── */
+const WORKSPACE_MIN = 320;
+const WORKSPACE_MAX = 900;
+
 /* ── Clamp helpers ── */
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
-const RIGHT_MIN = 280;
-const RIGHT_MAX = 600;
-const RIGHT_RAIL_WIDTH = 36;
 const BOTTOM_MIN = 120;
 const BOTTOM_MAX = 600;
 
@@ -69,7 +70,6 @@ export default function App() {
     setCenterTab: controller.setCenterTab,
     setSidebarTab: controller.setSidebarTab,
     setBottomCollapsed: controller.setBottomCollapsed,
-    setRightCollapsed: controller.setRightCollapsed,
     generatePlan: controller.generatePlan,
     runPlan: controller.runPlan,
     forceRefresh: controller.forceRefresh,
@@ -80,7 +80,6 @@ export default function App() {
     setCenterTab: controller.setCenterTab,
     setSidebarTab: controller.setSidebarTab,
     toggleBottom: () => controller.setBottomCollapsed((v) => !v),
-    toggleRight: () => controller.setRightCollapsed((v) => !v),
   });
 
   /* Keep ref fresh */
@@ -89,16 +88,14 @@ export default function App() {
       setCenterTab: controller.setCenterTab,
       setSidebarTab: controller.setSidebarTab,
       toggleBottom: () => controller.setBottomCollapsed((v) => !v),
-      toggleRight: () => controller.setRightCollapsed((v) => !v),
     };
-  }, [controller.setCenterTab, controller.setSidebarTab, controller.setBottomCollapsed, controller.setRightCollapsed]);
+  }, [controller.setCenterTab, controller.setSidebarTab, controller.setBottomCollapsed]);
 
   useEffect(() => {
     controllerCommandRef.current = {
       setCenterTab: controller.setCenterTab,
       setSidebarTab: controller.setSidebarTab,
       setBottomCollapsed: controller.setBottomCollapsed,
-      setRightCollapsed: controller.setRightCollapsed,
       generatePlan: controller.generatePlan,
       runPlan: controller.runPlan,
       forceRefresh: controller.forceRefresh,
@@ -110,7 +107,6 @@ export default function App() {
     controller.runPlan,
     controller.setBottomCollapsed,
     controller.setCenterTab,
-    controller.setRightCollapsed,
     controller.setSidebarTab,
     controller.startNewProject,
   ]);
@@ -138,7 +134,7 @@ export default function App() {
   /* Keyboard shortcuts */
   useEffect(() => {
     function handleKeyDown(event) {
-      const { setCenterTab, setSidebarTab, toggleBottom, toggleRight } = keybindingActionsRef.current;
+      const { setCenterTab, setSidebarTab, toggleBottom } = keybindingActionsRef.current;
 
       /* Ctrl+1..6 → center tabs */
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key >= "1" && event.key <= "6") {
@@ -160,13 +156,6 @@ export default function App() {
       /* Alt+B → toggle bottom panel */
       if (event.altKey && (event.key === "b" || event.key === "B")) {
         toggleBottom();
-        event.preventDefault();
-        return;
-      }
-
-      /* Alt+R → toggle right panel */
-      if (event.altKey && (event.key === "r" || event.key === "R")) {
-        toggleRight();
         event.preventDefault();
         return;
       }
@@ -199,8 +188,9 @@ export default function App() {
      The Splitter reports cumulative delta from drag start, so we compute
      newValue = snapshot + delta on each move event. */
   const sidebarSnap = useRef(controller.sidebarWidth);
-  const rightSnap = useRef(controller.rightWidth);
   const bottomSnap = useRef(controller.bottomHeight);
+  const [workspaceWidth, setWorkspaceWidth] = useState(480);
+  const workspaceSnap = useRef(480);
 
   /* Snapshot the current value before each drag by keeping refs in sync
      ONLY when no drag is active (dragging flag is managed per-splitter). */
@@ -209,23 +199,30 @@ export default function App() {
   const makeSplitterHandlers = useCallback((name, snap, setter, min, max, sign) => ({
     onResize: (delta) => {
       if (draggingRef.current !== name) {
-        snap.current = name === "sidebar" ? controller.sidebarWidth
-          : name === "right" ? controller.rightWidth
-          : controller.bottomHeight;
+        snap.current = name === "sidebar" ? controller.sidebarWidth : controller.bottomHeight;
         draggingRef.current = name;
       }
       setter(clamp(snap.current + delta * sign, min, max));
     },
     onDragEnd: () => { draggingRef.current = null; },
-  }), [controller.sidebarWidth, controller.rightWidth, controller.bottomHeight]);
+  }), [controller.sidebarWidth, controller.bottomHeight]);
 
   const sidebarSplitter = useMemo(
     () => makeSplitterHandlers("sidebar", sidebarSnap, controller.setSidebarWidth, SIDEBAR_MIN, SIDEBAR_MAX, 1),
     [makeSplitterHandlers, controller.setSidebarWidth],
   );
-  const rightSplitter = useMemo(
-    () => makeSplitterHandlers("right", rightSnap, controller.setRightWidth, RIGHT_MIN, RIGHT_MAX, -1),
-    [makeSplitterHandlers, controller.setRightWidth],
+  const workspaceSplitter = useMemo(
+    () => ({
+      onResize: (delta) => {
+        if (draggingRef.current !== "workspace") {
+          workspaceSnap.current = workspaceWidth;
+          draggingRef.current = "workspace";
+        }
+        setWorkspaceWidth(clamp(workspaceSnap.current - delta, WORKSPACE_MIN, WORKSPACE_MAX));
+      },
+      onDragEnd: () => { draggingRef.current = null; },
+    }),
+    [workspaceWidth],
   );
   const bottomSplitter = useMemo(
     () => makeSplitterHandlers("bottom", bottomSnap, controller.setBottomHeight, BOTTOM_MIN, BOTTOM_MAX, -1),
@@ -236,24 +233,12 @@ export default function App() {
   const deferredDetail = useDeferredValue(detail);
   const deferredPlanDraft = useDeferredValue(controller.planDraft);
   const sidebarOpen = Boolean(controller.sidebarTab);
-  const rightOpen = !controller.rightCollapsed;
   const sidebarStyle = sidebarOpen ? { width: controller.sidebarWidth, flex: `0 0 ${controller.sidebarWidth}px` } : undefined;
-  const rightStyle = {
-    width: rightOpen ? controller.rightWidth : RIGHT_RAIL_WIDTH,
-    flex: `0 0 ${rightOpen ? controller.rightWidth : RIGHT_RAIL_WIDTH}px`,
-  };
   const compact = Boolean(controller.programSettings?.compact_mode);
   const handleRightTabChange = useCallback((nextTab) => {
     const requestedTab = String(nextTab || "").trim();
-    if (!requestedTab) {
-      return;
-    }
-    setRightTab((currentTab) => {
-      const nextState = nextRightSidebarState(currentTab, requestedTab, controller.rightCollapsed);
-      controller.setRightCollapsed(nextState.collapsed);
-      return nextState.tab;
-    });
-  }, [controller.rightCollapsed, controller.setRightCollapsed]);
+    if (requestedTab) setRightTab(requestedTab);
+  }, []);
   const handleSelectStep = useCallback(
     (stepId) => {
       controller.setSelectedStepId((current) => toggleStepSelection(current, stepId));
@@ -280,7 +265,6 @@ export default function App() {
     { id: "sidebar-plans", label: t("sidebar.checkpoints"), shortcut: "Alt+2", category: "Sidebar", keywords: "checkpoints plans", onExecute: () => controllerCommandRef.current.setSidebarTab((current) => nextSidebarTab(current, "plans")) },
     { id: "sidebar-reservations", label: "Job Queue", shortcut: "Alt+3", category: "Sidebar", keywords: "reservations queue jobs", onExecute: () => controllerCommandRef.current.setSidebarTab((current) => nextSidebarTab(current, "reservations")) },
     { id: "toggle-bottom", label: "Toggle Bottom Panel", shortcut: "Alt+B", category: "Panel", keywords: "bottom tool panel logs json tokens", onExecute: () => controllerCommandRef.current.setBottomCollapsed((value) => !value) },
-    { id: "toggle-right", label: "Toggle Inspector", shortcut: "Alt+R", category: "Panel", keywords: "right inspector details", onExecute: () => controllerCommandRef.current.setRightCollapsed((value) => !value) },
     { id: "generate-plan", label: t("action.generatePlan"), category: "Action", keywords: "generate plan ai", onExecute: () => controllerCommandRef.current.generatePlan() },
     { id: "run-plan", label: t("action.runRemaining"), category: "Action", keywords: "run execute remaining", onExecute: () => controllerCommandRef.current.runPlan() },
     { id: "refresh", label: t("action.refresh"), category: "Action", keywords: "refresh reload", onExecute: () => controllerCommandRef.current.forceRefresh() },
@@ -333,7 +317,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {/* ── Main body: sidebar | center-column | right inspector ── */}
+      {/* ── Main body: sidebar | chat-center | workspace-right ── */}
       <div className="ide-body">
         {/* Left sidebar */}
         <div
@@ -380,97 +364,13 @@ export default function App() {
           <Splitter axis="vertical" onResize={sidebarSplitter.onResize} onDragEnd={sidebarSplitter.onDragEnd} title="Resize sidebar" />
         ) : null}
 
-        {/* Center column: workspace + bottom tool panel */}
-        <div className="ide-center-column">
-          <div className="ide-main">
-            <CenterWorkspace
-              activeTab={controller.centerTab}
-              onChangeTab={controller.setCenterTab}
-              detail={detail}
-              workspaceShareDetail={controller.workspaceShareDetail}
-              form={controller.projectForm}
-              programSettings={controller.programSettings}
-              planDraft={controller.planDraft}
-              historyDetail={controller.historyDetail}
-              selectedHistoryId={controller.selectedHistoryId}
-              shareSettings={controller.shareSettings}
-              autoRunAfterPlan={controller.autoRunAfterPlan}
-              selectedStepId={controller.selectedStepId}
-              modelPresets={controller.modelPresets}
-              modelCatalog={controller.modelCatalog}
-              busy={controller.busy}
-              canRequestStop={controller.canRequestStop}
-              canCancelReservation={controller.canCancelReservation}
-              shareBusy={controller.shareBusy}
-              queuedJobs={controller.queuedJobs}
-              onChangeForm={controller.setProjectForm}
-              onChangeProgramSettings={controller.setProgramSettings}
-              onSaveProject={controller.saveProject}
-              onSaveProgramSettings={controller.saveProgramSettings}
-              programSettingsDirty={controller.programSettingsDirty}
-              onChooseDirectory={controller.chooseDirectory}
-              onArchiveProject={controller.archiveProject}
-              onDeleteProject={controller.deleteProject}
-              onDeleteHistoryEntry={controller.deleteHistoryEntry}
-              onGenerateShareLink={controller.generateShareLink}
-              onCopyShareLink={controller.copyShareLink}
-              onRevokeShareLink={controller.revokeShareLink}
-              onChangeShareSettings={controller.setShareSettings}
-              onChangeAutoRunAfterPlan={controller.setAutoRunAfterPlan}
-              onPromptChange={(value) =>
-                controller.syncPlan({
-                  ...(controller.planDraft || {}),
-                  project_prompt: value,
-                })
-              }
-              onGeneratePlan={controller.generatePlan}
-              onSavePlan={controller.savePlan}
-              onResetPlan={controller.resetPlan}
-              onRunPlan={controller.runPlan}
-              onRunManualDebugger={controller.runManualDebugger}
-              onRunManualMerger={controller.runManualMerger}
-              onRequestStop={controller.requestStop}
-              onCancelQueuedJob={controller.cancelQueuedReservation}
-              onSelectStep={handleSelectStep}
-              onUpdateStepField={controller.updateSelectedStep}
-              onSaveStepLocal={controller.saveStepLocal}
-              onAddStep={controller.addStep}
-              onDeleteStep={controller.deleteStep}
-              onMoveStep={controller.moveStep}
-              activeJob={controller.activeJob}
-            />
-          </div>
-
-          {/* Bottom splitter + tool panel */}
-          {!controller.bottomCollapsed ? (
-            <>
-              <Splitter axis="horizontal" onResize={bottomSplitter.onResize} onDragEnd={bottomSplitter.onDragEnd} title="Resize bottom panel" />
-              <div className="ide-pane ide-pane--bottom" style={{ height: controller.bottomHeight, flex: `0 0 ${controller.bottomHeight}px` }}>
-                <Suspense fallback={<PanelSuspenseFallback className="ide-pane ide-pane--bottom" />}>
-                  <LazyBottomToolPanel
-                    activeTab={controller.bottomTab}
-                    onChangeTab={controller.setBottomTab}
-                    data={deferredDetail}
-                    onHide={() => controller.setBottomCollapsed(true)}
-                  />
-                </Suspense>
-              </div>
-            </>
-          ) : null}
-        </div>
-
-        {/* Right splitter + sidebar */}
-        {rightOpen ? (
-          <Splitter axis="vertical" onResize={rightSplitter.onResize} onDragEnd={rightSplitter.onDragEnd} title="Resize right sidebar" />
-        ) : null}
-        <div
-          className={`ide-pane ide-pane--details ${rightOpen ? "" : "ide-pane--details-collapsed"}`.trim()}
-          style={rightStyle}
-        >
-          <Suspense fallback={<PanelSuspenseFallback className="ide-pane ide-pane--details" />}>
+        {/* ── Center: Full-screen AI Chat ── */}
+        <div className="ide-center-column ide-chat-center">
+          <Suspense fallback={<PanelSuspenseFallback className="ide-chat-center" />}>
             <LazyRightSidebarPane
               activeTab={rightTab}
-              collapsed={!rightOpen}
+              collapsed={false}
+              chatCenterMode
               onChangeTab={handleRightTabChange}
               detail={deferredDetail}
               planDraft={deferredPlanDraft}
@@ -493,8 +393,105 @@ export default function App() {
               onDeleteCommonRequirement={controller.deleteCommonRequirement}
               onUpdateSpineCheckpoint={controller.updateSpineCheckpoint}
               onDeleteSpineCheckpoint={controller.deleteSpineCheckpoint}
+              promptValue={controller.planDraft?.project_prompt || ""}
+              onPromptChange={(value) =>
+                controller.syncPlan({
+                  ...(controller.planDraft || {}),
+                  project_prompt: value,
+                })
+              }
+              onGeneratePlan={controller.generatePlan}
+              onRunPlan={controller.runPlan}
             />
           </Suspense>
+        </div>
+
+        {/* Splitter between chat and workspace panel */}
+        <Splitter axis="vertical" onResize={workspaceSplitter.onResize} onDragEnd={workspaceSplitter.onDragEnd} title="Resize workspace panel" />
+
+        {/* ── Right: CenterWorkspace (run/config/dashboard/history) ── */}
+        <div
+          className="ide-pane ide-pane--workspace-right"
+          style={{ width: workspaceWidth, flex: `0 0 ${workspaceWidth}px` }}
+        >
+          <div className="ide-center-column" style={{ height: "100%" }}>
+            <div className="ide-main">
+              <CenterWorkspace
+                activeTab={controller.centerTab}
+                onChangeTab={controller.setCenterTab}
+                detail={detail}
+                workspaceShareDetail={controller.workspaceShareDetail}
+                form={controller.projectForm}
+                programSettings={controller.programSettings}
+                planDraft={controller.planDraft}
+                historyDetail={controller.historyDetail}
+                selectedHistoryId={controller.selectedHistoryId}
+                shareSettings={controller.shareSettings}
+                autoRunAfterPlan={controller.autoRunAfterPlan}
+                selectedStepId={controller.selectedStepId}
+                modelPresets={controller.modelPresets}
+                modelCatalog={controller.modelCatalog}
+                busy={controller.busy}
+                canRequestStop={controller.canRequestStop}
+                canCancelReservation={controller.canCancelReservation}
+                shareBusy={controller.shareBusy}
+                queuedJobs={controller.queuedJobs}
+                onChangeForm={controller.setProjectForm}
+                onChangeProgramSettings={controller.setProgramSettings}
+                onSaveProject={controller.saveProject}
+                onSaveProgramSettings={controller.saveProgramSettings}
+                programSettingsDirty={controller.programSettingsDirty}
+                onChooseDirectory={controller.chooseDirectory}
+                onArchiveProject={controller.archiveProject}
+                onDeleteProject={controller.deleteProject}
+                onDeleteHistoryEntry={controller.deleteHistoryEntry}
+                onGenerateShareLink={controller.generateShareLink}
+                onCopyShareLink={controller.copyShareLink}
+                onRevokeShareLink={controller.revokeShareLink}
+                onChangeShareSettings={controller.setShareSettings}
+                onChangeAutoRunAfterPlan={controller.setAutoRunAfterPlan}
+                onPromptChange={(value) =>
+                  controller.syncPlan({
+                    ...(controller.planDraft || {}),
+                    project_prompt: value,
+                  })
+                }
+                onGeneratePlan={controller.generatePlan}
+                onSavePlan={controller.savePlan}
+                onResetPlan={controller.resetPlan}
+                onRunPlan={controller.runPlan}
+                onRunManualDebugger={controller.runManualDebugger}
+                onRunManualMerger={controller.runManualMerger}
+                onRequestStop={controller.requestStop}
+                onCancelQueuedJob={controller.cancelQueuedReservation}
+                onSelectStep={handleSelectStep}
+                onUpdateStepField={controller.updateSelectedStep}
+                onSaveStepLocal={controller.saveStepLocal}
+                onAddStep={controller.addStep}
+                onDeleteStep={controller.deleteStep}
+                onMoveStep={controller.moveStep}
+                activeJob={controller.activeJob}
+                hidePromptStrip
+              />
+            </div>
+
+            {/* Bottom splitter + tool panel */}
+            {!controller.bottomCollapsed ? (
+              <>
+                <Splitter axis="horizontal" onResize={bottomSplitter.onResize} onDragEnd={bottomSplitter.onDragEnd} title="Resize bottom panel" />
+                <div className="ide-pane ide-pane--bottom" style={{ height: controller.bottomHeight, flex: `0 0 ${controller.bottomHeight}px` }}>
+                  <Suspense fallback={<PanelSuspenseFallback className="ide-pane ide-pane--bottom" />}>
+                    <LazyBottomToolPanel
+                      activeTab={controller.bottomTab}
+                      onChangeTab={controller.setBottomTab}
+                      data={deferredDetail}
+                      onHide={() => controller.setBottomCollapsed(true)}
+                    />
+                  </Suspense>
+                </div>
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
 
