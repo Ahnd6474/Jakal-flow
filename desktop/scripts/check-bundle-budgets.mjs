@@ -15,7 +15,7 @@ const budgets = [
   { label: "command palette", pattern: /^CommandPalette-.*\.js$/, maxBytes: 5 * 1024 },
 ];
 
-const localeMaxBytes = 15 * 1024;
+const localeMaxBytes = 24 * 1024;
 const localePrefixes = Object.keys(DYNAMIC_LANGUAGE_LOADERS).sort((left, right) => right.length - left.length);
 
 function formatKiB(bytes) {

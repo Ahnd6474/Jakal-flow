@@ -167,16 +167,26 @@ function sortTreeChildren(children = []) {
 function normalizeTree(node) {
   const label = String(node?.label || "");
   const path = String(node?.path || "");
+  const children = sortTreeChildren(node.children || []).map((child) => normalizeTree(child));
+  const searchText = `${label}\n${path}`.toLowerCase();
+  const subtreeSearchText = [
+    searchText,
+    ...children.map((child) => String(child?.subtreeSearchText || "")),
+  ].join("\n");
   return {
     ...node,
-    searchText: `${label}\n${path}`.toLowerCase(),
-    children: sortTreeChildren(node.children || []).map((child) => normalizeTree(child)),
+    searchText,
+    subtreeSearchText,
+    children,
   };
 }
 
 function filterPreparedTree(node, normalizedQuery) {
   if (!normalizedQuery) {
     return node;
+  }
+  if (!String(node?.subtreeSearchText || "").includes(normalizedQuery)) {
+    return null;
   }
   const children = (node.children || [])
     .map((child) => filterPreparedTree(child, normalizedQuery))
