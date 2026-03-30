@@ -887,6 +887,17 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.model, "gpt-5.4")
         self.assertFalse(runtime.use_fast_mode)
 
+    def test_runtime_from_payload_accepts_compact_planning_alias(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model": "gpt-5.4",
+                "use_compact_planning": "true",
+            }
+        )
+
+        self.assertEqual(runtime.model, "gpt-5.4")
+        self.assertTrue(runtime.use_fast_mode)
+
     def test_runtime_from_payload_coerces_word_report_flag(self) -> None:
         runtime = runtime_from_payload(
             {

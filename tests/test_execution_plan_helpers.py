@@ -5400,7 +5400,7 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual(mocked_run_pass.call_count, 1)
         self.assertEqual(mocked_run_pass.call_args.kwargs["pass_type"], "plan-agent-b-packing")
-        self.assertIn("Fast planning mode", outline_text)
+        self.assertIn("Compact planning mode", outline_text)
         self.assertIn('"block_id": "B1"', outline_text)
         self.assertIn("Planner Agent A decomposition artifact:", prompt)
         self.assertIn('"block_id": "B1"', prompt)

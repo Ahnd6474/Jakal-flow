@@ -233,8 +233,12 @@ class ProjectPaths:
     task_summaries_file: Path
     pass_log_file: Path
     block_log_file: Path
+    planning_metrics_file: Path
     checkpoint_state_file: Path
     execution_plan_file: Path
+    planning_inputs_cache_file: Path
+    planning_prompt_cache_file: Path
+    block_plan_cache_file: Path
     lineage_state_file: Path
     spine_file: Path
     common_requirements_file: Path

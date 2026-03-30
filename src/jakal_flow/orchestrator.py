@@ -340,7 +340,7 @@ class Orchestrator(OrchestratorLineageMixin, OrchestratorCloseoutMixin, Orchestr
             )
             report_progress(
                 "planner-agent-finished",
-                "Planner Agent A was skipped in fast mode; a compact heuristic outline was saved instead.",
+                "Planner Agent A was skipped in compact planning mode; a compact heuristic outline was saved instead.",
                 {
                     "stage_key": "planner_a",
                     "stage_index": 2,

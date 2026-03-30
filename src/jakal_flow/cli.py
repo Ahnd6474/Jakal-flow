@@ -69,6 +69,7 @@ def _add_legacy_runtime_arguments(target: argparse.ArgumentParser) -> None:
     target.add_argument("--reasoning-output-cost-per-million-usd", type=float, default=argparse.SUPPRESS, help=hidden)
     target.add_argument("--per-pass-cost-usd", type=float, default=argparse.SUPPRESS, help=hidden)
     target.add_argument("--fast", action="store_true", default=argparse.SUPPRESS, help=hidden)
+    target.add_argument("--compact-planning", action="store_true", default=argparse.SUPPRESS, help=hidden)
     target.add_argument("--word-report", action="store_true", default=argparse.SUPPRESS, help=hidden)
     target.add_argument("--effort", default=argparse.SUPPRESS, help=hidden)
     target.add_argument("--planning-effort", default=argparse.SUPPRESS, help=hidden)
@@ -159,6 +160,7 @@ def _legacy_runtime_overrides(args: argparse.Namespace) -> dict[str, object]:
         "reasoning_output_cost_per_million_usd": "reasoning_output_cost_per_million_usd",
         "per_pass_cost_usd": "per_pass_cost_usd",
         "fast": "use_fast_mode",
+        "compact_planning": "use_fast_mode",
         "word_report": "generate_word_report",
         "effort": "effort",
         "planning_effort": "planning_effort",

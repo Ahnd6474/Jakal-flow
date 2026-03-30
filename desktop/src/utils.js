@@ -2050,6 +2050,7 @@ export function planStepsWithCloseout(plan, labels = {}) {
 export function runtimeSummary(runtime, modelPresets = [], language = "en", modelCatalog = []) {
   const provider = normalizedModelProvider(runtime);
   const providerPrefix = providerDisplayName(provider, normalizedLocalModelProvider(runtime));
+  const compactPlanningSuffix = runtime?.use_fast_mode ? ` | ${translate(language, "runtime.compactPlanning")}` : "";
   const workflowSuffix =
     String(runtime?.workflow_mode || "standard").trim().toLowerCase() === "ml"
       ? ` | ${translate(language, "option.workflowML")}`
@@ -2061,7 +2062,7 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
   const preset = modelPresets.find((item) => item.preset_id === runtime?.model_preset);
   if (preset && providerSupportsAutoModel(provider)) {
     const summary = `${providerPrefix}${workflowSuffix} | ${preset.summary}${executionSuffix}`;
-    return runtime?.use_fast_mode ? `${summary} | /fast` : summary;
+    return `${summary}${compactPlanningSuffix}`;
   }
   if (runtime?.model) {
     const label = modelDisplayName(modelCatalog, runtime.model);
@@ -2075,10 +2076,10 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
         effort: effortLabel,
       });
       const nextSummary = `${summary}${executionSuffix}`;
-      return runtime?.use_fast_mode ? `${nextSummary} | /fast` : nextSummary;
+      return `${nextSummary}${compactPlanningSuffix}`;
     }
     const summary = `${providerPrefix}${workflowSuffix} | ${label} | reasoning ${effortLabel}${executionSuffix}`;
-    return runtime?.use_fast_mode ? `${summary} | /fast` : summary;
+    return `${summary}${compactPlanningSuffix}`;
   }
   return translate(language, "runtime.noModelSelected");
 }

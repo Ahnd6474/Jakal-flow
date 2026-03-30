@@ -132,6 +132,8 @@ def normalize_runtime_payload(
     force_execution_mode: str | None = None,
 ) -> dict[str, Any]:
     source = dict(payload or {})
+    if "use_fast_mode" not in source and "use_compact_planning" in source:
+        source["use_fast_mode"] = source.get("use_compact_planning")
     default_values = _default_runtime_payload(defaults)
     merged = {**default_values, **source}
     merged["max_blocks"] = coerce_positive_int(

@@ -646,7 +646,11 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                   }))
                 }
                 label={t("option.useFastMode")}
-                hint={language === "ko" ? "더 빠른 응답을 위해 스트리밍 속도 증가" : "Increase streaming speed for faster output"}
+                hint={
+                  language === "ko"
+                    ? "계획 생성에서 Planner Agent A를 생략하고 압축 계획 경로를 사용합니다."
+                    : "Skip Planner Agent A during plan generation and use the compact planning path."
+                }
                 disabled={busy}
               />
             </div>

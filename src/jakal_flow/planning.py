@@ -359,9 +359,9 @@ def build_fast_planner_outline(
     candidate_owned_paths = _candidate_owned_paths_from_source_summary(source_summary)
     prompt_summary = compact_text(user_prompt.strip(), 180) or "Implement the requested repository change safely."
     payload = {
-        "title": compact_text(prompt_summary, 80) or "Fast planning outline",
+        "title": compact_text(prompt_summary, 80) or "Compact planning outline",
         "strategy_summary": (
-            "Fast planning mode: skip the separate decomposition pass, keep the DAG narrow, and prefer direct edits "
+            "Compact planning mode: skip the separate decomposition pass, keep the DAG narrow, and prefer direct edits "
             "to existing implementation surfaces before introducing new scaffolding."
         ),
         "shared_contracts": [],
