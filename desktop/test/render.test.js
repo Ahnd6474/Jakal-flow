@@ -3203,7 +3203,7 @@ test("AppSettingsView keeps share actions enabled while a run is active", async 
   assert.match(html, /Revoke Link/);
 });
 
-test("ConfigEditorView no longer renders the advanced settings section", async () => {
+test("ConfigEditorView shows project-level model controls without the legacy advanced settings section", async () => {
   const html = await renderBundledComponent(
     "config-editor-view-render",
     "./src/components/views/ConfigEditorView.jsx",
@@ -3217,9 +3217,9 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
         origin_url: "",
         runtime: {
           model_provider: "openai",
-          model: "auto",
-          model_preset: "auto",
-          model_slug_input: "auto",
+          model: "gpt-5.4",
+          model_preset: "",
+          model_slug_input: "gpt-5.4",
           effort: "medium",
           workflow_mode: "standard",
           execution_mode: "serial",
@@ -3232,9 +3232,10 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
       modelPresets: [],
       modelCatalog: [
         {
-          model: "auto",
-          display_name: "Auto",
+          model: "gpt-5.4",
+          display_name: "GPT-5.4",
           hidden: false,
+          provider: "openai",
           default_reasoning_effort: "medium",
           supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
         },
@@ -3249,7 +3250,10 @@ test("ConfigEditorView no longer renders the advanced settings section", async (
   );
 
   assert.doesNotMatch(html, /Advanced Settings/);
-  assert.doesNotMatch(html, /Custom Model Slug/);
+  assert.match(html, /Model Settings/);
+  assert.match(html, /Custom Model Slug/);
+  assert.match(html, /GPT-5\.4/);
+  assert.match(html, /GPT Reasoning/);
   assert.match(html, />Save Configuration<\/button>/);
   assert.match(html, /Planning Reasoning/);
   assert.match(html, /Memory \/ Worker \(GiB\)/);
@@ -3418,7 +3422,7 @@ test("DetailsPane shows report documents and checkpoint deadlines in the inspect
   assert.match(html, /2026-04-05 18:00/);
 });
 
-test("ConfigEditorView keeps execution-model controls out of project settings even for provider-specific runtimes", async () => {
+test("ConfigEditorView shows provider-specific project model controls after setup", async () => {
   const html = await renderBundledComponent(
     "config-editor-no-execution-model-controls-render",
     "./src/components/views/ConfigEditorView.jsx",
@@ -3477,12 +3481,10 @@ test("ConfigEditorView keeps execution-model controls out of project settings ev
   );
 
   assert.match(html, /Planning Reasoning/);
-  assert.doesNotMatch(html, /Execution Model/);
-  assert.doesNotMatch(html, /Codex Model/);
-  assert.doesNotMatch(html, /GPT Model/);
-  assert.doesNotMatch(html, /Claude Model/);
-  assert.doesNotMatch(html, /GPT-5\.4 Mini/);
-  assert.doesNotMatch(html, /Claude 3\.7 Sonnet/);
+  assert.match(html, /Model Settings/);
+  assert.match(html, /GPT-5\.4 Mini/);
+  assert.match(html, /Custom Model Slug/);
+  assert.match(html, /GPT Reasoning/);
 });
 
 test("AppSettingsView keeps direct model slug editing for OpenRouter only", async () => {

@@ -1973,6 +1973,12 @@ export function selectedConfigReasoning(modelCatalog = [], runtime = {}) {
   if (String(runtime?.effort_selection_mode || "").trim().toLowerCase() === AUTO_REASONING_OPTION && options.includes(AUTO_REASONING_OPTION)) {
     return AUTO_REASONING_OPTION;
   }
+  if (model === "auto") {
+    const preset = String(runtime?.model_preset || "").trim().toLowerCase();
+    if (options.includes(preset)) {
+      return preset;
+    }
+  }
   const preferred = String(runtime?.effort || "").trim().toLowerCase() || defaultReasoningOption(modelCatalog, model, "medium");
   if (options.includes(preferred)) {
     return preferred;
