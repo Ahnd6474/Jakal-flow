@@ -22,6 +22,7 @@ from jakal_flow.errors import RuntimeConfigError
 from jakal_flow.execution_control import ImmediateStopRequested
 import jakal_flow.chat_sessions as chat_sessions
 import jakal_flow.orchestrator as orchestrator_module
+import jakal_flow.share as share_module
 import jakal_flow.ui_bridge as ui_bridge
 import jakal_flow.ui_bridge_payloads as ui_bridge_payloads
 import jakal_flow.workspace as workspace_module
@@ -619,6 +620,15 @@ class UIBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.effort, "high")
         self.assertEqual(runtime.planning_effort, "high")
 
+    def test_runtime_from_payload_defaults_fast_mode_for_desktop(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model": "gpt-5.4",
+            }
+        )
+
+        self.assertTrue(runtime.use_fast_mode)
+
     def test_cli_runtime_from_args_loads_toml_config_and_set_overrides(self) -> None:
         with TemporaryTestDir() as temp_dir:
             config_path = temp_dir / "runtime.toml"
@@ -865,6 +875,17 @@ class UIBridgeTests(unittest.TestCase):
 
         self.assertEqual(runtime.model, "gpt-5.4")
         self.assertTrue(runtime.use_fast_mode)
+
+    def test_runtime_from_payload_preserves_explicit_fast_mode_disable(self) -> None:
+        runtime = runtime_from_payload(
+            {
+                "model": "gpt-5.4",
+                "use_fast_mode": "false",
+            }
+        )
+
+        self.assertEqual(runtime.model, "gpt-5.4")
+        self.assertFalse(runtime.use_fast_mode)
 
     def test_runtime_from_payload_coerces_word_report_flag(self) -> None:
         runtime = runtime_from_payload(
@@ -4891,6 +4912,602 @@ class UIBridgeTests(unittest.TestCase):
 
             self.assertEqual(first["projects"][0]["display_name"], "Workspace Listing Invalidation Demo")
             self.assertEqual(second["projects"][0]["display_name"], "Workspace Listing Invalidation Updated")
+
+    def test_list_projects_reuses_persisted_workspace_listing_cache_after_memory_reset(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Workspace Listing File Cache Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            ui_bridge._orchestrator_cache.clear()
+            ui_bridge_payloads._WORKSPACE_LISTING_MEMORY_CACHE.clear()
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            cache_file = workspace_root / "WORKSPACE_LISTING_CACHE.json"
+            if cache_file.exists():
+                cache_file.unlink()
+
+            first = run_command("list-projects", workspace_root)
+
+            self.assertTrue(cache_file.exists())
+
+            ui_bridge._orchestrator_cache.clear()
+            ui_bridge_payloads._WORKSPACE_LISTING_MEMORY_CACHE.clear()
+
+            with mock.patch(
+                "jakal_flow.workspace.WorkspaceManager.list_projects",
+                side_effect=AssertionError("persisted workspace listing cache should bypass list_projects"),
+            ), mock.patch(
+                "jakal_flow.workspace.WorkspaceManager.list_history_projects",
+                side_effect=AssertionError("persisted workspace listing cache should bypass list_history_projects"),
+            ):
+                second = run_command("list-projects", workspace_root)
+
+            self.assertEqual(first["projects"][0]["repo_id"], detail["project"]["repo_id"])
+            self.assertEqual(second["projects"], first["projects"])
+            self.assertEqual(second["workspace"], first["workspace"])
+
+    def test_list_projects_cached_payload_isolated_from_result_mutation(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Workspace Listing Isolation Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            ui_bridge._orchestrator_cache.clear()
+            ui_bridge_payloads._WORKSPACE_LISTING_MEMORY_CACHE.clear()
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                run_command("save-project-setup", workspace_root, payload)
+
+            first = run_command("list-projects", workspace_root)
+            first["projects"][0]["display_name"] = "mutated"
+            first["workspace"]["project_count"] = 999
+
+            second = run_command("list-projects", workspace_root)
+
+            self.assertEqual(second["projects"][0]["display_name"], "Workspace Listing Isolation Demo")
+            self.assertNotEqual(second["workspace"]["project_count"], 999)
+
+    def test_load_project_cached_payload_isolated_from_result_mutation(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Detail Isolation Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+                first = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": False,
+                        "detail_level": "core",
+                    },
+                )
+
+            first["summary"] = "mutated"
+            first["project"]["display_name"] = "mutated"
+            first["snapshot"]["project"]["display_name"] = "mutated"
+
+            second = run_command(
+                "load-project",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                    "refresh_codex_status": False,
+                    "detail_level": "core",
+                },
+            )
+
+            self.assertEqual(second["project"]["display_name"], "Detail Isolation Demo")
+            self.assertEqual(second["snapshot"]["project"]["display_name"], "Detail Isolation Demo")
+            self.assertNotEqual(second["summary"], "mutated")
+
+    def test_load_project_reuses_cached_provider_statuses_during_refresh_window(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Provider Status Cache Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            ui_bridge_payloads._PROVIDER_STATUSES_FETCH_CACHE = None
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            provider_status_calls: list[bool] = []
+
+            def fake_provider_statuses_payload(*, fetch_snapshot=None):
+                provider_status_calls.append(callable(fetch_snapshot))
+                return {"openai": {"available": True, "usable": True}}
+
+            ui_bridge_payloads._PROVIDER_STATUSES_FETCH_CACHE = None
+            with mock.patch(
+                "jakal_flow.ui_bridge_payloads.provider_statuses_payload",
+                side_effect=fake_provider_statuses_payload,
+            ), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": True,
+                        "detail_level": "core",
+                    },
+                )
+                run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": True,
+                        "detail_level": "core",
+                    },
+                )
+
+            self.assertEqual(provider_status_calls, [True])
+
+    def test_load_project_full_reuses_recent_content_signature_without_rescanning(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            (repo_dir / "README.md").write_text("demo", encoding="utf-8")
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Full Detail Signature Cache Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            ui_bridge_payloads._DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE.clear()
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+                first = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "refresh_codex_status": False,
+                        "detail_level": "full",
+                    },
+                )
+
+                with mock.patch(
+                    "jakal_flow.ui_bridge_payloads._preview_tree_signature",
+                    side_effect=AssertionError("recent content signature cache should bypass preview tree rescans"),
+                ):
+                    second = run_command(
+                        "load-project",
+                        workspace_root,
+                        {
+                            "repo_id": detail["project"]["repo_id"],
+                            "refresh_codex_status": False,
+                            "detail_level": "full",
+                        },
+                    )
+
+            self.assertEqual(second["detail_signature"], first["detail_signature"])
+
+    def test_bridge_payload_size_estimator_handles_large_nested_payload_without_json_dumps(self) -> None:
+        large_payload = {
+            "detail_signature": "sig",
+            "history": [{"index": index, "message": "x" * 256} for index in range(200)],
+            "workspace_tree": [{"path": f"src/file-{index}.py", "kind": "file"} for index in range(200)],
+        }
+
+        with mock.patch("jakal_flow.ui_bridge.json.dumps", side_effect=AssertionError("json.dumps should not be used")):
+            size = ui_bridge._payload_size_bytes(large_payload)
+
+        self.assertGreater(size, 0)
+
+    def test_bridge_perf_log_aggregates_fast_cached_read_commands(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            workspace_root.mkdir(parents=True, exist_ok=True)
+            bridge_perf_file = workspace_root / "bridge_perf.jsonl"
+            if bridge_perf_file.exists():
+                bridge_perf_file.unlink()
+
+            ui_bridge._bridge_perf_aggregate_cache.clear()
+            result = {
+                "payload_cache_hit": True,
+                "content_signature": "content",
+                "detail_signature": "detail",
+                "project": {"repo_id": "repo-1"},
+            }
+            payload = {
+                "repo_id": "repo-1",
+                "detail_level": "core",
+                "refresh_codex_status": False,
+            }
+
+            for _ in range(10):
+                ui_bridge._bridge_perf_log(workspace_root, "load-project", payload, result, 4.0)
+
+            entries = read_jsonl(bridge_perf_file)
+
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["command"], "load-project")
+            self.assertEqual(entries[0]["sample_count"], 10)
+            self.assertEqual(entries[0]["payload_cache_hit"], True)
+
+    def test_load_project_chat_reuses_cached_payload_and_isolates_result_mutation(self) -> None:
+        with TemporaryTestDir() as temp_dir, mock.patch.dict(
+            os.environ,
+            {CHAT_HOME_ENV_VAR: str(temp_dir / "chat-home")},
+            clear=False,
+        ):
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Chat Cache Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            project = ui_bridge.orchestrator_for(workspace_root).workspace.load_project_by_id(detail["project"]["repo_id"])
+            session = chat_sessions.create_chat_session(project, title_hint="Release follow-up")
+            chat_sessions.save_chat_message(
+                project,
+                session.session_id,
+                role="user",
+                text="status update",
+                mode="conversation",
+            )
+            chat_sessions.save_chat_message(
+                project,
+                session.session_id,
+                role="assistant",
+                text="working on it",
+                mode="conversation",
+            )
+            chat_sessions.rebuild_chat_session_files(project, session.session_id)
+
+            chat_sessions._CHAT_REGISTRY_MEMORY_CACHE.clear()
+            chat_sessions._CHAT_ACTIVE_SESSION_MEMORY_CACHE.clear()
+            chat_sessions._CHAT_MESSAGES_MEMORY_CACHE.clear()
+            chat_sessions._CHAT_TEXT_MEMORY_CACHE.clear()
+            chat_sessions._CHAT_PAYLOAD_MEMORY_CACHE.clear()
+
+            first = run_command(
+                "load-project-chat",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                    "session_id": session.session_id,
+                },
+            )
+
+            first["chat"]["summary_text"] = "mutated"
+            first["chat"]["messages"][0]["text"] = "mutated"
+            first["chat"]["sessions"][0]["title"] = "mutated"
+
+            with mock.patch(
+                "jakal_flow.chat_sessions._read_jsonl_txt",
+                side_effect=AssertionError("chat registry cache should avoid reparsing jsonl text"),
+            ), mock.patch(
+                "jakal_flow.chat_sessions._read_jsonl_txt_tail",
+                side_effect=AssertionError("chat payload cache should avoid rereading message tails"),
+            ):
+                second = run_command(
+                    "load-project-chat",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                        "session_id": session.session_id,
+                    },
+                )
+
+            self.assertEqual(second["chat"]["messages"][0]["text"], "status update")
+            self.assertNotEqual(second["chat"]["summary_text"], "mutated")
+            self.assertNotEqual(second["chat"]["sessions"][0]["title"], "mutated")
+
+    def test_load_workspace_share_reuses_cached_payload_and_isolates_result_mutation(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            workspace_root.mkdir(parents=True, exist_ok=True)
+
+            share_module._SHARE_STATUS_MEMORY_CACHE.clear()
+            share_module._WORKSPACE_SHARE_PAYLOAD_MEMORY_CACHE.clear()
+            share_module.save_share_server_config(
+                workspace_root,
+                share_module.ShareServerConfig(public_base_url="https://share.example.com/base"),
+            )
+            (workspace_root / "share_server.json").write_text(
+                json.dumps(
+                    {
+                        "host": "0.0.0.0",
+                        "port": 43123,
+                        "pid": 4242,
+                        "started_at": "2026-03-30T00:00:00+00:00",
+                        "viewer_path": "/share/view",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            share_module.create_workspace_share_session(workspace_root, expires_in_minutes=60)
+
+            fake_tunnel = {
+                "running": False,
+                "provider": None,
+                "public_url": "",
+                "target_url": "",
+                "pid": None,
+                "started_at": None,
+                "available": True,
+            }
+
+            with mock.patch("jakal_flow.share.process_is_running", return_value=True), mock.patch(
+                "jakal_flow.public_tunnel.public_tunnel_status_payload",
+                return_value=fake_tunnel,
+            ):
+                first = run_command("load-workspace-share", workspace_root, {})
+
+            first["share"]["server"]["config"]["public_base_url"] = "mutated"
+            first["share"]["sessions"][0]["share_url"] = "mutated"
+
+            with mock.patch(
+                "jakal_flow.share.process_is_running",
+                side_effect=AssertionError("workspace share cache should avoid repeated process checks"),
+            ), mock.patch(
+                "jakal_flow.public_tunnel.public_tunnel_status_payload",
+                side_effect=AssertionError("workspace share cache should avoid repeated tunnel refreshes"),
+            ):
+                second = run_command("load-workspace-share", workspace_root, {})
+
+            self.assertEqual(second["share"]["server"]["config"]["public_base_url"], "https://share.example.com/base")
+            self.assertNotEqual(second["share"]["sessions"][0]["share_url"], "mutated")
+
+    def test_load_project_share_reuses_cached_payload_and_isolates_result_mutation(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Project Share Cache Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            share_module._SHARE_STATUS_MEMORY_CACHE.clear()
+            share_module._WORKSPACE_SHARE_PAYLOAD_MEMORY_CACHE.clear()
+            share_module.save_share_server_config(
+                workspace_root,
+                share_module.ShareServerConfig(public_base_url="https://share.example.com/project"),
+            )
+            (workspace_root / "share_server.json").write_text(
+                json.dumps(
+                    {
+                        "host": "0.0.0.0",
+                        "port": 43124,
+                        "pid": 4343,
+                        "started_at": "2026-03-30T00:00:00+00:00",
+                        "viewer_path": "/share/view",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            project = ui_bridge.orchestrator_for(workspace_root).workspace.load_project_by_id(detail["project"]["repo_id"])
+            share_module.create_workspace_share_session(workspace_root, context=project, expires_in_minutes=60)
+
+            fake_tunnel = {
+                "running": False,
+                "provider": None,
+                "public_url": "",
+                "target_url": "",
+                "pid": None,
+                "started_at": None,
+                "available": True,
+            }
+
+            with mock.patch("jakal_flow.share.process_is_running", return_value=True), mock.patch(
+                "jakal_flow.public_tunnel.public_tunnel_status_payload",
+                return_value=fake_tunnel,
+            ):
+                first = run_command(
+                    "load-project-share",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                    },
+                )
+
+            first["share"]["server"]["config"]["public_base_url"] = "mutated"
+
+            with mock.patch(
+                "jakal_flow.share.process_is_running",
+                side_effect=AssertionError("project share cache should avoid repeated process checks"),
+            ), mock.patch(
+                "jakal_flow.public_tunnel.public_tunnel_status_payload",
+                side_effect=AssertionError("project share cache should avoid repeated tunnel refreshes"),
+            ):
+                second = run_command(
+                    "load-project-share",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                    },
+                )
+
+            self.assertEqual(second["share"]["server"]["config"]["public_base_url"], "https://share.example.com/project")
+
+    def test_load_project_reports_reuses_cached_payload_and_isolates_result_mutation(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Reports Cache Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            project = ui_bridge.orchestrator_for(workspace_root).workspace.load_project_by_id(detail["project"]["repo_id"])
+            project.paths.closeout_report_file.write_text("# Closeout Report\n\nDone.\n", encoding="utf-8")
+            project.paths.attempt_history_file.write_text("attempt 1", encoding="utf-8")
+            ui_bridge_payloads._SECTION_PAYLOAD_MEMORY_CACHE.clear()
+
+            first = run_command(
+                "load-project-reports",
+                workspace_root,
+                {
+                    "repo_id": detail["project"]["repo_id"],
+                },
+            )
+
+            first["closeout_report_text"] = "mutated"
+            first["spine"]["current_version"] = "mutated"
+
+            with mock.patch(
+                "jakal_flow.ui_bridge_payloads.preview_text",
+                side_effect=AssertionError("report payload cache should avoid preview text rebuilds"),
+            ), mock.patch(
+                "jakal_flow.ui_bridge_payloads._contract_wave_report_payload",
+                side_effect=AssertionError("report payload cache should avoid contract wave rebuilds"),
+            ), mock.patch(
+                "jakal_flow.ui_bridge_payloads._latest_failure_details",
+                side_effect=AssertionError("report payload cache should avoid latest failure rebuilds"),
+            ):
+                second = run_command(
+                    "load-project-reports",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                    },
+                )
+
+            self.assertNotEqual(second["closeout_report_text"], "mutated")
+            self.assertNotEqual(second["spine"]["current_version"], "mutated")
 
     def test_workspace_manager_reuses_cached_project_context_when_files_are_unchanged(self) -> None:
         with TemporaryTestDir() as temp_dir:

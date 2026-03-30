@@ -1,3 +1,5 @@
+import { DYNAMIC_LANGUAGE_LOADERS } from "./generated_locale_loaders.js";
+
 export const DEFAULT_LANGUAGE = "en";
 export const SUPPORTED_LANGUAGES = [
   "ko",
@@ -1096,7 +1098,6 @@ const STATIC_LANGUAGE_PACKS = new Map(
   ]),
 );
 
-let externalLocaleModulesPromise = null;
 const loadedDynamicLanguagePacks = new Map();
 const pendingDynamicLanguagePacks = new Map();
 
@@ -1108,29 +1109,6 @@ function staticLanguagePack(language) {
 function currentLanguagePack(language) {
   const normalized = normalizeLanguage(language);
   return loadedDynamicLanguagePacks.get(normalized) || staticLanguagePack(normalized);
-}
-
-async function loadExternalLocaleModules() {
-  if (!externalLocaleModulesPromise) {
-    externalLocaleModulesPromise = Promise.all([
-      import("./generated_locale_data.js"),
-      import("./manual_locale_overrides.js"),
-    ]).then(([generatedModule, overridesModule]) => ({
-      generated: generatedModule.GENERATED_STRINGS || {},
-      overrides: overridesModule.MANUAL_LOCALE_OVERRIDES || {},
-    }));
-  }
-  return externalLocaleModulesPromise;
-}
-
-function mergeDynamicLanguagePack(language, externalModules) {
-  const normalized = normalizeLanguage(language);
-  return {
-    ...(STRINGS[normalized] || {}),
-    ...(externalModules.generated?.[normalized] || {}),
-    ...(externalModules.overrides?.[normalized] || {}),
-    ...(normalized === "ko" ? KO_HIGH_QUALITY_OVERRIDES : {}),
-  };
 }
 
 export function hasLanguageCatalog(language) {
@@ -1146,9 +1124,17 @@ export async function ensureLanguageCatalog(language) {
   if (pendingDynamicLanguagePacks.has(normalized)) {
     return pendingDynamicLanguagePacks.get(normalized);
   }
-  const pending = loadExternalLocaleModules()
-    .then((externalModules) => {
-      const merged = mergeDynamicLanguagePack(normalized, externalModules);
+  const loader = DYNAMIC_LANGUAGE_LOADERS[normalized];
+  if (!loader) {
+    return currentLanguagePack(normalized);
+  }
+  const pending = loader()
+    .then((module) => {
+      const merged = {
+        ...(STRINGS[normalized] || {}),
+        ...(module?.default || {}),
+        ...(normalized === "ko" ? KO_HIGH_QUALITY_OVERRIDES : {}),
+      };
       loadedDynamicLanguagePacks.set(normalized, merged);
       pendingDynamicLanguagePacks.delete(normalized);
       return merged;

@@ -822,6 +822,59 @@ test("RightSidebarPane renders assistant replies with safe markdown while keepin
   assert.doesNotMatch(html, /<strong>this<\/strong>/);
 });
 
+test("RightSidebarPane limits long chat transcripts and shows an earlier-messages affordance", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-chat-windowing-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+      },
+      planDraft: {
+        steps: [],
+      },
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: null,
+      busy: false,
+      chat: {
+        sessions: [
+          { session_id: "chat-1", title: "Long session", message_count: 130 },
+        ],
+        active_session_id: "chat-1",
+        messages: Array.from({ length: 130 }, (_, index) => ({
+          message_id: `msg-${index + 1}`,
+          role: index % 2 === 0 ? "assistant" : "user",
+          text: `Message ${index + 1}`,
+        })),
+        summary_file: "C:/demo/chat.summary.txt",
+      },
+      chatSettings: {},
+      selectedChatSessionId: "chat-1",
+      chatDraftSession: false,
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+      onChangeChatModelSelection: noop,
+    },
+  );
+
+  assert.match(html, /Show 10 earlier messages/);
+  assert.doesNotMatch(html, />Message 10</);
+  assert.match(html, />Message 11</);
+  assert.match(html, />Message 130</);
+});
+
 test("BottomToolPanel keeps JSON preview rendering lazy with an explicit full-toggle", async () => {
   const html = await renderBundledComponent(
     "bottom-tool-panel-json-preview-render",

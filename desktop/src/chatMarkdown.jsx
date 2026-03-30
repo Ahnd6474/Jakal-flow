@@ -1,4 +1,29 @@
-import React from "react";
+import React, { memo, useMemo } from "react";
+
+const MARKDOWN_BLOCK_CACHE_LIMIT = 200;
+const markdownBlockCache = new Map();
+
+function readCachedMarkdownBlocks(text = "") {
+  const key = String(text || "");
+  if (!markdownBlockCache.has(key)) {
+    return null;
+  }
+  const cached = markdownBlockCache.get(key);
+  markdownBlockCache.delete(key);
+  markdownBlockCache.set(key, cached);
+  return cached;
+}
+
+function writeCachedMarkdownBlocks(text = "", blocks = []) {
+  const key = String(text || "");
+  markdownBlockCache.set(key, blocks);
+  if (markdownBlockCache.size <= MARKDOWN_BLOCK_CACHE_LIMIT) {
+    return blocks;
+  }
+  const oldestKey = markdownBlockCache.keys().next().value;
+  markdownBlockCache.delete(oldestKey);
+  return blocks;
+}
 
 function normalizeMarkdownSource(text = "") {
   return String(text || "").replace(/\r\n?/g, "\n");
@@ -82,7 +107,7 @@ function parseInlineMarkdown(text = "", keyPrefix = "inline") {
   return nodes;
 }
 
-export function parseChatMarkdown(text = "") {
+function parseChatMarkdownSource(text = "") {
   const lines = normalizeMarkdownSource(text).split("\n");
   const blocks = [];
   let index = 0;
@@ -198,6 +223,14 @@ export function parseChatMarkdown(text = "") {
   return blocks;
 }
 
+export function parseChatMarkdown(text = "") {
+  const cached = readCachedMarkdownBlocks(text);
+  if (cached) {
+    return cached;
+  }
+  return writeCachedMarkdownBlocks(text, parseChatMarkdownSource(text));
+}
+
 function renderMarkdownBlock(block, index) {
   if (block.type === "heading") {
     const TagName = `h${block.level}`;
@@ -226,14 +259,9 @@ function renderMarkdownBlock(block, index) {
   return <p key={`paragraph-${index}`}>{parseInlineMarkdown(block.text, `paragraph-${index}`)}</p>;
 }
 
-export function ChatMessageContent({ role = "assistant", text = "" }) {
-  const normalizedRole = String(role || "assistant").trim().toLowerCase();
+const AssistantMarkdownContent = memo(function AssistantMarkdownContent({ text = "" }) {
   const content = String(text || "");
-  if (normalizedRole === "user") {
-    return <p className="sidebar-chat-bubble__content sidebar-chat-bubble__content--plain">{content}</p>;
-  }
-
-  const blocks = parseChatMarkdown(content);
+  const blocks = useMemo(() => parseChatMarkdown(content), [content]);
   if (!blocks.length) {
     return <p className="sidebar-chat-bubble__content sidebar-chat-bubble__content--plain">{content}</p>;
   }
@@ -243,4 +271,16 @@ export function ChatMessageContent({ role = "assistant", text = "" }) {
       {blocks.map(renderMarkdownBlock)}
     </div>
   );
-}
+}, (previousProps, nextProps) => previousProps.text === nextProps.text);
+
+export const ChatMessageContent = memo(function ChatMessageContent({ role = "assistant", text = "" }) {
+  const normalizedRole = String(role || "assistant").trim().toLowerCase();
+  const content = String(text || "");
+  if (normalizedRole === "user") {
+    return <p className="sidebar-chat-bubble__content sidebar-chat-bubble__content--plain">{content}</p>;
+  }
+  return <AssistantMarkdownContent text={content} />;
+}, (previousProps, nextProps) => (
+  previousProps.role === nextProps.role
+  && previousProps.text === nextProps.text
+));

@@ -383,6 +383,57 @@ function sameChatSessions(previousSessions = [], nextSessions = []) {
   return true;
 }
 
+const MAX_VISIBLE_CHAT_MESSAGES = 120;
+const CHAT_MESSAGE_BATCH = 100;
+
+function chatRoleLabel(role, language = "en") {
+  if (role === "user") {
+    return language === "ko" ? "You" : "You";
+  }
+  if (role === "system") {
+    return language === "ko" ? "System" : "System";
+  }
+  return "AI";
+}
+
+function chatModeLabel(mode, language = "en") {
+  if (mode === "debugger") {
+    return language === "ko" ? "Debugger" : "Debugger";
+  }
+  if (mode === "merger") {
+    return language === "ko" ? "Merger" : "Merger";
+  }
+  return language === "ko" ? "Conversation" : "Conversation";
+}
+
+const ChatMessageBubble = memo(function ChatMessageBubble({
+  message,
+  fallbackKey,
+  language,
+}) {
+  const role = String(message?.role || "assistant").trim().toLowerCase() || "assistant";
+  const mode = String(message?.mode || "").trim().toLowerCase();
+  return (
+    <div
+      className={`sidebar-chat-bubble sidebar-chat-bubble--${role}`}
+      data-testid="chat-message-bubble"
+    >
+      <span className="sidebar-chat-bubble__role">
+        {chatRoleLabel(role, language)}
+        {mode && mode !== "conversation" ? ` · ${chatModeLabel(mode, language)}` : ""}
+      </span>
+      <ChatMessageContent role={role} text={message?.text} />
+    </div>
+  );
+}, (previousProps, nextProps) => (
+  previousProps.fallbackKey === nextProps.fallbackKey
+  && previousProps.language === nextProps.language
+  && previousProps.message?.message_id === nextProps.message?.message_id
+  && previousProps.message?.role === nextProps.message?.role
+  && previousProps.message?.mode === nextProps.message?.mode
+  && previousProps.message?.text === nextProps.message?.text
+));
+
 const ProjectChatPane = memo(function ProjectChatPane({
   chat,
   detail,
@@ -412,31 +463,65 @@ const ProjectChatPane = memo(function ProjectChatPane({
   const [pendingMode, setPendingMode] = useState("conversation");
   const [menuOpen, setMenuOpen] = useState(false);
   const [localMessages, setLocalMessages] = useState(deferredRemoteMessages);
+  const [visibleMessageCount, setVisibleMessageCount] = useState(MAX_VISIBLE_CHAT_MESSAGES);
   const bottomRef = useRef(null);
   const menuRef = useRef(null);
-  const availableChatModels = (Array.isArray(modelCatalog) ? modelCatalog : []).filter((item) => {
-    const model = String(item?.model || "").trim();
-    return Boolean(model) && !item?.hidden;
-  });
-  const selectedChatValue = selectedChatModel ? [selectedChatProvider || "openai", selectedChatLocalProvider, selectedChatModel].join("::") : "";
-  const selectedChatEntry =
-    availableChatModels.find((item) => chatModelOptionValue(item) === selectedChatValue)
-    || (selectedChatModel
-      ? {
-          model: selectedChatModel,
-          display_name: selectedChatModel,
-          provider: selectedChatProvider || "openai",
-          local_provider: selectedChatLocalProvider,
-        }
-      : null);
-  const projectDefaultSummary = runtimeSummary(projectRuntime, modelPresets, language, modelCatalog);
-  const chatTargetSummary = selectedChatEntry
+  const availableChatModels = useMemo(
+    () => (Array.isArray(modelCatalog) ? modelCatalog : []).filter((item) => {
+      const model = String(item?.model || "").trim();
+      return Boolean(model) && !item?.hidden;
+    }),
+    [modelCatalog],
+  );
+  const selectedChatValue = useMemo(
+    () => (selectedChatModel ? [selectedChatProvider || "openai", selectedChatLocalProvider, selectedChatModel].join("::") : ""),
+    [selectedChatLocalProvider, selectedChatModel, selectedChatProvider],
+  );
+  const selectedChatEntry = useMemo(
+    () => (
+      availableChatModels.find((item) => chatModelOptionValue(item) === selectedChatValue)
+      || (selectedChatModel
+        ? {
+            model: selectedChatModel,
+            display_name: selectedChatModel,
+            provider: selectedChatProvider || "openai",
+            local_provider: selectedChatLocalProvider,
+          }
+        : null)
+    ),
+    [availableChatModels, selectedChatLocalProvider, selectedChatModel, selectedChatProvider, selectedChatValue],
+  );
+  const projectDefaultSummary = useMemo(
+    () => runtimeSummary(projectRuntime, modelPresets, language, modelCatalog),
+    [language, modelCatalog, modelPresets, projectRuntime],
+  );
+  const legacyChatTargetSummary = selectedChatEntry
     ? `${selectedChatEntry.display_name || selectedChatEntry.model} · ${chatProviderLabel(selectedChatEntry.provider, selectedChatEntry.local_provider, language)}`
     : `${language === "ko" ? "Project default" : "Project default"} · ${projectDefaultSummary}`;
+
+  const chatTargetSummary = useMemo(
+    () => (
+      selectedChatEntry
+        ? `${selectedChatEntry.display_name || selectedChatEntry.model} · ${chatProviderLabel(selectedChatEntry.provider, selectedChatEntry.local_provider, language)}`
+        : `${language === "ko" ? "Project default" : "Project default"} · ${projectDefaultSummary}`
+    ),
+    [language, projectDefaultSummary, selectedChatEntry],
+  );
+  const visibleMessages = useMemo(() => {
+    if (localMessages.length <= visibleMessageCount) {
+      return localMessages;
+    }
+    return localMessages.slice(localMessages.length - visibleMessageCount);
+  }, [localMessages, visibleMessageCount]);
+  const hiddenMessageCount = Math.max(0, localMessages.length - visibleMessages.length);
 
   useEffect(() => {
     setLocalMessages(deferredRemoteMessages);
   }, [deferredRemoteMessages, activeSessionId, chatDraftSession]);
+
+  useEffect(() => {
+    setVisibleMessageCount(MAX_VISIBLE_CHAT_MESSAGES);
+  }, [activeSessionId, chatDraftSession]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -612,6 +697,28 @@ const ProjectChatPane = memo(function ProjectChatPane({
                 : "Send a message to continue the session from the saved txt history."}
             </span>
           </div>
+        ) : hiddenMessageCount >= 0 ? (
+          <>
+            {hiddenMessageCount > 0 ? (
+              <button
+                className="sidebar-chat-history-button"
+                onClick={() => setVisibleMessageCount((current) => current + CHAT_MESSAGE_BATCH)}
+                type="button"
+              >
+                {language === "ko"
+                  ? `이전 메시지 ${Math.min(hiddenMessageCount, CHAT_MESSAGE_BATCH)}개 더 보기`
+                  : `Show ${Math.min(hiddenMessageCount, CHAT_MESSAGE_BATCH)} earlier messages`}
+              </button>
+            ) : null}
+            {visibleMessages.map((msg, index) => (
+              <ChatMessageBubble
+                key={msg.message_id || msg.id || `${msg.role || "assistant"}-${hiddenMessageCount + index}`}
+                message={msg}
+                fallbackKey={`${msg.role || "assistant"}-${hiddenMessageCount + index}`}
+                language={language}
+              />
+            ))}
+          </>
         ) : (
           localMessages.map((msg, index) => (
             <div
@@ -650,7 +757,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
                     setMenuOpen(false);
                   }}
                 >
-                  {modeLabel("debugger")}
+                  {chatModeLabel("debugger", language)}
                 </button>
                 <button
                   type="button"
@@ -659,7 +766,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
                     setMenuOpen(false);
                   }}
                 >
-                  {modeLabel("merger")}
+                  {chatModeLabel("merger", language)}
                 </button>
               </div>
             ) : null}
@@ -675,7 +782,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
               onClick={() => setPendingMode("conversation")}
               type="button"
             >
-              {language === "ko" ? "Next send:" : "Next send:"} {modeLabel(pendingMode)}
+              {language === "ko" ? "Next send:" : "Next send:"} {chatModeLabel(pendingMode, language)}
             </button>
           )}
         </div>

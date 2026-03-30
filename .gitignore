@@ -7,6 +7,9 @@ build/
 .idea/
 .venv/
 **/.idea/workspace.xml
+.artifacts/*
+!.artifacts/pytest/
+!.artifacts/pytest/.gitkeep
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/

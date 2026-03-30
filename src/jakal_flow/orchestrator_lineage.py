@@ -17,6 +17,7 @@ from .contract_wave import (
     classify_completed_lineage_step,
     current_spine_version,
     load_lineage_manifests,
+    manifest_symbol_inventory_paths,
     manifest_summary_markdown,
     normalize_execution_step_policy,
     persist_lineage_completion_artifacts,
@@ -740,6 +741,7 @@ class OrchestratorLineageMixin:
                     )
             elif worker_limit > 1:
                 with ThreadPoolExecutor(max_workers=worker_limit) as executor:
+                    ordered_targets_by_id = {step.step_id: step for step in ordered_targets}
                     future_map = {
                         executor.submit(
                             self._run_lineage_step_worker,
@@ -750,7 +752,7 @@ class OrchestratorLineageMixin:
                     }
                     for future in as_completed(future_map):
                         result_step_id = str(future_map[future]).strip()
-                        step = next((item for item in ordered_targets if item.step_id == result_step_id), None)
+                        step = ordered_targets_by_id.get(result_step_id)
                         if step is None:
                             continue
                         try:
@@ -772,6 +774,7 @@ class OrchestratorLineageMixin:
                             success_status="completed",
                             running_status="running:lineages",
                         )
+                        ordered_targets_by_id = {item.step_id: item for item in ordered_targets}
             worker_results = [
                 worker_results_by_step.get(step.step_id)
                 or self._lineage_worker_failure_result(
@@ -801,6 +804,7 @@ class OrchestratorLineageMixin:
                     step.notes = batch_summary
                 context.metadata.current_status = self._status_from_plan_state(plan_state)
             completion_time = now_utc_iso()
+            batch_spine_version = current_spine_version(context.paths)
             for index, step in enumerate(ordered_targets):
                 worker_result = worker_results[index] if index < len(worker_results) else {}
                 lineage_id = str((step.metadata or {}).get("lineage_id", "")).strip()
@@ -819,7 +823,7 @@ class OrchestratorLineageMixin:
                     normalize_execution_step_policy(
                         step,
                         step_kind=self._step_kind(step),
-                        current_spine_version=current_spine_version(context.paths),
+                        current_spine_version=batch_spine_version,
                     )
                     previous_safe_revision = str(lineage.safe_revision or lineage.head_commit or "").strip()
                     head_commit = str(
@@ -850,10 +854,7 @@ class OrchestratorLineageMixin:
                     previous_file_texts: dict[str, str] = {}
                     if previous_safe_revision and head_commit and previous_safe_revision != head_commit and lineage.worktree_dir.exists():
                         diff_entries = self.git.diff_name_status(lineage.worktree_dir, previous_safe_revision, head_commit)
-                        for _status, path in diff_entries:
-                            normalized_path = str(path).strip().replace("\\", "/")
-                            if not normalized_path:
-                                continue
+                        for normalized_path in manifest_symbol_inventory_paths(changed_files, diff_entries):
                             previous_text = self.git.read_file_at_revision(
                                 lineage.worktree_dir,
                                 previous_safe_revision,
@@ -881,10 +882,11 @@ class OrchestratorLineageMixin:
                         manifest=manifest,
                         assessment=assessment,
                     )
+                    batch_spine_version = manifest.spine_version or _spine_state.current_version or batch_spine_version
                     normalize_execution_step_policy(
                         step,
                         step_kind=self._step_kind(step),
-                        current_spine_version=manifest.spine_version or current_spine_version(context.paths),
+                        current_spine_version=batch_spine_version,
                     )
                     worker_result["lineage_manifest"] = manifest.to_dict()
                     worker_result["lineage_manifest_file"] = str(manifest_path)

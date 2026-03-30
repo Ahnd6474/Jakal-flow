@@ -46,6 +46,9 @@ _UI_PATH_PREFIXES = (
 _UI_SUFFIXES = (".css", ".scss", ".sass", ".less", ".jsx", ".tsx", ".html")
 _PROVIDER_STATUSES_CACHE_TTL_SECONDS = 10.0
 _provider_statuses_cache_no_fetch: tuple[float, dict[str, dict[str, Any]]] | None = None
+_COMMAND_AVAILABLE_CACHE_TTL_SECONDS = 10.0
+_command_available_cache: dict[str, tuple[float, bool]] = {}
+_gemini_settings_cache: dict[str, tuple[float, bool]] = {}
 _UI_KEYWORD_PATTERN = re.compile(
     r"\b("
     r"ui|ux|frontend|react|tauri|desktop|screen|layout|style|styling|theme|component|"
@@ -111,6 +114,9 @@ def provider_statuses_payload(
         checked_at, cached_statuses = _provider_statuses_cache_no_fetch
         if (time.monotonic() - checked_at) <= _PROVIDER_STATUSES_CACHE_TTL_SECONDS:
             return deepcopy(cached_statuses)
+    if fetch_snapshot is not None:
+        _command_available_cache.clear()
+        _gemini_settings_cache.clear()
     fetch = fetch_snapshot
     snapshots = {
         "openai": _snapshot_to_dict(fetch(default_codex_path("openai"))) if callable(fetch) else {},
@@ -595,16 +601,24 @@ def _command_available(command: str) -> bool:
     candidate = str(command or "").strip()
     if not candidate:
         return False
+    cached = _command_available_cache.get(candidate)
+    now = time.monotonic()
+    if cached is not None and (now - cached[0]) <= _COMMAND_AVAILABLE_CACHE_TTL_SECONDS:
+        return cached[1]
     if "\\" in candidate or "/" in candidate:
-        return Path(candidate).expanduser().exists()
-    if shutil.which(candidate) is not None:
-        return True
-    resolved = str(resolve_codex_path(candidate)).strip()
-    if not resolved or resolved == candidate:
-        return False
-    if "\\" in resolved or "/" in resolved:
-        return Path(resolved).expanduser().exists()
-    return shutil.which(resolved) is not None
+        available = Path(candidate).expanduser().exists()
+    elif shutil.which(candidate) is not None:
+        available = True
+    else:
+        resolved = str(resolve_codex_path(candidate)).strip()
+        if not resolved or resolved == candidate:
+            available = False
+        elif "\\" in resolved or "/" in resolved:
+            available = Path(resolved).expanduser().exists()
+        else:
+            available = shutil.which(resolved) is not None
+    _command_available_cache[candidate] = (now, available)
+    return available
 
 
 def _openai_auth_env_configured() -> bool:
@@ -653,11 +667,20 @@ def _gemini_auth_error_message(settings_path: Path | None = None) -> str:
 
 def _gemini_settings_file_configured(settings_path: Path | None = None) -> bool:
     candidate = settings_path or (Path.home() / ".gemini" / "settings.json")
+    cache_key = str(candidate.expanduser())
+    cached = _gemini_settings_cache.get(cache_key)
+    now = time.monotonic()
+    if cached is not None and (now - cached[0]) <= _COMMAND_AVAILABLE_CACHE_TTL_SECONDS:
+        return cached[1]
     try:
         if not candidate.is_file():
+            _gemini_settings_cache[cache_key] = (now, False)
             return False
-        return bool(candidate.read_text(encoding="utf-8", errors="replace").strip())
+        configured = bool(candidate.read_text(encoding="utf-8", errors="replace").strip())
+        _gemini_settings_cache[cache_key] = (now, configured)
+        return configured
     except OSError:
+        _gemini_settings_cache[cache_key] = (now, False)
         return False
 
 

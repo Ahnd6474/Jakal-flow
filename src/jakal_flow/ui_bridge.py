@@ -93,6 +93,12 @@ _codex_snapshot_service = CodexBackendSnapshotService(
     ttl_seconds=CODEX_SNAPSHOT_TTL_SECONDS,
 )
 _orchestrator_cache: dict[str, Orchestrator] = {}
+_bridge_command_handlers_cache: dict[str, Any] | None = None
+_bridge_command_handlers_cache_token: tuple[int, ...] | None = None
+_bridge_perf_aggregate_cache: dict[str, dict[str, Any]] = {}
+_BRIDGE_PERF_AGGREGATE_WINDOW_SECONDS = 1.0
+_BRIDGE_PERF_AGGREGATE_SAMPLE_LIMIT = 10
+_BRIDGE_PERF_AGGREGATE_COMMANDS = frozenset({"list-projects", "load-project", "load-project-core", "load-visible-project-state"})
 
 
 def default_workspace_root() -> Path:
@@ -483,7 +489,25 @@ def common_project_inputs(
 
 
 def bridge_command_handlers() -> dict[str, Any]:
-    return {
+    global _bridge_command_handlers_cache, _bridge_command_handlers_cache_token
+    cache_token = (
+        id(resolve_project),
+        id(resolve_history_project),
+        id(common_project_inputs),
+        id(parse_plan_state),
+        id(append_ui_event),
+        id(save_run_control),
+        id(default_run_control),
+        id(clear_stop_request),
+        id(EXECUTION_STOP_REGISTRY),
+        id(start_share_server_process),
+        id(stop_share_server_process),
+        id(save_share_server_config),
+    )
+    if _bridge_command_handlers_cache is not None and _bridge_command_handlers_cache_token == cache_token:
+        return _bridge_command_handlers_cache
+    _bridge_command_handlers_cache_token = cache_token
+    _bridge_command_handlers_cache = {
         **build_read_model_handlers(
             bootstrap_payload=bootstrap_payload,
             resolve_project=resolve_project,
@@ -532,36 +556,152 @@ def bridge_command_handlers() -> dict[str, Any]:
             coerce_bool=coerce_bool,
         ),
     }
+    return _bridge_command_handlers_cache
 
 
 def _payload_size_bytes(value: Any) -> int:
-    try:
-        return len(json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8"))
-    except (TypeError, ValueError):
-        return 0
+    def estimate(item: Any, *, depth: int = 0, max_items: int = 64) -> int:
+        if item is None:
+            return 4
+        if isinstance(item, bool):
+            return 4 if item else 5
+        if isinstance(item, (int, float)):
+            return len(str(item))
+        if isinstance(item, str):
+            return len(item.encode("utf-8")) + 2
+        if depth >= 3:
+            return 16
+        if isinstance(item, dict):
+            total = 2
+            for index, (key, value) in enumerate(item.items()):
+                if index >= max_items:
+                    return total + 3
+                total += len(str(key).encode("utf-8")) + 3
+                total += estimate(value, depth=depth + 1, max_items=max_items)
+            return total
+        if isinstance(item, (list, tuple)):
+            total = 2
+            for index, value in enumerate(item):
+                if index >= max_items:
+                    return total + 3
+                total += estimate(value, depth=depth + 1, max_items=max_items)
+            return total
+        return len(str(item).encode("utf-8"))
+
+    return estimate(value)
+
+
+def _bridge_perf_entry(command: str, payload: dict[str, Any], result: Any, duration_ms: float) -> dict[str, Any]:
+    return {
+        "timestamp": now_utc_iso(),
+        "command": command,
+        "repo_id": str(payload.get("repo_id", "")).strip(),
+        "project_dir": str(payload.get("project_dir", "")).strip(),
+        "archive_id": str(payload.get("archive_id", "")).strip(),
+        "detail_level": str(payload.get("detail_level", "")).strip().lower(),
+        "refresh_codex_status": coerce_bool(payload.get("refresh_codex_status", False), False),
+        "duration_ms": round(duration_ms, 3),
+        "payload_size_bytes": _payload_size_bytes(payload),
+        "result_size_bytes": _payload_size_bytes(result),
+        "result_keys": sorted(result.keys()) if isinstance(result, dict) else [],
+        "payload_cache_hit": bool(result.get("payload_cache_hit")) if isinstance(result, dict) else False,
+        "content_signature": str(result.get("content_signature", "")).strip() if isinstance(result, dict) else "",
+        "detail_signature": str(result.get("detail_signature", "")).strip() if isinstance(result, dict) else "",
+    }
+
+
+def _bridge_perf_hot_entry(command: str, payload: dict[str, Any], result: Any, duration_ms: float) -> dict[str, Any]:
+    return {
+        "timestamp": now_utc_iso(),
+        "command": command,
+        "repo_id": str(payload.get("repo_id", "")).strip(),
+        "project_dir": str(payload.get("project_dir", "")).strip(),
+        "archive_id": str(payload.get("archive_id", "")).strip(),
+        "detail_level": str(payload.get("detail_level", "")).strip().lower(),
+        "refresh_codex_status": coerce_bool(payload.get("refresh_codex_status", False), False),
+        "duration_ms": round(duration_ms, 3),
+        "payload_size_bytes": _payload_size_bytes(payload),
+        "result_size_bytes": _payload_size_bytes(result),
+        "result_keys": sorted(result.keys()) if isinstance(result, dict) else [],
+        "payload_cache_hit": True,
+        "content_signature": str(result.get("content_signature", "")).strip() if isinstance(result, dict) else "",
+        "detail_signature": str(result.get("detail_signature", "")).strip() if isinstance(result, dict) else "",
+    }
+
+
+def _write_bridge_perf_entry(workspace_root: Path, entry: dict[str, Any]) -> None:
+    payload = dict(entry)
+    payload["workspace_root"] = str(workspace_root)
+    append_jsonl(workspace_root / "bridge_perf.jsonl", payload)
+
+
+def _flush_bridge_perf_aggregates(workspace_root: Path | None = None, *, force: bool = False) -> None:
+    now_monotonic = time.monotonic()
+    flush_keys: list[str] = []
+    for key, aggregate in _bridge_perf_aggregate_cache.items():
+        if workspace_root is not None and aggregate.get("workspace_root") != str(workspace_root):
+            continue
+        if force or (now_monotonic - float(aggregate.get("started_monotonic", now_monotonic))) >= _BRIDGE_PERF_AGGREGATE_WINDOW_SECONDS:
+            flush_keys.append(key)
+    for key in flush_keys:
+        aggregate = _bridge_perf_aggregate_cache.pop(key, None)
+        if aggregate is None:
+            continue
+        entry = dict(aggregate["entry"])
+        sample_count = int(aggregate.get("sample_count", 1) or 1)
+        total_duration_ms = float(aggregate.get("total_duration_ms", entry.get("duration_ms", 0.0)) or 0.0)
+        entry["sample_count"] = sample_count
+        entry["duration_ms_avg"] = round(total_duration_ms / sample_count, 3)
+        entry["duration_ms_max"] = round(float(aggregate.get("max_duration_ms", entry.get("duration_ms", 0.0)) or 0.0), 3)
+        entry["payload_size_bytes_avg"] = int(entry.get("payload_size_bytes", 0))
+        entry["result_size_bytes_avg"] = int(entry.get("result_size_bytes", 0))
+        _write_bridge_perf_entry(Path(str(aggregate["workspace_root"])), entry)
 
 
 def _bridge_perf_log(workspace_root: Path, command: str, payload: dict[str, Any], result: Any, duration_ms: float) -> None:
-    append_jsonl(
-        workspace_root / "bridge_perf.jsonl",
-        {
-            "timestamp": now_utc_iso(),
-            "command": command,
-            "workspace_root": str(workspace_root),
-            "repo_id": str(payload.get("repo_id", "")).strip(),
-            "project_dir": str(payload.get("project_dir", "")).strip(),
-            "archive_id": str(payload.get("archive_id", "")).strip(),
-            "detail_level": str(payload.get("detail_level", "")).strip().lower(),
-            "refresh_codex_status": coerce_bool(payload.get("refresh_codex_status", False), False),
-            "duration_ms": round(duration_ms, 3),
-            "payload_size_bytes": _payload_size_bytes(payload),
-            "result_size_bytes": _payload_size_bytes(result),
-            "result_keys": sorted(result.keys()) if isinstance(result, dict) else [],
-            "payload_cache_hit": bool(result.get("payload_cache_hit")) if isinstance(result, dict) else False,
-            "content_signature": str(result.get("content_signature", "")).strip() if isinstance(result, dict) else "",
-            "detail_signature": str(result.get("detail_signature", "")).strip() if isinstance(result, dict) else "",
-        },
+    _flush_bridge_perf_aggregates(workspace_root)
+    payload_cache_hit = bool(result.get("payload_cache_hit")) if isinstance(result, dict) else False
+    if (
+        command not in _BRIDGE_PERF_AGGREGATE_COMMANDS
+        or not payload_cache_hit
+        or duration_ms >= 25.0
+    ):
+        entry = _bridge_perf_entry(command, payload, result, duration_ms)
+        _write_bridge_perf_entry(workspace_root, entry)
+        return
+
+    aggregate_key = "|".join(
+        [
+            str(workspace_root),
+            command,
+            str(payload.get("repo_id", "")).strip(),
+            str(payload.get("project_dir", "")).strip(),
+            str(payload.get("detail_level", "")).strip().lower(),
+            str(coerce_bool(payload.get("refresh_codex_status", False), False)).lower(),
+        ]
     )
+    aggregate = _bridge_perf_aggregate_cache.get(aggregate_key)
+    if aggregate is None:
+        entry = _bridge_perf_hot_entry(command, payload, result, duration_ms)
+        _bridge_perf_aggregate_cache[aggregate_key] = {
+            "workspace_root": str(workspace_root),
+            "entry": entry,
+            "sample_count": 1,
+            "total_duration_ms": float(entry["duration_ms"]),
+            "max_duration_ms": float(entry["duration_ms"]),
+            "started_monotonic": time.monotonic(),
+        }
+        return
+    aggregate["sample_count"] = int(aggregate.get("sample_count", 1) or 1) + 1
+    aggregate["total_duration_ms"] = float(aggregate.get("total_duration_ms", 0.0) or 0.0) + float(duration_ms)
+    aggregate["max_duration_ms"] = max(float(aggregate.get("max_duration_ms", 0.0) or 0.0), float(duration_ms))
+    aggregate["entry"]["timestamp"] = now_utc_iso()
+    aggregate["entry"]["duration_ms"] = round(duration_ms, 3)
+    if isinstance(result, dict):
+        aggregate["entry"]["content_signature"] = str(result.get("content_signature", "")).strip()
+        aggregate["entry"]["detail_signature"] = str(result.get("detail_signature", "")).strip()
+    if int(aggregate["sample_count"]) >= _BRIDGE_PERF_AGGREGATE_SAMPLE_LIMIT:
+        _flush_bridge_perf_aggregates(workspace_root, force=True)
 
 
 def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | None = None) -> dict[str, Any]:

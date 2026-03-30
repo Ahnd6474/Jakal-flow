@@ -2579,11 +2579,30 @@ select:focus {
   opacity: 0.4;
 }
 
+.sidebar-chat-history-button {
+  align-self: center;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel-alt);
+  color: var(--text-dim);
+  font-size: 11px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.sidebar-chat-history-button:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text);
+  border-color: rgba(95, 151, 214, 0.36);
+}
+
 .sidebar-chat-bubble {
   display: flex;
   flex-direction: column;
   gap: 3px;
   max-width: 90%;
+  content-visibility: auto;
+  contain-intrinsic-size: 88px;
 }
 
 .sidebar-chat-bubble--user {

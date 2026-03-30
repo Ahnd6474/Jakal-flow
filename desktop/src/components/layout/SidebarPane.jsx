@@ -1,4 +1,4 @@
-import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import { arePropsEqualExceptFunctions } from "../../shallowProps";
@@ -165,8 +165,11 @@ function sortTreeChildren(children = []) {
 }
 
 function normalizeTree(node) {
+  const label = String(node?.label || "");
+  const path = String(node?.path || "");
   return {
     ...node,
+    searchText: `${label}\n${path}`.toLowerCase(),
     children: sortTreeChildren(node.children || []).map((child) => normalizeTree(child)),
   };
 }
@@ -178,8 +181,7 @@ function filterPreparedTree(node, normalizedQuery) {
   const children = (node.children || [])
     .map((child) => filterPreparedTree(child, normalizedQuery))
     .filter(Boolean);
-  const selfMatch =
-    node.label.toLowerCase().includes(normalizedQuery) || String(node.path || "").toLowerCase().includes(normalizedQuery);
+  const selfMatch = String(node.searchText || "").includes(normalizedQuery);
   if (selfMatch || children.length) {
     return { ...node, children };
   }
@@ -227,10 +229,12 @@ const WorkspaceTreeView = memo(function WorkspaceTreeView({
   emptyLabel = "",
 }) {
   const containerRef = useRef(null);
+  const scrollFrameRef = useRef(0);
+  const pendingScrollTopRef = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(TREE_DEFAULT_VIEWPORT_HEIGHT);
   const normalizedQuery = String(query || "").trim().toLowerCase();
-  const virtualizationEnabled = typeof window !== "undefined" && rows.length > 80;
+  const virtualizationEnabled = typeof window !== "undefined" && rows.length > 40;
 
   useEffect(() => {
     if (!virtualizationEnabled || !containerRef.current || typeof ResizeObserver === "undefined") {
@@ -253,6 +257,23 @@ const WorkspaceTreeView = memo(function WorkspaceTreeView({
     }
   }, [normalizedQuery]);
 
+  useEffect(() => () => {
+    if (scrollFrameRef.current) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+  }, []);
+
+  const handleScroll = useCallback((event) => {
+    pendingScrollTopRef.current = event.currentTarget.scrollTop;
+    if (scrollFrameRef.current) {
+      return;
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = 0;
+      setScrollTop(pendingScrollTopRef.current);
+    });
+  }, []);
+
   if (!rows.length) {
     return (
       <div className="empty-block">
@@ -274,7 +295,7 @@ const WorkspaceTreeView = memo(function WorkspaceTreeView({
     <div
       ref={containerRef}
       className="sidebar-tree"
-      onScroll={virtualizationEnabled ? (event) => setScrollTop(event.currentTarget.scrollTop) : undefined}
+      onScroll={virtualizationEnabled ? handleScroll : undefined}
     >
       <div style={{ paddingTop: `${topOffset}px`, paddingBottom: `${bottomOffset}px` }}>
         {visibleRows.map((row) => (
@@ -771,6 +792,7 @@ export const SidebarPane = memo(function SidebarPane({
   const workspaceTabActive = activeTab === "workspace";
   const deferredWorkspaceFilter = useDeferredValue(workspaceFilter);
   const workspaceFilterCacheRef = useRef(new Map());
+  const workspaceRowsCacheRef = useRef(new Map());
   const [expandedWorkspacePaths, setExpandedWorkspacePaths] = useState({});
   const normalizedWorkspaceTree = useMemo(
     () => (workspaceTabActive ? (workspaceTree || []).map((node) => normalizeTree(node)) : []),
@@ -788,7 +810,10 @@ export const SidebarPane = memo(function SidebarPane({
     return [pending, ...items];
   }, [activeTab, checkpoints]);
 
-  useEffect(() => { workspaceFilterCacheRef.current.clear(); }, [normalizedWorkspaceTree]);
+  useEffect(() => {
+    workspaceFilterCacheRef.current.clear();
+    workspaceRowsCacheRef.current.clear();
+  }, [normalizedWorkspaceTree]);
   useEffect(() => {
     setExpandedWorkspacePaths({});
   }, [normalizedWorkspaceTree]);
@@ -810,10 +835,26 @@ export const SidebarPane = memo(function SidebarPane({
     workspaceFilterCacheRef.current.set(normalizedQuery, nextTree);
     return nextTree;
   }, [deferredWorkspaceFilter, normalizedWorkspaceTree, workspaceTabActive]);
-  const flattenedWorkspaceRows = useMemo(
-    () => buildVisibleTreeRows(filteredWorkspaceTree, expandedWorkspacePaths, deferredWorkspaceFilter.trim().toLowerCase()),
-    [deferredWorkspaceFilter, expandedWorkspacePaths, filteredWorkspaceTree],
-  );
+  const flattenedWorkspaceRows = useMemo(() => {
+    const normalizedQuery = deferredWorkspaceFilter.trim().toLowerCase();
+    const expansionSignature = Object.entries(expandedWorkspacePaths)
+      .filter(([, expanded]) => expanded)
+      .map(([path]) => path)
+      .sort()
+      .join("|");
+    const cacheKey = `${normalizedQuery}::${expansionSignature}`;
+    const cachedRows = workspaceRowsCacheRef.current.get(cacheKey);
+    if (cachedRows) {
+      return cachedRows;
+    }
+    const nextRows = buildVisibleTreeRows(filteredWorkspaceTree, expandedWorkspacePaths, normalizedQuery);
+    if (workspaceRowsCacheRef.current.size >= 12) {
+      const oldestKey = workspaceRowsCacheRef.current.keys().next().value;
+      workspaceRowsCacheRef.current.delete(oldestKey);
+    }
+    workspaceRowsCacheRef.current.set(cacheKey, nextRows);
+    return nextRows;
+  }, [deferredWorkspaceFilter, expandedWorkspacePaths, filteredWorkspaceTree]);
 
   const tabs = [
     ["workspace", <SidebarExplorerIcon key="workspace-icon" />, t("sidebar.explorer")],

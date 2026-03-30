@@ -104,6 +104,7 @@ def desktop_runtime_defaults() -> dict[str, Any]:
         checkpoint_interval_blocks=1,
         require_checkpoint_approval=False,
         generate_word_report=True,
+        use_fast_mode=True,
         max_blocks=5,
         workflow_mode="standard",
         ml_max_cycles=3,

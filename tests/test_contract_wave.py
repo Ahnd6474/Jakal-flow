@@ -15,9 +15,12 @@ from jakal_flow.contract_wave import (
     current_spine_version,
     delete_common_requirement,
     delete_spine_checkpoint,
+    lineage_manifest_summary_payload,
     load_common_requirements_state,
+    load_lineage_manifest_payloads,
     load_lineage_manifests,
     load_spine_state,
+    manifest_symbol_inventory_paths,
     normalize_execution_step_policy,
     persist_lineage_completion_artifacts,
     record_manual_spine_checkpoint,
@@ -296,6 +299,163 @@ class ContractWaveTests(unittest.TestCase):
         self.assertEqual(spine_state.current_version, DEFAULT_SPINE_VERSION)
         self.assertEqual(spine_state.history, [])
         self.assertEqual(common_state.open_requirements, [])
+
+    def test_persist_lineage_completion_artifacts_reuses_loaded_state(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_manifest_loads"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        manager = WorkspaceManager(workspace_root)
+        context = manager.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+
+        try:
+            step = normalize_execution_step_policy(
+                ExecutionStep(
+                    step_id="ST14",
+                    title="Contract state reuse",
+                    owned_paths=["src/contracts"],
+                    step_type="contract",
+                    scope_class="shared_reviewed",
+                    shared_contracts=["api.reuse"],
+                    shared_reviewed_paths=["src/shared"],
+                    spine_version=current_spine_version(context.paths),
+                )
+            )
+            assessment = classify_completed_lineage_step(
+                step,
+                changed_files=["src/contracts/reuse.py", "src/shared/adapter.py"],
+                verification_passed=True,
+                batch_size=1,
+                child_count=0,
+            )
+            manifest = build_lineage_manifest(
+                lineage_id="LN14",
+                step=step,
+                changed_files=["src/contracts/reuse.py", "src/shared/adapter.py"],
+                diff_entries=[("M", "src/contracts/reuse.py")],
+                verification_command="python -m pytest tests/test_reuse.py",
+                verification_summary="reuse passed",
+                verification_passed=True,
+                assessment=assessment,
+                commit_hash="ln14-head",
+            )
+            original_load_spine_state = load_spine_state
+            original_load_common_requirements_state = load_common_requirements_state
+            with mock.patch(
+                "jakal_flow.contract_wave.load_spine_state",
+                side_effect=original_load_spine_state,
+            ) as load_spine_mock, mock.patch(
+                "jakal_flow.contract_wave.load_common_requirements_state",
+                side_effect=original_load_common_requirements_state,
+            ) as load_common_mock:
+                persist_lineage_completion_artifacts(
+                    context.paths,
+                    step=step,
+                    lineage_id="LN14",
+                    manifest=manifest,
+                    assessment=assessment,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(load_spine_mock.call_count, 1)
+        self.assertEqual(load_common_mock.call_count, 1)
+
+    def test_manifest_symbol_inventory_paths_filters_to_symbol_sensitive_files(self) -> None:
+        paths = manifest_symbol_inventory_paths(
+            ["README.md", "src/helpers/util.py", "src/api/contracts.ts", "assets/logo.svg"],
+            diff_entries=[
+                ("M", "README.md"),
+                ("M", "src/helpers/util.py"),
+                ("M", "src/api/contracts.ts"),
+                ("M", "assets/logo.svg"),
+            ],
+        )
+
+        self.assertEqual(paths, ["src/helpers/util.py", "src/api/contracts.ts"])
+
+    def test_lineage_manifest_payload_limit_uses_latest_items_and_summary_counts_all(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_manifest_cache"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        manager = WorkspaceManager(workspace_root)
+        context = manager.initialize_local_project(
+            project_dir=repo_dir,
+            branch="main",
+            runtime=RuntimeOptions(model="gpt-5.4", effort="medium"),
+        )
+
+        try:
+            first_step = normalize_execution_step_policy(ExecutionStep(step_id="ST1", title="First", owned_paths=["src/first"]))
+            first = build_lineage_manifest(
+                lineage_id="LN1",
+                step=first_step,
+                changed_files=["src/first/a.py"],
+                diff_entries=[("M", "src/first/a.py")],
+                verification_command="python -m pytest",
+                verification_summary="first",
+                verification_passed=True,
+                assessment=classify_completed_lineage_step(
+                    first_step,
+                    changed_files=["src/first/a.py"],
+                    verification_passed=True,
+                    batch_size=1,
+                    child_count=0,
+                ),
+                commit_hash="c1",
+            )
+            first.created_at = "2026-03-29T01:00:00+00:00"
+            first.manifest_id = "MAN-1"
+            first.promotion_class = "green"
+            save_lineage_manifest(context.paths, first)
+
+            second_step = normalize_execution_step_policy(
+                ExecutionStep(
+                    step_id="ST2",
+                    title="Second",
+                    owned_paths=["src/second"],
+                    shared_reviewed_paths=["src/shared"],
+                )
+            )
+            second = build_lineage_manifest(
+                lineage_id="LN2",
+                step=second_step,
+                changed_files=["src/shared/b.py"],
+                diff_entries=[("M", "src/shared/b.py")],
+                verification_command="python -m pytest",
+                verification_summary="second",
+                verification_passed=True,
+                assessment=classify_completed_lineage_step(
+                    second_step,
+                    changed_files=["src/shared/b.py"],
+                    verification_passed=True,
+                    batch_size=1,
+                    child_count=0,
+                ),
+                commit_hash="c2",
+            )
+            second.created_at = "2026-03-29T02:00:00+00:00"
+            second.manifest_id = "MAN-2"
+            save_lineage_manifest(context.paths, second)
+
+            latest_payload = load_lineage_manifest_payloads(context.paths, limit=1, newest_first=True)
+            summary = lineage_manifest_summary_payload(context.paths)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(len(latest_payload), 1)
+        self.assertEqual(latest_payload[0]["manifest_id"], "MAN-2")
+        self.assertEqual(summary["total"], 2)
+        self.assertEqual(summary["green_count"], 1)
+        self.assertEqual(summary["yellow_count"], 1)
+        self.assertEqual(summary["latest_manifest"]["manifest_id"], "MAN-2")
 
     def test_build_lineage_manifest_tracks_symbol_level_changes(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_contract_wave_symbols"

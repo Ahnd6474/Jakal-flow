@@ -37,6 +37,7 @@ ML_FINALIZATION_PROMPT_FILENAME = "ML_FINALIZATION_PROMPT.txt"
 SCOPE_GUARD_TEMPLATE_FILENAME = "SCOPE_GUARD_TEMPLATE.md"
 REFERENCE_GUIDE_FILENAME = "REFERENCE_GUIDE.md"
 REFERENCE_GUIDE_DISPLAY_PATH = f"src/jakal_flow/docs/{REFERENCE_GUIDE_FILENAME}"
+_AGENTS_SUMMARY_CACHE: dict[tuple[str, int], tuple[tuple[int, int, int, int], str]] = {}
 
 
 def source_docs_dir() -> Path:
@@ -54,6 +55,14 @@ def load_source_prompt_template(name: str) -> str:
 
 def _normalize_execution_mode(value: str | None) -> str:
     return "parallel"
+
+
+def _path_cache_token(path: Path) -> tuple[int, int, int, int]:
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return (0, 0, 0, 0)
+    return (1, int(stat_result.st_mtime_ns), int(stat_result.st_size), int(stat_result.st_ctime_ns))
 
 
 def plan_generation_prompt_filename(execution_mode: str | None, workflow_mode: str | None = None) -> str:
@@ -254,8 +263,16 @@ def scan_repository_inputs(repo_dir: Path) -> dict[str, str]:
 
 
 def repository_agents_summary(repo_dir: Path, *, max_chars: int = 1500) -> str:
-    agents = read_text(repo_dir / "AGENTS.md")
-    return compact_text(agents, max_chars) or "AGENTS.md not found."
+    agents_path = repo_dir / "AGENTS.md"
+    cache_key = (str(repo_dir.resolve()), max_chars)
+    cache_token = _path_cache_token(agents_path)
+    cached = _AGENTS_SUMMARY_CACHE.get(cache_key)
+    if cached is not None and cached[0] == cache_token:
+        return cached[1]
+    agents = read_text(agents_path)
+    summary = compact_text(agents, max_chars) or "AGENTS.md not found."
+    _AGENTS_SUMMARY_CACHE[cache_key] = (cache_token, summary)
+    return summary
 
 
 def compact_repository_inputs(

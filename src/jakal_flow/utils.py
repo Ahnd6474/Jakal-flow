@@ -86,6 +86,13 @@ def write_text(path: Path, content: str) -> None:
     _atomic_write_bytes(path, content.encode("utf-8"))
 
 
+def write_text_if_changed(path: Path, content: str) -> bool:
+    if read_text(path) == content:
+        return False
+    write_text(path, content)
+    return True
+
+
 def append_text(path: Path, content: str) -> None:
     ensure_dir(path.parent)
     with path.open("a", encoding="utf-8") as handle:
@@ -100,6 +107,14 @@ def read_text(path: Path, default: str = "") -> str:
 
 def write_json(path: Path, data: Any) -> None:
     _atomic_write_bytes(path, json.dumps(data, indent=2, sort_keys=True).encode("utf-8"))
+
+
+def write_json_if_changed(path: Path, data: Any) -> bool:
+    serialized = json.dumps(data, indent=2, sort_keys=True)
+    if read_text(path) == serialized:
+        return False
+    _atomic_write_bytes(path, serialized.encode("utf-8"))
+    return True
 
 
 def read_json(path: Path, default: Any = None) -> Any:

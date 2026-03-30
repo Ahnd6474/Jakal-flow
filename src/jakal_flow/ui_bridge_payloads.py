@@ -5,12 +5,17 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Any, Callable
 
 from .chat_sessions import chat_active_session_file, chat_payload, chat_sessions_registry_file
 from .codex_app_server import fetch_codex_backend_snapshot
-from .contract_wave import load_common_requirements_state, load_lineage_manifest_payloads, load_spine_state
+from .contract_wave import (
+    lineage_manifest_summary_payload,
+    load_common_requirements_state,
+    load_lineage_manifest_payloads,
+    load_spine_state,
+)
 from .errors import ARTIFACT_READ_EXCEPTIONS
 from .model_constants import DEFAULT_LOCAL_MODEL_PROVIDER
 from .model_providers import normalize_local_model_provider, normalize_model_provider, provider_preset
@@ -27,10 +32,14 @@ from .workspace import LOCAL_PROJECT_LOG_DIRNAME
 DETAIL_CACHE_VERSION = 14
 LIST_ITEM_CACHE_VERSION = 1
 WORKSPACE_LISTING_CACHE_VERSION = 1
-PROJECT_TREE_EXCLUDED_NAMES = frozenset({".git", LOCAL_PROJECT_LOG_DIRNAME})
+PROJECT_TREE_EXCLUDED_NAMES = frozenset({".git", LOCAL_PROJECT_LOG_DIRNAME, "ui_bridge_perf.jsonl"})
 _DETAIL_BASE_PAYLOAD_MEMORY_CACHE: dict[str, tuple[int, str, dict[str, Any]]] = {}
 _LIST_ITEM_PAYLOAD_MEMORY_CACHE: dict[str, tuple[int, str, dict[str, Any]]] = {}
 _WORKSPACE_LISTING_MEMORY_CACHE: dict[str, tuple[int, str, dict[str, Any]]] = {}
+_PROVIDER_STATUSES_FETCH_CACHE: tuple[float, dict[str, dict[str, Any]]] | None = None
+_PROVIDER_STATUSES_FETCH_CACHE_TTL_SECONDS = 10.0
+_DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE: dict[str, tuple[str, str]] = {}
+_SECTION_PAYLOAD_MEMORY_CACHE: dict[str, tuple[str, dict[str, Any]]] = {}
 
 PLANNING_STAGE_DEFINITIONS = (
     {"key": "context_scan", "label": "Scan repository context"},
@@ -64,6 +73,10 @@ def _path_signature(path: Path) -> str:
 
 
 def _preview_tree_signature(path: Path, max_entries: int = 16, child_limit: int = 8) -> str:
+    return _preview_tree_structure_token(path, max_entries=max_entries, child_limit=child_limit)
+
+
+def _preview_tree_structure_token(path: Path, max_entries: int = 16, child_limit: int = 8) -> str:
     if not path.exists() or not path.is_dir():
         return f"{path.name}:missing"
     try:
@@ -76,8 +89,8 @@ def _preview_tree_signature(path: Path, max_entries: int = 16, child_limit: int 
     digest = hashlib.sha1()
     digest.update(str(path).encode("utf-8"))
     for child in children[:max_entries]:
-        digest.update(_path_signature(child).encode("utf-8"))
         digest.update(str(child.name).encode("utf-8"))
+        digest.update(("dir" if child.is_dir() else "file").encode("utf-8"))
         if child.is_dir():
             try:
                 grandchildren = sorted(
@@ -88,8 +101,8 @@ def _preview_tree_signature(path: Path, max_entries: int = 16, child_limit: int 
                 digest.update(b"grandchildren:unavailable")
             else:
                 for grandchild in grandchildren[:child_limit]:
-                    digest.update(_path_signature(grandchild).encode("utf-8"))
                     digest.update(str(grandchild.name).encode("utf-8"))
+                    digest.update(("dir" if grandchild.is_dir() else "file").encode("utf-8"))
     digest.update(f"count:{len(children)}".encode("utf-8"))
     return digest.hexdigest()
 
@@ -104,14 +117,70 @@ def _project_share_payload_signature(project: ProjectContext) -> str:
     return digest.hexdigest()
 
 
+def _clone_cached_list_item_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    cloned = dict(payload)
+    stats = payload.get("stats")
+    if isinstance(stats, dict):
+        cloned["stats"] = dict(stats)
+    return cloned
+
+
+def _clone_cached_detail_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    cloned = {
+        key: (dict(value) if isinstance(value, dict) else value)
+        for key, value in payload.items()
+    }
+    snapshot = payload.get("snapshot")
+    if isinstance(snapshot, dict):
+        cloned["snapshot"] = {
+            key: (dict(value) if isinstance(value, dict) else value)
+            for key, value in snapshot.items()
+        }
+    bottom_panels = payload.get("bottom_panels")
+    if isinstance(bottom_panels, dict):
+        cloned["bottom_panels"] = {
+            key: (dict(value) if isinstance(value, dict) else value)
+            for key, value in bottom_panels.items()
+        }
+    return cloned
+
+
+def _clone_workspace_listing_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    projects = payload.get("projects")
+    history = payload.get("history")
+    workspace = payload.get("workspace")
+    return {
+        "projects": [dict(item) if isinstance(item, dict) else item for item in projects] if isinstance(projects, list) else [],
+        "history": [dict(item) if isinstance(item, dict) else item for item in history] if isinstance(history, list) else [],
+        "workspace": dict(workspace) if isinstance(workspace, dict) else {},
+    }
+
+
+def _clone_section_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return deepcopy(payload)
+
+
+def _section_payload_from_cache(cache_key: str, signature: str) -> dict[str, Any] | None:
+    cached = _SECTION_PAYLOAD_MEMORY_CACHE.get(cache_key)
+    if cached is None or cached[0] != signature:
+        return None
+    return _clone_section_payload(cached[1])
+
+
+def _store_section_payload(cache_key: str, signature: str, payload: dict[str, Any]) -> dict[str, Any]:
+    _SECTION_PAYLOAD_MEMORY_CACHE[cache_key] = (signature, _clone_section_payload(payload))
+    return payload
+
+
 def project_detail_content_signature(project: ProjectContext, detail_level: str) -> str:
     normalized_detail_level = "core" if str(detail_level).strip().lower() == "core" else "full"
-    digest = hashlib.sha1()
-    digest.update(f"detail-cache-v{DETAIL_CACHE_VERSION}:{normalized_detail_level}".encode("utf-8"))
-    digest.update(str(project.metadata.current_status).encode("utf-8"))
-    digest.update(str(project.metadata.last_run_at or "").encode("utf-8"))
-    digest.update(str(project.metadata.current_safe_revision or "").encode("utf-8"))
-    digest.update(str(project.loop_state.current_task or "").encode("utf-8"))
+    cache_key = f"{project.paths.project_root.resolve()}|{normalized_detail_level}"
+    pre_digest = hashlib.sha1()
+    pre_digest.update(f"detail-cache-v{DETAIL_CACHE_VERSION}:{normalized_detail_level}".encode("utf-8"))
+    pre_digest.update(str(project.metadata.current_status).encode("utf-8"))
+    pre_digest.update(str(project.metadata.last_run_at or "").encode("utf-8"))
+    pre_digest.update(str(project.metadata.current_safe_revision or "").encode("utf-8"))
+    pre_digest.update(str(project.loop_state.current_task or "").encode("utf-8"))
     tracked_files = [
         project.paths.metadata_file,
         project.paths.project_config_file,
@@ -154,19 +223,33 @@ def project_detail_content_signature(project: ProjectContext, detail_level: str)
             ]
         )
     for path in tracked_files:
-        digest.update(_path_signature(path).encode("utf-8"))
+        pre_digest.update(_path_signature(path).encode("utf-8"))
+    tracked_tree_roots: list[Path] = []
     if normalized_detail_level == "full":
-        digest.update(_project_share_payload_signature(project).encode("utf-8"))
-        for path in [
+        tracked_tree_roots = [
             project.paths.repo_dir,
             project.paths.docs_dir,
             project.paths.reports_dir,
             project.paths.state_dir,
             project.paths.logs_dir,
             project.paths.memory_dir,
-        ]:
+        ]
+        for path in tracked_tree_roots:
+            pre_digest.update(_preview_tree_structure_token(path).encode("utf-8"))
+    pre_signature = pre_digest.hexdigest()
+    cached = _DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE.get(cache_key)
+    if cached is not None and cached[0] == pre_signature:
+        return cached[1]
+
+    digest = hashlib.sha1()
+    digest.update(pre_signature.encode("utf-8"))
+    if normalized_detail_level == "full":
+        digest.update(_project_share_payload_signature(project).encode("utf-8"))
+        for path in tracked_tree_roots:
             digest.update(_preview_tree_signature(path).encode("utf-8"))
-    return digest.hexdigest()
+    signature = digest.hexdigest()
+    _DETAIL_CONTENT_SIGNATURE_MEMORY_CACHE[cache_key] = (pre_signature, signature)
+    return signature
 
 
 def _detail_cache_file(project: ProjectContext, detail_level: str) -> Path:
@@ -488,16 +571,27 @@ def preview_tree(path: Path, max_entries: int = 16) -> list[dict[str, Any]]:
 
 
 def managed_workspace_tree(context: ProjectContext) -> list[dict[str, Any]]:
-    repo_dir = context.paths.repo_dir
-    root_label = repo_dir.name or context.metadata.display_name or context.metadata.slug or "Project"
-    return [
-        {
-            "label": root_label,
-            "path": str(repo_dir),
-            "kind": "dir",
-            "children": preview_tree(repo_dir),
-        }
-    ]
+    cache_key = f"workspace-tree|{context.metadata.repo_id}"
+    signature = "|".join(
+        (
+            _preview_tree_signature(context.paths.repo_dir),
+            str(context.metadata.display_name or context.metadata.slug or context.paths.repo_dir.name),
+        )
+    )
+    cached = _section_payload_from_cache(cache_key, signature)
+    if cached is not None:
+        return cached.get("workspace_tree", [])
+    payload = {
+        "workspace_tree": [
+            {
+                "label": context.paths.repo_dir.name or context.metadata.display_name or context.metadata.slug or "Project",
+                "path": str(context.paths.repo_dir),
+                "kind": "dir",
+                "children": preview_tree(context.paths.repo_dir),
+            }
+        ]
+    }
+    return _store_section_payload(cache_key, signature, payload)["workspace_tree"]
 
 
 def _sort_payload_items(items: list[dict[str, Any]], *timestamp_keys: str) -> list[dict[str, Any]]:
@@ -527,30 +621,20 @@ def _contract_wave_report_payload(context: ProjectContext) -> dict[str, Any]:
         "resolved_at",
         "created_at",
     )
-    lineage_manifests = _sort_payload_items(
-        load_lineage_manifest_payloads(context.paths),
-        "created_at",
-    )
+    lineage_manifests = load_lineage_manifest_payloads(context.paths, limit=12, newest_first=True)
     audit_entries = _sort_payload_items(
         read_jsonl_tail(context.paths.contract_wave_audit_file, 20),
         "timestamp",
     )
-
-    manifest_summary = {
-        "total": len(lineage_manifests),
-        "green_count": 0,
-        "yellow_count": 0,
-        "red_count": 0,
-        "latest_manifest": lineage_manifests[0] if lineage_manifests else None,
-    }
-    for manifest in lineage_manifests:
-        promotion_class = str(manifest.get("promotion_class", "")).strip().lower()
-        if promotion_class == "green":
-            manifest_summary["green_count"] += 1
-        elif promotion_class == "yellow":
-            manifest_summary["yellow_count"] += 1
-        elif promotion_class == "red":
-            manifest_summary["red_count"] += 1
+    manifest_summary = lineage_manifest_summary_payload(context.paths)
+    spine_json_text = compact_text(
+        json.dumps(spine_state.to_dict(), indent=2, ensure_ascii=False),
+        4000,
+    )
+    common_requirements_json_text = compact_text(
+        json.dumps(common_requirements_state.to_dict(), indent=2, ensure_ascii=False),
+        4000,
+    )
 
     return {
         "spine": {
@@ -559,7 +643,7 @@ def _contract_wave_report_payload(context: ProjectContext) -> dict[str, Any]:
             "history_count": len(spine_state.history),
             "latest_checkpoint": spine_history[0] if spine_history else None,
             "recent_history": spine_history[:8],
-            "json_text": preview_text(context.paths.spine_file, default="{\n}\n", max_chars=4000),
+            "json_text": spine_json_text or "{\n}\n",
             "path": str(context.paths.spine_file),
         },
         "common_requirements": {
@@ -568,7 +652,7 @@ def _contract_wave_report_payload(context: ProjectContext) -> dict[str, Any]:
             "resolved_count": len(common_requirements_state.resolved_requirements),
             "open_items": open_requirements[:8],
             "resolved_items": resolved_requirements[:8],
-            "json_text": preview_text(context.paths.common_requirements_file, default="{\n}\n", max_chars=4000),
+            "json_text": common_requirements_json_text or "{\n}\n",
             "path": str(context.paths.common_requirements_file),
         },
         "contract_wave_audit": {
@@ -588,66 +672,7 @@ def _contract_wave_report_payload(context: ProjectContext) -> dict[str, Any]:
     }
 
 
-def report_payload(context: ProjectContext) -> dict[str, Any]:
-    latest_failure_status = safe_json(context.paths.reports_dir / "latest_pr_failure_status.json", default={})
-    latest_failure: dict[str, Any] = {}
-    if isinstance(latest_failure_status, dict) and latest_failure_status:
-        report_json_file = str(latest_failure_status.get("report_json_file", "")).strip()
-        report_markdown_file = str(latest_failure_status.get("report_markdown_file", "")).strip()
-        bundle_json = safe_json(Path(report_json_file), default={}) if report_json_file else {}
-        block_index = bundle_json.get("block_index") if isinstance(bundle_json, dict) else None
-        block_dir = (
-            context.paths.logs_dir / f"block_{int(block_index):04d}"
-            if isinstance(block_index, int) and block_index >= 0
-            else None
-        )
-        artifact_files = bundle_json.get("artifact_files", []) if isinstance(bundle_json, dict) else []
-        artifact_files = artifact_files if isinstance(artifact_files, list) else []
-        if not artifact_files and block_dir is not None and block_dir.exists():
-            try:
-                artifact_files = [
-                    str(path)
-                    for path in sorted(block_dir.iterdir(), key=lambda item: item.name.lower())
-                    if path.is_file()
-                ]
-            except OSError:
-                artifact_files = []
-        latest_failure = {
-            "generated_at": str(latest_failure_status.get("generated_at", "")).strip(),
-            "failure_type": str(latest_failure_status.get("failure_type", "")).strip(),
-            "posted": bool(latest_failure_status.get("posted")),
-            "result": latest_failure_status.get("result", {}) if isinstance(latest_failure_status.get("result"), dict) else {},
-            "summary": str(bundle_json.get("summary", "")).strip() if isinstance(bundle_json, dict) else "",
-            "selected_task": str(bundle_json.get("selected_task", "")).strip() if isinstance(bundle_json, dict) else "",
-            "report_json_file": report_json_file,
-            "report_markdown_file": report_markdown_file,
-            "report_markdown_text": preview_text(Path(report_markdown_file), default="", max_chars=4000) if report_markdown_file else "",
-            "block_index": block_index if isinstance(block_index, int) else None,
-            "block_dir": str(block_dir) if block_dir is not None else "",
-            "artifact_files": artifact_files,
-            "artifacts": bundle_json.get("artifacts", []) if isinstance(bundle_json, dict) and isinstance(bundle_json.get("artifacts", []), list) else [],
-        }
-    return {
-        "closeout_report_text": preview_text(
-            context.paths.closeout_report_file,
-            default="# Closeout Report\n\nNo closeout has been run yet.\n",
-        ),
-        "ml_experiment_report_text": preview_text(
-            context.paths.ml_experiment_report_file,
-            default="# ML Experiment Report\n\nNo ML experiment summary has been generated yet.\n",
-        ),
-        "attempt_history_text": preview_text(context.paths.attempt_history_file, default="No attempt history recorded yet.\n"),
-        "word_report_enabled": bool(context.runtime.generate_word_report),
-        "word_report_path": str(context.paths.closeout_report_docx_file) if context.paths.closeout_report_docx_file.exists() else "",
-        "powerpoint_report_path": str(context.paths.closeout_report_pptx_file) if context.paths.closeout_report_pptx_file.exists() else "",
-        "powerpoint_report_target_path": str(context.paths.closeout_report_pptx_file),
-        "ml_results_svg_path": str(context.paths.ml_experiment_results_svg_file) if context.paths.ml_experiment_results_svg_file.exists() else "",
-        **_contract_wave_report_payload(context),
-        "latest_failure": latest_failure,
-    }
-
-
-def latest_failure_payload(context: ProjectContext) -> dict[str, Any]:
+def _latest_failure_details(context: ProjectContext) -> dict[str, Any]:
     latest_failure_status = safe_json(context.paths.reports_dir / "latest_pr_failure_status.json", default={})
     if not isinstance(latest_failure_status, dict) or not latest_failure_status:
         return {}
@@ -688,6 +713,51 @@ def latest_failure_payload(context: ProjectContext) -> dict[str, Any]:
     }
 
 
+def report_payload(context: ProjectContext) -> dict[str, Any]:
+    cache_key = f"reports|{context.metadata.repo_id}"
+    signature = "|".join(
+        (
+            _path_signature(context.paths.closeout_report_file),
+            _path_signature(context.paths.ml_experiment_report_file),
+            _path_signature(context.paths.attempt_history_file),
+            _path_signature(context.paths.closeout_report_docx_file),
+            _path_signature(context.paths.closeout_report_pptx_file),
+            _path_signature(context.paths.ml_experiment_results_svg_file),
+            _path_signature(context.paths.spine_file),
+            _path_signature(context.paths.common_requirements_file),
+            _path_signature(context.paths.contract_wave_audit_file),
+            _path_signature(context.paths.lineage_manifests_dir),
+            _path_signature(context.paths.reports_dir / "latest_pr_failure_status.json"),
+        )
+    )
+    cached = _section_payload_from_cache(cache_key, signature)
+    if cached is not None:
+        return cached
+    payload = {
+        "closeout_report_text": preview_text(
+            context.paths.closeout_report_file,
+            default="# Closeout Report\n\nNo closeout has been run yet.\n",
+        ),
+        "ml_experiment_report_text": preview_text(
+            context.paths.ml_experiment_report_file,
+            default="# ML Experiment Report\n\nNo ML experiment summary has been generated yet.\n",
+        ),
+        "attempt_history_text": preview_text(context.paths.attempt_history_file, default="No attempt history recorded yet.\n"),
+        "word_report_enabled": bool(context.runtime.generate_word_report),
+        "word_report_path": str(context.paths.closeout_report_docx_file) if context.paths.closeout_report_docx_file.exists() else "",
+        "powerpoint_report_path": str(context.paths.closeout_report_pptx_file) if context.paths.closeout_report_pptx_file.exists() else "",
+        "powerpoint_report_target_path": str(context.paths.closeout_report_pptx_file),
+        "ml_results_svg_path": str(context.paths.ml_experiment_results_svg_file) if context.paths.ml_experiment_results_svg_file.exists() else "",
+        **_contract_wave_report_payload(context),
+        "latest_failure": _latest_failure_details(context),
+    }
+    return _store_section_payload(cache_key, signature, payload)
+
+
+def latest_failure_payload(context: ProjectContext) -> dict[str, Any]:
+    return _latest_failure_details(context)
+
+
 def _flow_svg_payload(context: ProjectContext) -> dict[str, Any]:
     return {
         "flow_svg_path": str(context.paths.execution_flow_svg_file) if context.paths.execution_flow_svg_file.exists() else "",
@@ -696,13 +766,27 @@ def _flow_svg_payload(context: ProjectContext) -> dict[str, Any]:
 
 
 def history_payload(context: ProjectContext) -> dict[str, Any]:
-    return {
+    cache_key = f"history|{context.metadata.repo_id}"
+    signature = "|".join(
+        (
+            _path_signature(context.paths.ui_event_log_file),
+            _path_signature(context.paths.block_log_file),
+            _path_signature(context.paths.pass_log_file),
+            _path_signature(context.paths.logs_dir / "test_runs.jsonl"),
+            _path_signature(context.paths.execution_flow_svg_file),
+        )
+    )
+    cached = _section_payload_from_cache(cache_key, signature)
+    if cached is not None:
+        return cached
+    payload = {
         "ui_events": read_jsonl_tail(context.paths.ui_event_log_file, 40),
         "blocks": read_jsonl_tail(context.paths.block_log_file, 20),
         "passes": read_jsonl_tail(context.paths.pass_log_file, 30),
         "test_runs": read_jsonl_tail(context.paths.logs_dir / "test_runs.jsonl", 20),
         **_flow_svg_payload(context),
     }
+    return _store_section_payload(cache_key, signature, payload)
 
 
 def history_payload_from_snapshot(context: ProjectContext, snapshot: DetailLogSnapshot) -> dict[str, Any]:
@@ -985,6 +1069,10 @@ def _workspace_listing_content_signature(orchestrator: Orchestrator) -> str:
     return digest.hexdigest()
 
 
+def _workspace_listing_cache_file(orchestrator: Orchestrator) -> Path:
+    return orchestrator.workspace.workspace_root / "WORKSPACE_LISTING_CACHE.json"
+
+
 def _project_list_item_content_signature(project: ProjectContext, *, archived: bool) -> str:
     digest = hashlib.sha1()
     digest.update(f"list-item-v{LIST_ITEM_CACHE_VERSION}:{'history' if archived else 'active'}".encode("utf-8"))
@@ -1056,7 +1144,7 @@ def _cached_project_list_item_payload(
         and memory_cached[0] == LIST_ITEM_CACHE_VERSION
         and memory_cached[1] == content_signature
     ):
-        return deepcopy(memory_cached[2])
+        return _clone_cached_list_item_payload(memory_cached[2])
     cache_file = _list_item_cache_file(project, archived=archived)
     cached = read_json(cache_file, default=None)
     if isinstance(cached, dict):
@@ -1072,7 +1160,7 @@ def _cached_project_list_item_payload(
                 content_signature,
                 deepcopy(cached_payload),
             )
-            return cached_payload
+            return _clone_cached_list_item_payload(cached_payload)
     payload = _build_project_list_item_payload(orchestrator, project, archived=archived)
     _LIST_ITEM_PAYLOAD_MEMORY_CACHE[memory_cache_key] = (
         LIST_ITEM_CACHE_VERSION,
@@ -1279,9 +1367,12 @@ def _cached_project_detail_base_payload(
     started_at = perf_counter()
     content_signature = project_detail_content_signature(project, normalized_detail_level)
     timings["content_signature_ms"] = round((perf_counter() - started_at) * 1000.0, 3)
+    cache_file = _detail_cache_file(project, normalized_detail_level)
     memory_cache_key = f"{project.paths.project_root.resolve()}|{normalized_detail_level}"
     memory_cached = _DETAIL_BASE_PAYLOAD_MEMORY_CACHE.get(memory_cache_key)
     if (
+        cache_file.exists()
+        and
         memory_cached is not None
         and memory_cached[0] == DETAIL_CACHE_VERSION
         and memory_cached[1] == content_signature
@@ -1290,8 +1381,7 @@ def _cached_project_detail_base_payload(
         timings["cache_hit"] = True
         timings["base_build_ms"] = 0.0
         timings["cache_write_ms"] = 0.0
-        return deepcopy(memory_cached[2]), content_signature, True, timings
-    cache_file = _detail_cache_file(project, normalized_detail_level)
+        return _clone_cached_detail_payload(memory_cached[2]), content_signature, True, timings
     cache_lookup_started_at = perf_counter()
     cached = read_json(cache_file, default=None)
     if isinstance(cached, dict):
@@ -1314,7 +1404,7 @@ def _cached_project_detail_base_payload(
             timings["cache_hit"] = True
             timings["base_build_ms"] = 0.0
             timings["cache_write_ms"] = 0.0
-            return payload, content_signature, True, timings
+            return _clone_cached_detail_payload(payload), content_signature, True, timings
     timings["cache_lookup_ms"] = round((perf_counter() - cache_lookup_started_at) * 1000.0, 3)
     base_build_started_at = perf_counter()
     payload = _build_project_detail_base_payload(orchestrator, project, normalized_detail_level, load_run_control)
@@ -1361,6 +1451,23 @@ def _finalize_project_detail_payload(
     return payload
 
 
+def _provider_statuses_for_detail(
+    *,
+    fetch_codex_status: Callable[[str], Any],
+    refresh_codex_status: bool,
+) -> dict[str, dict[str, Any]]:
+    global _PROVIDER_STATUSES_FETCH_CACHE
+    if not refresh_codex_status:
+        return provider_statuses_payload()
+    if _PROVIDER_STATUSES_FETCH_CACHE is not None:
+        checked_at, cached_statuses = _PROVIDER_STATUSES_FETCH_CACHE
+        if (monotonic() - checked_at) <= _PROVIDER_STATUSES_FETCH_CACHE_TTL_SECONDS:
+            return deepcopy(cached_statuses)
+    statuses = provider_statuses_payload(fetch_snapshot=fetch_codex_status)
+    _PROVIDER_STATUSES_FETCH_CACHE = (monotonic(), deepcopy(statuses))
+    return statuses
+
+
 def project_detail_payload(
     orchestrator: Orchestrator,
     project: ProjectContext,
@@ -1387,10 +1494,9 @@ def project_detail_payload(
     perf_details["codex_status_ms"] = round((perf_counter() - codex_started_at) * 1000.0, 3)
     if isinstance(codex_status, dict):
         provider_statuses_started_at = perf_counter()
-        codex_status["provider_statuses"] = (
-            provider_statuses_payload(fetch_snapshot=fetch_codex_status)
-            if refresh_codex_status
-            else provider_statuses_payload()
+        codex_status["provider_statuses"] = _provider_statuses_for_detail(
+            fetch_codex_status=fetch_codex_status,
+            refresh_codex_status=refresh_codex_status,
         )
         perf_details["provider_statuses_ms"] = round((perf_counter() - provider_statuses_started_at) * 1000.0, 3)
     finalize_started_at = perf_counter()
@@ -1417,7 +1523,23 @@ def list_projects_payload(orchestrator: Orchestrator) -> dict[str, Any]:
         and memory_cached[0] == WORKSPACE_LISTING_CACHE_VERSION
         and memory_cached[1] == content_signature
     ):
-        return deepcopy(memory_cached[2])
+        return _clone_workspace_listing_payload(memory_cached[2])
+    cache_file = _workspace_listing_cache_file(orchestrator)
+    cached = read_json(cache_file, default=None)
+    if isinstance(cached, dict):
+        cached_signature = str(cached.get("content_signature", "")).strip()
+        cached_payload = cached.get("payload")
+        if (
+            int(cached.get("version", 0) or 0) == WORKSPACE_LISTING_CACHE_VERSION
+            and cached_signature == content_signature
+            and isinstance(cached_payload, dict)
+        ):
+            _WORKSPACE_LISTING_MEMORY_CACHE[memory_cache_key] = (
+                WORKSPACE_LISTING_CACHE_VERSION,
+                content_signature,
+                deepcopy(cached_payload),
+            )
+            return _clone_workspace_listing_payload(cached_payload)
     projects = sorted(orchestrator.list_projects(), key=lambda item: item.metadata.created_at, reverse=True)
     project_payloads = [project_list_item_payload(orchestrator, project) for project in projects]
     history_projects = orchestrator.workspace.list_history_projects()
@@ -1431,5 +1553,13 @@ def list_projects_payload(orchestrator: Orchestrator) -> dict[str, Any]:
         WORKSPACE_LISTING_CACHE_VERSION,
         content_signature,
         deepcopy(payload),
+    )
+    write_json(
+        cache_file,
+        {
+            "version": WORKSPACE_LISTING_CACHE_VERSION,
+            "content_signature": content_signature,
+            "payload": payload,
+        },
     )
     return payload

@@ -12,17 +12,16 @@ import {
   refreshVisibleProjectState,
 } from "../src/controller/projectQueries.js";
 
-test("refreshVisibleProjectState loads listing and selected project detail in parallel", async () => {
+test("refreshVisibleProjectState loads listing and selected project detail with one bridge request", async () => {
   const calls = [];
   const bridgeRequest = async (command, payload, workspaceRoot) => {
     calls.push({ command, payload, workspaceRoot });
-    if (command === "list-projects") {
+    if (command === "load-visible-project-state") {
       await new Promise((resolve) => setTimeout(resolve, 40));
-      return { projects: [{ repo_id: "demo" }] };
-    }
-    if (command === "load-project") {
-      await new Promise((resolve) => setTimeout(resolve, 40));
-      return { project: { repo_id: "demo" }, detail_level: "core" };
+      return {
+        listing: { projects: [{ repo_id: "demo" }] },
+        detail: { project: { repo_id: "demo" }, detail_level: "core" },
+      };
     }
     throw new Error(`Unexpected command: ${command}`);
   };
@@ -35,16 +34,26 @@ test("refreshVisibleProjectState loads listing and selected project detail in pa
     listing: { projects: [{ repo_id: "demo" }] },
     detail: { project: { repo_id: "demo" }, detail_level: "core" },
   });
-  assert.equal(calls[0].command, "list-projects");
-  assert.equal(calls[1].command, "load-project");
-  assert.ok(elapsedMs < 70, `expected parallel refresh to finish quickly, took ${elapsedMs}ms`);
+  assert.deepEqual(calls, [
+    {
+      command: "load-visible-project-state",
+      payload: {
+        repo_id: "demo",
+        refresh_codex_status: false,
+        detail_level: "core",
+        include_listing: true,
+      },
+      workspaceRoot: "/workspace",
+    },
+  ]);
+  assert.ok(elapsedMs < 70, `expected combined refresh to finish quickly, took ${elapsedMs}ms`);
 });
 
 test("refreshVisibleProjectState skips detail loading when no project is selected", async () => {
   const calls = [];
-  const bridgeRequest = async (command) => {
-    calls.push(command);
-    return { projects: [] };
+  const bridgeRequest = async (command, payload, workspaceRoot) => {
+    calls.push({ command, payload, workspaceRoot });
+    return { listing: { projects: [] }, detail: null };
   };
 
   const result = await refreshVisibleProjectState(bridgeRequest, "/workspace", "", { detailLevel: "core" });
@@ -53,15 +62,25 @@ test("refreshVisibleProjectState skips detail loading when no project is selecte
     listing: { projects: [] },
     detail: null,
   });
-  assert.deepEqual(calls, ["list-projects"]);
+  assert.deepEqual(calls, [
+    {
+      command: "load-visible-project-state",
+      payload: {
+        refresh_codex_status: false,
+        detail_level: "core",
+        include_listing: true,
+      },
+      workspaceRoot: "/workspace",
+    },
+  ]);
 });
 
 test("refreshVisibleProjectState can skip listing when only selected detail needs a live refresh", async () => {
   const calls = [];
   const bridgeRequest = async (command, payload, workspaceRoot) => {
     calls.push({ command, payload, workspaceRoot });
-    if (command === "load-project") {
-      return { project: { repo_id: "demo" }, detail_level: "full" };
+    if (command === "load-visible-project-state") {
+      return { detail: { project: { repo_id: "demo" }, detail_level: "full" } };
     }
     throw new Error(`Unexpected command: ${command}`);
   };
@@ -77,11 +96,12 @@ test("refreshVisibleProjectState can skip listing when only selected detail need
   });
   assert.deepEqual(calls, [
     {
-      command: "load-project",
+      command: "load-visible-project-state",
       payload: {
         repo_id: "demo",
         refresh_codex_status: false,
         detail_level: "full",
+        include_listing: false,
       },
       workspaceRoot: "/workspace",
     },

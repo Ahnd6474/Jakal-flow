@@ -1,11 +1,7 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { BottomToolPanel } from "./components/layout/BottomToolPanel";
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { CenterWorkspace } from "./components/layout/CenterWorkspace";
-import { CommandPalette } from "./components/layout/CommandPalette";
-import { RightSidebarPane } from "./components/layout/RightSidebarPane";
 import { IdeToolbar } from "./components/layout/IdeToolbar";
 import { RunProgressPanel } from "./components/layout/RunProgressPanel";
-import { SidebarPane } from "./components/layout/SidebarPane";
 import { Splitter } from "./components/layout/Splitter";
 import { StatusBar } from "./components/layout/StatusBar";
 import { nextRightSidebarState, nextSidebarTab } from "./controllerHelpers";
@@ -25,6 +21,43 @@ const BOTTOM_MAX = 600;
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
+
+function lazyNamedExport(loader, exportName) {
+  return lazy(() => loader().then((module) => ({ default: module[exportName] })));
+}
+
+function scheduleIdleWork(callback) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+  if (typeof window.requestIdleCallback === "function") {
+    const handle = window.requestIdleCallback(callback, { timeout: 1200 });
+    return () => window.cancelIdleCallback?.(handle);
+  }
+  const handle = window.setTimeout(callback, 200);
+  return () => window.clearTimeout(handle);
+}
+
+function PanelSuspenseFallback({ className = "" }) {
+  return <div className={className} aria-hidden="true" />;
+}
+
+const LazyCommandPalette = lazyNamedExport(
+  () => import("./components/layout/CommandPalette"),
+  "CommandPalette",
+);
+const LazySidebarPane = lazyNamedExport(
+  () => import("./components/layout/SidebarPane"),
+  "SidebarPane",
+);
+const LazyRightSidebarPane = lazyNamedExport(
+  () => import("./components/layout/RightSidebarPane"),
+  "RightSidebarPane",
+);
+const LazyBottomToolPanel = lazyNamedExport(
+  () => import("./components/layout/BottomToolPanel"),
+  "BottomToolPanel",
+);
 
 export default function App() {
   const controller = useDesktopController();
@@ -81,6 +114,13 @@ export default function App() {
     controller.setSidebarTab,
     controller.startNewProject,
   ]);
+
+  useEffect(() => scheduleIdleWork(() => {
+    void import("./components/layout/CommandPalette");
+    void import("./components/layout/SidebarPane");
+    void import("./components/layout/RightSidebarPane");
+    void import("./components/layout/BottomToolPanel");
+  }), []);
 
   /* Theme */
   useEffect(() => {
@@ -300,37 +340,39 @@ export default function App() {
           className={`ide-pane ide-pane--sidebar ${sidebarOpen ? "" : "ide-pane--sidebar-collapsed"}`.trim()}
           style={sidebarStyle}
         >
-          <SidebarPane
-            activeTab={controller.sidebarTab}
-            onChangeTab={(nextTab) =>
-              controller.setSidebarTab((currentTab) => nextSidebarTab(currentTab, nextTab))
-            }
-            projects={controller.filteredProjects}
-            historyProjects={controller.filteredHistoryProjects}
-            selectedProjectId={controller.selectedProjectId}
-            selectedHistoryId={controller.selectedHistoryId}
-            loadingProjectId={controller.loadingProjectId}
-            projectFilter={controller.projectFilter}
-            workspaceFilter={controller.workspaceFilter}
-            onProjectFilterChange={controller.setProjectFilter}
-            onWorkspaceFilterChange={controller.setWorkspaceFilter}
-            onSelectProject={controller.loadProject}
-            onSelectHistory={controller.setSelectedHistoryId}
-            onNewProject={controller.startNewProject}
-            onArchiveProject={controller.archiveProjectById}
-            onDeleteProject={controller.deleteProjectById}
-            onDeleteHistoryEntry={controller.deleteHistoryEntry}
-            workspaceTree={deferredDetail?.workspace_tree}
-            checkpoints={deferredDetail?.checkpoints}
-            github={deferredDetail?.github}
-            planPrompt={controller.planDraft?.project_prompt || ""}
-            onOpenFolder={controller.openRepoInFolder}
-            onOpenVsCode={controller.openRepoInVsCode}
-            onOpenGithub={controller.openRepoOnGithub}
-            queuedJobs={controller.queuedJobs}
-            onCancelQueuedJob={controller.cancelQueuedReservation}
-            busy={controller.busy}
-          />
+          <Suspense fallback={<PanelSuspenseFallback className="ide-pane ide-pane--sidebar" />}>
+            <LazySidebarPane
+              activeTab={controller.sidebarTab}
+              onChangeTab={(nextTab) =>
+                controller.setSidebarTab((currentTab) => nextSidebarTab(currentTab, nextTab))
+              }
+              projects={controller.filteredProjects}
+              historyProjects={controller.filteredHistoryProjects}
+              selectedProjectId={controller.selectedProjectId}
+              selectedHistoryId={controller.selectedHistoryId}
+              loadingProjectId={controller.loadingProjectId}
+              projectFilter={controller.projectFilter}
+              workspaceFilter={controller.workspaceFilter}
+              onProjectFilterChange={controller.setProjectFilter}
+              onWorkspaceFilterChange={controller.setWorkspaceFilter}
+              onSelectProject={controller.loadProject}
+              onSelectHistory={controller.setSelectedHistoryId}
+              onNewProject={controller.startNewProject}
+              onArchiveProject={controller.archiveProjectById}
+              onDeleteProject={controller.deleteProjectById}
+              onDeleteHistoryEntry={controller.deleteHistoryEntry}
+              workspaceTree={deferredDetail?.workspace_tree}
+              checkpoints={deferredDetail?.checkpoints}
+              github={deferredDetail?.github}
+              planPrompt={controller.planDraft?.project_prompt || ""}
+              onOpenFolder={controller.openRepoInFolder}
+              onOpenVsCode={controller.openRepoInVsCode}
+              onOpenGithub={controller.openRepoOnGithub}
+              queuedJobs={controller.queuedJobs}
+              onCancelQueuedJob={controller.cancelQueuedReservation}
+              busy={controller.busy}
+            />
+          </Suspense>
         </div>
 
         {/* Left splitter */}
@@ -404,12 +446,14 @@ export default function App() {
             <>
               <Splitter axis="horizontal" onResize={bottomSplitter.onResize} onDragEnd={bottomSplitter.onDragEnd} title="Resize bottom panel" />
               <div className="ide-pane ide-pane--bottom" style={{ height: controller.bottomHeight, flex: `0 0 ${controller.bottomHeight}px` }}>
-                <BottomToolPanel
-                  activeTab={controller.bottomTab}
-                  onChangeTab={controller.setBottomTab}
-                  data={deferredDetail}
-                  onHide={() => controller.setBottomCollapsed(true)}
-                />
+                <Suspense fallback={<PanelSuspenseFallback className="ide-pane ide-pane--bottom" />}>
+                  <LazyBottomToolPanel
+                    activeTab={controller.bottomTab}
+                    onChangeTab={controller.setBottomTab}
+                    data={deferredDetail}
+                    onHide={() => controller.setBottomCollapsed(true)}
+                  />
+                </Suspense>
               </div>
             </>
           ) : null}
@@ -423,32 +467,34 @@ export default function App() {
           className={`ide-pane ide-pane--details ${rightOpen ? "" : "ide-pane--details-collapsed"}`.trim()}
           style={rightStyle}
         >
-          <RightSidebarPane
-            activeTab={rightTab}
-            collapsed={!rightOpen}
-            onChangeTab={handleRightTabChange}
-            detail={deferredDetail}
-            planDraft={deferredPlanDraft}
-            selectedStepId={controller.selectedStepId}
-            modelPresets={controller.modelPresets}
-            form={controller.projectForm}
-            activeJob={controller.activeJob}
-            busy={controller.busy}
-            onChangeForm={controller.setProjectForm}
-            chat={deferredDetail?.chat}
-            selectedChatSessionId={controller.selectedChatSessionId}
-            chatDraftSession={controller.chatDraftSession}
-            onSelectChatSession={controller.loadChatSession}
-            onStartNewChatSession={controller.startNewChatSession}
-            onSendChatMessage={controller.sendChatMessage}
-            onResolveCommonRequirement={controller.resolveCommonRequirement}
-            onReopenCommonRequirement={controller.reopenCommonRequirement}
-            onRecordSpineCheckpoint={controller.recordSpineCheckpoint}
-            onUpdateCommonRequirement={controller.updateCommonRequirement}
-            onDeleteCommonRequirement={controller.deleteCommonRequirement}
-            onUpdateSpineCheckpoint={controller.updateSpineCheckpoint}
-            onDeleteSpineCheckpoint={controller.deleteSpineCheckpoint}
-          />
+          <Suspense fallback={<PanelSuspenseFallback className="ide-pane ide-pane--details" />}>
+            <LazyRightSidebarPane
+              activeTab={rightTab}
+              collapsed={!rightOpen}
+              onChangeTab={handleRightTabChange}
+              detail={deferredDetail}
+              planDraft={deferredPlanDraft}
+              selectedStepId={controller.selectedStepId}
+              modelPresets={controller.modelPresets}
+              form={controller.projectForm}
+              activeJob={controller.activeJob}
+              busy={controller.busy}
+              onChangeForm={controller.setProjectForm}
+              chat={deferredDetail?.chat}
+              selectedChatSessionId={controller.selectedChatSessionId}
+              chatDraftSession={controller.chatDraftSession}
+              onSelectChatSession={controller.loadChatSession}
+              onStartNewChatSession={controller.startNewChatSession}
+              onSendChatMessage={controller.sendChatMessage}
+              onResolveCommonRequirement={controller.resolveCommonRequirement}
+              onReopenCommonRequirement={controller.reopenCommonRequirement}
+              onRecordSpineCheckpoint={controller.recordSpineCheckpoint}
+              onUpdateCommonRequirement={controller.updateCommonRequirement}
+              onDeleteCommonRequirement={controller.deleteCommonRequirement}
+              onUpdateSpineCheckpoint={controller.updateSpineCheckpoint}
+              onDeleteSpineCheckpoint={controller.deleteSpineCheckpoint}
+            />
+          </Suspense>
         </div>
       </div>
 
@@ -463,11 +509,15 @@ export default function App() {
       />
 
       {/* ── Command palette (Double Shift / Ctrl+Shift+A) ── */}
-      <CommandPalette
-        open={commandPaletteOpen}
-        onClose={handleCloseCommandPalette}
-        actions={paletteActions}
-      />
+      {commandPaletteOpen ? (
+        <Suspense fallback={null}>
+          <LazyCommandPalette
+            open={commandPaletteOpen}
+            onClose={handleCloseCommandPalette}
+            actions={paletteActions}
+          />
+        </Suspense>
+      ) : null}
     </main>
   );
 }

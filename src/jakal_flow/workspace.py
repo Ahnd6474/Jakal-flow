@@ -51,7 +51,23 @@ class WorkspaceManager:
         cache_key = self._project_cache_key(context.paths.project_root)
         self._project_context_cache[cache_key] = (
             self._project_context_signature(context.paths),
-            deepcopy(context),
+            self._copy_project_context(context),
+        )
+
+    def _copy_project_context(self, context: ProjectContext) -> ProjectContext:
+        copied_metadata = replace(context.metadata)
+        copied_runtime = replace(context.runtime)
+        copied_paths = replace(context.paths)
+        copied_loop_state = replace(
+            context.loop_state,
+            last_candidates=deepcopy(context.loop_state.last_candidates),
+            counters=replace(context.loop_state.counters),
+        )
+        return ProjectContext(
+            metadata=copied_metadata,
+            runtime=copied_runtime,
+            paths=copied_paths,
+            loop_state=copied_loop_state,
         )
 
     def _invalidate_project_context_cache(self, project_root: Path | None = None) -> None:
@@ -509,7 +525,7 @@ class WorkspaceManager:
         signature = self._project_context_signature(paths)
         cached = self._project_context_cache.get(cache_key)
         if cached is not None and cached[0] == signature:
-            return deepcopy(cached[1])
+            return self._copy_project_context(cached[1])
         if metadata_data is None:
             metadata_data = read_json(paths.metadata_file)
         runtime_data = read_json(paths.project_config_file)
@@ -561,7 +577,7 @@ class WorkspaceManager:
             counters=replace(LoopCounters(), **counters_data),
         )
         context = ProjectContext(metadata=metadata, runtime=runtime, paths=paths, loop_state=loop_state)
-        self._project_context_cache[cache_key] = (signature, deepcopy(context))
+        self._project_context_cache[cache_key] = (signature, self._copy_project_context(context))
         return context
 
     def find_project(self, repo_url: str, branch: str) -> ProjectContext | None:

@@ -28,3 +28,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "jakal_flow" = ["docs/*.txt", "docs/*.md"]
+
+[tool.pytest.ini_options]
+addopts = "--basetemp=.artifacts/pytest/tmp -p no:cacheprovider"

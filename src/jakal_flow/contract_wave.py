@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 import re
@@ -17,6 +18,9 @@ DEFAULT_SPINE_VERSION = "spine-v1"
 DEFAULT_VERIFICATION_PROFILE = "default"
 _SYMBOLIC_SOURCE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx"}
 _UNCHANGED = object()
+_SPINE_STATE_CACHE: dict[str, tuple[tuple[int, int, int], "SpineState"]] = {}
+_COMMON_REQUIREMENTS_STATE_CACHE: dict[str, tuple[tuple[int, int, int], "CommonRequirementsState"]] = {}
+_LINEAGE_MANIFEST_CACHE: dict[str, tuple[tuple[tuple[str, int, int], ...], list["LineageManifest"]]] = {}
 
 
 def _normalize(value: Any) -> Any:
@@ -437,29 +441,93 @@ def default_common_requirements_state() -> CommonRequirementsState:
     return CommonRequirementsState(updated_at=now_utc_iso(), open_requirements=[], resolved_requirements=[])
 
 
+def _state_file_token(path: Path) -> tuple[int, int, int]:
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return (0, 0, 0)
+    return (1, int(stat_result.st_mtime_ns), int(stat_result.st_size))
+
+
+def _manifest_cache_key(paths: ProjectPaths) -> str:
+    return str(paths.lineage_manifests_dir.resolve())
+
+
+def _manifest_cache_token(manifests_dir: Path) -> tuple[tuple[str, int, int], ...]:
+    if not manifests_dir.exists():
+        return ()
+    entries: list[tuple[str, int, int]] = []
+    for item in sorted(manifests_dir.glob("*.json")):
+        try:
+            stat_result = item.stat()
+        except OSError:
+            continue
+        entries.append((item.name, int(stat_result.st_mtime_ns), int(stat_result.st_size)))
+    return tuple(entries)
+
+
+def _cached_lineage_manifests(paths: ProjectPaths) -> list[LineageManifest]:
+    ensure_contract_wave_artifacts(paths)
+    cache_key = _manifest_cache_key(paths)
+    cache_token = _manifest_cache_token(paths.lineage_manifests_dir)
+    cached = _LINEAGE_MANIFEST_CACHE.get(cache_key)
+    if cached is not None and cached[0] == cache_token:
+        return cached[1]
+    manifests: list[LineageManifest] = []
+    for item in sorted(paths.lineage_manifests_dir.glob("*.json")):
+        raw = read_json(item, default={})
+        if not isinstance(raw, dict):
+            continue
+        manifests.append(LineageManifest.from_dict(raw))
+    _LINEAGE_MANIFEST_CACHE[cache_key] = (cache_token, manifests)
+    return manifests
+
+
 def load_spine_state(path: Path) -> SpineState:
+    cache_key = str(path.resolve())
+    cache_token = _state_file_token(path)
+    cached = _SPINE_STATE_CACHE.get(cache_key)
+    if cached is not None and cached[0] == cache_token:
+        return SpineState.from_dict(cached[1].to_dict())
     raw = read_json(path, default={})
     if not isinstance(raw, dict):
         return default_spine_state()
-    return SpineState.from_dict(raw)
+    state = SpineState.from_dict(raw)
+    _SPINE_STATE_CACHE[cache_key] = (cache_token, SpineState.from_dict(state.to_dict()))
+    return state
 
 
 def save_spine_state(path: Path, state: SpineState) -> SpineState:
     state.updated_at = state.updated_at or now_utc_iso()
     write_json(path, state.to_dict())
+    _SPINE_STATE_CACHE[str(path.resolve())] = (_state_file_token(path), SpineState.from_dict(state.to_dict()))
     return state
 
 
 def load_common_requirements_state(path: Path) -> CommonRequirementsState:
+    cache_key = str(path.resolve())
+    cache_token = _state_file_token(path)
+    cached = _COMMON_REQUIREMENTS_STATE_CACHE.get(cache_key)
+    if cached is not None and cached[0] == cache_token:
+        return CommonRequirementsState.from_dict(cached[1].to_dict())
     raw = read_json(path, default={})
     if not isinstance(raw, dict):
         return default_common_requirements_state()
-    return CommonRequirementsState.from_dict(raw)
+    state = CommonRequirementsState.from_dict(raw)
+    _COMMON_REQUIREMENTS_STATE_CACHE[cache_key] = (
+        cache_token,
+        CommonRequirementsState.from_dict(state.to_dict()),
+    )
+    return state
 
 
 def save_common_requirements_state(path: Path, state: CommonRequirementsState) -> CommonRequirementsState:
     state.updated_at = state.updated_at or now_utc_iso()
     write_json(path, state.to_dict())
+    _COMMON_REQUIREMENTS_STATE_CACHE[str(path.resolve())] = (
+        _state_file_token(path),
+        CommonRequirementsState.from_dict(state.to_dict()),
+    )
     return state
 
 
@@ -663,6 +731,22 @@ def ensure_contract_wave_artifacts(paths: ProjectPaths) -> None:
 def current_spine_version(paths: ProjectPaths) -> str:
     ensure_contract_wave_artifacts(paths)
     return load_spine_state(paths.spine_file).current_version or DEFAULT_SPINE_VERSION
+
+
+def manifest_symbol_inventory_paths(
+    changed_files: list[str],
+    diff_entries: list[tuple[str, str]] | None = None,
+) -> list[str]:
+    candidate_paths = _normalize_paths(changed_files)
+    if diff_entries:
+        diff_paths = _normalize_paths([path for _status, path in diff_entries])
+        if diff_paths:
+            candidate_paths = diff_paths
+    return [
+        path
+        for path in candidate_paths
+        if _supports_symbol_inventory(path) and (_is_helper_path(path) or _is_public_api_path(path))
+    ]
 
 
 def _advance_spine_version(current_version: str) -> str:
@@ -1379,7 +1463,11 @@ def persist_lineage_completion_artifacts(
     manifest: LineageManifest,
     assessment: PromotionAssessment,
 ) -> tuple[SpineState, CommonRequirementsState, CommonRequirementRecord | None, Path]:
-    rollback_spine_state, rollback_requirements_state = snapshot_contract_wave_artifacts(paths)
+    ensure_contract_wave_artifacts(paths)
+    spine_state = load_spine_state(paths.spine_file)
+    requirements_state = load_common_requirements_state(paths.common_requirements_file)
+    rollback_spine_state = _clone_spine_state(spine_state)
+    rollback_requirements_state = _clone_common_requirements_state(requirements_state)
     try:
         spine_state, requirements_state, crr_record = update_contract_wave_artifacts_for_completion(
             paths,
@@ -1387,6 +1475,8 @@ def persist_lineage_completion_artifacts(
             lineage_id=lineage_id,
             manifest=manifest,
             assessment=assessment,
+            spine_state=spine_state,
+            requirements_state=requirements_state,
         )
         manifest_path = save_lineage_manifest(paths, manifest)
     except ContractWavePersistenceError as exc:
@@ -1407,22 +1497,48 @@ def persist_lineage_completion_artifacts(
 
 
 def load_lineage_manifests(paths: ProjectPaths, *, lineage_id: str = "") -> list[LineageManifest]:
-    ensure_contract_wave_artifacts(paths)
-    manifests: list[LineageManifest] = []
     target_lineage = str(lineage_id).strip()
-    for item in sorted(paths.lineage_manifests_dir.glob("*.json")):
-        raw = read_json(item, default={})
-        if not isinstance(raw, dict):
-            continue
-        manifest = LineageManifest.from_dict(raw)
-        if target_lineage and manifest.lineage_id != target_lineage:
-            continue
-        manifests.append(manifest)
-    return manifests
+    manifests = _cached_lineage_manifests(paths)
+    if not target_lineage:
+        return deepcopy(manifests)
+    return [deepcopy(manifest) for manifest in manifests if manifest.lineage_id == target_lineage]
 
 
-def load_lineage_manifest_payloads(paths: ProjectPaths) -> list[dict[str, Any]]:
-    return [manifest.to_dict() for manifest in load_lineage_manifests(paths)]
+def load_lineage_manifest_payloads(
+    paths: ProjectPaths,
+    *,
+    lineage_id: str = "",
+    limit: int | None = None,
+    newest_first: bool = False,
+) -> list[dict[str, Any]]:
+    target_lineage = str(lineage_id).strip()
+    manifests = _cached_lineage_manifests(paths)
+    if target_lineage:
+        manifests = [manifest for manifest in manifests if manifest.lineage_id == target_lineage]
+    if newest_first:
+        manifests = list(reversed(manifests))
+    if isinstance(limit, int) and limit >= 0:
+        manifests = manifests[:limit]
+    return [manifest.to_dict() for manifest in manifests]
+
+
+def lineage_manifest_summary_payload(paths: ProjectPaths) -> dict[str, Any]:
+    manifests = _cached_lineage_manifests(paths)
+    summary = {
+        "total": len(manifests),
+        "green_count": 0,
+        "yellow_count": 0,
+        "red_count": 0,
+        "latest_manifest": manifests[-1].to_dict() if manifests else None,
+    }
+    for manifest in manifests:
+        if manifest.promotion_class == "green":
+            summary["green_count"] += 1
+        elif manifest.promotion_class == "yellow":
+            summary["yellow_count"] += 1
+        elif manifest.promotion_class == "red":
+            summary["red_count"] += 1
+    return summary
 
 
 def manifest_summary_markdown(manifests: list[LineageManifest]) -> str:
@@ -1495,10 +1611,16 @@ def update_contract_wave_artifacts_for_completion(
     lineage_id: str,
     manifest: LineageManifest,
     assessment: PromotionAssessment,
+    spine_state: SpineState | None = None,
+    requirements_state: CommonRequirementsState | None = None,
 ) -> tuple[SpineState, CommonRequirementsState, CommonRequirementRecord | None]:
     ensure_contract_wave_artifacts(paths)
-    spine_state = load_spine_state(paths.spine_file)
-    requirements_state = load_common_requirements_state(paths.common_requirements_file)
+    spine_state = spine_state if spine_state is not None else load_spine_state(paths.spine_file)
+    requirements_state = (
+        requirements_state
+        if requirements_state is not None
+        else load_common_requirements_state(paths.common_requirements_file)
+    )
     timestamp = now_utc_iso()
     normalize_execution_step_policy(step, current_spine_version=spine_state.current_version)
 

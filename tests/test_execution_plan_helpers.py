@@ -5007,6 +5007,157 @@ class ExecutionPlanHelperTests(unittest.TestCase):
         self.assertIn("omitted to keep planning context compact", repo_inputs["docs"])
         self.assertIn("note_1.md", repo_inputs["docs"])
 
+    def test_plan_work_reuses_existing_plan_without_re_scanning_resolution_inputs(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_plan_work_existing_plan_scan_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "README.md").write_text("README summary", encoding="utf-8")
+        (repo_dir / "AGENTS.md").write_text("AGENTS summary", encoding="utf-8")
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        context = orchestrator.workspace.initialize_project(
+            repo_url="https://github.com/example/project.git",
+            branch="main",
+            runtime=runtime,
+        )
+        context.paths.repo_dir.mkdir(parents=True, exist_ok=True)
+        context.paths.plan_file.write_text("# Existing Plan\n\n- [ ] PL1: Keep the current plan.\n", encoding="utf-8")
+        orchestrator.workspace.save_project(context)
+
+        try:
+            with mock.patch.object(orchestrator.workspace, "find_project", return_value=context), mock.patch.object(
+                orchestrator.git,
+                "clone_or_update",
+            ), mock.patch.object(
+                orchestrator.git,
+                "configure_local_identity",
+            ), mock.patch.object(
+                orchestrator,
+                "_plan_block_items",
+                return_value=([], "# Mid-Term Plan\n"),
+            ), mock.patch(
+                "jakal_flow.orchestrator.scan_repository_inputs",
+                side_effect=AssertionError("plan_work should not rescan repository inputs when the saved plan is reused."),
+            ):
+                result = orchestrator.plan_work(
+                    repo_url="https://github.com/example/project.git",
+                    branch="main",
+                    runtime=runtime,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(result["current_status"], context.metadata.current_status)
+
+    def test_generate_codex_work_items_uses_supplied_repo_inputs_without_rescan(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_generate_codex_work_items_scan_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+        supplied_repo_inputs = {
+            "readme": "README summary",
+            "agents": "AGENTS summary",
+            "docs": "No markdown files under repo/docs.",
+            "source": "Existing implementation files detected. Prefer extending src/main.py.",
+        }
+
+        try:
+            with mock.patch(
+                "jakal_flow.orchestrator.scan_repository_inputs",
+                side_effect=AssertionError("supplied repo inputs should be reused directly."),
+            ), mock.patch.object(
+                MemoryStore,
+                "render_context",
+                return_value="memory context",
+            ), mock.patch.object(
+                orchestrator,
+                "_run_pass_with_provider_fallback",
+                return_value=SimpleNamespace(returncode=1, last_message=""),
+            ):
+                items = orchestrator._generate_codex_work_items(
+                    context=context,
+                    runner=mock.Mock(),
+                    plan_text="# Plan\n\n- [ ] PL1: Demo\n",
+                    max_items=3,
+                    repo_inputs=supplied_repo_inputs,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(items, [])
+
+    def test_save_execution_plan_state_skips_static_artifact_refresh_when_only_status_changes(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_plan_artifact_refresh_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest")
+        context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+        initial_state = ExecutionPlanState(
+            plan_title="Artifact refresh demo",
+            project_prompt="Keep the plan stable.",
+            summary="Plan structure should not be rewritten for status-only changes.",
+            default_test_command="python -m pytest",
+            steps=[
+                ExecutionStep(
+                    step_id="ST1",
+                    title="Stabilize the plan artifacts",
+                    display_description="Keep the static documents stable.",
+                    codex_description="Preserve the plan docs while runtime status changes.",
+                    owned_paths=["src/jakal_flow/orchestrator.py"],
+                )
+            ],
+        )
+        running_state = ExecutionPlanState(
+            plan_title=initial_state.plan_title,
+            project_prompt=initial_state.project_prompt,
+            summary=initial_state.summary,
+            default_test_command=initial_state.default_test_command,
+            steps=[
+                ExecutionStep(
+                    step_id="ST1",
+                    title="Stabilize the plan artifacts",
+                    display_description="Keep the static documents stable.",
+                    codex_description="Preserve the plan docs while runtime status changes.",
+                    owned_paths=["src/jakal_flow/orchestrator.py"],
+                    status="running",
+                    started_at="2026-03-30T00:00:00+00:00",
+                )
+            ],
+        )
+
+        try:
+            with mock.patch("jakal_flow.orchestrator.execution_plan_markdown", return_value="plan doc\n") as mocked_plan_markdown, mock.patch(
+                "jakal_flow.orchestrator.build_mid_term_plan_from_plan_items",
+                return_value=("mid term doc\n", []),
+            ) as mocked_mid_term, mock.patch(
+                "jakal_flow.orchestrator.ensure_scope_guard",
+                return_value="scope guard\n",
+            ) as mocked_scope_guard, mock.patch(
+                "jakal_flow.orchestrator.execution_plan_svg",
+                return_value="<svg />\n",
+            ) as mocked_svg:
+                orchestrator.save_execution_plan_state(context, initial_state)
+                saved = orchestrator.save_execution_plan_state(context, running_state)
+                checkpoint_payload = read_json(context.paths.checkpoint_state_file, default={})
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(mocked_plan_markdown.call_count, 1)
+        self.assertEqual(mocked_mid_term.call_count, 1)
+        self.assertEqual(mocked_scope_guard.call_count, 1)
+        self.assertEqual(mocked_svg.call_count, 1)
+        self.assertEqual(saved.steps[0].status, "running")
+        self.assertEqual(checkpoint_payload["checkpoints"][0]["status"], "running")
+
     def test_parallel_worker_summary_prefers_logged_failure_detail(self) -> None:
         orchestrator = Orchestrator(Path(__file__).resolve().parents[1] / ".tmp_parallel_worker_summary_test")
         summary = orchestrator._parallel_worker_summary(

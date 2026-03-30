@@ -7,6 +7,7 @@ import secrets
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from urllib.parse import quote
 
@@ -40,6 +41,9 @@ MAX_PUBLIC_LOG_LINES = 12
 DEFAULT_VIEWER_PATH = "/share/view"
 DEFAULT_SHARE_PUBLIC_BASE_URL = ""
 _UNSET = object()
+_SHARE_STATUS_CACHE_TTL_SECONDS = 1.0
+_SHARE_STATUS_MEMORY_CACHE: dict[str, tuple[str, float, dict[str, Any]]] = {}
+_WORKSPACE_SHARE_PAYLOAD_MEMORY_CACHE: dict[str, tuple[str, dict[str, Any]]] = {}
 
 TOKEN_PATTERNS = [
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
@@ -67,6 +71,90 @@ def _normalize(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _normalize(item) for key, item in value.items()}
     return value
+
+
+def _path_signature(path: Path) -> str:
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return "missing"
+    return f"{stat_result.st_mtime_ns}:{stat_result.st_size}"
+
+
+def _clone_share_session_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items()}
+
+
+def _clone_share_server_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    config = payload.get("config")
+    public_tunnel = payload.get("public_tunnel")
+    return {
+        key: (
+            dict(config)
+            if key == "config" and isinstance(config, dict)
+            else dict(public_tunnel)
+            if key == "public_tunnel" and isinstance(public_tunnel, dict)
+            else value
+        )
+        for key, value in payload.items()
+    }
+
+
+def _clone_workspace_share_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    server = payload.get("server")
+    sessions = payload.get("sessions")
+    project_active_session = payload.get("project_active_session")
+    active_session = payload.get("active_session")
+    return {
+        "server": _clone_share_server_payload(server) if isinstance(server, dict) else {},
+        "sessions": [
+            _clone_share_session_payload(item)
+            for item in sessions
+            if isinstance(item, dict)
+        ] if isinstance(sessions, list) else [],
+        "project_active_session": (
+            _clone_share_session_payload(project_active_session)
+            if isinstance(project_active_session, dict)
+            else project_active_session
+        ),
+        "active_session": (
+            _clone_share_session_payload(active_session)
+            if isinstance(active_session, dict)
+            else active_session
+        ),
+    }
+
+
+def _invalidate_share_caches(workspace_root: Path) -> None:
+    root_key = str(workspace_root.resolve())
+    _SHARE_STATUS_MEMORY_CACHE.pop(root_key, None)
+    stale_payload_keys = [
+        key
+        for key in _WORKSPACE_SHARE_PAYLOAD_MEMORY_CACHE
+        if key.startswith(f"{root_key}|")
+    ]
+    for key in stale_payload_keys:
+        _WORKSPACE_SHARE_PAYLOAD_MEMORY_CACHE.pop(key, None)
+
+
+def _share_status_signature(workspace_root: Path) -> str:
+    return "|".join(
+        (
+            _path_signature(share_server_status_file(workspace_root)),
+            _path_signature(share_server_config_file(workspace_root)),
+            _path_signature(workspace_root / "public_tunnel.json"),
+        )
+    )
+
+
+def _workspace_share_payload_signature(workspace_root: Path, context: ProjectContext | None) -> str:
+    return "|".join(
+        (
+            _share_status_signature(workspace_root),
+            _path_signature(workspace_share_sessions_file(workspace_root)),
+            str(context.metadata.repo_id).strip() if context is not None else "",
+        )
+    )
 
 
 def parse_iso_datetime(value: str | None) -> datetime | None:
@@ -271,6 +359,7 @@ def clear_share_server_state(workspace_root: Path) -> None:
         share_server_status_file(workspace_root).unlink(missing_ok=True)
     except OSError:
         pass
+    _invalidate_share_caches(workspace_root)
 
 
 def load_share_server_config(workspace_root: Path) -> ShareServerConfig:
@@ -286,6 +375,7 @@ def load_share_server_config(workspace_root: Path) -> ShareServerConfig:
 def save_share_server_config(workspace_root: Path, config: ShareServerConfig) -> ShareServerConfig:
     normalized = ShareServerConfig.from_dict(config.to_dict())
     write_json(share_server_config_file(workspace_root), normalized.to_dict())
+    _invalidate_share_caches(workspace_root)
     return normalized
 
 
@@ -302,13 +392,19 @@ def ensure_share_access_token(workspace_root: Path, config: ShareServerConfig | 
 def share_server_status_payload(workspace_root: Path) -> dict[str, Any]:
     from .public_tunnel import normalize_tunnel_target_url, public_tunnel_status_payload
 
+    cache_key = str(workspace_root.resolve())
+    signature = _share_status_signature(workspace_root)
+    cached = _SHARE_STATUS_MEMORY_CACHE.get(cache_key)
+    if cached is not None and cached[0] == signature and (monotonic() - cached[1]) <= _SHARE_STATUS_CACHE_TTL_SECONDS:
+        return _clone_share_server_payload(cached[2])
+
     config = load_share_server_config(workspace_root)
     tunnel = public_tunnel_status_payload(workspace_root)
     state = load_share_server_state(workspace_root)
     tunnel_public_url = str(tunnel.get("public_url") or "").strip()
     tunnel_target = normalize_tunnel_target_url(str(tunnel.get("target_url") or "").strip())
     if state is None:
-        return {
+        payload = {
             "running": False,
             "host": DEFAULT_SHARE_HOST,
             "port": None,
@@ -319,6 +415,8 @@ def share_server_status_payload(workspace_root: Path) -> dict[str, Any]:
             "share_base_url_source": "config" if config.public_base_url else None,
             "public_tunnel": tunnel,
         }
+        _SHARE_STATUS_MEMORY_CACHE[cache_key] = (signature, monotonic(), _clone_share_server_payload(payload))
+        return payload
     running = process_is_running(state.pid)
     local_tunnel_target = normalize_tunnel_target_url(state.base_url if running else "")
     tunnel_matches_server = bool(
@@ -336,6 +434,7 @@ def share_server_status_payload(workspace_root: Path) -> dict[str, Any]:
     )
     if not running:
         clear_share_server_state(workspace_root)
+        signature = _share_status_signature(workspace_root)
     payload = {
         "running": running,
         "host": state.host,
@@ -349,6 +448,7 @@ def share_server_status_payload(workspace_root: Path) -> dict[str, Any]:
         "share_base_url_source": share_base_url_source,
         "public_tunnel": tunnel,
     }
+    _SHARE_STATUS_MEMORY_CACHE[cache_key] = (signature, monotonic(), _clone_share_server_payload(payload))
     return payload
 
 
@@ -386,6 +486,7 @@ def load_workspace_share_sessions(workspace_root: Path) -> list[ShareSession]:
 
 def save_workspace_share_sessions(workspace_root: Path, sessions: list[ShareSession]) -> None:
     _save_share_sessions_to_file(workspace_share_sessions_file(workspace_root), sessions)
+    _invalidate_share_caches(workspace_root)
 
 
 def append_share_audit_event(workspace_root: Path, event_type: str, details: dict[str, Any] | None = None) -> None:
@@ -1047,6 +1148,13 @@ def public_session_summary(
 
 
 def workspace_share_payload(workspace_root: Path, context: ProjectContext | None = None) -> dict[str, Any]:
+    ensure_share_access_token(workspace_root)
+    cache_key = f"{workspace_root.resolve()}|{str(context.metadata.repo_id).strip() if context is not None else ''}"
+    signature = _workspace_share_payload_signature(workspace_root, context)
+    cached = _WORKSPACE_SHARE_PAYLOAD_MEMORY_CACHE.get(cache_key)
+    if cached is not None and cached[0] == signature:
+        return _clone_workspace_share_payload(cached[1])
+
     sessions = load_workspace_share_sessions(workspace_root)
     state = load_share_server_state(workspace_root)
     server = share_server_status_payload(workspace_root)
@@ -1077,12 +1185,14 @@ def workspace_share_payload(workspace_root: Path, context: ProjectContext | None
         server=server,
         state=state,
     )
-    return {
+    payload = {
         "server": server,
         "sessions": public_sessions,
         "project_active_session": project_active,
         "active_session": active,
     }
+    _WORKSPACE_SHARE_PAYLOAD_MEMORY_CACHE[cache_key] = (signature, _clone_workspace_share_payload(payload))
+    return payload
 
 
 def project_share_payload(workspace_root: Path, context: ProjectContext) -> dict[str, Any]:
