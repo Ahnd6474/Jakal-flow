@@ -1870,14 +1870,14 @@ export function useDesktopController() {
   async function sendChatMessage(text, mode = "conversation") {
     const messageText = String(text || "").trim();
     const normalizedMode = String(mode || "conversation").trim().toLowerCase() || "conversation";
+    if (!messageText) {
+      return null;
+    }
     if (normalizedMode === "plan") {
       return generatePlan(messageText);
     }
     if (!projectForm.project_dir.trim()) {
       setMessage(messagePayload("error", translate(language, "message.openProjectFirst")));
-      return null;
-    }
-    if (!messageText) {
       return null;
     }
     if (["queued", "running"].includes(String(projectJob?.status || "").trim().toLowerCase())) {

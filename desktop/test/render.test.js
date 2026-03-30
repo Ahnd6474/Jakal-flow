@@ -687,6 +687,60 @@ test("RightSidebarPane renders the project chat on the right rail by default", a
   assert.match(html, /Release/);
   assert.match(html, /Hello from the right side\./);
   assert.match(html, /chat\.summary\.txt/);
+  assert.match(html, /title="Choose plan, debugger, or merger"/);
+});
+
+test("RightSidebarPane merges plan generation into the center chat composer", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-chat-center-plan-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      chatCenterMode: true,
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+        runtime: {
+          effort: "medium",
+        },
+      },
+      planDraft: {
+        project_prompt: "Ship the merged plan flow",
+        steps: [],
+      },
+      promptValue: "Ship the merged plan flow",
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: null,
+      busy: false,
+      chat: {
+        sessions: [],
+        active_session_id: "",
+        messages: [],
+        summary_file: "",
+      },
+      selectedChatSessionId: "",
+      chatDraftSession: true,
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+      onChangeChatModelSelection: noop,
+      onGeneratePlan: noop,
+    },
+  );
+
+  const textareaMatches = html.match(/<textarea\b/g) || [];
+  assert.equal(textareaMatches.length, 1);
+  assert.match(html, /title="Choose plan, debugger, or merger"/);
+  assert.doesNotMatch(html, /Plan generation prompt/);
 });
 
 test("RightSidebarPane keeps the icon rail visible when the right panel is collapsed", async () => {

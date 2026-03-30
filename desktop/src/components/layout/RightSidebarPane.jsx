@@ -578,7 +578,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
       ? (language === "ko" ? "계획 생성 프롬프트를 입력하세요... (Enter로 생성)" : "Type a plan prompt... (Enter to generate)")
       : (language === "ko" ? "메시지를 입력하세요... (Enter로 전송)" : "Type a message… (Enter to send)");
   const sendButtonTitle = pendingMode === "plan"
-    ? (language === "ko" ? "Generate Plan" : "Generate Plan")
+    ? (language === "ko" ? "계획 생성" : "Generate Plan")
     : (language === "ko" ? "Send" : "Send");
 
   return (
@@ -736,7 +736,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
                   type="button"
                   onClick={() => {
                     setPendingMode("plan");
-                    setInput((current) => current || String(promptValue || ""));
+                    setInput((current) => current.trim() ? current : String(promptValue || ""));
                     setMenuOpen(false);
                   }}
                 >
