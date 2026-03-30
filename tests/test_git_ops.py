@@ -10,6 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from jakal_flow.errors import SubprocessTimeoutError
 from jakal_flow.git_ops import GitCommandError, GitOps
 from jakal_flow.models import CommandResult
 
@@ -61,6 +62,38 @@ class GitOpsTests(unittest.TestCase):
 
         self.assertTrue(created)
         self.assertEqual(calls, [["init"], ["branch", "--show-current"]])
+
+    def test_current_branch_reads_head_without_git_subprocess(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+        (repo_dir / ".git").mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+        try:
+            with mock.patch.object(git, "run", side_effect=AssertionError("git subprocess should not run")):
+                branch = git.current_branch(repo_dir)
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(branch, "main")
+
+    def test_current_branch_returns_empty_when_git_queries_time_out(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        repo_dir = Path(temp_dir.name)
+        git = GitOps()
+
+        try:
+            with mock.patch.object(
+                git,
+                "run",
+                side_effect=SubprocessTimeoutError("Command timed out after 10.0 seconds: git branch --show-current"),
+            ):
+                branch = git.current_branch(repo_dir)
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(branch, "")
 
     def test_commit_all_uses_custom_author_name(self) -> None:
         repo_dir = Path(__file__).resolve().parents[1]

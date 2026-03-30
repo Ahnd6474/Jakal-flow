@@ -1,21 +1,18 @@
 ﻿import { Suspense, lazy, memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ChatMessageContent } from "../../chatMarkdown";
 import { useI18n } from "../../i18n";
-import { resolveExecutionDisplayPlan, runtimeSummary } from "../../utils";
-<<<<<<< Updated upstream
-import { isActiveExecutionStatus, runtimeSummary, visibleExecutionJob } from "../../utils";
-=======
 import {
   defaultModelForRuntime,
   filterModelCatalogByProvider,
+  formatDurationCompact,
   normalizedLocalModelProvider,
   normalizedModelProvider,
   reasoningEffortLabel,
+  resolveExecutionDisplayPlan,
   runtimeSummary,
   supportedReasoningOptions,
   visibleExecutionJob,
 } from "../../utils";
->>>>>>> Stashed changes
 
 function RailChatIcon() {
   return (
@@ -63,6 +60,18 @@ function RailContractsIcon() {
   );
 }
 
+function RailFlowIcon() {
+  return (
+    <svg aria-hidden="true" className="sidebar-icon__svg" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="10" width="5" height="5" rx="1.4" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="16" y="4" width="5" height="5" rx="1.4" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="16" y="15" width="5" height="5" rx="1.4" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 12.5h4m0 0V6.5m0 6v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M12 6.5h4M12 18.5h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function SendIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -87,6 +96,7 @@ const LazyOutputPanel = lazyNamedExport(() => import("./RightSidebarDetailPanels
 const LazyFilesPanel = lazyNamedExport(() => import("./RightSidebarDetailPanels"), "FilesPanel");
 const LazyContractsPanel = lazyNamedExport(() => import("./RightSidebarDetailPanels"), "ContractsPanel");
 const LazyInspectorPanel = lazyNamedExport(() => import("./RightSidebarDetailPanels"), "InspectorPanel");
+const LazyFlowWorkspaceView = lazyNamedExport(() => import("../views/FlowWorkspaceView"), "FlowWorkspaceView");
 
 function chatModelOptionValue(item = {}) {
   const provider = String(item?.provider || "openai").trim().toLowerCase() || "openai";
@@ -152,10 +162,31 @@ function sameArtifactFiles(previousFiles = [], nextFiles = []) {
   return previousFiles.every((value, index) => value === nextFiles[index]);
 }
 
+function sameQueuedJobs(previousJobs = [], nextJobs = []) {
+  if (previousJobs === nextJobs) {
+    return true;
+  }
+  if (!Array.isArray(previousJobs) || !Array.isArray(nextJobs) || previousJobs.length !== nextJobs.length) {
+    return false;
+  }
+  for (let index = 0; index < previousJobs.length; index += 1) {
+    const previousJob = previousJobs[index];
+    const nextJob = nextJobs[index];
+    if (
+      previousJob?.id !== nextJob?.id
+      || previousJob?.status !== nextJob?.status
+      || previousJob?.queue_position !== nextJob?.queue_position
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function rightRailTabIds(includeChatTab = true) {
   return includeChatTab
-    ? ["chat", "output", "files", "contracts", "inspector"]
-    : ["output", "files", "contracts", "inspector"];
+    ? ["chat", "flow", "output", "files", "contracts", "inspector"]
+    : ["flow", "output", "files", "contracts", "inspector"];
 }
 
 function effectiveRightSidebarTab(activeTab = "chat", includeChatTab = true) {
@@ -183,7 +214,6 @@ function rightSidebarPanePropsEqual(previousProps, nextProps) {
     previousProps.detail?.files?.closeout_report_file
     || previousProps.detail?.reports?.word_report_path
     || previousProps.detail?.reports?.powerpoint_report_path
-    || previousProps.detail?.reports?.powerpoint_report_target_path
     || previousProps.detail?.reports?.webpage_path
     || previousProps.detail?.files?.ml_experiment_report_file,
   );
@@ -191,7 +221,6 @@ function rightSidebarPanePropsEqual(previousProps, nextProps) {
     nextProps.detail?.files?.closeout_report_file
     || nextProps.detail?.reports?.word_report_path
     || nextProps.detail?.reports?.powerpoint_report_path
-    || nextProps.detail?.reports?.powerpoint_report_target_path
     || nextProps.detail?.reports?.webpage_path
     || nextProps.detail?.files?.ml_experiment_report_file,
   );
@@ -216,6 +245,7 @@ function rightSidebarPanePropsEqual(previousProps, nextProps) {
     case "chat":
       return (
         previousProps.chat === nextProps.chat
+        && previousProps.chatJob === nextProps.chatJob
         && previousProps.chatSettings === nextProps.chatSettings
         && previousProps.selectedChatSessionId === nextProps.selectedChatSessionId
         && previousProps.chatDraftSession === nextProps.chatDraftSession
@@ -224,11 +254,27 @@ function rightSidebarPanePropsEqual(previousProps, nextProps) {
         && previousProps.modelCatalog === nextProps.modelCatalog
         && previousProps.modelPresets === nextProps.modelPresets
       );
+    case "flow":
+      return (
+        previousProps.detail === nextProps.detail
+        && previousProps.form === nextProps.form
+        && previousProps.planDraft === nextProps.planDraft
+        && previousProps.activeJob === nextProps.activeJob
+        && previousProps.autoRunAfterPlan === nextProps.autoRunAfterPlan
+        && previousProps.selectedStepId === nextProps.selectedStepId
+        && previousProps.busy === nextProps.busy
+        && previousProps.canRequestStop === nextProps.canRequestStop
+        && previousProps.canCancelReservation === nextProps.canCancelReservation
+        && sameQueuedJobs(previousProps.queuedJobs, nextProps.queuedJobs)
+      );
     case "output":
       return true;
     case "files":
       return (
         previousProps.detail?.files === nextProps.detail?.files
+        && previousProps.form?.runtime?.generate_word_report === nextProps.form?.runtime?.generate_word_report
+        && previousProps.activeJob?.status === nextProps.activeJob?.status
+        && previousProps.busy === nextProps.busy
         && previousProps.detail?.reports?.word_report_path === nextProps.detail?.reports?.word_report_path
         && previousProps.detail?.reports?.powerpoint_report_path === nextProps.detail?.reports?.powerpoint_report_path
         && previousProps.detail?.reports?.powerpoint_report_target_path === nextProps.detail?.reports?.powerpoint_report_target_path
@@ -292,6 +338,7 @@ const CHAT_MESSAGE_BATCH = 100;
 const CHAT_ESTIMATED_ROW_HEIGHT = 92;
 const CHAT_OVERSCAN_ROWS = 6;
 const CHAT_DEFAULT_VIEWPORT_HEIGHT = 520;
+const DEFAULT_CHAT_MODE = "review";
 
 function chatRoleLabel(role, language = "en") {
   if (role === "user") {
@@ -304,6 +351,9 @@ function chatRoleLabel(role, language = "en") {
 }
 
 function chatModeLabel(mode, language = "en") {
+  if (mode === "review") {
+    return language === "ko" ? "Code Review" : "Code Review";
+  }
   if (mode === "plan") {
     return language === "ko" ? "Plan" : "Plan";
   }
@@ -357,14 +407,12 @@ const ProjectChatPane = memo(function ProjectChatPane({
   onSendChatMessage,
   onChangeChatModelSelection,
   onChangeChatReasoningEffort,
+  chatJob,
   busy,
   language,
   centerMode = false,
-<<<<<<< Updated upstream
-  promptValue = "",
-=======
->>>>>>> Stashed changes
   onGeneratePlan,
+  onRequestStop,
 }) {
   const sessions = Array.isArray(chat?.sessions) ? chat.sessions : [];
   const remoteMessages = Array.isArray(chat?.messages) ? chat.messages : [];
@@ -378,9 +426,10 @@ const ProjectChatPane = memo(function ProjectChatPane({
   const selectedChatLocalProvider = String(chatSettings?.chat_local_model_provider || "").trim().toLowerCase();
   const selectedChatModel = String(chatSettings?.chat_model || "").trim().toLowerCase();
   const selectedChatEffort = String(chatSettings?.chat_effort || "").trim().toLowerCase();
+  const chatJobStatus = String(chatJob?.status || "").trim().toLowerCase();
   const projectRuntime = detail?.runtime || {};
   const [input, setInput] = useState("");
-  const [pendingMode, setPendingMode] = useState("conversation");
+  const [pendingMode, setPendingMode] = useState(DEFAULT_CHAT_MODE);
   const [menuOpen, setMenuOpen] = useState(false);
   const [localMessages, setLocalMessages] = useState(deferredRemoteMessages);
   const [visibleMessageCount, setVisibleMessageCount] = useState(MAX_VISIBLE_CHAT_MESSAGES);
@@ -391,6 +440,14 @@ const ProjectChatPane = memo(function ProjectChatPane({
   const shouldStickToBottomRef = useRef(true);
   const [messageScrollTop, setMessageScrollTop] = useState(0);
   const [messageViewportHeight, setMessageViewportHeight] = useState(CHAT_DEFAULT_VIEWPORT_HEIGHT);
+  const [chatElapsedSeconds, setChatElapsedSeconds] = useState(() => {
+    if (chatJobStatus !== "running") {
+      return 0;
+    }
+    const parsedStartedAt = Date.parse(String(chatJob?.started_at || "").trim());
+    const startedAtMs = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
+    return Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+  });
   const providerScopedRuntime = useMemo(
     () => ({
       ...projectRuntime,
@@ -468,6 +525,10 @@ const ProjectChatPane = memo(function ProjectChatPane({
     ),
     [language, projectDefaultSummary, selectedChatEntry],
   );
+  const projectDefaultOptionLabel = useMemo(
+    () => `${language === "ko" ? "Project default" : "Project default"}${projectDefaultSummary ? ` / ${projectDefaultSummary}` : ""}`,
+    [language, projectDefaultSummary],
+  );
   const visibleMessages = useMemo(() => {
     if (localMessages.length <= visibleMessageCount) {
       return localMessages;
@@ -503,6 +564,21 @@ const ProjectChatPane = memo(function ProjectChatPane({
   useEffect(() => {
     setLocalMessages(deferredRemoteMessages);
   }, [deferredRemoteMessages, activeSessionId, chatDraftSession]);
+
+  useEffect(() => {
+    if (chatJobStatus !== "running") {
+      setChatElapsedSeconds(0);
+      return undefined;
+    }
+    const parsedStartedAt = Date.parse(String(chatJob?.started_at || "").trim());
+    const startedAtMs = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
+    const syncElapsed = () => {
+      setChatElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+    };
+    syncElapsed();
+    const intervalId = window.setInterval(syncElapsed, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [chatJob?.started_at, chatJobStatus]);
 
   useEffect(() => {
     setVisibleMessageCount(MAX_VISIBLE_CHAT_MESSAGES);
@@ -608,20 +684,16 @@ const ProjectChatPane = memo(function ProjectChatPane({
       return;
     }
     const mode = pendingMode;
-<<<<<<< Updated upstream
-    setInput("");
-    setPendingMode("conversation");
-    setMenuOpen(false);
-    if (mode === "plan") {
-=======
     if (mode === "plan") {
       setInput("");
-      setPendingMode("conversation");
+      setPendingMode(DEFAULT_CHAT_MODE);
       setMenuOpen(false);
->>>>>>> Stashed changes
       void Promise.resolve(onGeneratePlan?.(text)).catch(() => {});
       return;
     }
+    setInput("");
+    setPendingMode(DEFAULT_CHAT_MODE);
+    setMenuOpen(false);
     setLocalMessages((prev) => [
       ...prev,
       {
@@ -665,13 +737,54 @@ const ProjectChatPane = memo(function ProjectChatPane({
   }
 
   const selectedSessionValue = chatDraftSession ? "" : activeSessionId;
+  const showRespondingState = chatJobStatus === "running";
+  const respondingLabel = language === "ko" ? "응답 중" : "Responding";
+  const stopLabel = language === "ko" ? "중단" : "Stop";
   const composerPlaceholder =
     pendingMode === "plan"
       ? (language === "ko" ? "계획 생성 프롬프트를 입력하세요... (Enter로 생성)" : "Type a plan prompt... (Enter to generate)")
+      : pendingMode === "review"
+        ? (language === "ko" ? "코드나 변경 내용을 입력하세요... 요약, 평가, 개선점을 함께 제안합니다. (Enter로 전송)" : "Paste code or describe a change... I will summarize, evaluate, and suggest improvements. (Enter to send)")
       : (language === "ko" ? "메시지를 입력하세요... (Enter로 전송)" : "Type a message… (Enter to send)");
-  const sendButtonTitle = pendingMode === "plan"
-    ? (language === "ko" ? "계획 생성" : "Generate Plan")
-    : (language === "ko" ? "Send" : "Send");
+  const sendButtonTitle =
+    pendingMode === "plan"
+      ? (language === "ko" ? "계획 생성" : "Generate Plan")
+      : pendingMode === "review"
+        ? (language === "ko" ? "코드 리뷰 보내기" : "Send code review")
+        : (language === "ko" ? "Send" : "Send");
+  const chatModelSelect = (
+    <select
+      className={centerMode ? "chat-center__runtime-select" : "sidebar-chat-config__select"}
+      value={selectedChatValue}
+      onChange={handleChatModelChange}
+    >
+      <option value="">{projectDefaultOptionLabel}</option>
+      {selectedChatEntry && !availableChatModels.some((item) => chatModelOptionValue(item) === selectedChatValue) ? (
+        <option value={selectedChatValue}>
+          {selectedChatEntry.display_name || selectedChatEntry.model} / {chatProviderLabel(selectedChatEntry.provider, selectedChatEntry.local_provider, language)}
+        </option>
+      ) : null}
+      {availableChatModels.map((item) => (
+        <option key={chatModelOptionValue(item)} value={chatModelOptionValue(item)}>
+          {(item.display_name || item.model) + " / " + chatProviderLabel(item.provider, item.local_provider, language)}
+        </option>
+      ))}
+    </select>
+  );
+  const chatEffortSelect = (
+    <select
+      className={centerMode ? "chat-center__runtime-select" : "sidebar-chat-config__select"}
+      value={effectiveChatEffort}
+      onChange={handleChatEffortChange}
+    >
+      <option value="">{language === "ko" ? "Project default" : "Project default"}</option>
+      {availableChatEfforts.map((effort) => (
+        <option key={effort} value={effort}>
+          {reasoningEffortLabel(effort, language)}
+        </option>
+      ))}
+    </select>
+  );
 
   return (
     <div className={centerMode ? "rsb-chat rsb-chat--center" : "rsb-chat"}>
@@ -679,7 +792,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
         <div className="sidebar-panel__header" style={{ padding: "10px 10px 0" }}>
           <strong>{language === "ko" ? "AI Chat" : "AI Chat"}</strong>
           <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
-            {language === "ko" ? "Conversation or manual recovery" : "Conversation or manual recovery"}
+            {language === "ko" ? "Code review or manual recovery" : "Code review or manual recovery"}
           </span>
         </div>
       ) : (
@@ -704,7 +817,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
             </select>
             <button
               className="sidebar-chat-new"
-              onClick={() => { setPendingMode("conversation"); setMenuOpen(false); onStartNewChatSession?.(); }}
+              onClick={() => { setPendingMode(DEFAULT_CHAT_MODE); setMenuOpen(false); onStartNewChatSession?.(); }}
               type="button"
               disabled={busy}
             >
@@ -714,52 +827,29 @@ const ProjectChatPane = memo(function ProjectChatPane({
         </div>
       )}
 
-      <div className="sidebar-chat-config" style={{ margin: "8px 10px 0" }}>
-        <div className="sidebar-chat-config__header">
-          <strong>{language === "ko" ? "Chat model" : "Chat model"}</strong>
-          <span>{chatTargetSummary}</span>
-        </div>
-        <select
-          className="sidebar-chat-config__select"
-          value={selectedChatValue}
-          onChange={handleChatModelChange}
-        >
-          <option value="">{language === "ko" ? "Project default" : "Project default"}</option>
-          {selectedChatEntry && !availableChatModels.some((item) => chatModelOptionValue(item) === selectedChatValue) ? (
-            <option value={selectedChatValue}>
-              {selectedChatEntry.display_name || selectedChatEntry.model} / {chatProviderLabel(selectedChatEntry.provider, selectedChatEntry.local_provider, language)}
-            </option>
-          ) : null}
-          {availableChatModels.map((item) => (
-            <option key={chatModelOptionValue(item)} value={chatModelOptionValue(item)}>
-              {(item.display_name || item.model) + " / " + chatProviderLabel(item.provider, item.local_provider, language)}
-            </option>
-          ))}
-        </select>
-      </div>
+      {!centerMode ? (
+        <>
+          <div className="sidebar-chat-config" style={{ margin: "8px 10px 0" }}>
+            <div className="sidebar-chat-config__header">
+              <strong>{language === "ko" ? "Chat model" : "Chat model"}</strong>
+              <span>{chatTargetSummary}</span>
+            </div>
+            {chatModelSelect}
+          </div>
 
-      <div className="sidebar-chat-config" style={{ margin: "8px 10px 0" }}>
-        <div className="sidebar-chat-config__header">
-          <strong>{language === "ko" ? "Chat reasoning" : "Chat reasoning"}</strong>
-          <span>
-            {effectiveChatEffort
-              ? reasoningEffortLabel(effectiveChatEffort, language)
-              : (language === "ko" ? "Project default" : "Project default")}
-          </span>
-        </div>
-        <select
-          className="sidebar-chat-config__select"
-          value={effectiveChatEffort}
-          onChange={handleChatEffortChange}
-        >
-          <option value="">{language === "ko" ? "Project default" : "Project default"}</option>
-          {availableChatEfforts.map((effort) => (
-            <option key={effort} value={effort}>
-              {reasoningEffortLabel(effort, language)}
-            </option>
-          ))}
-        </select>
-      </div>
+          <div className="sidebar-chat-config" style={{ margin: "8px 10px 0" }}>
+            <div className="sidebar-chat-config__header">
+              <strong>{language === "ko" ? "Chat reasoning" : "Chat reasoning"}</strong>
+              <span>
+                {effectiveChatEffort
+                  ? reasoningEffortLabel(effectiveChatEffort, language)
+                  : (language === "ko" ? "Project default" : "Project default")}
+              </span>
+            </div>
+            {chatEffortSelect}
+          </div>
+        </>
+      ) : null}
 
       {!centerMode ? (
         <div className="sidebar-chat-toolbar" style={{ padding: "0 10px" }}>
@@ -779,7 +869,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
           <button
             className="sidebar-chat-new"
             onClick={() => {
-              setPendingMode("conversation");
+              setPendingMode(DEFAULT_CHAT_MODE);
               setMenuOpen(false);
               onStartNewChatSession?.();
             }}
@@ -843,11 +933,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
               onClick={() => setMenuOpen((current) => !current)}
               type="button"
               disabled={busy}
-<<<<<<< Updated upstream
-              title={language === "ko" ? "계획, 디버거, 머저 모드 선택" : "Choose plan, debugger, or merger"}
-=======
-              title={language === "ko" ? "Choose plan, debugger or merger" : "Choose plan, debugger or merger"}
->>>>>>> Stashed changes
+              title={language === "ko" ? "채팅 모드 선택" : "Choose chat mode"}
             >
               <PlusIcon />
             </button>
@@ -856,11 +942,25 @@ const ProjectChatPane = memo(function ProjectChatPane({
                 <button
                   type="button"
                   onClick={() => {
+                    setPendingMode("review");
+                    setMenuOpen(false);
+                  }}
+                >
+                  {chatModeLabel("review", language)}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingMode("conversation");
+                    setMenuOpen(false);
+                  }}
+                >
+                  {chatModeLabel("conversation", language)}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
                     setPendingMode("plan");
-<<<<<<< Updated upstream
-                    setInput((current) => current.trim() ? current : String(promptValue || ""));
-=======
->>>>>>> Stashed changes
                     setMenuOpen(false);
                   }}
                 >
@@ -888,20 +988,44 @@ const ProjectChatPane = memo(function ProjectChatPane({
             ) : null}
           </div>
 
-          {pendingMode === "conversation" ? (
+          {pendingMode === DEFAULT_CHAT_MODE ? (
             <span className="sidebar-chat-mode-chip">
-              {language === "ko" ? "Default: conversation" : "Default: conversation"}
+              {language === "ko" ? "Default: code review" : "Default: code review"}
             </span>
           ) : (
             <button
               className="sidebar-chat-mode-chip sidebar-chat-mode-chip--active"
-              onClick={() => setPendingMode("conversation")}
+              onClick={() => setPendingMode(DEFAULT_CHAT_MODE)}
               type="button"
             >
               {language === "ko" ? "Next send:" : "Next send:"} {chatModeLabel(pendingMode, language)}
             </button>
           )}
         </div>
+
+        {centerMode ? (
+          <div className="chat-center__runtime-row">
+            <div className="chat-center__runtime-field">
+              <span className="chat-center__runtime-label">{language === "ko" ? "Model" : "Model"}</span>
+              {chatModelSelect}
+            </div>
+            <div className="chat-center__runtime-field">
+              <span className="chat-center__runtime-label">{language === "ko" ? "Reasoning" : "Reasoning"}</span>
+              {chatEffortSelect}
+            </div>
+          </div>
+        ) : null}
+
+        {showRespondingState ? (
+          <div className="sidebar-chat-status" role="status" aria-live="polite">
+            <span className="sidebar-chat-status__dot" aria-hidden="true" />
+            <span>{respondingLabel}</span>
+            <strong>{formatDurationCompact(chatElapsedSeconds, language)}</strong>
+            <button className="toolbar-button toolbar-button--ghost" onClick={() => onRequestStop?.()} type="button">
+              {stopLabel}
+            </button>
+          </div>
+        ) : null}
 
         <div className={centerMode ? "chat-center__input-row" : "sidebar-chat-input-row"}>
           <textarea
@@ -924,35 +1048,31 @@ const ProjectChatPane = memo(function ProjectChatPane({
           </button>
         </div>
       </div>
-<<<<<<< Updated upstream
-=======
-
->>>>>>> Stashed changes
     </div>
   );
 }, (previousProps, nextProps) => (
-  previousProps.chat === nextProps.chat
-  || (
-    previousProps.selectedChatSessionId === nextProps.selectedChatSessionId
-    && previousProps.chatDraftSession === nextProps.chatDraftSession
-    && previousProps.busy === nextProps.busy
-    && previousProps.detail?.runtime === nextProps.detail?.runtime
-    && previousProps.chatSettings?.model_provider === nextProps.chatSettings?.model_provider
-    && previousProps.chatSettings?.local_model_provider === nextProps.chatSettings?.local_model_provider
-    && previousProps.chatSettings?.model === nextProps.chatSettings?.model
-    && previousProps.chatSettings?.chat_model_provider === nextProps.chatSettings?.chat_model_provider
-    && previousProps.chatSettings?.chat_local_model_provider === nextProps.chatSettings?.chat_local_model_provider
-    && previousProps.chatSettings?.chat_model === nextProps.chatSettings?.chat_model
-    && previousProps.chatSettings?.chat_effort === nextProps.chatSettings?.chat_effort
-    && previousProps.modelCatalog === nextProps.modelCatalog
-    && previousProps.modelPresets === nextProps.modelPresets
-    && previousProps.chat?.active_session_id === nextProps.chat?.active_session_id
-    && previousProps.chat?.summary_file === nextProps.chat?.summary_file
-    && sameChatSessions(previousProps.chat?.sessions, nextProps.chat?.sessions)
-    && sameChatMessages(previousProps.chat?.messages, nextProps.chat?.messages)
-    && previousProps.centerMode === nextProps.centerMode
-    && previousProps.promptValue === nextProps.promptValue
-  )
+  previousProps.selectedChatSessionId === nextProps.selectedChatSessionId
+  && previousProps.chatDraftSession === nextProps.chatDraftSession
+  && previousProps.busy === nextProps.busy
+  && previousProps.detail?.runtime === nextProps.detail?.runtime
+  && previousProps.chatSettings?.model_provider === nextProps.chatSettings?.model_provider
+  && previousProps.chatSettings?.local_model_provider === nextProps.chatSettings?.local_model_provider
+  && previousProps.chatSettings?.model === nextProps.chatSettings?.model
+  && previousProps.chatSettings?.chat_model_provider === nextProps.chatSettings?.chat_model_provider
+  && previousProps.chatSettings?.chat_local_model_provider === nextProps.chatSettings?.chat_local_model_provider
+  && previousProps.chatSettings?.chat_model === nextProps.chatSettings?.chat_model
+  && previousProps.chatSettings?.chat_effort === nextProps.chatSettings?.chat_effort
+  && previousProps.chatJob?.id === nextProps.chatJob?.id
+  && previousProps.chatJob?.status === nextProps.chatJob?.status
+  && previousProps.chatJob?.started_at === nextProps.chatJob?.started_at
+  && previousProps.modelCatalog === nextProps.modelCatalog
+  && previousProps.modelPresets === nextProps.modelPresets
+  && previousProps.chat?.active_session_id === nextProps.chat?.active_session_id
+  && previousProps.chat?.summary_file === nextProps.chat?.summary_file
+  && sameChatSessions(previousProps.chat?.sessions, nextProps.chat?.sessions)
+  && sameChatMessages(previousProps.chat?.messages, nextProps.chat?.messages)
+  && previousProps.centerMode === nextProps.centerMode
+  && previousProps.onRequestStop === nextProps.onRequestStop
 ));
 
 export const RightSidebarPane = memo(function RightSidebarPane({
@@ -968,7 +1088,12 @@ export const RightSidebarPane = memo(function RightSidebarPane({
   modelCatalog = [],
   form,
   activeJob,
+  chatJob,
   busy,
+  autoRunAfterPlan = false,
+  canRequestStop = false,
+  canCancelReservation = false,
+  queuedJobs = [],
   onChangeForm,
   chat,
   chatSettings = {},
@@ -987,24 +1112,33 @@ export const RightSidebarPane = memo(function RightSidebarPane({
   onUpdateSpineCheckpoint,
   onDeleteSpineCheckpoint,
   onGeneratePlan,
+  onPromptChange,
+  onSavePlan,
+  onResetPlan,
+  onRunPlan,
+  onRunManualDebugger,
+  onRunManualMerger,
+  onRequestStop,
+  onCancelQueuedJob,
+  onChangeAutoRunAfterPlan,
+  onSelectStep,
+  onUpdateStepField,
+  onSaveStepLocal,
+  onAddStep,
+  onDeleteStep,
 }) {
   const { language } = useI18n();
   const processOutput = detail?.subprocess_output || detail?.agent_output || detail?.process_log || "";
-  const effectivePlan = useMemo(
-    () => resolveExecutionDisplayPlan(detail, planDraft, activeJob),
-    [detail, planDraft, activeJob],
-  );
+  const effectivePlan = useMemo(() => resolveExecutionDisplayPlan(detail, planDraft, activeJob), [detail, planDraft, activeJob]);
   const selectedStep = (effectivePlan?.steps || []).find((step) => step.step_id === selectedStepId) || null;
+  const executionJob = visibleExecutionJob(activeJob);
+  const liveRuntimeEditable = ["running", "queued"].includes(String(executionJob?.status || "").trim().toLowerCase());
   const hasFiles = Boolean(
     detail?.files?.closeout_report_file
     || detail?.reports?.word_report_path
-    || detail?.files?.word_report_file
     || detail?.reports?.powerpoint_report_path
-    || detail?.reports?.powerpoint_report_target_path
-    || detail?.files?.powerpoint_report_file
     || detail?.reports?.webpage_path
     || detail?.files?.webpage_file
-    || detail?.files?.ml_experiment_report_file
   );
   const contractAttention =
     Number(detail?.reports?.common_requirements?.open_count || 0) > 0
@@ -1019,6 +1153,12 @@ export const RightSidebarPane = memo(function RightSidebarPane({
       icon: <RailChatIcon />,
       title: language === "ko" ? "AI Chat" : "AI Chat",
       dot: false,
+    },
+    {
+      id: "flow",
+      icon: <RailFlowIcon />,
+      title: language === "ko" ? "Flow" : "Flow",
+      dot: Array.isArray(effectivePlan?.steps) && effectivePlan.steps.length > 0,
     },
     {
       id: "output",
@@ -1044,7 +1184,8 @@ export const RightSidebarPane = memo(function RightSidebarPane({
       title: "Inspector",
       dot: false,
     },
-  ];
+  ].filter((item) => includeChatTab || item.id !== "chat");
+  const effectiveActiveTab = effectiveRightSidebarTab(activeTab, includeChatTab);
 
   if (chatCenterMode) {
     return (
@@ -1061,11 +1202,13 @@ export const RightSidebarPane = memo(function RightSidebarPane({
           onStartNewChatSession={onStartNewChatSession}
           onSendChatMessage={onSendChatMessage}
           onChangeChatModelSelection={onChangeChatModelSelection}
+          onChangeChatReasoningEffort={onChangeChatReasoningEffort}
+          chatJob={chatJob}
           busy={busy}
           language={language}
           centerMode
-          promptValue={promptValue}
           onGeneratePlan={onGeneratePlan}
+          onRequestStop={onRequestStop}
         />
       </div>
     );
@@ -1075,7 +1218,7 @@ export const RightSidebarPane = memo(function RightSidebarPane({
     <aside className={`details-pane rsb ${collapsed ? "rsb--collapsed" : ""}`.trim()}>
       {collapsed ? null : (
         <div className="rsb-panel">
-        {activeTab === "chat" ? (
+        {effectiveActiveTab === "chat" ? (
           <ProjectChatPane
             chat={chat}
             detail={detail}
@@ -1088,20 +1231,54 @@ export const RightSidebarPane = memo(function RightSidebarPane({
             onStartNewChatSession={onStartNewChatSession}
             onSendChatMessage={onSendChatMessage}
             onChangeChatModelSelection={onChangeChatModelSelection}
+            onChangeChatReasoningEffort={onChangeChatReasoningEffort}
+            chatJob={chatJob}
             busy={busy}
             language={language}
-            promptValue={promptValue}
-            onGeneratePlan={onGeneratePlan}
+            onRequestStop={onRequestStop}
           />
         ) : null}
 
-        {activeTab === "output" ? (
+        {effectiveActiveTab === "flow" ? (
+          <Suspense fallback={<div className="rsb-panel__loading" aria-hidden="true" />}>
+            <LazyFlowWorkspaceView
+              detail={detail}
+              form={form}
+              planDraft={planDraft}
+              activeJob={activeJob}
+              autoRunAfterPlan={autoRunAfterPlan}
+              selectedStepId={selectedStepId}
+              busy={busy}
+              canRequestStop={canRequestStop}
+              canCancelReservation={canCancelReservation}
+              queuedJobs={queuedJobs}
+              onPromptChange={onPromptChange}
+              onChangeForm={onChangeForm}
+              onGeneratePlan={onGeneratePlan}
+              onSavePlan={onSavePlan}
+              onResetPlan={onResetPlan}
+              onRunPlan={onRunPlan}
+              onRunManualDebugger={onRunManualDebugger}
+              onRunManualMerger={onRunManualMerger}
+              onRequestStop={onRequestStop}
+              onCancelQueuedJob={onCancelQueuedJob}
+              onChangeAutoRunAfterPlan={onChangeAutoRunAfterPlan}
+              onSelectStep={onSelectStep}
+              onUpdateStepField={onUpdateStepField}
+              onSaveStepLocal={onSaveStepLocal}
+              onAddStep={onAddStep}
+              onDeleteStep={onDeleteStep}
+            />
+          </Suspense>
+        ) : null}
+
+        {effectiveActiveTab === "output" ? (
           <Suspense fallback={<div className="rsb-panel__loading" aria-hidden="true" />}>
             <LazyOutputPanel processOutput={processOutput} language={language} />
           </Suspense>
         ) : null}
 
-        {activeTab === "files" ? (
+        {effectiveActiveTab === "files" ? (
           <Suspense fallback={<div className="rsb-panel__loading" aria-hidden="true" />}>
             <LazyFilesPanel
               detail={detail}
@@ -1114,7 +1291,7 @@ export const RightSidebarPane = memo(function RightSidebarPane({
           </Suspense>
         ) : null}
 
-        {activeTab === "contracts" ? (
+        {effectiveActiveTab === "contracts" ? (
           <Suspense fallback={<div className="rsb-panel__loading" aria-hidden="true" />}>
             <LazyContractsPanel
               detail={detail}
@@ -1132,7 +1309,7 @@ export const RightSidebarPane = memo(function RightSidebarPane({
           </Suspense>
         ) : null}
 
-        {activeTab === "inspector" ? (
+        {effectiveActiveTab === "inspector" ? (
           <Suspense fallback={<div className="rsb-panel__loading" aria-hidden="true" />}>
             <LazyInspectorPanel
               detail={detail}
@@ -1149,11 +1326,11 @@ export const RightSidebarPane = memo(function RightSidebarPane({
         {railTabs.map(({ id, icon, title, dot }) => (
           <button
             key={id}
-            className={`sidebar-icon${!collapsed && activeTab === id ? " active" : ""}`}
+            className={`sidebar-icon${!collapsed && effectiveActiveTab === id ? " active" : ""}`}
             onClick={() => onChangeTab?.(id)}
             title={title}
             type="button"
-            aria-pressed={!collapsed && activeTab === id}
+            aria-pressed={!collapsed && effectiveActiveTab === id}
           >
             {icon}
             {dot ? <span className="rsb-rail__dot" /> : null}

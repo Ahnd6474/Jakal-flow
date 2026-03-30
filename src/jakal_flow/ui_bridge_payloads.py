@@ -495,7 +495,7 @@ def project_summary(
         lines.append(f"Archived At: {project.metadata.archived_at}")
     if project.metadata.last_run_at:
         lines.append(f"Last Run: {project.metadata.last_run_at}")
-    if project.paths.closeout_report_docx_file.exists():
+    if getattr(project.runtime, "generate_word_report", False) and project.paths.closeout_report_docx_file.exists():
         lines.append(f"Word Report: {project.paths.closeout_report_docx_file}")
     if recent_statuses:
         lines.append(f"Recent Blocks: {', '.join(recent_statuses)}")
@@ -882,13 +882,18 @@ def report_payload(context: ProjectContext) -> dict[str, Any]:
             context.paths.closeout_report_file,
             default="# Closeout Report\n\nNo closeout has been run yet.\n",
         ),
+        "closeout_report_file": str(context.paths.closeout_report_file),
         "ml_experiment_report_text": preview_text(
             context.paths.ml_experiment_report_file,
             default="# ML Experiment Report\n\nNo ML experiment summary has been generated yet.\n",
         ),
         "attempt_history_text": preview_text(context.paths.attempt_history_file, default="No attempt history recorded yet.\n"),
         "word_report_enabled": bool(context.runtime.generate_word_report),
-        "word_report_path": str(context.paths.closeout_report_docx_file) if context.paths.closeout_report_docx_file.exists() else "",
+        "word_report_path": (
+            str(context.paths.closeout_report_docx_file)
+            if context.runtime.generate_word_report and context.paths.closeout_report_docx_file.exists()
+            else ""
+        ),
         "powerpoint_report_path": str(context.paths.closeout_report_pptx_file) if context.paths.closeout_report_pptx_file.exists() else "",
         "powerpoint_report_target_path": str(context.paths.closeout_report_pptx_file),
         "ml_results_svg_path": str(context.paths.ml_experiment_results_svg_file) if context.paths.ml_experiment_results_svg_file.exists() else "",

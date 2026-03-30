@@ -545,7 +545,7 @@ test("CenterWorkspace upgrades legacy serial plans into the parallel execution t
   assert.doesNotMatch(html, /Serial/);
 });
 
-test("CenterWorkspace shows the AI Chat tab instead of the old Flow tab", async () => {
+test("CenterWorkspace keeps AI Chat active without exposing the Flow tab in the top tabs", async () => {
   const html = await renderBundledComponent(
     "center-workspace-ai-chat-tab-render",
     "./src/components/layout/CenterWorkspace.jsx",
@@ -555,8 +555,9 @@ test("CenterWorkspace shows the AI Chat tab instead of the old Flow tab", async 
     }),
   );
 
-  assert.match(html, />AI Chat<\/button>/);
+  assert.match(html, /workspace-tab active"[^>]*>[\s\S]*?AI Chat<\/button>/);
   assert.doesNotMatch(html, />Flow<\/button>/);
+  assert.match(html, /rsb-chat--center/);
 });
 
 test("CenterWorkspace renders the parallel execution flow chart for parallel plans", async () => {
@@ -760,7 +761,8 @@ test("RightSidebarPane renders the project chat on the right rail by default", a
   assert.match(html, /Release/);
   assert.match(html, /Hello from the right side\./);
   assert.match(html, /chat\.summary\.txt/);
-  assert.match(html, /title="Choose plan, debugger, or merger"/);
+  assert.match(html, /title="Choose chat mode"/);
+  assert.match(html, /Default: code review/);
 });
 
 test("RightSidebarPane merges plan generation into the center chat composer", async () => {
@@ -782,7 +784,6 @@ test("RightSidebarPane merges plan generation into the center chat composer", as
         project_prompt: "Ship the merged plan flow",
         steps: [],
       },
-      promptValue: "Ship the merged plan flow",
       selectedStepId: "",
       modelPresets: [],
       modelCatalog: [],
@@ -812,8 +813,87 @@ test("RightSidebarPane merges plan generation into the center chat composer", as
 
   const textareaMatches = html.match(/<textarea\b/g) || [];
   assert.equal(textareaMatches.length, 1);
-  assert.match(html, /title="Choose plan, debugger, or merger"/);
+  assert.match(html, /title="Choose chat mode"/);
   assert.doesNotMatch(html, /Plan generation prompt/);
+  assert.doesNotMatch(html, /Chat model/);
+  assert.match(html, /<span class="chat-center__runtime-label">Model<\/span>/);
+  assert.match(html, /<span class="chat-center__runtime-label">Reasoning<\/span>/);
+  assert.match(html, /Default: code review/);
+});
+
+test("RightSidebarPane shows the project default model name in the center chat selector", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-chat-center-default-model-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      chatCenterMode: true,
+      detail: {
+        project: {
+          repo_id: "demo",
+          repo_path: "/workspace/demo",
+          current_status: "plan_ready",
+        },
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          model_slug_input: "gpt-5.4",
+          workflow_mode: "standard",
+          parallel_worker_mode: "auto",
+          parallel_workers: 0,
+          effort: "high",
+        },
+      },
+      planDraft: {
+        steps: [],
+      },
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.4",
+          display_name: "GPT-5.4",
+          provider: "openai",
+          hidden: false,
+        },
+      ],
+      form: {
+        project_dir: "/workspace/demo",
+        runtime: {},
+      },
+      activeJob: null,
+      busy: false,
+      chat: {
+        sessions: [],
+        active_session_id: "",
+        messages: [],
+        summary_file: "",
+      },
+      chatSettings: {
+        model_provider: "openai",
+        model: "gpt-5.4",
+        model_slug_input: "gpt-5.4",
+        chat_model_provider: "",
+        chat_local_model_provider: "",
+        chat_model: "",
+        chat_effort: "",
+        workflow_mode: "standard",
+        parallel_worker_mode: "auto",
+        parallel_workers: 0,
+      },
+      selectedChatSessionId: "",
+      chatDraftSession: true,
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+      onChangeChatModelSelection: noop,
+      onChangeChatReasoningEffort: noop,
+      onGeneratePlan: noop,
+    },
+  );
+
+  assert.match(html, /Project default \/ OpenAI\/Codex \| Standard Mode \| GPT-5\.4 \| reasoning High \| parallel auto/);
 });
 
 test("RightSidebarPane keeps the icon rail visible when the right panel is collapsed", async () => {
@@ -895,7 +975,50 @@ test("RightSidebarPane renders process output through the deferred detail panel"
   assert.match(html, /step-2/);
 });
 
-<<<<<<< Updated upstream
+test("RightSidebarPane files panel owns the Word report toggle", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-files-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      activeTab: "files",
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+        files: {
+          closeout_report_file: "C:/demo/docs/CLOSEOUT_REPORT.md",
+          word_report_file: "C:/demo/reports/CLOSEOUT_REPORT.docx",
+        },
+        reports: {
+          closeout_report_text: "# Closeout",
+          word_report_path: "",
+          latest_failure: {},
+        },
+      },
+      planDraft: {
+        steps: [],
+      },
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [],
+      form: {
+        runtime: {
+          generate_word_report: true,
+        },
+      },
+      activeJob: null,
+      busy: false,
+      onChangeForm: noop,
+    },
+  );
+
+  assert.match(html, /Document Generation/);
+  assert.match(html, /Word Report/);
+  assert.match(html, /Save execution results as a Word \(.docx\) report\./);
+  assert.match(html, /Reports &amp; Outputs/);
+});
+
 test("RightSidebarPane inspector prefers the live execution plan over a stale draft while a run is active", async () => {
   const html = await renderBundledComponent(
     "right-sidebar-inspector-live-plan-render",
@@ -1020,10 +1143,7 @@ test("RightSidebarPane inspector uses the live plan when project status is runni
   assert.doesNotMatch(html, /Stale Build/);
 });
 
-test("RightSidebarPane keeps an out-of-catalog chat model visible in the selector", async () => {
-=======
 test("RightSidebarPane scopes chat models to the provider selected in program settings", async () => {
->>>>>>> Stashed changes
   const html = await renderBundledComponent(
     "right-sidebar-chat-custom-model-render",
     "./src/components/layout/RightSidebarPane.jsx",
@@ -1118,7 +1238,8 @@ test("RightSidebarPane can exclude the AI chat tab from the right rail", async (
     },
   );
 
-  assert.match(html, /Process Output/);
+  assert.match(html, /Flow/);
+  assert.match(html, /run-flow-area/);
   assert.doesNotMatch(html, /title="AI Chat"/);
   assert.doesNotMatch(html, /Chat model/);
 });
@@ -1435,7 +1556,8 @@ test("CenterWorkspace keeps using the live detail plan when project status is ru
   );
 
   const runningNodeMatches = html.match(/execution-flow-chart__node--info/g) || [];
-  assert.match(html, /Ship the live plan from project status/);
+  assert.match(html, /Running: Parallel/);
+  assert.doesNotMatch(html, />Flow<\/button>/);
   assert.doesNotMatch(html, /Ship the stale draft/);
   assert.equal(runningNodeMatches.length, 1);
 });
@@ -1959,6 +2081,7 @@ test("AppSettingsView omits the removed subsection helper copy", async () => {
   assert.doesNotMatch(html, /These preferences affect the desktop shell itself\./);
   assert.doesNotMatch(html, /Show only the dashboard cards you want to keep visible\./);
   assert.doesNotMatch(html, /These defaults are reused across projects unless a project-specific field replaces them\./);
+  assert.doesNotMatch(html, /Save Program Settings/);
   assert.match(html, /Application/);
   assert.match(html, /Dashboard/);
   assert.match(html, /Execution/);
@@ -2248,6 +2371,63 @@ test("StatusBar hides the live execution chip while only a chat job is active", 
   assert.doesNotMatch(html, /send-chat-message/);
 });
 
+test("RightSidebarPane shows chat responding state with elapsed time", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-pane-chat-status-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      activeTab: "chat",
+      collapsed: false,
+      includeChatTab: true,
+      detail: {
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          model_slug_input: "gpt-5.4",
+          effort: "medium",
+        },
+      },
+      planDraft: null,
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [],
+      form: {},
+      activeJob: null,
+      chatJob: {
+        id: "job-chat-1",
+        status: "running",
+        command: "send-chat-message",
+        started_at: "2026-03-30T00:00:00Z",
+      },
+      busy: true,
+      chat: {
+        active_session_id: "chat-1",
+        summary_file: "",
+        sessions: [],
+        messages: [],
+      },
+      chatSettings: {},
+      selectedChatSessionId: "chat-1",
+      chatDraftSession: false,
+      onChangeTab: noop,
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+      onChangeChatModelSelection: noop,
+      onChangeChatReasoningEffort: noop,
+      onGeneratePlan: noop,
+      onRequestStop: noop,
+    },
+  );
+
+  assert.match(html, /Responding/);
+  assert.match(html, />Stop</);
+  assert.match(html, /sidebar-chat-status/);
+  assert.match(html, /\d+[smh]/);
+});
+
 test("SidebarPane renders a filtered workspace tree without unrelated nodes", async () => {
   const html = await renderBundledComponent(
     "sidebar-pane-render",
@@ -2444,6 +2624,54 @@ test("SidebarPane keeps only the new project action below the project search", a
   assert.doesNotMatch(html, />Delete All</);
   assert.match(html, /placeholder="Search projects"/);
   assert.match(html, /sidebar-search-wrapper[\s\S]*placeholder="Search projects"[\s\S]*sidebar-add-btn[\s\S]*>New</);
+});
+
+test("SidebarPane reservations tab exposes an add queued run action", async () => {
+  const html = await renderBundledComponent(
+    "sidebar-pane-reservations-render",
+    "./src/components/layout/SidebarPane.jsx",
+    "SidebarPane",
+    {
+      activeTab: "reservations",
+      onChangeTab: noop,
+      projects: [],
+      historyProjects: [],
+      selectedProjectId: "demo",
+      selectedHistoryId: "",
+      loadingProjectId: "",
+      projectFilter: "",
+      workspaceFilter: "",
+      onProjectFilterChange: noop,
+      onWorkspaceFilterChange: noop,
+      onSelectProject: noop,
+      onSelectHistory: noop,
+      onNewProject: noop,
+      onRunPlan: noop,
+      workspaceTree: [],
+      checkpoints: { items: [] },
+      detail: {
+        project: {
+          repo_path: "C:/demo",
+        },
+      },
+      queuedJobs: [
+        {
+          id: "job-1",
+          status: "queued",
+          queue_position: 1,
+          project_dir: "C:/demo",
+          display_name: "Demo",
+        },
+      ],
+      onCancelQueuedJob: noop,
+      busy: false,
+    },
+  );
+
+  assert.match(html, /Job Queue/);
+  assert.match(html, /Add Queued Run/);
+  assert.match(html, /Demo/);
+  assert.match(html, /sidebar-count-badge">1</);
 });
 
 test("SidebarPane hides the content panel when no sidebar icon is active", async () => {
@@ -2790,10 +3018,8 @@ test("AppSettingsView exposes dashboard visibility controls in the dashboard tab
         },
       },
       busy: false,
-      dirty: true,
       initialSettingsTab: "dashboard",
       onChangeSettings: noop,
-      onSaveSettings: noop,
       onGenerateShareLink: noop,
       onCopyShareLink: noop,
       onRevokeShareLink: noop,
@@ -2802,7 +3028,7 @@ test("AppSettingsView exposes dashboard visibility controls in the dashboard tab
   );
 
   assert.doesNotMatch(html, /Show only the dashboard cards you want to keep visible\./);
-  assert.match(html, /Save Program Settings/);
+  assert.doesNotMatch(html, /Save Program Settings/);
   assert.match(html, /Dashboard/);
   assert.match(html, /Status/);
   assert.match(html, /5h Usage/);
@@ -3092,7 +3318,37 @@ test("ConfigEditorView keeps checkpoint controls editable during an active run",
   assert.match(html, /Safe runtime settings like checkpoints and report output can still be saved while a run is active\./);
   assert.match(html, /Checkpoint Interval/);
   assert.match(html, /Require checkpoint approval/);
-  assert.doesNotMatch(html, /Word Report Creation/);
+  assert.doesNotMatch(html, /Generate Word Report/);
+});
+
+test("ModelPane shows the selected model when only model_slug_input is populated", async () => {
+  const html = await renderBundledComponent(
+    "model-pane-model-slug-input-render",
+    "./src/components/layout/ModelPane.jsx",
+    "ModelPane",
+    {
+      form: {
+        runtime: {
+          model_provider: "openai",
+          model: "",
+          model_slug_input: "gpt-5.4-mini",
+          effort: "medium",
+        },
+      },
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.4-mini",
+          display_name: "GPT-5.4 Mini",
+          hidden: false,
+        },
+      ],
+      onChangeForm: noop,
+    },
+  );
+
+  assert.match(html, /<option value="gpt-5\.4-mini" selected="">GPT-5\.4 Mini<\/option>/);
+  assert.match(html, /OpenAI\/Codex \| Standard Mode \| GPT-5\.4 Mini \| reasoning Medium \| parallel auto/);
 });
 
 test("DetailsPane shows report documents and checkpoint deadlines in the inspector", async () => {
@@ -3129,13 +3385,11 @@ test("DetailsPane shows report documents and checkpoint deadlines in the inspect
           word_report_path: "C:/demo/reports/CLOSEOUT_REPORT.docx",
           powerpoint_report_path: "",
           powerpoint_report_target_path: "C:/demo/reports/CLOSEOUT_REPORT.pptx",
-          ml_experiment_report_text: "",
         },
         files: {
           closeout_report_file: "C:/demo/docs/CLOSEOUT_REPORT.md",
           word_report_file: "C:/demo/reports/CLOSEOUT_REPORT.docx",
           powerpoint_report_file: "C:/demo/reports/CLOSEOUT_REPORT.pptx",
-          ml_experiment_report_file: "C:/demo/docs/ML_EXPERIMENT_REPORT.md",
         },
       },
       planDraft: {
@@ -3332,7 +3586,7 @@ test("ReportsView shows the saved Word report path next to the closeout report",
     {
       reports: {
         closeout_report_text: "# Closeout Report\n\nDone.",
-        ml_experiment_report_text: "No ML experiment report yet.",
+        closeout_report_file: "C:/workspace/docs/CLOSEOUT_REPORT.md",
         attempt_history_text: "Attempt 1",
         word_report_enabled: true,
         word_report_path: "C:/workspace/reports/CLOSEOUT_REPORT.docx",
@@ -3341,8 +3595,11 @@ test("ReportsView shows the saved Word report path next to the closeout report",
   );
 
   assert.match(html, /Closeout Report/);
+  assert.match(html, />Browse<\/button>/);
+  assert.match(html, />Word<\/button>/);
   assert.match(html, /Word report saved at C:\/workspace\/reports\/CLOSEOUT_REPORT\.docx/);
   assert.match(html, /Attempt 1/);
+  assert.doesNotMatch(html, /ML Experiment Report/);
 });
 
 test("HistoryView exposes a delete action for archived runs", async () => {
@@ -3415,6 +3672,135 @@ test("IdeToolbar labels the top settings action as Program Settings", async () =
   );
 
   assert.match(html, /Program Settings/);
+});
+
+test("IdeToolbar exposes a top-level delete button for the selected project", async () => {
+  const html = await renderBundledComponent(
+    "ide-toolbar-selected-project-delete-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projects: [
+        {
+          repo_id: "demo-idle",
+          display_name: "Demo Idle",
+          status: "plan_ready",
+        },
+      ],
+      selectedProjectId: "demo-idle",
+      onSelectProject: noop,
+      onNewProject: noop,
+      onDeleteSelectedProject: noop,
+      onDeleteProject: noop,
+      projectDetail: {
+        project: {
+          current_status: "idle",
+        },
+      },
+      planDraft: {
+        steps: [],
+      },
+      pendingCheckpoint: null,
+      busy: false,
+      activeJob: null,
+      activeCenterTab: "run",
+      projectPath: "",
+      githubUrl: "",
+      shareUrl: "",
+      shareBusy: false,
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onGeneratePlan: noop,
+      onRunPlan: noop,
+      onApproveCheckpoint: noop,
+      onSmartShareLink: noop,
+      onOpenFolder: noop,
+      onOpenVsCode: noop,
+      onOpenGithub: noop,
+    },
+  );
+
+  assert.match(html, /aria-label="Demo Idle Delete Project"/);
+});
+
+test("ProjectSelector exposes delete buttons and disables them for running projects", async () => {
+  const module = await importBundledModule(
+    "project-selector-delete-render",
+    `
+      import React from "react";
+      import { PassThrough } from "node:stream";
+      import { renderToPipeableStream } from "react-dom/server";
+      import { I18nProvider } from "./src/i18n.jsx";
+      import { __toolbarTestables } from "./src/components/layout/IdeToolbar.jsx";
+
+      export async function renderComponent(props) {
+        return await new Promise((resolve, reject) => {
+          const output = new PassThrough();
+          let html = "";
+          let settled = false;
+          let timeoutHandle = null;
+          const finish = (callback) => (value) => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            clearTimeout(timeoutHandle);
+            callback(value);
+          };
+          output.on("data", (chunk) => {
+            html += chunk.toString();
+          });
+          output.on("end", finish(() => resolve(html)));
+          output.on("error", finish(reject));
+          const { pipe, abort } = renderToPipeableStream(
+            React.createElement(
+              I18nProvider,
+              { initialLanguage: "en" },
+              React.createElement(__toolbarTestables.ProjectSelector, props),
+            ),
+            {
+              onAllReady() {
+                pipe(output);
+              },
+              onError(error) {
+                finish(reject)(error);
+              },
+            },
+          );
+          timeoutHandle = setTimeout(() => {
+            abort();
+            finish(reject)(new Error("Timed out waiting for server render."));
+          }, 5000);
+        });
+      }
+    `,
+  );
+  const html = await module.renderComponent({
+    projects: [
+      {
+        repo_id: "demo-idle",
+        display_name: "Demo Idle",
+        status: "plan_ready",
+      },
+      {
+        repo_id: "demo-running",
+        display_name: "Demo Running",
+        status: "running:parallel",
+      },
+    ],
+    selectedProjectId: "demo-idle",
+    onSelectProject: noop,
+    onNewProject: noop,
+    onDeleteSelectedProject: noop,
+    onDeleteProject: noop,
+    defaultOpen: true,
+  });
+
+  assert.match(html, /Demo Idle Delete Project/);
+  assert.match(html, /Demo Running Delete Project/);
+  const runningDeleteButton = html.match(/<button[^>]*aria-label="Demo Running Delete Project"[^>]*>/)?.[0] || "";
+  assert.ok(runningDeleteButton, "expected running project delete button to render");
+  assert.match(runningDeleteButton, /disabled=""/);
 });
 
 test("IdeToolbar keeps the remote link button enabled without a selected project", async () => {

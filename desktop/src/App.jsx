@@ -4,16 +4,15 @@ import { IdeToolbar } from "./components/layout/IdeToolbar";
 import { RunProgressPanel } from "./components/layout/RunProgressPanel";
 import { Splitter } from "./components/layout/Splitter";
 import { StatusBar } from "./components/layout/StatusBar";
-import { nextRightSidebarState, nextSidebarTab } from "./controllerHelpers";
+import { nextSidebarTab } from "./controllerHelpers";
 import { useDesktopController } from "./hooks/useDesktopController";
 import { useI18n } from "./i18n";
-import { isActiveExecutionStatus, toggleStepSelection } from "./utils";
+import { toggleStepSelection } from "./utils";
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 500;
 const RIGHT_MIN = 260;
 const RIGHT_MAX = 520;
-const RIGHT_COLLAPSED_WIDTH = 52;
 const BOTTOM_MIN = 120;
 const BOTTOM_MAX = 600;
 
@@ -62,8 +61,9 @@ export default function App() {
   const controller = useDesktopController();
   const { t } = useI18n();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [rightTab, setRightTab] = useState("output");
+  const [rightTab, setRightTab] = useState("flow");
   const lastShiftRef = useRef(0);
+  const hadFlowContentRef = useRef(false);
   const controllerCommandRef = useRef({
     setCenterTab: controller.setCenterTab,
     setSidebarTab: controller.setSidebarTab,
@@ -212,23 +212,38 @@ export default function App() {
 
   const detail = controller.projectDetail;
   const deferredDetail = useDeferredValue(detail);
-<<<<<<< Updated upstream
-  const deferredPlanDraft = useDeferredValue(controller.planDraft);
-  const useLiveExecutionDetail =
-    isActiveExecutionStatus(controller.activeJob?.status)
-    || isActiveExecutionStatus(detail?.project?.current_status);
-  const sidebarDetail = useLiveExecutionDetail ? detail : deferredDetail;
-  const sidebarPlanDraft = useLiveExecutionDetail && detail?.plan ? detail.plan : deferredPlanDraft;
-=======
->>>>>>> Stashed changes
   const sidebarOpen = Boolean(controller.sidebarTab);
-  const showRightSidebar = controller.centerTab !== "ai-chat";
   const sidebarStyle = sidebarOpen ? { width: controller.sidebarWidth, flex: `0 0 ${controller.sidebarWidth}px` } : undefined;
-  const rightPaneWidth = controller.rightCollapsed ? RIGHT_COLLAPSED_WIDTH : controller.rightWidth;
-  const rightSidebarStyle = showRightSidebar
-    ? { width: rightPaneWidth, minWidth: rightPaneWidth, flex: `0 0 ${rightPaneWidth}px` }
-    : undefined;
+  const rightPaneWidth = controller.rightWidth;
+  const rightSidebarStyle = { width: rightPaneWidth, minWidth: rightPaneWidth, flex: `0 0 ${rightPaneWidth}px` };
   const compact = Boolean(controller.programSettings?.compact_mode);
+  const hasFlowContent = useMemo(() => {
+    const planningStatus = String(detail?.planning_progress?.status || detail?.planning_progress?.planningStatus || "").trim().toLowerCase();
+    const livePlan = detail?.plan || controller.planDraft;
+    return Boolean(
+      planningStatus === "running"
+      || String(livePlan?.project_prompt || "").trim()
+      || (Array.isArray(livePlan?.steps) && livePlan.steps.length > 0)
+    );
+  }, [detail?.plan, detail?.planning_progress?.planningStatus, detail?.planning_progress?.status, controller.planDraft]);
+
+  useEffect(() => {
+    const activeCommand = String(controller.activeJob?.command || "").trim().toLowerCase();
+    const activeStatus = String(controller.activeJob?.status || "").trim().toLowerCase();
+    if (
+      ["generate-plan", "run-plan", "run-closeout", "run-manual-debugger", "run-manual-merger"].includes(activeCommand)
+      && ["queued", "running", "completed"].includes(activeStatus)
+    ) {
+      setRightTab("flow");
+    }
+  }, [controller.activeJob?.command, controller.activeJob?.status]);
+
+  useEffect(() => {
+    if (!hadFlowContentRef.current && hasFlowContent) {
+      setRightTab("flow");
+    }
+    hadFlowContentRef.current = hasFlowContent;
+  }, [hasFlowContent]);
 
   const handleSelectStep = useCallback((stepId) => {
     controller.setSelectedStepId((current) => toggleStepSelection(current, stepId));
@@ -267,6 +282,8 @@ export default function App() {
         selectedProjectId={controller.selectedProjectId}
         onSelectProject={controller.loadProject}
         onNewProject={controller.startNewProject}
+        onDeleteSelectedProject={controller.deleteProject}
+        onDeleteProject={controller.deleteProjectById}
         projectDetail={detail}
         planDraft={controller.planDraft}
         pendingCheckpoint={detail?.checkpoints?.pending || null}
@@ -329,15 +346,16 @@ export default function App() {
               onArchiveProject={controller.archiveProjectById}
               onDeleteProject={controller.deleteProjectById}
               onDeleteHistoryEntry={controller.deleteHistoryEntry}
-              workspaceTree={sidebarDetail?.workspace_tree}
-              checkpoints={sidebarDetail?.checkpoints}
-              detail={sidebarDetail}
-              planDraft={sidebarPlanDraft}
+              workspaceTree={deferredDetail?.workspace_tree}
+              checkpoints={deferredDetail?.checkpoints}
+              detail={deferredDetail}
+              planDraft={controller.planDraft}
               activeJob={controller.activeJob}
               selectedStepId={controller.selectedStepId}
               onSelectStep={handleSelectStep}
-              github={sidebarDetail?.github}
-              planPrompt={sidebarPlanDraft?.project_prompt || ""}
+              github={deferredDetail?.github}
+              planPrompt={controller.planDraft?.project_prompt || ""}
+              onRunPlan={controller.runPlan}
               onOpenFolder={controller.openRepoInFolder}
               onOpenVsCode={controller.openRepoInVsCode}
               onOpenGithub={controller.openRepoOnGithub}
@@ -352,62 +370,8 @@ export default function App() {
           <Splitter axis="vertical" onResize={sidebarSplitter.onResize} onDragEnd={sidebarSplitter.onDragEnd} title="Resize sidebar" />
         ) : null}
 
-<<<<<<< Updated upstream
-        {/* ── Center: Full-screen AI Chat ── */}
-        <div className="ide-center-column ide-chat-center">
-          <Suspense fallback={<PanelSuspenseFallback className="ide-chat-center" />}>
-            <LazyRightSidebarPane
-              activeTab={rightTab}
-              collapsed={false}
-              chatCenterMode
-              onChangeTab={handleRightTabChange}
-              detail={sidebarDetail}
-              planDraft={sidebarPlanDraft}
-              selectedStepId={controller.selectedStepId}
-              modelPresets={controller.modelPresets}
-              form={controller.projectForm}
-              activeJob={controller.activeJob}
-              busy={controller.busy}
-              onChangeForm={controller.setProjectForm}
-              chat={sidebarDetail?.chat}
-              selectedChatSessionId={controller.selectedChatSessionId}
-              chatDraftSession={controller.chatDraftSession}
-              onSelectChatSession={controller.loadChatSession}
-              onStartNewChatSession={controller.startNewChatSession}
-              onSendChatMessage={controller.sendChatMessage}
-              onResolveCommonRequirement={controller.resolveCommonRequirement}
-              onReopenCommonRequirement={controller.reopenCommonRequirement}
-              onRecordSpineCheckpoint={controller.recordSpineCheckpoint}
-              onUpdateCommonRequirement={controller.updateCommonRequirement}
-              onDeleteCommonRequirement={controller.deleteCommonRequirement}
-              onUpdateSpineCheckpoint={controller.updateSpineCheckpoint}
-              onDeleteSpineCheckpoint={controller.deleteSpineCheckpoint}
-              promptValue={controller.planDraft?.project_prompt || ""}
-              onPromptChange={(value) =>
-                controller.syncPlan({
-                  ...(controller.planDraft || {}),
-                  project_prompt: value,
-                })
-              }
-              onGeneratePlan={controller.generatePlan}
-              onRunPlan={controller.runPlan}
-            />
-          </Suspense>
-        </div>
-
-        {/* Splitter between chat and workspace panel */}
-        <Splitter axis="vertical" onResize={workspaceSplitter.onResize} onDragEnd={workspaceSplitter.onDragEnd} title="Resize workspace panel" />
-
-        {/* ── Right: CenterWorkspace (run/config/dashboard/history) ── */}
-        <div
-          className="ide-pane ide-pane--workspace-right"
-          style={{ width: workspaceWidth, flex: `0 0 ${workspaceWidth}px` }}
-        >
-          <div className="ide-center-column" style={{ height: "100%" }}>
-=======
         <div className="ide-pane ide-pane--workspace-right" style={{ flex: "1 1 auto", minWidth: 0 }}>
           <div className="ide-center-column" style={{ height: "100%", flex: "1 1 auto", minWidth: 0 }}>
->>>>>>> Stashed changes
             <div className="ide-main">
               <CenterWorkspace
                 activeTab={controller.centerTab}
@@ -472,6 +436,7 @@ export default function App() {
                 onChangeChatModelSelection={controller.setChatModelSelection}
                 onChangeChatReasoningEffort={controller.setChatReasoningEffort}
                 activeJob={controller.activeJob}
+                chatJob={controller.chatJob}
                 hidePromptStrip
               />
             </div>
@@ -484,7 +449,7 @@ export default function App() {
                     <LazyBottomToolPanel
                       activeTab={controller.bottomTab}
                       onChangeTab={controller.setBottomTab}
-                      data={sidebarDetail}
+                      data={deferredDetail}
                       onHide={() => controller.setBottomCollapsed(true)}
                     />
                   </Suspense>
@@ -493,43 +458,67 @@ export default function App() {
             ) : null}
           </div>
 
-          {showRightSidebar ? (
-            <>
-              <Splitter axis="vertical" onResize={rightSplitter.onResize} onDragEnd={rightSplitter.onDragEnd} title="Resize right sidebar" />
-              <div className="ide-pane" style={rightSidebarStyle}>
-                <Suspense fallback={<PanelSuspenseFallback className="ide-pane" />}>
-                  <LazyRightSidebarPane
-                    activeTab={rightTab}
-                    collapsed={controller.rightCollapsed}
-                    includeChatTab={false}
-                    onChangeTab={(nextTab) => {
-                      const nextState = nextRightSidebarState(rightTab, nextTab, controller.rightCollapsed);
-                      setRightTab(nextState.tab);
-                      controller.setRightCollapsed(nextState.collapsed);
-                    }}
-                    detail={detail}
-                    planDraft={controller.planDraft}
-                    selectedStepId={controller.selectedStepId}
-                    modelPresets={controller.modelPresets}
-                    modelCatalog={controller.modelCatalog}
-                    form={controller.projectForm}
-                    activeJob={controller.activeJob}
-                    busy={controller.busy}
-                    onChangeForm={controller.setProjectForm}
-                    chat={detail?.chat}
-                    chatSettings={controller.programSettings}
-                    selectedChatSessionId={controller.selectedChatSessionId}
-                    chatDraftSession={controller.chatDraftSession}
-                    onSelectChatSession={controller.loadChatSession}
-                    onStartNewChatSession={controller.startNewChatSession}
-                    onSendChatMessage={controller.sendChatMessage}
-                    onChangeChatModelSelection={controller.setChatModelSelection}
-                    onChangeChatReasoningEffort={controller.setChatReasoningEffort}
-                  />
-                </Suspense>
-              </div>
-            </>
-          ) : null}
+          <>
+            <Splitter axis="vertical" onResize={rightSplitter.onResize} onDragEnd={rightSplitter.onDragEnd} title="Resize right sidebar" />
+            <div className="ide-pane" style={rightSidebarStyle}>
+              <Suspense fallback={<PanelSuspenseFallback className="ide-pane" />}>
+                <LazyRightSidebarPane
+                  activeTab={rightTab}
+                  collapsed={false}
+                  includeChatTab={false}
+                  onChangeTab={(nextTab) => {
+                    if (nextTab) {
+                      setRightTab(nextTab);
+                    }
+                    controller.setRightCollapsed(false);
+                  }}
+                  detail={detail}
+                  planDraft={controller.planDraft}
+                  selectedStepId={controller.selectedStepId}
+                  modelPresets={controller.modelPresets}
+                  modelCatalog={controller.modelCatalog}
+                  form={controller.projectForm}
+                  activeJob={controller.activeJob}
+                  chatJob={controller.chatJob}
+                  busy={controller.busy}
+                  autoRunAfterPlan={controller.autoRunAfterPlan}
+                  canRequestStop={controller.canRequestStop}
+                  canCancelReservation={controller.canCancelReservation}
+                  queuedJobs={controller.queuedJobs}
+                  onChangeForm={controller.setProjectForm}
+                  chat={detail?.chat}
+                  chatSettings={controller.programSettings}
+                  selectedChatSessionId={controller.selectedChatSessionId}
+                  chatDraftSession={controller.chatDraftSession}
+                  onSelectChatSession={controller.loadChatSession}
+                  onStartNewChatSession={controller.startNewChatSession}
+                  onSendChatMessage={controller.sendChatMessage}
+                  onChangeChatModelSelection={controller.setChatModelSelection}
+                  onChangeChatReasoningEffort={controller.setChatReasoningEffort}
+                  onPromptChange={(value) =>
+                    controller.syncPlan({
+                      ...(controller.planDraft || {}),
+                      project_prompt: value,
+                    })
+                  }
+                  onGeneratePlan={controller.generatePlan}
+                  onSavePlan={controller.savePlan}
+                  onResetPlan={controller.resetPlan}
+                  onRunPlan={controller.runPlan}
+                  onRunManualDebugger={controller.runManualDebugger}
+                  onRunManualMerger={controller.runManualMerger}
+                  onRequestStop={controller.requestStop}
+                  onCancelQueuedJob={controller.cancelQueuedReservation}
+                  onChangeAutoRunAfterPlan={controller.setAutoRunAfterPlan}
+                  onSelectStep={handleSelectStep}
+                  onUpdateStepField={controller.updateSelectedStep}
+                  onSaveStepLocal={controller.saveStepLocal}
+                  onAddStep={controller.addStep}
+                  onDeleteStep={controller.deleteStep}
+                />
+              </Suspense>
+            </div>
+          </>
         </div>
       </div>
 

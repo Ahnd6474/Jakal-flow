@@ -105,6 +105,9 @@ def default_workspace_root() -> Path:
     explicit = os.environ.get("JAKAL_FLOW_GUI_WORKSPACE")
     if explicit:
         return Path(explicit).expanduser().resolve()
+    repo_preferred = (repo_root() / DEFAULT_GUI_WORKSPACE_DIRNAME).resolve()
+    if repo_preferred.exists():
+        return repo_preferred
     preferred = (Path.cwd() / DEFAULT_GUI_WORKSPACE_DIRNAME).resolve()
     if preferred.exists():
         return preferred

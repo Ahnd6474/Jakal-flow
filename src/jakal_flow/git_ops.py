@@ -4,6 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from .errors import SubprocessTimeoutError
 from .models import CommandResult
 from .subprocess_utils import run_subprocess
 from .utils import decode_process_output, remove_tree
@@ -225,12 +226,60 @@ class GitOps:
         result = self.run(["rev-parse", "--verify", "HEAD"], cwd=repo_dir, check=False)
         return result.returncode == 0
 
+    def _git_dir_for_repo(self, repo_dir: Path) -> Path | None:
+        dot_git = repo_dir / ".git"
+        if dot_git.is_dir():
+            return dot_git
+        if not dot_git.is_file():
+            return None
+        try:
+            header = dot_git.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        prefix = "gitdir:"
+        if not header.lower().startswith(prefix):
+            return None
+        git_dir_text = header[len(prefix) :].strip()
+        if not git_dir_text:
+            return None
+        git_dir = Path(git_dir_text)
+        if not git_dir.is_absolute():
+            git_dir = (repo_dir / git_dir).resolve(strict=False)
+        return git_dir
+
+    def _current_branch_from_head(self, repo_dir: Path) -> str:
+        git_dir = self._git_dir_for_repo(repo_dir)
+        if git_dir is None:
+            return ""
+        head_path = git_dir / "HEAD"
+        try:
+            head_contents = head_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+        prefix = "ref:"
+        if not head_contents.lower().startswith(prefix):
+            return ""
+        ref_name = head_contents[len(prefix) :].strip()
+        branch_prefix = "refs/heads/"
+        if not ref_name.startswith(branch_prefix):
+            return ""
+        return ref_name[len(branch_prefix) :].strip()
+
     def current_branch(self, repo_dir: Path) -> str:
-        result = self.run(["branch", "--show-current"], cwd=repo_dir, check=False)
+        head_branch = self._current_branch_from_head(repo_dir)
+        if head_branch:
+            return head_branch
+        try:
+            result = self.run(["branch", "--show-current"], cwd=repo_dir, check=False)
+        except SubprocessTimeoutError:
+            result = CommandResult(command=["git", "branch", "--show-current"], returncode=1, stdout="", stderr="")
         branch = result.stdout.strip()
         if branch:
             return branch
-        fallback = self.run(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_dir, check=False).stdout.strip()
+        try:
+            fallback = self.run(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_dir, check=False).stdout.strip()
+        except SubprocessTimeoutError:
+            return ""
         return "" if fallback == "HEAD" else fallback
 
     def remote_url(self, repo_dir: Path, remote_name: str = "origin") -> str | None:

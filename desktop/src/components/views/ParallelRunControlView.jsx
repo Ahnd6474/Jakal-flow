@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import { ExecutionFlowChart } from "../common/ExecutionFlowChart";
 import {
+  applyConfigRuntimeModelSelection,
   basename,
   canEditStep,
   CLAUDE_DEFAULT_MODEL,
@@ -12,6 +13,7 @@ import {
   effectiveStepStatus,
   failureReasonCode,
   failureReasonLabel,
+  filterModelCatalogByProvider,
   formatDurationCompact,
   formatUsd,
   GEMINI_DEFAULT_MODEL,
@@ -19,7 +21,6 @@ import {
   isSystemStep,
   KIMI_DEFAULT_MODEL,
   MINIMAX_DEFAULT_MODEL,
-  MODEL_REASONING_OPTIONS,
   parallelLimitDescription,
   parallelLimitTone,
   parallelWorkerLabel,
@@ -32,8 +33,10 @@ import {
   projectStatusWithJob,
   QWEN_CODE_DEFAULT_MODEL,
   REASONING_OPTIONS,
+  configReasoningOptions,
   reasoningEffortLabel,
   resolveExecutionDisplayPlan,
+  selectedConfigReasoning,
   shouldShowEstimatedCost,
   statusTone,
   visibleExecutionJob,
@@ -288,10 +291,14 @@ function modelChipLabel(form, detail) {
 }
 
 /* ── ModelEffortChip: single button + popover ── */
-function ModelEffortChip({ form, detail, busy, onChangeForm, language }) {
+function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCatalog = [] }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-  const currentEffort = form?.runtime?.effort || detail?.runtime?.effort || "high";
+  const runtime = form?.runtime || detail?.runtime || {};
+  const scopedModelCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
+  const selectedModel = String(runtime?.model || runtime?.model_slug_input || "").trim();
+  const reasoningOptions = configReasoningOptions(scopedModelCatalog, selectedModel, runtime?.effort || "medium");
+  const currentEffort = selectedConfigReasoning(scopedModelCatalog, runtime) || "medium";
   const chipModel = modelChipLabel(form, detail);
 
   useEffect(() => {
@@ -330,13 +337,16 @@ function ModelEffortChip({ form, detail, busy, onChangeForm, language }) {
           <div className="mec-popover__section">
             <span className="mec-popover__label">{language === "ko" ? "추론 강도" : "Reasoning"}</span>
             <div className="mec-effort-list">
-              {MODEL_REASONING_OPTIONS.map((opt) => (
+              {reasoningOptions.map((opt) => (
                 <button
                   key={opt}
                   type="button"
                   className={`mec-effort-row${currentEffort === opt ? " mec-effort-row--active" : ""}`}
                   onClick={() => {
-                    onChangeForm?.((c) => ({ ...c, runtime: { ...c.runtime, effort: opt } }));
+                    onChangeForm?.((c) => ({
+                      ...c,
+                      runtime: applyConfigRuntimeModelSelection(c.runtime || {}, scopedModelCatalog, selectedModel, opt),
+                    }));
                     setOpen(false);
                   }}
                   disabled={busy}
@@ -789,7 +799,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
           <div className="run-prompt-strip__inner">
             <div className="run-prompt-strip__toolbar">
               <span className="run-prompt-strip__count">{promptDraft.length} {language === "ko" ? "자" : "chars"}</span>
-              <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} />
+              <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={detail?.codex_status?.model_catalog || []} />
               {promptDraft.trim() ? (
                 <button
                   type="button"
@@ -838,7 +848,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
             >
               {language === "ko" ? "편집" : "Edit"}
             </button>
-            <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} />
+            <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={detail?.codex_status?.model_catalog || []} />
           </div>
         )}
       </div>}

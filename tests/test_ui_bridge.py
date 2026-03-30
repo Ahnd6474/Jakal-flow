@@ -377,6 +377,30 @@ class UIBridgeTests(unittest.TestCase):
 
         self.assertEqual(resolved, (home_dir / ".jakal-flow-workspace").resolve())
 
+    def test_default_workspace_root_prefers_repo_workspace_over_cwd(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            repo_dir = temp_dir / "repo"
+            repo_workspace = repo_dir / ".jakal-flow-workspace"
+            cwd_dir = temp_dir / "cwd"
+            cwd_workspace = cwd_dir / ".jakal-flow-workspace"
+            home_dir = temp_dir / "home"
+            repo_workspace.mkdir(parents=True, exist_ok=True)
+            cwd_workspace.mkdir(parents=True, exist_ok=True)
+            home_dir.mkdir(parents=True, exist_ok=True)
+            with mock.patch.dict(os.environ, {}, clear=True), mock.patch(
+                "jakal_flow.ui_bridge.repo_root",
+                return_value=repo_dir,
+            ), mock.patch(
+                "jakal_flow.ui_bridge.Path.cwd",
+                return_value=cwd_dir,
+            ), mock.patch(
+                "jakal_flow.ui_bridge.Path.home",
+                return_value=home_dir,
+            ):
+                resolved = default_workspace_root()
+
+        self.assertEqual(resolved, repo_workspace.resolve())
+
     def test_progress_caption_reports_ready_nodes_for_parallel_dag(self) -> None:
         caption = progress_caption(
             ExecutionPlanState(
@@ -1360,6 +1384,48 @@ class UIBridgeTests(unittest.TestCase):
 
             self.assertEqual(loaded["reports"]["word_report_path"], str(word_report_path))
             self.assertIn(str(word_report_path), loaded["summary"])
+
+    def test_load_project_hides_stale_word_report_when_generation_disabled(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Report Disabled Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "effort": "medium",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                    "generate_word_report": False,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            word_report_path = Path(detail["files"]["project_root"]) / "reports" / "CLOSEOUT_REPORT.docx"
+            word_report_path.parent.mkdir(parents=True, exist_ok=True)
+            word_report_path.write_bytes(b"stale-demo")
+
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: fake_codex_snapshot()):
+                loaded = run_command(
+                    "load-project",
+                    workspace_root,
+                    {
+                        "repo_id": detail["project"]["repo_id"],
+                    },
+                )
+
+            self.assertEqual(loaded["reports"]["word_report_path"], "")
+            self.assertNotIn(str(word_report_path), loaded["summary"])
 
     def test_report_payload_includes_contract_wave_artifacts(self) -> None:
         with TemporaryTestDir() as temp_dir:
@@ -2863,6 +2929,82 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(result["reports"]["word_report_path"], expected_path)
             self.assertTrue(any(expected_path in line for line in result["activity"]))
 
+    def test_run_closeout_hides_stale_word_report_path_when_generation_disabled(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Closeout Report Disabled Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                    "generate_word_report": False,
+                },
+            }
+            completed_plan = {
+                "plan_title": "Closeout Report Disabled Demo",
+                "project_prompt": "Finish the work",
+                "summary": "Everything is ready for closeout.",
+                "workflow_mode": "standard",
+                "execution_mode": "parallel",
+                "default_test_command": "python -m unittest",
+                "steps": [
+                    {
+                        "step_id": "ST1",
+                        "title": "Implement",
+                        "display_description": "Implementation finished",
+                        "codex_description": "Implementation finished",
+                        "success_criteria": "Tests pass",
+                        "test_command": "python -m unittest",
+                        "reasoning_effort": "high",
+                        "status": "completed",
+                    }
+                ],
+            }
+
+            def fake_run_execution_closeout(self, project_dir, runtime, branch="main", origin_url=""):
+                context = self.local_project(project_dir)
+                assert context is not None
+                context.paths.closeout_report_docx_file.parent.mkdir(parents=True, exist_ok=True)
+                context.paths.closeout_report_docx_file.write_bytes(b"stale-demo")
+                plan_state = self.load_execution_plan_state(context)
+                plan_state.closeout_status = "completed"
+                plan_state.closeout_started_at = "2026-03-26T00:10:00+00:00"
+                plan_state.closeout_completed_at = "2026-03-26T00:12:00+00:00"
+                plan_state.closeout_notes = "Closeout finished successfully."
+                saved = self.save_execution_plan_state(context, plan_state)
+                context.metadata.current_status = self._status_from_plan_state(saved)
+                self.workspace.save_project(context)
+                return context, saved
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ), mock.patch(
+                "jakal_flow.orchestrator.Orchestrator.run_execution_closeout",
+                new=fake_run_execution_closeout,
+            ):
+                result = run_command(
+                    "run-closeout",
+                    workspace_root,
+                    {
+                        **payload,
+                        "plan": completed_plan,
+                    },
+                )
+
+            stale_path = str(Path(result["files"]["project_root"]) / "reports" / "CLOSEOUT_REPORT.docx")
+            self.assertEqual(result["reports"]["word_report_path"], "")
+            self.assertFalse(any(stale_path in line for line in result["activity"]))
+
     def test_run_closeout_surfaces_failure_report_details_when_closeout_raises(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"
@@ -3567,6 +3709,38 @@ class UIBridgeTests(unittest.TestCase):
             self.assertNotIn("[README.md](", assistant_text)
             self.assertNotIn("**판단**", assistant_text)
 
+    def test_execute_conversation_turn_records_interrupted_chat_without_failing(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            chat_home = temp_dir / "jakal-flow-chat"
+            context = build_test_project_context(
+                temp_dir,
+                repo_id="chat-stop-demo",
+                slug="chat-stop-demo",
+                display_name="Chat Stop Demo",
+            )
+            plan_state = ExecutionPlanState(
+                plan_title="Chat Stop Demo",
+                project_prompt="Stop the current reply when requested.",
+                summary="Chat interruption test plan.",
+            )
+
+            with mock.patch.dict(os.environ, {CHAT_HOME_ENV_VAR: str(chat_home)}), mock.patch(
+                "jakal_flow.chat_sessions._run_conversation_reply",
+                side_effect=ImmediateStopRequested("Immediate stop requested while running OpenAI chat."),
+            ):
+                result = execute_conversation_turn(
+                    context,
+                    plan_state=plan_state,
+                    user_message="Stop this response.",
+                )
+
+            self.assertEqual(result["error"], "")
+            self.assertTrue(result["interrupted"])
+            self.assertEqual([item["role"] for item in result["chat"]["messages"]], ["user", "system"])
+            self.assertEqual(result["chat"]["messages"][-1]["status"], "cancelled")
+            self.assertEqual(result["chat"]["messages"][-1]["text"], "Response stopped.")
+            self.assertTrue(result["chat"]["messages"][-1]["metadata"]["interrupted"])
+
     def test_load_chat_sessions_migrates_legacy_project_chat_storage_into_global_chat_home(self) -> None:
         with TemporaryTestDir() as temp_dir:
             chat_home = temp_dir / "jakal-flow-chat"
@@ -3644,6 +3818,38 @@ class UIBridgeTests(unittest.TestCase):
             self.assertFalse(legacy_log_path.exists())
             self.assertFalse(legacy_summary_path.exists())
             self.assertFalse(legacy_transcript_path.exists())
+
+    def test_execute_conversation_turn_review_mode_wraps_the_user_request(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            chat_home = temp_dir / "jakal-flow-chat"
+            context = build_test_project_context(
+                temp_dir,
+                repo_id="chat-review-demo",
+                slug="chat-review-demo",
+                display_name="Chat Review Demo",
+            )
+            plan_state = ExecutionPlanState(
+                plan_title="Chat Review Demo",
+                project_prompt="Review the latest desktop changes.",
+                summary="Chat review test plan.",
+            )
+
+            with mock.patch.dict(os.environ, {CHAT_HOME_ENV_VAR: str(chat_home)}), mock.patch(
+                "jakal_flow.chat_sessions._run_conversation_reply",
+                return_value=(0, "Review reply."),
+            ) as run_reply:
+                result = execute_conversation_turn(
+                    context,
+                    plan_state=plan_state,
+                    user_message="desktop/src/App.jsx changes",
+                    mode="review",
+                )
+
+            prompt_text = run_reply.call_args.kwargs["prompt"]
+            self.assertIn("Review the following code, diff, or implementation request.", prompt_text)
+            self.assertIn("desktop/src/App.jsx changes", prompt_text)
+            self.assertEqual(result["chat"]["messages"][0]["mode"], "review")
+            self.assertEqual(result["chat"]["messages"][1]["mode"], "review")
 
     def test_send_chat_message_conversation_uses_chat_model_override(self) -> None:
         context = mock.Mock(
@@ -3768,6 +3974,73 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(result["project"]["repo_id"], detail["project"]["repo_id"])
             self.assertEqual(result["chat"]["active_session_id"], "chat-1")
             self.assertNotIn("detail", result)
+
+    def test_send_chat_message_review_route_uses_conversation_execution(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Chat Review Route Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "model_preset": "high",
+                    "effort": "high",
+                    "test_cmd": "python -m unittest",
+                    "max_blocks": 5,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            session_payload = {
+                "chat": {
+                    "active_session_id": "chat-review-1",
+                    "active_session": {
+                        "session_id": "chat-review-1",
+                        "title": "Chat review route",
+                    },
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "text": "Review reply.",
+                            "mode": "review",
+                        }
+                    ],
+                },
+                "error": "",
+            }
+
+            with mock.patch(
+                "jakal_flow.ui_bridge_commands.runs.execute_conversation_turn",
+                return_value=session_payload,
+            ) as execute_turn:
+                result = run_command(
+                    "send-chat-message",
+                    workspace_root,
+                    {
+                        **payload,
+                        "repo_id": detail["project"]["repo_id"],
+                        "message": "Please review these desktop changes.",
+                        "chat_mode": "review",
+                        "session_id": "chat-review-1",
+                    },
+                )
+
+            execute_turn.assert_called_once()
+            self.assertEqual(execute_turn.call_args.kwargs["mode"], "review")
+            self.assertEqual(execute_turn.call_args.kwargs["user_message"], "Please review these desktop changes.")
+            self.assertEqual(result["chat_mode"], "review")
+            self.assertFalse(result["emit_project_changed"])
 
     def test_send_chat_message_debugger_routes_message_into_manual_recovery(self) -> None:
         with TemporaryTestDir() as temp_dir:

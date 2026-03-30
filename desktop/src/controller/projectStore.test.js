@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { applyProjectDetailState, mergeProjectDetailSupplement, preserveProjectDetailSupplement } from "./projectStore.js";
+import { applyProjectDetailState, clearSelectedProjectState, mergeProjectDetailSupplement, preserveProjectDetailSupplement } from "./projectStore.js";
 
 test("preserveProjectDetailSupplement keeps the previous workspace tree reference on core refresh", () => {
   const previousWorkspaceTree = [
@@ -244,6 +244,90 @@ test("applyProjectDetailState preserves the current project_dir when a sparse de
   assert.equal(capturedProjectForm.runtime.model_provider, "gemini");
 });
 
+test("applyProjectDetailState preserves local model and reasoning overrides on same-project refresh", () => {
+  let capturedProjectForm = {
+    project_dir: "C:/repo",
+    display_name: "Existing Repo",
+    branch: "main",
+    origin_url: "https://example.com/repo.git",
+    github_mode: "manual",
+    runtime: {
+      model_provider: "claude",
+      model: "claude-sonnet-4-6",
+      model_slug_input: "claude-sonnet-4-6",
+      effort: "xhigh",
+      planning_effort: "high",
+    },
+  };
+
+  applyProjectDetailState({
+    detail: {
+      project: {
+        repo_id: "repo-1",
+        repo_path: "C:/repo",
+        display_name: "Existing Repo",
+        branch: "main",
+        origin_url: "https://example.com/repo.git",
+      },
+      runtime: {
+        model_provider: "openai",
+        model: "gpt-5.4",
+        model_slug_input: "gpt-5.4",
+        effort: "medium",
+        planning_effort: "medium",
+      },
+      plan: {
+        steps: [],
+      },
+      codex_status: {
+        model_catalog: [],
+      },
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: { current: "" },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "repo-1",
+        },
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          model_slug_input: "gpt-5.4",
+          effort: "medium",
+          planning_effort: "medium",
+        },
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model_provider: "openai",
+      },
+      planDirty: false,
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: () => {},
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: (updater) => {
+        capturedProjectForm = typeof updater === "function" ? updater(capturedProjectForm) : updater;
+      },
+      setPlanDraft: () => {},
+      setSelectedStepId: () => {},
+      setPlanDirty: () => {},
+    },
+  });
+
+  assert.equal(capturedProjectForm.runtime.model_provider, "claude");
+  assert.equal(capturedProjectForm.runtime.model, "claude-sonnet-4-6");
+  assert.equal(capturedProjectForm.runtime.model_slug_input, "claude-sonnet-4-6");
+  assert.equal(capturedProjectForm.runtime.effort, "xhigh");
+  assert.equal(capturedProjectForm.runtime.planning_effort, "high");
+});
+
 test("applyProjectDetailState preserves a manually cleared step selection on same-project refresh", () => {
   let capturedSelectedStepId = "__unset__";
 
@@ -354,4 +438,50 @@ test("applyProjectDetailState keeps the step editor closed when switching to a d
   });
 
   assert.equal(capturedSelectedStepId, "");
+});
+
+test("clearSelectedProjectState can preserve the current project identity form", () => {
+  let capturedProjectForm = null;
+
+  clearSelectedProjectState({
+    defaultRuntime: {
+      model_provider: "openai",
+    },
+    nextProjectForm: {
+      project_dir: "C:/repo",
+      display_name: "Repo",
+      branch: "main",
+      origin_url: "https://example.com/repo.git",
+      github_mode: "existing",
+      runtime: {
+        model_provider: "openai",
+      },
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: { current: "sig" },
+    },
+    setters: {
+      setProjectDetail: () => {},
+      setSelectedProjectId: () => {},
+      setSelectedStepId: () => {},
+      setPlanDirty: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: (value) => {
+        capturedProjectForm = value;
+      },
+      setPlanDraft: () => {},
+      setShareSettings: () => {},
+    },
+  });
+
+  assert.deepEqual(capturedProjectForm, {
+    project_dir: "C:/repo",
+    display_name: "Repo",
+    branch: "main",
+    origin_url: "https://example.com/repo.git",
+    github_mode: "existing",
+    runtime: {
+      model_provider: "openai",
+    },
+  });
 });

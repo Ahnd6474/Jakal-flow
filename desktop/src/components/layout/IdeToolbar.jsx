@@ -70,9 +70,28 @@ function FolderIcon() {
   );
 }
 
-function ProjectSelector({ projects, selectedProjectId, onSelectProject = () => {}, onNewProject = () => {} }) {
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 7h16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7 7l1 12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 11v5M14 11v5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ProjectSelector({
+  projects,
+  selectedProjectId,
+  onSelectProject = () => {},
+  onNewProject = () => {},
+  onDeleteSelectedProject = () => {},
+  onDeleteProject = () => {},
+  defaultOpen = false,
+}) {
   const { language, t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [filter, setFilter] = useState("");
   const containerRef = useRef(null);
   const inputRef = useRef(null);
@@ -120,6 +139,10 @@ function ProjectSelector({ projects, selectedProjectId, onSelectProject = () => 
   const searchProjectsPlaceholder = language === "ko" ? "프로젝트 검색..." : "Search projects...";
   const noProjectsLabel = language === "ko" ? "프로젝트 없음" : "No projects yet";
   const selectedProjectName = selectedProject?.display_name || selectProjectPlaceholder;
+  const selectedProjectStatus = String(selectedProject?.status || "").trim();
+  const deleteSelectedProjectTitle = isActiveExecutionStatus(selectedProjectStatus)
+    ? (language === "ko" ? "실행 중인 프로젝트는 삭제할 수 없습니다." : "Cannot delete a running project.")
+    : t("action.deleteProject");
 
   function handleNewProject() {
     setOpen(false);
@@ -131,25 +154,47 @@ function ProjectSelector({ projects, selectedProjectId, onSelectProject = () => 
     setOpen(false);
   }
 
+  function handleDeleteProject(event, repoId) {
+    event.stopPropagation();
+    onDeleteProject(repoId);
+  }
+
+  function handleDeleteSelectedProject(event) {
+    event.stopPropagation();
+    onDeleteSelectedProject();
+  }
+
   return (
     <div className="project-selector project-selector--primary" ref={containerRef}>
-      <button
-        className="project-selector__btn project-selector__btn--primary"
-        onClick={() => setOpen((value) => !value)}
-        type="button"
-        title={selectedProjectName}
-      >
-        <span className="project-selector__btn-main">
-          <FolderIcon />
-          <span className="project-selector__btn-copy">
-            <span className="project-selector__btn-label">{selectProjectLabel}</span>
-            <strong className="project-selector__btn-name">{selectedProjectName}</strong>
+      <div className="project-selector__controls">
+        <button
+          className="project-selector__btn project-selector__btn--primary"
+          onClick={() => setOpen((value) => !value)}
+          type="button"
+          title={selectedProjectName}
+        >
+          <span className="project-selector__btn-main">
+            <FolderIcon />
+            <span className="project-selector__btn-copy">
+              <span className="project-selector__btn-label">{selectProjectLabel}</span>
+              <strong className="project-selector__btn-name">{selectedProjectName}</strong>
+            </span>
           </span>
-        </span>
-        <span className="project-selector__btn-trailing">
-          {open ? <ChevronDown /> : <ChevronRight />}
-        </span>
-      </button>
+          <span className="project-selector__btn-trailing">
+            {open ? <ChevronDown /> : <ChevronRight />}
+          </span>
+        </button>
+        <button
+          className="project-selector__btn project-selector__btn--icon project-selector__btn--delete"
+          onClick={handleDeleteSelectedProject}
+          type="button"
+          title={deleteSelectedProjectTitle}
+          aria-label={selectedProjectId ? `${selectedProjectName} ${t("action.deleteProject")}` : t("action.deleteProject")}
+          disabled={!selectedProjectId || isActiveExecutionStatus(selectedProjectStatus)}
+        >
+          <TrashIcon />
+        </button>
+      </div>
 
       {open ? (
         <div className="project-selector__dropdown">
@@ -167,15 +212,33 @@ function ProjectSelector({ projects, selectedProjectId, onSelectProject = () => 
           </button>
           <div className="project-selector__list">
             {filtered.length ? filtered.map((project) => (
-              <button
+              <div
                 key={project.repo_id}
                 className={`project-selector__item${project.repo_id === selectedProjectId ? " active" : ""}`}
-                onClick={() => handleSelectProject(project.repo_id)}
-                type="button"
               >
-                <span className="project-selector__item-name">{project.display_name}</span>
-                <span className={`chip-dot chip-dot--${statusTone(project.status)}`} />
-              </button>
+                <button
+                  className="project-selector__item-main"
+                  onClick={() => handleSelectProject(project.repo_id)}
+                  type="button"
+                >
+                  <span className="project-selector__item-name">{project.display_name}</span>
+                  <span className={`chip-dot chip-dot--${statusTone(project.status)}`} />
+                </button>
+                <button
+                  className="project-selector__item-delete"
+                  onClick={(event) => handleDeleteProject(event, project.repo_id)}
+                  type="button"
+                  title={
+                    isActiveExecutionStatus(project.status)
+                      ? (language === "ko" ? "실행 중인 프로젝트는 삭제할 수 없습니다." : "Cannot delete a running project.")
+                      : t("action.deleteProject")
+                  }
+                  aria-label={`${project.display_name || project.repo_id} ${t("action.deleteProject")}`}
+                  disabled={isActiveExecutionStatus(project.status)}
+                >
+                  <TrashIcon />
+                </button>
+              </div>
             )) : (
               <div className="project-selector__empty">{noProjectsLabel}</div>
             )}
@@ -185,6 +248,10 @@ function ProjectSelector({ projects, selectedProjectId, onSelectProject = () => 
     </div>
   );
 }
+
+export const __toolbarTestables = {
+  ProjectSelector,
+};
 
 const MemoProjectSelector = memo(ProjectSelector, (prevProps, nextProps) => {
   if (prevProps.selectedProjectId !== nextProps.selectedProjectId) {
@@ -285,6 +352,8 @@ export const IdeToolbar = memo(function IdeToolbar({
   selectedProjectId,
   onSelectProject,
   onNewProject,
+  onDeleteSelectedProject,
+  onDeleteProject,
   projectDetail,
   planDraft,
   pendingCheckpoint,
@@ -353,6 +422,8 @@ export const IdeToolbar = memo(function IdeToolbar({
         selectedProjectId={selectedProjectId}
         onSelectProject={onSelectProject}
         onNewProject={onNewProject}
+        onDeleteSelectedProject={onDeleteSelectedProject}
+        onDeleteProject={onDeleteProject}
       />
 
       <nav className="ide-toolbar__breadcrumb" aria-label="Navigation">

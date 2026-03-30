@@ -43,7 +43,6 @@ export function DetailsPane({ detail, planDraft, selectedStepId, modelPresets, o
   const wordReportTargetPath = String(detail?.files?.word_report_file || "").trim();
   const powerpointReportActualPath = String(detail?.reports?.powerpoint_report_path || "").trim();
   const powerpointTargetPath = String(detail?.reports?.powerpoint_report_target_path || detail?.files?.powerpoint_report_file || "").trim();
-  const mlReportPath = String(detail?.files?.ml_experiment_report_file || "").trim();
   const documents = [
     {
       title: t("reports.closeoutReport"),
@@ -62,16 +61,9 @@ export function DetailsPane({ detail, planDraft, selectedStepId, modelPresets, o
     {
       title: "PowerPoint Report",
       kind: ".pptx",
-      path: powerpointReportActualPath || powerpointTargetPath || "reports/CLOSEOUT_REPORT.pptx",
+      path: powerpointReportActualPath || (powerpointTargetPath ? `${powerpointTargetPath} (pending)` : "reports/CLOSEOUT_REPORT.pptx"),
       status: powerpointReportActualPath ? "completed" : "pending",
       muted: !powerpointReportActualPath,
-    },
-    {
-      title: "ML Experiment Report",
-      kind: "Markdown",
-      path: mlReportPath || "docs/ML_EXPERIMENT_REPORT.md",
-      status: detail?.reports?.ml_experiment_report_text ? "completed" : "pending",
-      muted: !detail?.reports?.ml_experiment_report_text,
     },
   ];
 

@@ -693,7 +693,7 @@ export function defaultModelForProvider(provider = "openai", runtime = {}) {
       return "gpt-5.4";
     }
     if (currentModel === "auto") {
-      return "auto";
+      return "gpt-5.4";
     }
     return looksLikeClaudeModel(currentModel) || currentModel.startsWith("gemini") ? "gpt-5.4" : currentModel;
   }
@@ -729,7 +729,7 @@ export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nex
   const currentModel = String(runtime?.model_slug_input || runtime?.model || "").trim().toLowerCase();
   const autoModelBase =
     previousProvider === provider
-      ? (currentModel || "auto")
+      ? (currentModel && currentModel !== "auto" ? currentModel : defaultModelForProvider(provider, runtime))
       : defaultModelForProvider(provider, { ...runtime, model: "", model_slug_input: "" });
   const ensembleDefaultModel = nextEnsembleOpenAiModel || "gpt-5.4";
   const keepExistingLocalModel =
@@ -792,9 +792,7 @@ export function blankProjectForm(defaultRuntime) {
   const defaultModelPreset =
     runtimeSource.model_preset !== undefined
       ? String(runtimeSource.model_preset || "").trim().toLowerCase()
-      : defaultModel === "auto"
-        ? "auto"
-        : "";
+      : "";
   return {
     project_dir: "",
     display_name: "",
@@ -837,6 +835,14 @@ export function projectFormFromDetail(detail, defaultRuntime) {
         ) || 0,
     },
   };
+}
+
+export function resolveProjectDirectory(form = null, detail = null) {
+  const detailProjectDir = String(detail?.project?.repo_path || "").trim();
+  if (detailProjectDir) {
+    return detailProjectDir;
+  }
+  return String(form?.project_dir || "").trim();
 }
 
 export function inheritProjectIdentityForm(form, defaultRuntime) {
@@ -1898,12 +1904,12 @@ export function defaultModelForRuntime(modelCatalog = [], runtime = {}) {
     return defaultModelForProvider(provider, runtime);
   }
   const scopedCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
-  const visible = scopedCatalog.filter((item) => !item?.hidden);
+  const visible = scopedCatalog.filter((item) => !item?.hidden && String(item?.model || "").trim().toLowerCase() !== "auto");
   const preferred = visible[0] || scopedCatalog[0] || null;
   if (preferred?.model) {
     return preferred.model;
   }
-  return provider === "oss" || provider === "ollama" ? "" : "auto";
+  return defaultModelForProvider(provider, runtime);
 }
 
 export function supportedReasoningOptions(modelCatalog = [], model = "", fallback = "medium") {
@@ -1932,8 +1938,10 @@ export function clampReasoningEffort(modelCatalog = [], model = "", requestedEff
 }
 
 export function applyConfigRuntimeModelSelection(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null) {
-  const providerAllowsAuto = providerSupportsAutoModel(currentRuntime?.model_provider || "openai");
-  const model = String(nextModel || "").trim() || (providerAllowsAuto ? "auto" : "");
+  const model = String(nextModel || "").trim()
+    || defaultModelForRuntime(modelCatalog, currentRuntime)
+    || defaultModelForProvider(currentRuntime?.model_provider || "openai", currentRuntime)
+    || "";
   const normalizedModel = model.toLowerCase();
   const supported = configReasoningOptions(modelCatalog, model, currentRuntime?.effort || "medium");
   const preferred = nextEffort || selectedConfigReasoning(modelCatalog, { ...currentRuntime, model });
@@ -1958,16 +1966,12 @@ export function configReasoningOptions(modelCatalog = [], model = "", fallback =
 }
 
 export function selectedConfigReasoning(modelCatalog = [], runtime = {}) {
-  const model = String(runtime?.model || "").trim().toLowerCase() || "auto";
+  const model = String(runtime?.model || runtime?.model_slug_input || "").trim().toLowerCase()
+    || defaultModelForRuntime(modelCatalog, runtime)
+    || "";
   const options = configReasoningOptions(modelCatalog, model, runtime?.effort || "medium");
   if (String(runtime?.effort_selection_mode || "").trim().toLowerCase() === AUTO_REASONING_OPTION && options.includes(AUTO_REASONING_OPTION)) {
     return AUTO_REASONING_OPTION;
-  }
-  if (model === "auto") {
-    const preset = String(runtime?.model_preset || "").trim().toLowerCase();
-    if (options.includes(preset)) {
-      return preset;
-    }
   }
   const preferred = String(runtime?.effort || "").trim().toLowerCase() || defaultReasoningOption(modelCatalog, model, "medium");
   if (options.includes(preferred)) {
@@ -2234,6 +2238,7 @@ export function planStepsWithCloseout(plan, labels = {}) {
 export function runtimeSummary(runtime, modelPresets = [], language = "en", modelCatalog = []) {
   const provider = normalizedModelProvider(runtime);
   const providerPrefix = providerDisplayName(provider, normalizedLocalModelProvider(runtime));
+  const selectedModel = String(runtime?.model || runtime?.model_slug_input || "").trim();
   const compactPlanningSuffix = runtime?.use_fast_mode ? ` | ${translate(language, "runtime.compactPlanning")}` : "";
   const workflowSuffix =
     String(runtime?.workflow_mode || "standard").trim().toLowerCase() === "ml"
@@ -2248,8 +2253,8 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
     const summary = `${providerPrefix}${workflowSuffix} | ${preset.summary}${executionSuffix}`;
     return `${summary}${compactPlanningSuffix}`;
   }
-  if (runtime?.model) {
-    const label = modelDisplayName(modelCatalog, runtime.model);
+  if (selectedModel) {
+    const label = modelDisplayName(modelCatalog, selectedModel);
     const effortLabel =
       String(runtime?.effort_selection_mode || "").trim().toLowerCase() === AUTO_REASONING_OPTION
         ? reasoningEffortLabel(AUTO_REASONING_OPTION, language)

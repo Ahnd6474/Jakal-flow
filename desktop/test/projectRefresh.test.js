@@ -19,10 +19,10 @@ test("mergeRefreshRepoId keeps the latest non-empty repo id", () => {
   assert.equal(mergeRefreshRepoId("repo-1", "repo-2"), "repo-2");
 });
 
-test("projectRefreshDebounceMs uses shorter defaults and bypasses debounce for immediate refreshes", () => {
-  assert.equal(projectRefreshDebounceMs(null), 120);
-  assert.equal(projectRefreshDebounceMs({ status: "queued" }), 120);
-  assert.equal(projectRefreshDebounceMs({ status: "running" }), 250);
+test("projectRefreshDebounceMs uses slower defaults and bypasses debounce for immediate refreshes", () => {
+  assert.equal(projectRefreshDebounceMs(null), 400);
+  assert.equal(projectRefreshDebounceMs({ status: "queued" }), 400);
+  assert.equal(projectRefreshDebounceMs({ status: "running" }), 1600);
   assert.equal(projectRefreshDebounceMs({ status: "running" }, { immediate: true }), 0);
 });
 

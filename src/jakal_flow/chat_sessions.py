@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from .codex_runner import CodexRunner
 from .errors import JSON_PARSE_EXCEPTIONS
-from .execution_control import execution_scope_id, run_subprocess_capture
+from .execution_control import ImmediateStopRequested, execution_scope_id, run_subprocess_capture
 from .models import ExecutionPlanState, ProjectContext
 from .model_providers import normalize_model_provider
 from .platform_defaults import default_codex_path
@@ -33,6 +33,7 @@ CHAT_HOME_ENV_VAR = "JAKAL_FLOW_CHAT_HOME"
 CHAT_MESSAGE_LOG_SUFFIX = ".messages.txt"
 CHAT_SUMMARY_SUFFIX = ".summary.txt"
 CHAT_TRANSCRIPT_SUFFIX = ".transcript.txt"
+CHAT_INTERRUPTED_MESSAGE = "Response stopped."
 _CHAT_REGISTRY_MEMORY_CACHE: dict[str, tuple[str, list[dict[str, Any]]]] = {}
 _CHAT_ACTIVE_SESSION_MEMORY_CACHE: dict[str, tuple[str, str]] = {}
 _CHAT_MESSAGES_MEMORY_CACHE: dict[str, tuple[str, list[dict[str, Any]]]] = {}
@@ -286,9 +287,25 @@ def _session_transcript_file(context: ProjectContext, title: str, created_at: st
 
 def _safe_chat_mode(value: str) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized in {"debugger", "merger"}:
+    if normalized in {"review", "debugger", "merger"}:
         return normalized
     return "conversation"
+
+
+def _conversation_user_message(user_message: str, mode: str = "conversation") -> str:
+    cleaned = str(user_message or "").strip()
+    normalized_mode = _safe_chat_mode(mode)
+    if normalized_mode != "review":
+        return cleaned
+    return (
+        "Review the following code, diff, or implementation request.\n"
+        "1. Summarize what it does.\n"
+        "2. Evaluate correctness, maintainability, and risks.\n"
+        "3. Suggest concrete improvements and next steps.\n"
+        "4. Respond in the same language as the user's message when practical.\n\n"
+        "User content:\n"
+        f"{cleaned}"
+    ).strip()
 
 
 def _session_title(value: str) -> str:
@@ -991,12 +1008,15 @@ def execute_conversation_turn(
     *,
     plan_state: ExecutionPlanState,
     user_message: str,
+    mode: str = "conversation",
     session_id: str = "",
     create_new_session: bool = False,
 ) -> dict[str, Any]:
     cleaned_user_message = str(user_message or "").strip()
     if not cleaned_user_message:
         raise ValueError("message is required.")
+    conversation_mode = _safe_chat_mode(mode)
+    prompt_user_message = _conversation_user_message(cleaned_user_message, conversation_mode)
     session = resolve_chat_session(
         context,
         session_id=session_id,
@@ -1010,7 +1030,7 @@ def execute_conversation_turn(
         session.session_id,
         role="user",
         text=cleaned_user_message,
-        mode="conversation",
+        mode=conversation_mode,
     )
     prompt = build_conversation_prompt(
         context,
@@ -1018,34 +1038,48 @@ def execute_conversation_turn(
         session=session,
         prior_summary=prior_summary,
         recent_messages=[*prior_messages[-7:], user_entry],
-        user_message=cleaned_user_message,
+        user_message=prompt_user_message,
     )
     conversation_context = _conversation_context(context)
-    returncode, assistant_text = _run_conversation_reply(
-        conversation_context,
-        prompt=prompt,
-        session_id=session.session_id,
-    )
+    interrupted = False
+    try:
+        returncode, assistant_text = _run_conversation_reply(
+            conversation_context,
+            prompt=prompt,
+            session_id=session.session_id,
+        )
+    except ImmediateStopRequested:
+        interrupted = True
+        returncode = 130
+        assistant_text = CHAT_INTERRUPTED_MESSAGE
     assistant_text = _normalize_conversation_reply_text(assistant_text)
     error = ""
     role = "assistant"
-    if returncode != 0 or not assistant_text:
+    message_status = "completed"
+    metadata: dict[str, Any] = {
+        "returncode": int(returncode),
+    }
+    if interrupted:
+        role = "system"
+        message_status = "cancelled"
+        metadata["interrupted"] = True
+    elif returncode != 0 or not assistant_text:
         error = _chat_run_error_message(assistant_text)
         assistant_text = error
         role = "system"
+        message_status = "failed"
     _save_chat_message(
         context,
         session.session_id,
         role=role,
         text=assistant_text,
-        mode="conversation",
-        status="failed" if error else "completed",
-        metadata={
-            "returncode": int(returncode),
-        },
+        mode=conversation_mode,
+        status=message_status,
+        metadata=metadata,
     )
     rebuild_chat_session_files(context, session.session_id)
     return {
         "chat": chat_payload(context, session_id=session.session_id, activate=True),
         "error": error,
+        "interrupted": interrupted,
     }

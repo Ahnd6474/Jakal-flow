@@ -1,3 +1,4 @@
+import { openInSystem } from "../../api";
 import { useI18n } from "../../i18n";
 
 function contractListLabel(items = []) {
@@ -40,6 +41,7 @@ function SectionList({ items, emptyText, renderItem }) {
 
 export function ReportsView({ reports }) {
   const { t } = useI18n();
+  const closeoutReportPath = String(reports?.closeout_report_file || reports?.closeout_report_path || "").trim();
   const wordReportPath = String(reports?.word_report_path || "").trim();
   const wordReportEnabled = Boolean(reports?.word_report_enabled);
   const spine = reports?.spine || {};
@@ -54,6 +56,13 @@ export function ReportsView({ reports }) {
   const planningStageSummary = Array.isArray(planningMetrics?.stage_summary) ? planningMetrics.stage_summary : [];
   const recentPlanningItems = Array.isArray(planningMetrics?.recent_items) ? planningMetrics.recent_items : [];
   const slowestPlanningItem = planningMetrics?.slowest_item || null;
+
+  function handleOpen(path) {
+    if (!path) {
+      return;
+    }
+    openInSystem(path).catch(() => {});
+  }
 
   return (
     <section className="workspace-view">
@@ -279,16 +288,29 @@ export function ReportsView({ reports }) {
 
         <div className="content-card">
           <div className="content-card__header">
-            <strong>ML Experiment Report</strong>
-          </div>
-          <pre>{reports?.ml_experiment_report_text || "No ML experiment report yet."}</pre>
-        </div>
-
-        <div className="content-card">
-          <div className="content-card__header">
             <strong>{t("reports.closeoutReport")}</strong>
           </div>
           <pre>{reports?.closeout_report_text || t("reports.noCloseoutReport")}</pre>
+          {closeoutReportPath ? (
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button className="toolbar-button toolbar-button--ghost" onClick={() => handleOpen(closeoutReportPath)} type="button">
+                {t("action.browse")}
+              </button>
+              {wordReportPath ? (
+                <button className="toolbar-button toolbar-button--ghost" onClick={() => handleOpen(wordReportPath)} type="button">
+                  Word
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            wordReportPath ? (
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button className="toolbar-button toolbar-button--ghost" onClick={() => handleOpen(wordReportPath)} type="button">
+                  Word
+                </button>
+              </div>
+            ) : null
+          )}
           {wordReportPath ? <p>{t("reports.wordReportReady", { path: wordReportPath })}</p> : null}
           {!wordReportPath && !wordReportEnabled ? <p>{t("reports.wordReportDisabled")}</p> : null}
         </div>

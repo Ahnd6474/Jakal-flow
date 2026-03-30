@@ -54,6 +54,7 @@ import {
   projectJobFromJobs,
   projectFormFromDetail,
   projectStatusWithJob,
+  resolveProjectDirectory,
   runtimeSummary,
   isChatCommand,
   QWEN_CODE_DEFAULT_MODEL,
@@ -1703,7 +1704,7 @@ test("planStepsWithCloseout only depends on terminal steps in a DAG", () => {
   );
   assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low" }, []), "gpt-5.4 | reasoning Low");
   assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "medium", effort_selection_mode: "auto" }, []), "gpt-5.4 | reasoning Auto");
-  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low", use_fast_mode: true }, []), "gpt-5.4 | reasoning Low | compact planning");
+  assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "low", use_fast_mode: true }, []), "gpt-5.4 | reasoning Low | faster planning");
   assert.equal(runtimeSummary({ model: "gpt-5.4" }), "gpt-5.4 | reasoning High");
   assert.equal(runtimeSummary({}, undefined), "No model selected");
   assert.equal(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), "gpt-5.4 | 추론 높음");
@@ -1724,7 +1725,7 @@ test("runtimeSummary reflects execution mode in preset and direct model summarie
   );
   assert.equal(
     runtimeSummary({ model: "gpt-5.4", effort: "low", use_fast_mode: true }, []),
-    "OpenAI/Codex | Standard Mode | gpt-5.4 | reasoning Low | parallel auto | compact planning",
+    "OpenAI/Codex | Standard Mode | gpt-5.4 | reasoning Low | parallel auto | faster planning",
   );
   assert.equal(runtimeSummary({ model: "gpt-5.4" }), "OpenAI/Codex | Standard Mode | gpt-5.4 | reasoning High | parallel auto");
   assert.equal(
@@ -1733,6 +1734,28 @@ test("runtimeSummary reflects execution mode in preset and direct model summarie
   );
   assert.equal(runtimeSummary({}, undefined), "No model selected");
   assert.match(runtimeSummary({ model: "gpt-5.4", effort: "high" }, [], "ko"), /^OpenAI\/Codex \| .* \| gpt-5\.4 .* parallel .*$/);
+});
+
+test("resolveProjectDirectory prefers loaded project detail over a stale form value", () => {
+  assert.equal(
+    resolveProjectDirectory(
+      { project_dir: "" },
+      {
+        project: {
+          repo_path: "/workspace/demo",
+        },
+      },
+    ),
+    "/workspace/demo",
+  );
+  assert.equal(resolveProjectDirectory({ project_dir: "/workspace/fallback" }, null), "/workspace/fallback");
+});
+
+test("runtimeSummary falls back to model_slug_input when model is blank", () => {
+  assert.equal(
+    runtimeSummary({ model: "", model_slug_input: "gpt-5.4-mini", effort: "medium" }, []),
+    "OpenAI/Codex | Standard Mode | gpt-5.4-mini | reasoning Medium | parallel auto",
+  );
 });
 
 test("runtimeSummary includes the selected local provider for generic OSS models", () => {

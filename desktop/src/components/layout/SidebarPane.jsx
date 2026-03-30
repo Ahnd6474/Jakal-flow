@@ -465,14 +465,25 @@ function reservationLabel(job, fallback) {
   return String(job?.display_name || "").trim() || String(job?.repo_id || "").trim() || fallback;
 }
 
-function ReservationsPanel({ queuedJobs, onCancelQueuedJob, language, t }) {
+function ReservationsPanel({ queuedJobs, onCancelQueuedJob, onAddReservationRun, canAddReservationRun, language, t }) {
   return (
     <>
       <div className="sidebar-panel__header">
         <strong>{language === "ko" ? "예약 대기열" : "Job Queue"}</strong>
-        {queuedJobs.length > 0 ? (
-          <span className="sidebar-count-badge">{queuedJobs.length}</span>
-        ) : null}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {queuedJobs.length > 0 ? (
+            <span className="sidebar-count-badge">{queuedJobs.length}</span>
+          ) : null}
+          <button
+            className="toolbar-button toolbar-button--ghost"
+            onClick={() => onAddReservationRun?.()}
+            type="button"
+            disabled={!canAddReservationRun}
+            style={{ padding: "4px 8px", fontSize: "11px" }}
+          >
+            {language === "ko" ? "예약 실행 추가" : "Add Queued Run"}
+          </button>
+        </div>
       </div>
       <div className="sidebar-list">
         {queuedJobs.length ? (
@@ -964,6 +975,7 @@ export const SidebarPane = memo(function SidebarPane({
   onSelectStep = () => {},
   queuedJobs = [],
   onCancelQueuedJob,
+  onRunPlan = () => {},
   chat = {},
   selectedChatSessionId = "",
   chatDraftSession = false,
@@ -985,7 +997,7 @@ export const SidebarPane = memo(function SidebarPane({
   );
   const normalizedWorkspaceTree = useMemo(
     () => (workspaceTabActive ? (workspaceTree || []).map((node) => normalizeTree(node)) : []),
-    [workspaceTabActive, workspaceTree, workspaceTreeSignature],
+    [workspaceTabActive, workspaceTreeSignature],
   );
   const workspaceTreePaths = useMemo(
     () => (workspaceTabActive ? collectTreePaths(normalizedWorkspaceTree) : []),
@@ -1220,7 +1232,14 @@ export const SidebarPane = memo(function SidebarPane({
 
           {/* ── Reservations tab ── */}
           {activeTab === "reservations" ? (
-            <ReservationsPanel queuedJobs={queuedJobs} onCancelQueuedJob={onCancelQueuedJob} language={language} t={t} />
+            <ReservationsPanel
+              queuedJobs={queuedJobs}
+              onCancelQueuedJob={onCancelQueuedJob}
+              onAddReservationRun={onRunPlan}
+              canAddReservationRun={Boolean(detail?.project?.repo_path) && !busy}
+              language={language}
+              t={t}
+            />
           ) : null}
 
           {/* ── AI Chat tab ── */}

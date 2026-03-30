@@ -206,6 +206,7 @@ function centerWorkspacePropsEqual(previousProps, nextProps) {
       return (
         previousProps.detail === nextProps.detail
         && previousProps.activeJob === nextProps.activeJob
+        && previousProps.chatJob === nextProps.chatJob
         && previousProps.selectedStepId === nextProps.selectedStepId
         && previousProps.form === nextProps.form
         && previousProps.busy === nextProps.busy
@@ -319,6 +320,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
   onDeleteStep,
   onMoveStep,
   activeJob,
+  chatJob,
   hidePromptStrip = false,
   chat,
   selectedChatSessionId,
@@ -389,7 +391,6 @@ export const CenterWorkspace = memo(function CenterWorkspace({
   const visibleTabs = [
     ["ai-chat", t("tab.aiChat")],
     ["config", t("tab.config")],
-    ...(hasFlowTab ? [["flow", t("tab.flow")]] : []),
     ["dashboard", t("tab.dashboard")],
     ["history", t("tab.history")],
     ...(developerMode ? [["reports", t("tab.reports")]] : []),
@@ -418,6 +419,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
             modelPresets={modelPresets}
             modelCatalog={modelCatalog}
             activeJob={activeJob}
+            chatJob={chatJob}
             selectedStepId={selectedStepId}
             busy={busy}
             onChangeForm={onChangeForm}
@@ -497,6 +499,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
           <AppSettingsView
             settings={programSettings}
             codexStatus={detail?.codex_status}
+            modelCatalog={modelCatalog}
             shareSettings={shareSettings}
             shareDetail={workspaceShareDetail}
             busy={busy}

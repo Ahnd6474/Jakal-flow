@@ -1,11 +1,13 @@
 import { useI18n } from "../../i18n";
 import {
   applyConfigRuntimeModelSelection,
+  applyProviderDefaults,
+  configReasoningOptions,
+  defaultModelForRuntime,
   filterModelCatalogByProvider,
   MODEL_PROVIDER_OPTIONS,
   normalizedModelProvider,
   providerSupportsCatalog,
-  REASONING_OPTIONS,
   runtimeSummary,
   selectedConfigReasoning,
 } from "../../utils";
@@ -40,9 +42,10 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
   const selectedProvider = normalizedModelProvider(runtime);
   const scopedModelCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
   const providerHasCatalog = providerSupportsCatalog(selectedProvider);
-  const selectedModel = runtime.model || "";
+  const selectedModel = runtime.model || runtime.model_slug_input || defaultModelForRuntime(modelCatalog, runtime) || "";
   const selectedEffort = selectedConfigReasoning(scopedModelCatalog, runtime) || "medium";
-  const visibleModels = (scopedModelCatalog || []).filter((item) => item && item.model && !item.hidden);
+  const visibleModels = (scopedModelCatalog || []).filter((item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto");
+  const reasoningOptions = configReasoningOptions(scopedModelCatalog, selectedModel, runtime.effort || "medium");
 
   function applyModelChange(nextModel) {
     if (!form) return;
@@ -91,11 +94,7 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
             <select
               value={selectedProvider}
               onChange={(e) =>
-                applyRuntimePatch({
-                  model_provider: e.target.value,
-                  local_model_provider: e.target.value === "ollama" ? "ollama" : runtime.local_model_provider,
-                  model: "",
-                })
+                applyRuntimePatch(applyProviderDefaults(runtime, e.target.value))
               }
             >
               {MODEL_PROVIDER_OPTIONS.map((p) => (
@@ -122,9 +121,9 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
             <label className="model-pane__label">Reasoning Effort</label>
             <select
               value={selectedEffort}
-              onChange={(e) => applyRuntimePatch({ effort: e.target.value })}
+              onChange={(e) => applyRuntimePatch(applyConfigRuntimeModelSelection(runtime, scopedModelCatalog, selectedModel, e.target.value))}
             >
-              {REASONING_OPTIONS.map((opt) => (
+              {reasoningOptions.map((opt) => (
                 <option key={opt} value={opt}>{EFFORT_LABELS[opt] || opt}</option>
               ))}
             </select>
@@ -132,7 +131,7 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
 
           <div className="model-pane__summary">
             <span className="model-pane__summary-label">현재 설정</span>
-            <span className="model-pane__summary-value">{runtimeSummary(runtime, modelPresets)}</span>
+            <span className="model-pane__summary-value">{runtimeSummary(runtime, modelPresets, "en", scopedModelCatalog)}</span>
           </div>
         </div>
       )}

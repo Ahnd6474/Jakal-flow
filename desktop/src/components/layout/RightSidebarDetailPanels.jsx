@@ -85,15 +85,16 @@ function OutputCard({ icon, title, description, enabled, checked, onChange, busy
   );
 }
 
-function ReportFileCard({ title, kind, icon, path, available, onOpen, language }) {
+function ReportFileCard({ title, kind, icon, path, displayPath = "", available, onOpen, language }) {
+  const visiblePath = displayPath || path;
   return (
     <div className={`rsb-file-card${available ? " rsb-file-card--ready" : ""}`}>
       <div className="rsb-file-card__icon">{icon}</div>
       <div className="rsb-file-card__info">
         <strong>{title}</strong>
         <span className="rsb-file-card__kind">{kind}</span>
-        {path ? (
-          <span className="rsb-file-card__path" title={path}>{path}</span>
+        {visiblePath ? (
+          <span className="rsb-file-card__path" title={visiblePath}>{visiblePath}</span>
         ) : (
           <span className="rsb-file-card__path rsb-file-card__path--empty">
             {language === "ko" ? "Not generated yet" : "Not generated yet"}
@@ -152,17 +153,17 @@ export const FilesPanel = memo(function FilesPanel({
   liveRuntimeEditable,
   language = "en",
 }) {
-  const { closeoutPath, wordPath, pptPath, webpagePath, mlReportPath, latestFailureArtifactFiles } = useMemo(() => ({
+  const { closeoutPath, wordPath, wordTargetPath, pptPath, pptTargetPath, webpagePath, latestFailureArtifactFiles } = useMemo(() => ({
     closeoutPath: String(detail?.files?.closeout_report_file || "").trim(),
-    wordPath: String(detail?.reports?.word_report_path || detail?.files?.word_report_file || "").trim(),
-    pptPath: String(
-      detail?.reports?.powerpoint_report_path
-      || detail?.reports?.powerpoint_report_target_path
+    wordPath: String(detail?.reports?.word_report_path || "").trim(),
+    wordTargetPath: String(detail?.files?.word_report_file || "").trim(),
+    pptPath: String(detail?.reports?.powerpoint_report_path || "").trim(),
+    pptTargetPath: String(
+      detail?.reports?.powerpoint_report_target_path
       || detail?.files?.powerpoint_report_file
       || "",
     ).trim(),
     webpagePath: String(detail?.reports?.webpage_path || detail?.files?.webpage_file || "").trim(),
-    mlReportPath: String(detail?.files?.ml_experiment_report_file || "").trim(),
     latestFailureArtifactFiles: Array.isArray(detail?.reports?.latest_failure?.artifact_files)
       ? detail.reports.latest_failure.artifact_files
       : [],
@@ -220,10 +221,9 @@ export const FilesPanel = memo(function FilesPanel({
       </div>
 
       <ReportFileCard title={language === "ko" ? "Closeout Report" : "Closeout Report"} kind="Markdown" icon={<MarkdownDocIcon />} path={closeoutPath} available={Boolean(detail?.reports?.closeout_report_text && closeoutPath)} onOpen={openInSystemSafe} language={language} />
-      <ReportFileCard title="Word Report" kind=".docx" icon={<WordDocIcon />} path={wordPath} available={Boolean(wordPath)} onOpen={openInSystemSafe} language={language} />
-      <ReportFileCard title="PowerPoint" kind=".pptx" icon={<PptDocIcon />} path={pptPath} available={Boolean(pptPath)} onOpen={openInSystemSafe} language={language} />
+      <ReportFileCard title="Word Report" kind=".docx" icon={<WordDocIcon />} path={wordPath} displayPath={wordPath || wordTargetPath} available={Boolean(wordPath)} onOpen={openInSystemSafe} language={language} />
+      <ReportFileCard title="PowerPoint" kind=".pptx" icon={<PptDocIcon />} path={pptPath} displayPath={pptPath || pptTargetPath} available={Boolean(pptPath)} onOpen={openInSystemSafe} language={language} />
       {webpagePath ? <ReportFileCard title="Webpage" kind=".html" icon={<WebDocIcon />} path={webpagePath} available={true} onOpen={openInSystemSafe} language={language} /> : null}
-      {mlReportPath ? <ReportFileCard title="ML Experiment Report" kind="Markdown" icon={<MarkdownDocIcon />} path={mlReportPath} available={true} onOpen={openInSystemSafe} language={language} /> : null}
 
       {latestFailureArtifactFiles.length ? (
         <>

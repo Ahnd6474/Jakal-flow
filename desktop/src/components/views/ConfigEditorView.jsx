@@ -1,14 +1,16 @@
 import { memo, useMemo } from "react";
 import { useI18n } from "../../i18n";
 import {
+  applyConfigRuntimeModelSelection,
   clampReasoningEffort,
+  configReasoningOptions,
   defaultModelForRuntime,
   filterModelCatalogByProvider,
   findModelCatalogEntry,
   normalizeMemoryBudgetGiB,
   normalizedModelProvider,
-  REASONING_OPTIONS,
   reasoningEffortLabel,
+  selectedConfigReasoning,
 } from "../../utils";
 
 /* ── View header icon ── */
@@ -137,7 +139,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
       ? {
           ...runtime,
           model_provider: "openai",
-          model: runtime.ensemble_openai_model || runtime.model || defaultModelForRuntime(modelCatalog, { ...runtime, model_provider: "openai" }) || "auto",
+          model: runtime.ensemble_openai_model || runtime.model || defaultModelForRuntime(modelCatalog, { ...runtime, model_provider: "openai" }) || "gpt-5.4",
           model_slug_input: runtime.ensemble_openai_model || runtime.model_slug_input || runtime.model || "",
         }
       : runtime;
@@ -154,8 +156,8 @@ export const ConfigEditorView = memo(function ConfigEditorView({
     () => (
       planningEntry?.supported_reasoning_efforts?.length
         ? planningEntry.supported_reasoning_efforts
-        : REASONING_OPTIONS
-    ).filter((effort) => REASONING_OPTIONS.includes(effort)),
+        : ["low", "medium", "high", "xhigh"]
+    ).filter((effort) => ["low", "medium", "high", "xhigh"].includes(effort)),
     [planningEntry],
   );
   const planningSelectedEffort = useMemo(
@@ -166,6 +168,23 @@ export const ConfigEditorView = memo(function ConfigEditorView({
       runtime.effort || "medium",
     ),
     [planningCatalog, planningModel, runtime.effort, runtime.planning_effort],
+  );
+  const runtimeCatalog = useMemo(
+    () => filterModelCatalogByProvider(modelCatalog, runtime),
+    [modelCatalog, runtime],
+  );
+  const runtimeVisibleModels = useMemo(
+    () => runtimeCatalog.filter((item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto"),
+    [runtimeCatalog],
+  );
+  const runtimeModel = String(runtime.model_slug_input || runtime.model || defaultModelForRuntime(modelCatalog, runtime) || "").trim();
+  const runtimeReasoningOptions = useMemo(
+    () => configReasoningOptions(runtimeCatalog, runtimeModel, runtime.effort || "medium"),
+    [runtimeCatalog, runtimeModel, runtime.effort],
+  );
+  const runtimeSelectedReasoning = useMemo(
+    () => selectedConfigReasoning(runtimeCatalog, runtime),
+    [runtimeCatalog, runtime],
   );
 
   return (
@@ -502,8 +521,8 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 label={t("option.useFastMode")}
                 hint={
                   language === "ko"
-                    ? "계획 생성에서 Planner Agent A를 생략하고 압축 계획 경로를 사용합니다."
-                    : "Skip Planner Agent A during plan generation and use the compact planning path."
+                    ? "계획 생성 시간을 줄이기 위해 Planner Agent A를 생략하고 빠른 계획 경로를 사용합니다."
+                    : "Reduce plan generation time by skipping Planner Agent A and using the faster planning path."
                 }
                 disabled={busy}
               />
@@ -549,6 +568,75 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 />
               </label>
             ) : null}
+          </div>
+
+          <div className="subsection">
+            <SectionHeader
+              icon={<ExecutionIcon />}
+              title={language === "ko" ? "모델 설정" : "Model Settings"}
+              description={language === "ko" ? "프로젝트 생성 후에도 실행 모델과 추론 수준을 변경합니다." : "Change the runtime model and reasoning after project setup."}
+            />
+
+            {runtimeVisibleModels.length ? (
+              <label className="field" style={{ marginTop: "8px" }}>
+                <span>{t("field.model")}</span>
+                <select
+                  value={runtimeModel}
+                  onChange={(event) =>
+                    onChangeForm((current) => ({
+                      ...current,
+                      runtime: applyConfigRuntimeModelSelection(current.runtime || {}, runtimeCatalog, event.target.value),
+                    }))
+                  }
+                  disabled={busy && !liveRuntimeEditable}
+                >
+                  {runtimeVisibleModels.map((item) => (
+                    <option key={item.model} value={item.model}>
+                      {item.display_name || item.model}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            <label className="field">
+              <span>{t("field.customModelSlug")}</span>
+              <input
+                value={runtime.model_slug_input || runtime.model || ""}
+                onChange={(event) =>
+                  onChangeForm((current) => ({
+                    ...current,
+                    runtime: applyConfigRuntimeModelSelection(current.runtime || {}, runtimeCatalog, event.target.value),
+                  }))
+                }
+                disabled={busy && !liveRuntimeEditable}
+              />
+            </label>
+
+            <label className="field">
+              <span>{t("field.gptReasoning")}</span>
+              <select
+                value={runtimeSelectedReasoning}
+                onChange={(event) =>
+                  onChangeForm((current) => ({
+                    ...current,
+                    runtime: applyConfigRuntimeModelSelection(
+                      current.runtime || {},
+                      runtimeCatalog,
+                      String(current.runtime?.model_slug_input || current.runtime?.model || runtimeModel),
+                      event.target.value,
+                    ),
+                  }))
+                }
+                disabled={busy && !liveRuntimeEditable}
+              >
+                {runtimeReasoningOptions.map((effort) => (
+                  <option key={effort} value={effort}>
+                    {reasoningEffortLabel(effort, language)}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
         </div>

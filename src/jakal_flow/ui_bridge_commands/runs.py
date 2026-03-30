@@ -43,7 +43,7 @@ def build_run_command_handlers(
         }
         word_report_path = ""
         report_path = getattr(project.paths, "closeout_report_docx_file", None)
-        if report_path is not None and report_path.exists():
+        if bool(getattr(project.runtime, "generate_word_report", False)) and report_path is not None and report_path.exists():
             word_report_path = str(report_path)
             details["word_report_path"] = word_report_path
         latest_failure_status = read_json(project.paths.reports_dir / "latest_pr_failure_status.json", default={})
@@ -506,26 +506,31 @@ def build_run_command_handlers(
         if not message:
             raise ValueError("message is required.")
         chat_mode = str(ctx.payload.get("chat_mode", "conversation")).strip().lower()
-        if chat_mode not in {"conversation", "debugger", "merger"}:
+        if chat_mode not in {"conversation", "review", "debugger", "merger"}:
             chat_mode = "conversation"
         session_id = str(ctx.payload.get("session_id", "")).strip()
         create_new_session = coerce_bool(ctx.payload.get("create_new_session", False), False)
 
-        if chat_mode == "conversation":
+        if chat_mode in {"conversation", "review"}:
             plan_state = ctx.orchestrator.load_execution_plan_state(project)
-            result = execute_conversation_turn(
-                project,
-                plan_state=plan_state,
-                user_message=message,
-                session_id=session_id,
-                create_new_session=create_new_session,
-            )
-            return {
-                **result,
-                "chat_mode": chat_mode,
-                "project": chat_project_payload(project),
-                "emit_project_changed": False,
-            }
+            try:
+                result = execute_conversation_turn(
+                    project,
+                    plan_state=plan_state,
+                    user_message=message,
+                    mode=chat_mode,
+                    session_id=session_id,
+                    create_new_session=create_new_session,
+                )
+                return {
+                    **result,
+                    "chat_mode": chat_mode,
+                    "project": chat_project_payload(project),
+                    "emit_project_changed": False,
+                }
+            finally:
+                execution_stop_registry.clear(execution_scope_id(project))
+                save_run_control(project, default_run_control())
 
         runtime_payload = ctx.payload.get("runtime", {})
         runtime_payload = runtime_payload if isinstance(runtime_payload, dict) else {}

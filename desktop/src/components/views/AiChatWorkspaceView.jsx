@@ -8,6 +8,7 @@ function aiChatWorkspaceViewPropsEqual(previousProps, nextProps) {
     && previousProps.modelPresets === nextProps.modelPresets
     && previousProps.modelCatalog === nextProps.modelCatalog
     && previousProps.activeJob === nextProps.activeJob
+    && previousProps.chatJob === nextProps.chatJob
     && previousProps.selectedStepId === nextProps.selectedStepId
     && previousProps.busy === nextProps.busy
     && previousProps.selectedChatSessionId === nextProps.selectedChatSessionId
@@ -22,6 +23,7 @@ export const AiChatWorkspaceView = memo(function AiChatWorkspaceView({
   modelPresets,
   modelCatalog,
   activeJob,
+  chatJob,
   selectedStepId,
   busy,
   onChangeForm,
@@ -43,12 +45,12 @@ export const AiChatWorkspaceView = memo(function AiChatWorkspaceView({
         collapsed={false}
         chatCenterMode
         detail={detail}
-        planDraft={planDraft}
         selectedStepId={selectedStepId}
         modelPresets={modelPresets}
         modelCatalog={modelCatalog}
         form={form}
         activeJob={activeJob}
+        chatJob={chatJob}
         busy={busy}
         onChangeForm={onChangeForm}
         chat={chat}

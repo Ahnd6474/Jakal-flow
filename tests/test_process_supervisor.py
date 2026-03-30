@@ -4,7 +4,7 @@ import subprocess
 import unittest
 from unittest import mock
 
-from jakal_flow.process_supervisor import hidden_window_startupinfo, spawn_background_process
+from jakal_flow.process_supervisor import hidden_window_startupinfo, spawn_background_process, terminate_process
 
 
 class ProcessSupervisorTests(unittest.TestCase):
@@ -35,6 +35,34 @@ class ProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(popen_mock.call_count, 2)
         self.assertIsNotNone(popen_mock.call_args_list[0].kwargs["startupinfo"])
         self.assertIsNone(popen_mock.call_args_list[1].kwargs["startupinfo"])
+
+    @mock.patch("jakal_flow.process_supervisor.os.name", "nt")
+    @mock.patch("jakal_flow.process_supervisor.subprocess.run")
+    def test_terminate_process_uses_taskkill_tree_on_windows(self, run_mock: mock.Mock) -> None:
+        terminate_process(4321)
+
+        run_mock.assert_called_once_with(
+            ["taskkill", "/PID", "4321", "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    @mock.patch("jakal_flow.process_supervisor.os.name", "nt")
+    @mock.patch("jakal_flow.process_supervisor.subprocess.run", side_effect=OSError("taskkill unavailable"))
+    def test_terminate_process_falls_back_when_taskkill_is_unavailable(self, _run_mock: mock.Mock) -> None:
+        fake_kernel32 = mock.Mock()
+        fake_kernel32.OpenProcess.return_value = object()
+        fake_ctypes = mock.Mock()
+        fake_ctypes.WinDLL.return_value = fake_kernel32
+        fake_wintypes = mock.Mock(DWORD=object(), BOOL=object(), HANDLE=object(), UINT=object())
+
+        with mock.patch.dict("sys.modules", {"ctypes": fake_ctypes, "ctypes.wintypes": fake_wintypes}):
+            terminate_process(9876)
+
+        fake_kernel32.OpenProcess.assert_called_once()
+        fake_kernel32.TerminateProcess.assert_called_once()
+        fake_kernel32.CloseHandle.assert_called_once()
 
 
 if __name__ == "__main__":

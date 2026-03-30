@@ -51,6 +51,7 @@ import {
   projectJobFromJobs,
   programSettingsEqual,
   programSettingsFromRuntime,
+  resolveProjectDirectory,
   sanitizeProjectListForJobState,
   shouldReplaceVisibleProject,
   visibleExecutionJob,
@@ -81,6 +82,7 @@ import {
   mergeProjectDetailSupplement,
   reuseProjectListingItems,
 } from "../controller/projectStore";
+import { beginProjectSelectionLoad, isCurrentProjectSelectionLoad } from "../controller/projectSelection";
 import { createRequestDeduper } from "../controller/requestDeduper";
 import { usePersistentState } from "./usePersistentState";
 
@@ -142,6 +144,7 @@ export function useDesktopController() {
   const historyDetailRequestDeduperRef = useRef(createRequestDeduper());
   const projectSupplementRequestDeduperRef = useRef(createRequestDeduper());
   const workspaceShareRequestDeduperRef = useRef(createRequestDeduper());
+  const selectedProjectLoadSequenceRef = useRef(0);
 
   const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "ai-chat");
   const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
@@ -172,6 +175,10 @@ export function useDesktopController() {
     [jobs, projectDetail?.project?.current_status, projectDetail?.project?.last_run_at, projectDetail?.project?.repo_path, projectForm?.project_dir, selectedProjectId],
   );
   const activeJob = useMemo(() => visibleExecutionJob(projectJob), [projectJob]);
+  const chatJob = useMemo(
+    () => (isChatCommand(projectJob?.command) ? projectJob : null),
+    [projectJob],
+  );
   const activeJobId = activeJob?.id || "";
   const queuedJobs = useMemo(
     () =>
@@ -232,8 +239,8 @@ export function useDesktopController() {
       setCenterTab("dashboard");
       return;
     }
-    if (centerTab === "run") {
-      setCenterTab("flow");
+    if (centerTab === "run" || centerTab === "flow") {
+      setCenterTab("ai-chat");
     }
   }, [centerTab, setCenterTab]);
 
@@ -960,7 +967,6 @@ export function useDesktopController() {
             applyProjectDetail(job.result, { preserveDirtyPlan: false, runningJob: nextSelectedJob, force: true });
           }
           if (job.command === BRIDGE_COMMANDS.GENERATE_PLAN && jobStatus === "completed") {
-            setCenterTab("flow");
             setRightCollapsed(false);
           }
           if (
@@ -1232,6 +1238,7 @@ export function useDesktopController() {
     if (!repoId) {
       return null;
     }
+    const loadToken = beginProjectSelectionLoad(selectedProjectLoadSequenceRef);
     const previousProjectId = selectedProjectId;
     setLoadingProjectId(repoId);
     setSelectedProjectId(repoId);
@@ -1240,6 +1247,9 @@ export function useDesktopController() {
         refreshCodexStatus: options.refreshCodexStatus ?? false,
         detailLevel: options.detailLevel ?? (wantsExpandedDetail ? "full" : "core"),
       });
+      if (!isCurrentProjectSelectionLoad(selectedProjectLoadSequenceRef, loadToken)) {
+        return null;
+      }
       applyProjectDetail(
         detail,
         {
@@ -1253,6 +1263,9 @@ export function useDesktopController() {
       );
       return detail;
     } catch (error) {
+      if (!isCurrentProjectSelectionLoad(selectedProjectLoadSequenceRef, loadToken)) {
+        return null;
+      }
       setLoadingProjectId("");
       setSelectedProjectId(previousProjectId);
       setMessage(messagePayload("error", String(error)));
@@ -1281,6 +1294,7 @@ export function useDesktopController() {
   function clearSelectedProjectState(nextRuntime = defaultRuntime) {
     clearProjectSelectionState({
       defaultRuntime: nextRuntime,
+      nextProjectForm: inheritProjectIdentityForm(projectForm, nextRuntime),
       refs: {
         lastAppliedDetailSignatureRef,
       },
@@ -1349,12 +1363,9 @@ export function useDesktopController() {
   }
 
   function updateProgramSettings(updater) {
-    startTransition(() => {
-      setProgramSettings((current) => {
-        const draft = typeof updater === "function" ? updater(current) : updater;
-        return programSettingsFromRuntime(draft);
-      });
-    });
+    const draft = typeof updater === "function" ? updater(programSettings) : updater;
+    const nextSettings = programSettingsFromRuntime(draft);
+    applyProgramSettingsNow(nextSettings);
   }
 
   function setChatModelSelection(selection = null) {
@@ -1738,23 +1749,24 @@ export function useDesktopController() {
           BRIDGE_COMMANDS.RUN_MANUAL_MERGER,
         ].includes(command)
       ) {
-        setCenterTab("flow");
         setRightCollapsed(false);
       }
       setBottomTab("json");
-      setMessage(
-        messagePayload(
-          "info",
-          String(job?.status || "").trim().toLowerCase() === "queued"
-            ? translate(language, "message.commandQueued", {
-                command: commandLabel(command, language),
-                position: Math.max(1, Number.parseInt(String(job?.queue_position || 1), 10) || 1),
-              })
-            : translate(language, "message.commandStarted", {
-                command: commandLabel(command, language),
-              }),
-        ),
-      );
+      if (command !== BRIDGE_COMMANDS.SEND_CHAT_MESSAGE) {
+        setMessage(
+          messagePayload(
+            "info",
+            String(job?.status || "").trim().toLowerCase() === "queued"
+              ? translate(language, "message.commandQueued", {
+                  command: commandLabel(command, language),
+                  position: Math.max(1, Number.parseInt(String(job?.queue_position || 1), 10) || 1),
+                })
+              : translate(language, "message.commandStarted", {
+                  command: commandLabel(command, language),
+                }),
+          ),
+        );
+      }
       return job;
     } catch (error) {
       if (isDuplicateProjectJobError(error)) {
@@ -1795,8 +1807,7 @@ export function useDesktopController() {
     };
   }
 
-<<<<<<< Updated upstream
-  async function generatePlan(promptOverride = undefined) {
+  async function generatePlan(promptOverride = null) {
     const hasPromptOverride = typeof promptOverride === "string";
     const nextPlanDraft = hasPromptOverride
       ? {
@@ -1807,15 +1818,6 @@ export function useDesktopController() {
     const prompt = String(nextPlanDraft?.project_prompt || "").trim();
     if (hasPromptOverride && nextPlanDraft.project_prompt !== String(planDraft?.project_prompt || "")) {
       syncPlan(nextPlanDraft);
-=======
-  async function generatePlan(promptOverride = null) {
-    const prompt = String(promptOverride ?? planDraft?.project_prompt ?? "").trim();
-    if (promptOverride !== null) {
-      syncPlan({
-        ...(planDraft || {}),
-        project_prompt: promptOverride,
-      });
->>>>>>> Stashed changes
     }
     const generationValidation = planGenerationValidation({
       projectDir: projectForm.project_dir,
@@ -1836,7 +1838,6 @@ export function useDesktopController() {
     ) {
       return;
     }
-    setCenterTab("flow");
     setRightCollapsed(false);
     await startJob(BRIDGE_COMMANDS.GENERATE_PLAN, {
       ...buildProjectPayload(projectForm),
@@ -1956,13 +1957,14 @@ export function useDesktopController() {
   async function sendChatMessage(text, mode = "conversation") {
     const messageText = String(text || "").trim();
     const normalizedMode = String(mode || "conversation").trim().toLowerCase() || "conversation";
+    const effectiveProjectDir = resolveProjectDirectory(projectForm, projectDetail);
     if (!messageText) {
       return null;
     }
     if (normalizedMode === "plan") {
       return generatePlan(messageText);
     }
-    if (!projectForm.project_dir.trim()) {
+    if (!effectiveProjectDir) {
       setMessage(messagePayload("error", translate(language, "message.openProjectFirst")));
       return null;
     }
@@ -1982,7 +1984,13 @@ export function useDesktopController() {
         ? ""
         : (selectedChatSessionId || projectDetail?.chat?.active_session_id || ""),
     ).trim();
-    const basePayload = buildProjectPayload(projectForm, planDraft);
+    const basePayload = buildProjectPayload(
+      {
+        ...projectForm,
+        project_dir: effectiveProjectDir,
+      },
+      planDraft,
+    );
     const chatProviderRuntime = {
       ...(basePayload.runtime || {}),
       model_provider: normalizedModelProvider(programSettings),
@@ -2020,21 +2028,23 @@ export function useDesktopController() {
   }
 
   async function requestStop() {
-    if (!projectForm.project_dir.trim() || String(activeJob?.status || "").trim().toLowerCase() !== "running") {
+    const effectiveProjectDir = resolveProjectDirectory(projectForm, projectDetail);
+    const runningProjectJob = String(projectJob?.status || "").trim().toLowerCase() === "running";
+    if (!effectiveProjectDir || !runningProjectJob) {
       return;
     }
     await withPending("request-stop", async () => {
       await bridgeRequest(
         BRIDGE_COMMANDS.REQUEST_STOP,
         {
-          project_dir: projectForm.project_dir.trim(),
+          project_dir: effectiveProjectDir,
           source: "tauri-react-ui",
         },
         workspaceRoot || null,
       );
       const detail = await fetchProjectDetailBySelector(
         bridgeRequest,
-        { projectDir: projectForm.project_dir.trim() },
+        { projectDir: effectiveProjectDir },
         workspaceRoot,
         { refreshCodexStatus: false, detailLevel: wantsExpandedDetail ? "full" : "core" },
       );
@@ -2503,6 +2513,7 @@ export function useDesktopController() {
     pendingAction,
     loadingProjectId,
     activeJob,
+    chatJob,
     activeJobId,
     queuedJobs,
     canRequestStop,

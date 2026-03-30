@@ -1,11 +1,15 @@
 import { memo, startTransition, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import {
+  applyConfigRuntimeModelSelection,
   applyProviderDefaults,
   cloneValue,
+  configReasoningOptions,
   defaultCodexPath,
   defaultProviderApiKeyEnv,
   defaultProviderBaseUrl,
+  defaultModelForRuntime,
+  filterModelCatalogByProvider,
   normalizeMemoryBudgetGiB,
   normalizeDashboardVisibility,
   normalizedModelProvider,
@@ -14,8 +18,8 @@ import {
   providerStatusReason,
   programSettingsEqual,
   programSettingsAllowsModelSlugInput,
-  REASONING_OPTIONS,
   reasoningEffortLabel,
+  selectedConfigReasoning,
 } from "../../utils";
 
 /* ── Reusable toggle row ── */
@@ -168,7 +172,6 @@ function appSettingsViewPropsEqual(previousProps, nextProps) {
     && previousProps.shareDetail === nextProps.shareDetail
     && previousProps.busy === nextProps.busy
     && previousProps.shareBusy === nextProps.shareBusy
-    && previousProps.dirty === nextProps.dirty
     && previousProps.initialSettingsTab === nextProps.initialSettingsTab
   );
 }
@@ -176,14 +179,13 @@ function appSettingsViewPropsEqual(previousProps, nextProps) {
 export const AppSettingsView = memo(function AppSettingsView({
   settings,
   codexStatus,
+  modelCatalog = [],
   shareSettings,
   shareDetail,
   busy,
   shareBusy = false,
-  dirty = false,
   initialSettingsTab = "app",
   onChangeSettings,
-  onSaveSettings,
   onGenerateShareLink,
   onCopyShareLink,
   onRevokeShareLink,
@@ -206,6 +208,11 @@ export const AppSettingsView = memo(function AppSettingsView({
   const activeShare = shareDetail?.active_session || shareDetail?.project_active_session || null;
   const shareServer = shareDetail?.server || null;
   const selectedProvider = normalizedModelProvider(draftSettings);
+  const scopedModelCatalog = filterModelCatalogByProvider(modelCatalog, draftSettings);
+  const visibleModels = scopedModelCatalog.filter((item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto");
+  const selectedModel = String(draftSettings.model_slug_input || draftSettings.model || defaultModelForRuntime(modelCatalog, draftSettings) || "").trim();
+  const reasoningOptions = configReasoningOptions(scopedModelCatalog, selectedModel, draftSettings.effort || "medium");
+  const selectedReasoning = selectedConfigReasoning(scopedModelCatalog, draftSettings);
   const dashboardVisibility = normalizeDashboardVisibility(draftSettings?.dashboard_visibility);
   const runtimeBusy = busy;
   const autoParallelWorkers = String(draftSettings?.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
@@ -219,25 +226,22 @@ export const AppSettingsView = memo(function AppSettingsView({
     }
   }, [settings]);
 
+  useEffect(() => {
+    if (!localDirty || typeof onChangeSettings !== "function") {
+      return;
+    }
+    const nextSettings = cloneSettings(draftSettings);
+    startTransition(() => {
+      onChangeSettings(nextSettings);
+    });
+  }, [draftSettings, localDirty, onChangeSettings]);
+
   function updateDraftSettings(updater) {
     setDraftSettings((current) => {
       const nextDraft = typeof updater === "function" ? updater(current) : updater;
       return cloneSettings(nextDraft);
     });
     setLocalDirty(true);
-  }
-
-  function handleSaveSettings() {
-    const nextSettings = cloneSettings(draftSettings);
-    if (typeof onSaveSettings === "function") {
-      startTransition(() => {
-        onSaveSettings(nextSettings);
-      });
-    } else if (typeof onChangeSettings === "function") {
-      startTransition(() => {
-        onChangeSettings(nextSettings);
-      });
-    }
   }
 
   function categoryForProvider(provider) {
@@ -279,14 +283,6 @@ export const AppSettingsView = memo(function AppSettingsView({
           <h2>{t("tab.programSettings")}</h2>
           <p style={{ color: "var(--text-muted)", fontSize: "13px" }}>{t("settings.programSettingsDescription")}</p>
         </div>
-        <button
-          className="toolbar-button toolbar-button--accent"
-          onClick={handleSaveSettings}
-          type="button"
-          disabled={busy || !(localDirty || dirty)}
-        >
-          {t("action.saveProgramSettings")}
-        </button>
       </div>
 
       {/* ── Sub-category tab bar ── */}
@@ -526,25 +522,35 @@ export const AppSettingsView = memo(function AppSettingsView({
             ) : null}
 
             {programSettingsAllowsModelSlugInput(selectedProvider) ? (
-              <label className="field">
-                <span>{t("field.customModelSlug")}</span>
-                <input
-                  value={draftSettings.model_slug_input || draftSettings.model || ""}
-                  onChange={(event) =>
-                    updateDraftSettings((current) => {
-                      const nextModel = event.target.value.trim().toLowerCase();
-                      return {
-                        ...current,
-                        model: nextModel,
-                        model_preset: nextModel === "auto" ? "auto" : "",
-                        model_selection_mode: "slug",
-                        model_slug_input: event.target.value,
-                      };
-                    })
-                  }
-                  disabled={runtimeBusy}
-                />
-              </label>
+              <>
+                {visibleModels.length ? (
+                  <label className="field">
+                    <span>{t("field.model")}</span>
+                    <select
+                      value={selectedModel}
+                      onChange={(event) => updateDraftSettings((current) => applyConfigRuntimeModelSelection(current, scopedModelCatalog, event.target.value))}
+                      disabled={runtimeBusy}
+                    >
+                      {visibleModels.map((item) => (
+                        <option key={item.model} value={item.model}>
+                          {item.display_name || item.model}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
+                <label className="field">
+                  <span>{t("field.customModelSlug")}</span>
+                  <input
+                    value={draftSettings.model_slug_input || draftSettings.model || ""}
+                    onChange={(event) =>
+                      updateDraftSettings((current) => applyConfigRuntimeModelSelection(current, scopedModelCatalog, event.target.value))
+                    }
+                    disabled={runtimeBusy}
+                  />
+                </label>
+              </>
             ) : null}
 
             {/* 2-col grid for smaller fields */}
@@ -588,13 +594,30 @@ export const AppSettingsView = memo(function AppSettingsView({
               </label>
 
               <label className="field">
+                <span>{t("field.gptReasoning")}</span>
+                <select
+                  value={selectedReasoning}
+                  onChange={(event) =>
+                    updateDraftSettings((current) => applyConfigRuntimeModelSelection(current, scopedModelCatalog, selectedModel, event.target.value))
+                  }
+                  disabled={busy}
+                >
+                  {reasoningOptions.map((effort) => (
+                    <option key={effort} value={effort}>
+                      {reasoningEffortLabel(effort, language)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
                 <span>{planningReasoningLabel}</span>
                 <select
                   value={draftSettings.planning_effort || draftSettings.effort || "medium"}
                   onChange={(event) => updateDraftSettings((current) => ({ ...current, planning_effort: event.target.value }))}
                   disabled={busy}
                 >
-                  {REASONING_OPTIONS.map((effort) => (
+                  {reasoningOptions.filter((effort) => effort !== "auto").map((effort) => (
                     <option key={effort} value={effort}>
                       {reasoningEffortLabel(effort, language)}
                     </option>

@@ -72,6 +72,16 @@ def terminate_process(pid: int) -> None:
     try:
         if os.name == "nt":
             try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return
+            except OSError:
+                pass
+            try:
                 import ctypes
                 from ctypes import wintypes
             except ImportError:
@@ -93,12 +103,6 @@ def terminate_process(pid: int) -> None:
                         return
                     finally:
                         kernel32.CloseHandle(handle)
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
         else:
             os.kill(pid, signal.SIGTERM)
     except OSError:

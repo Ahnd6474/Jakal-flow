@@ -12,6 +12,23 @@ import {
 } from "../utils.js";
 
 const PROJECT_DETAIL_SECTION_KEYS = ["reports", "workspace", "checkpoints", "history", "config", "chat"];
+const PROJECT_RUNTIME_OVERRIDE_KEYS = [
+  "model_provider",
+  "local_model_provider",
+  "provider_base_url",
+  "provider_api_key_env",
+  "billing_mode",
+  "ensemble_openai_model",
+  "ensemble_gemini_model",
+  "ensemble_claude_model",
+  "model",
+  "model_preset",
+  "model_selection_mode",
+  "model_slug_input",
+  "codex_path",
+  "effort",
+  "planning_effort",
+];
 
 function hasOwnValue(value, key) {
   return Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
@@ -155,6 +172,44 @@ function preserveProjectIdentityForm(currentForm = null, nextForm = null) {
     branch: next.branch || current.branch || "main",
     origin_url: next.origin_url || current.origin_url || "",
     github_mode: next.github_mode || current.github_mode || "",
+  };
+}
+
+function preserveProjectRuntimeOverrides(currentForm = null, nextForm = null, previousDetail = null, sameProject = false) {
+  if (!sameProject) {
+    return nextForm;
+  }
+  const current = currentForm && typeof currentForm === "object" ? currentForm : {};
+  const next = nextForm && typeof nextForm === "object" ? nextForm : {};
+  if (!String(current.project_dir || "").trim()) {
+    return nextForm;
+  }
+  const currentRuntime = current.runtime && typeof current.runtime === "object" ? current.runtime : {};
+  const previousRuntime = previousDetail?.runtime && typeof previousDetail.runtime === "object" ? previousDetail.runtime : {};
+  const nextRuntime = next.runtime && typeof next.runtime === "object" ? { ...next.runtime } : {};
+  let changed = false;
+  PROJECT_RUNTIME_OVERRIDE_KEYS.forEach((key) => {
+    if (!hasOwnValue(currentRuntime, key)) {
+      return;
+    }
+    if (!hasOwnValue(previousRuntime, key)) {
+      return;
+    }
+    if (Object.is(currentRuntime[key], previousRuntime[key])) {
+      return;
+    }
+    const nextValue = cloneValue(currentRuntime[key]);
+    if (!Object.is(nextRuntime[key], nextValue)) {
+      changed = true;
+    }
+    nextRuntime[key] = nextValue;
+  });
+  if (!changed) {
+    return nextForm;
+  }
+  return {
+    ...next,
+    runtime: nextRuntime,
   };
 }
 
@@ -593,9 +648,14 @@ export function applyProjectDetailState({
       if (current.project_dir && preserveDirtyPlan) {
         return current;
       }
-      return preserveProjectIdentityForm(
+      return preserveProjectRuntimeOverrides(
         current,
-        projectFormFromDetail(normalizedDetail, state.defaultRuntime),
+        preserveProjectIdentityForm(
+          current,
+          projectFormFromDetail(normalizedDetail, state.defaultRuntime),
+        ),
+        state.projectDetail,
+        sameProject,
       );
     });
     if (!preserveDirtyPlan) {
@@ -616,6 +676,7 @@ export function applyProjectDetailState({
 
 export function clearSelectedProjectState({
   defaultRuntime,
+  nextProjectForm = null,
   refs,
   setters,
 }) {
@@ -625,7 +686,7 @@ export function clearSelectedProjectState({
   setters.setSelectedStepId("");
   setters.setPlanDirty(false);
   setters.setLoadingProjectId("");
-  setters.setProjectForm(blankProjectForm(defaultRuntime));
+  setters.setProjectForm(nextProjectForm && typeof nextProjectForm === "object" ? cloneValue(nextProjectForm) : blankProjectForm(defaultRuntime));
   setters.setPlanDraft(emptyPlanDraft());
   setters.setShareSettings(defaultShareSettings());
 }

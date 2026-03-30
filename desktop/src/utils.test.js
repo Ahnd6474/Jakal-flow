@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { canEditStep, failureReasonCode, failureReasonLabel, jobHasNewerActiveReplacement } from "./utils.js";
+import {
+  applyConfigRuntimeModelSelection,
+  canEditStep,
+  defaultModelForRuntime,
+  failureReasonCode,
+  failureReasonLabel,
+  jobHasNewerActiveReplacement,
+  selectedConfigReasoning,
+} from "./utils.js";
 
 test("jobHasNewerActiveReplacement detects a newer active job for the same project", () => {
   const jobs = [
@@ -101,4 +109,38 @@ test("failureReasonLabel maps step metadata reason codes to readable labels", ()
 test("failureReasonCode reads both top-level and step metadata reason codes", () => {
   assert.equal(failureReasonCode({ failure_reason_code: "agent_pass_failed" }), "agent_pass_failed");
   assert.equal(failureReasonCode({ metadata: { failure_reason_code: "parallel_merge_conflict" } }), "parallel_merge_conflict");
+});
+
+test("defaultModelForRuntime skips auto catalog entries for openai providers", () => {
+  const modelCatalog = [
+    { model: "auto", display_name: "Auto", provider: "openai", hidden: false },
+    { model: "gpt-5.4", display_name: "GPT-5.4", provider: "openai", hidden: false },
+  ];
+
+  assert.equal(defaultModelForRuntime(modelCatalog, { model_provider: "openai" }), "gpt-5.4");
+});
+
+test("applyConfigRuntimeModelSelection keeps a concrete model while supporting auto reasoning", () => {
+  const modelCatalog = [
+    {
+      model: "gpt-5.4",
+      display_name: "GPT-5.4",
+      provider: "openai",
+      hidden: false,
+      default_reasoning_effort: "medium",
+      supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+    },
+  ];
+
+  const nextRuntime = applyConfigRuntimeModelSelection(
+    { model_provider: "openai", model: "gpt-5.4", model_slug_input: "gpt-5.4", effort: "medium" },
+    modelCatalog,
+    "gpt-5.4",
+    "auto",
+  );
+
+  assert.equal(nextRuntime.model, "gpt-5.4");
+  assert.equal(nextRuntime.model_slug_input, "gpt-5.4");
+  assert.equal(nextRuntime.effort_selection_mode, "auto");
+  assert.equal(selectedConfigReasoning(modelCatalog, nextRuntime), "auto");
 });
