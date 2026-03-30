@@ -77,6 +77,7 @@ import {
   applyProjectEventListingState,
   clearSelectedProjectState as clearProjectSelectionState,
   mergeProjectDetailSupplement,
+  reuseProjectListingItems,
 } from "../controller/projectStore";
 import { createRequestDeduper } from "../controller/requestDeduper";
 import { usePersistentState } from "./usePersistentState";
@@ -557,11 +558,12 @@ export function useDesktopController() {
         }
         const nextProjects = applyListingState({
           listing,
+          previousProjects: projectsRef.current,
           runningJob: jobsRef.current,
           setProjects,
           setWorkspaceStats,
         });
-        setHistoryProjects(listing?.history || []);
+        setHistoryProjects((current) => reuseProjectListingItems(current, listing?.history || []));
         projectsRef.current = nextProjects;
         if (!nextProjects.some((item) => item.repo_id === selectedProjectId)) {
           setSelectedProjectId(nextProjects[0]?.repo_id || "");
@@ -840,11 +842,12 @@ export function useDesktopController() {
         if (listing) {
           const nextProjects = applyListingState({
             listing,
+            previousProjects: projectsRef.current,
             runningJob: jobsRef.current,
             setProjects,
             setWorkspaceStats,
           });
-          setHistoryProjects(listing?.history || []);
+          setHistoryProjects((current) => reuseProjectListingItems(current, listing?.history || []));
           projectsRef.current = nextProjects;
         }
         if (detail && !cancelled) {
@@ -990,6 +993,7 @@ export function useDesktopController() {
             }
             const nextProjects = applyListingState({
               listing,
+              previousProjects: projectsRef.current,
               runningJob: jobsRef.current,
               setProjects,
               setWorkspaceStats,
@@ -1134,11 +1138,12 @@ export function useDesktopController() {
     const listing = await loadProjectListing(bridgeRequest, workspaceRoot);
     const nextProjects = applyListingState({
       listing,
+      previousProjects: projectsRef.current,
       runningJob: jobsRef.current,
       setProjects,
       setWorkspaceStats,
     });
-    setHistoryProjects(listing?.history || []);
+    setHistoryProjects((current) => reuseProjectListingItems(current, listing?.history || []));
     projectsRef.current = nextProjects;
     if (!selectedProjectId && nextProjects.length) {
       setSelectedProjectId(nextProjects[0].repo_id);
@@ -1175,12 +1180,13 @@ export function useDesktopController() {
         if (listing) {
           const nextProjects = applyListingState({
             listing,
+            previousProjects: projectsRef.current,
             runningJob: jobsRef.current,
             setProjects,
             setWorkspaceStats,
           });
           startTransition(() => {
-            setHistoryProjects(listing?.history || []);
+            setHistoryProjects((current) => reuseProjectListingItems(current, listing?.history || []));
             projectsRef.current = nextProjects;
             if (detail) {
               applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob });
@@ -1193,6 +1199,7 @@ export function useDesktopController() {
         const listing = refreshedState;
         const nextProjects = applyListingState({
           listing,
+          previousProjects: projectsRef.current,
           runningJob: jobsRef.current,
           setProjects,
           setWorkspaceStats,
@@ -1203,7 +1210,7 @@ export function useDesktopController() {
           })
           : null;
         startTransition(() => {
-          setHistoryProjects(listing?.history || []);
+          setHistoryProjects((current) => reuseProjectListingItems(current, listing?.history || []));
           projectsRef.current = nextProjects;
           if (selectedHistoryId && historyDetail) {
             setHistoryDetail(historyDetail);
@@ -1478,7 +1485,7 @@ export function useDesktopController() {
         workspaceRoot || null,
       );
       setProjects(result.projects || []);
-      setHistoryProjects(result.history || []);
+      setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
       clearSelectedProjectState(defaultRuntime);
       restoreProjectForm(nextForm);
@@ -1505,7 +1512,7 @@ export function useDesktopController() {
         workspaceRoot || null,
       );
       setProjects(result.projects || []);
-      setHistoryProjects(result.history || []);
+      setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
       if (repoId === selectedProjectId) {
         clearSelectedProjectState(defaultRuntime);
@@ -1537,7 +1544,7 @@ export function useDesktopController() {
         workspaceRoot || null,
       );
       setProjects(result.projects || []);
-      setHistoryProjects(result.history || []);
+      setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
       clearSelectedProjectState(defaultRuntime);
       restoreProjectForm(nextForm);
@@ -1563,7 +1570,7 @@ export function useDesktopController() {
         workspaceRoot || null,
       );
       setProjects(result.projects || []);
-      setHistoryProjects(result.history || []);
+      setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
       if (repoId === selectedProjectId) {
         clearSelectedProjectState(defaultRuntime);
@@ -1586,7 +1593,7 @@ export function useDesktopController() {
     await withPending("archive-all-projects", async () => {
       const result = await bridgeRequest(BRIDGE_COMMANDS.ARCHIVE_ALL_PROJECTS, {}, workspaceRoot || null);
       setProjects(result.projects || []);
-      setHistoryProjects(result.history || []);
+      setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
       clearSelectedProjectState(defaultRuntime);
       setSelectedHistoryId((result.history || [])[0]?.archive_id || "");
@@ -1604,7 +1611,7 @@ export function useDesktopController() {
     await withPending("delete-all-projects", async () => {
       const result = await bridgeRequest(BRIDGE_COMMANDS.DELETE_ALL_PROJECTS, {}, workspaceRoot || null);
       setProjects(result.projects || []);
-      setHistoryProjects(result.history || []);
+      setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
       clearSelectedProjectState(defaultRuntime);
       setMessage(messagePayload("success", translate(language, "message.allProjectsDeleted")));
@@ -1627,7 +1634,7 @@ export function useDesktopController() {
         workspaceRoot || null,
       );
       setProjects(result.projects || []);
-      setHistoryProjects(result.history || []);
+      setHistoryProjects((current) => reuseProjectListingItems(current, result.history || []));
       setWorkspaceStats(result.workspace || null);
       const nextHistoryId = (result.history || [])[0]?.archive_id || "";
       if (archiveId === selectedHistoryId) {

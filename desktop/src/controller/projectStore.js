@@ -109,7 +109,7 @@ function sameProjectListItem(left, right) {
   );
 }
 
-function reuseProjectListingItems(previousProjects = [], nextProjects = []) {
+export function reuseProjectListingItems(previousProjects = [], nextProjects = []) {
   const previousByKey = new Map(
     (Array.isArray(previousProjects) ? previousProjects : [])
       .map((project) => [projectListingKey(project), project])
@@ -399,9 +399,9 @@ export function mergeProjectDetailSupplement(detail, supplement = {}) {
   };
 }
 
-export function applyListingState({ listing, runningJob = null, setProjects, setWorkspaceStats }) {
+export function applyListingState({ listing, previousProjects = [], runningJob = null, setProjects, setWorkspaceStats }) {
   const nextProjects = sanitizeProjectListForJobState(
-    reuseProjectListingItems([], listing?.projects || []),
+    reuseProjectListingItems(previousProjects, listing?.projects || []),
     runningJob,
   );
   setProjects(nextProjects);
