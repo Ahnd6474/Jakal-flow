@@ -495,10 +495,11 @@ const ProjectChatPane = memo(function ProjectChatPane({
     () => runtimeSummary(projectRuntime, modelPresets, language, modelCatalog),
     [language, modelCatalog, modelPresets, projectRuntime],
   );
-  const legacyChatTargetSummary = selectedChatEntry
+  /*
     ? `${selectedChatEntry.display_name || selectedChatEntry.model} · ${chatProviderLabel(selectedChatEntry.provider, selectedChatEntry.local_provider, language)}`
     : `${language === "ko" ? "Project default" : "Project default"} · ${projectDefaultSummary}`;
 
+  */
   const chatTargetSummary = useMemo(
     () => (
       selectedChatEntry

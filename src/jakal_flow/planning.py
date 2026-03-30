@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -11,7 +13,7 @@ from .contract_wave import DEFAULT_SPINE_VERSION, load_spine_state, normalize_ex
 from .model_selection import normalize_reasoning_effort
 from .models import CandidateTask, Checkpoint, ExecutionPlanState, ExecutionStep, ProjectContext
 from .step_models import planning_model_selection_guidance, resolve_step_model_choice
-from .utils import compact_text, normalize_workflow_mode, now_utc_iso, parse_json_text, read_text, similarity_score, svg_text_element, tokenize, wrap_svg_text, write_text
+from .utils import compact_text, normalize_workflow_mode, now_utc_iso, parse_json_text, read_json, read_text, similarity_score, svg_text_element, tokenize, wrap_svg_text, write_json_if_changed, write_text
 
 
 @dataclass(slots=True)
@@ -38,6 +40,10 @@ SCOPE_GUARD_TEMPLATE_FILENAME = "SCOPE_GUARD_TEMPLATE.md"
 REFERENCE_GUIDE_FILENAME = "REFERENCE_GUIDE.md"
 REFERENCE_GUIDE_DISPLAY_PATH = f"src/jakal_flow/docs/{REFERENCE_GUIDE_FILENAME}"
 _AGENTS_SUMMARY_CACHE: dict[tuple[str, int], tuple[tuple[int, int, int, int], str]] = {}
+_REPO_INPUTS_CACHE_VERSION = 1
+_PROMPT_BUNDLE_CACHE_VERSION = 1
+_REPO_INPUTS_MEMORY_CACHE: dict[str, tuple[str, dict[str, str]]] = {}
+_PROMPT_BUNDLE_MEMORY_CACHE: dict[str, tuple[str, dict[str, str]]] = {}
 
 
 def source_docs_dir() -> Path:
@@ -63,6 +69,35 @@ def _path_cache_token(path: Path) -> tuple[int, int, int, int]:
     except OSError:
         return (0, 0, 0, 0)
     return (1, int(stat_result.st_mtime_ns), int(stat_result.st_size), int(stat_result.st_ctime_ns))
+
+
+def _stable_json_dumps(data: Any) -> str:
+    return json.dumps(data, ensure_ascii=False, sort_keys=True)
+
+
+def _stable_digest(data: Any) -> str:
+    return hashlib.sha1(_stable_json_dumps(data).encode("utf-8")).hexdigest()
+
+
+def _source_inventory_roots(repo_dir: Path) -> list[Path]:
+    return [
+        repo_dir / "src",
+        repo_dir / "app",
+        repo_dir / "lib",
+        repo_dir / "desktop" / "src",
+    ]
+
+
+def _sorted_scandir(path: Path) -> list[os.DirEntry[str]]:
+    try:
+        with os.scandir(path) as entries:
+            return sorted(entries, key=lambda entry: entry.name)
+    except OSError:
+        return []
+
+
+def _cache_file_key(cache_file: Path | None, fallback: Path) -> str:
+    return str((cache_file or fallback).resolve())
 
 
 def plan_generation_prompt_filename(execution_mode: str | None, workflow_mode: str | None = None) -> str:
@@ -137,12 +172,7 @@ def load_reference_guide_text() -> str:
 
 
 def _summarize_source_inventory(repo_dir: Path, limit: int = 10) -> str:
-    roots = [
-        repo_dir / "src",
-        repo_dir / "app",
-        repo_dir / "lib",
-        repo_dir / "desktop" / "src",
-    ]
+    roots = _source_inventory_roots(repo_dir)
     allowed_suffixes = {
         ".c",
         ".cc",
@@ -183,24 +213,42 @@ def _summarize_source_inventory(repo_dir: Path, limit: int = 10) -> str:
     samples: list[str] = []
     seen: set[str] = set()
     total = 0
+    truncated = False
+    scan_limit = max(limit + 200, limit * 20)
 
     for root in roots:
         if not root.exists():
             continue
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            if path.suffix.lower() not in allowed_suffixes:
-                continue
-            if any(part in excluded_parts for part in path.parts):
-                continue
-            relative = str(path.relative_to(repo_dir)).replace("\\", "/")
-            if relative in seen:
-                continue
-            seen.add(relative)
-            total += 1
-            if len(samples) < limit:
-                samples.append(relative)
+        stack = [root]
+        while stack:
+            current = stack.pop()
+            child_dirs: list[Path] = []
+            for entry in _sorted_scandir(current):
+                name = entry.name
+                if entry.is_dir(follow_symlinks=False):
+                    if name in excluded_parts:
+                        continue
+                    child_dirs.append(Path(entry.path))
+                    continue
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                if Path(name).suffix.lower() not in allowed_suffixes:
+                    continue
+                relative = str(Path(entry.path).relative_to(repo_dir)).replace("\\", "/")
+                if relative in seen:
+                    continue
+                seen.add(relative)
+                total += 1
+                if len(samples) < limit:
+                    samples.append(relative)
+                if total >= scan_limit:
+                    truncated = True
+                    break
+            if truncated:
+                break
+            stack.extend(reversed(child_dirs))
+        if truncated:
+            break
 
     if not total:
         return (
@@ -209,7 +257,12 @@ def _summarize_source_inventory(repo_dir: Path, limit: int = 10) -> str:
             "entrypoint, or module."
         )
 
-    suffix = "" if total <= limit else f", plus {total - limit} more"
+    if total <= limit:
+        suffix = ""
+    elif truncated:
+        suffix = ", plus many more"
+    else:
+        suffix = f", plus {total - limit} more"
     return (
         "Existing implementation files detected. Prefer extending or editing these paths instead of adding "
         f"scaffold-only skeleton steps unless a genuinely new boundary is required: {', '.join(samples)}{suffix}."
@@ -222,44 +275,131 @@ def _summarize_docs_inventory(
     max_files: int = 8,
     max_chars_per_file: int = 320,
     max_total_chars: int = 2400,
-) -> str:
+) -> tuple[str, list[str]]:
     docs_dir = repo_dir / "docs"
     if not docs_dir.exists():
-        return "No markdown files under repo/docs."
-    doc_paths = sorted(docs_dir.rglob("*.md"))
+        return "No markdown files under repo/docs.", []
+    doc_paths: list[Path] = []
+    stack = [docs_dir]
+    while stack and len(doc_paths) < max_files + 1:
+        current = stack.pop()
+        child_dirs: list[Path] = []
+        for entry in _sorted_scandir(current):
+            if entry.is_dir(follow_symlinks=False):
+                child_dirs.append(Path(entry.path))
+                continue
+            if entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(".md"):
+                doc_paths.append(Path(entry.path))
+                if len(doc_paths) >= max_files + 1:
+                    break
+        stack.extend(reversed(child_dirs))
     if not doc_paths:
-        return "No markdown files under repo/docs."
+        return "No markdown files under repo/docs.", []
 
     entries: list[str] = []
+    sampled_docs: list[str] = []
     current_chars = 0
-    for path in doc_paths:
+    for path in doc_paths[:max_files]:
         if len(entries) >= max_files or current_chars >= max_total_chars:
             break
-        entry = f"## {path.relative_to(repo_dir)}\n{compact_text(read_text(path), max_chars_per_file)}"
+        relative = str(path.relative_to(repo_dir)).replace("\\", "/")
+        entry = f"## {relative}\n{compact_text(read_text(path), max_chars_per_file)}"
         if entries and current_chars + len(entry) + 2 > max_total_chars:
             break
         entries.append(entry)
         current_chars += len(entry) + 2
+        sampled_docs.append(relative)
 
     if not entries:
         first_path = doc_paths[0]
-        entries.append(f"## {first_path.relative_to(repo_dir)}\n{compact_text(read_text(first_path), max_chars_per_file)}")
+        relative = str(first_path.relative_to(repo_dir)).replace("\\", "/")
+        entries.append(f"## {relative}\n{compact_text(read_text(first_path), max_chars_per_file)}")
+        sampled_docs = [relative]
 
-    omitted_count = max(0, len(doc_paths) - len(entries))
-    if omitted_count:
-        entries.append(f"... {omitted_count} more markdown doc file(s) omitted to keep planning context compact.")
-    return "\n\n".join(entries)
+    if len(doc_paths) > len(entries):
+        entries.append("... additional markdown doc files omitted to keep planning context compact.")
+    return "\n\n".join(entries), sampled_docs
 
 
-def scan_repository_inputs(repo_dir: Path) -> dict[str, str]:
-    readme = read_text(repo_dir / "README.md")
-    agents = repository_agents_summary(repo_dir)
+def _repository_inputs_cache_signature(repo_dir: Path, *, sampled_docs: list[str]) -> dict[str, Any]:
     return {
-        "readme": compact_text(readme, 2000) or "README.md not found.",
-        "agents": agents,
-        "docs": _summarize_docs_inventory(repo_dir),
-        "source": _summarize_source_inventory(repo_dir),
+        "repo_dir": str(repo_dir.resolve()),
+        "readme": _path_cache_token(repo_dir / "README.md"),
+        "agents": _path_cache_token(repo_dir / "AGENTS.md"),
+        "docs_root": _path_cache_token(repo_dir / "docs"),
+        "source_roots": {
+            str(root.relative_to(repo_dir)).replace("\\", "/"): _path_cache_token(root)
+            for root in _source_inventory_roots(repo_dir)
+        },
+        "sampled_docs": {
+            relative: _path_cache_token(repo_dir / relative.replace("/", os.sep))
+            for relative in sampled_docs
+        },
     }
+
+
+def _build_repository_inputs(repo_dir: Path) -> tuple[dict[str, str], dict[str, Any]]:
+    docs_summary, sampled_docs = _summarize_docs_inventory(repo_dir)
+    return (
+        {
+            "readme": compact_text(read_text(repo_dir / "README.md"), 2000) or "README.md not found.",
+            "agents": repository_agents_summary(repo_dir),
+            "docs": docs_summary,
+            "source": _summarize_source_inventory(repo_dir),
+        },
+        {"sampled_docs": sampled_docs},
+    )
+
+
+def scan_repository_inputs(repo_dir: Path, *, cache_file: Path | None = None, force_refresh: bool = False) -> dict[str, str]:
+    cache_key = _cache_file_key(cache_file, repo_dir)
+    if not force_refresh:
+        cached_memory = _REPO_INPUTS_MEMORY_CACHE.get(cache_key)
+        if cached_memory is not None:
+            cached_signature, cached_payload = cached_memory
+            if cache_file is None:
+                return dict(cached_payload)
+            cached_disk = read_json(cache_file, default=None)
+            if (
+                isinstance(cached_disk, dict)
+                and int(cached_disk.get("version", 0) or 0) == _REPO_INPUTS_CACHE_VERSION
+                and str(cached_disk.get("signature", "")).strip() == cached_signature
+            ):
+                return dict(cached_payload)
+        if cache_file:
+            cached = read_json(cache_file, default=None)
+            if isinstance(cached, dict) and int(cached.get("version", 0) or 0) == _REPO_INPUTS_CACHE_VERSION:
+                payload = cached.get("payload")
+                metadata = cached.get("metadata")
+                if isinstance(payload, dict) and isinstance(metadata, dict):
+                    sampled_docs = [str(item).strip() for item in metadata.get("sampled_docs", []) if str(item).strip()]
+                    signature = _repository_inputs_cache_signature(repo_dir, sampled_docs=sampled_docs)
+                    signature_digest = _stable_digest(signature)
+                    if str(cached.get("signature", "")).strip() == signature_digest:
+                        normalized_payload = {
+                            "readme": str(payload.get("readme", "")).strip() or "README.md not found.",
+                            "agents": str(payload.get("agents", "")).strip() or "AGENTS.md not found.",
+                            "docs": str(payload.get("docs", "")).strip() or "No markdown files under repo/docs.",
+                            "source": str(payload.get("source", "")).strip() or "Source inventory unavailable.",
+                        }
+                        _REPO_INPUTS_MEMORY_CACHE[cache_key] = (signature_digest, normalized_payload)
+                        return dict(normalized_payload)
+
+    payload, metadata = _build_repository_inputs(repo_dir)
+    signature = _repository_inputs_cache_signature(repo_dir, sampled_docs=list(metadata.get("sampled_docs", [])))
+    signature_digest = _stable_digest(signature)
+    _REPO_INPUTS_MEMORY_CACHE[cache_key] = (signature_digest, dict(payload))
+    if cache_file:
+        write_json_if_changed(
+            cache_file,
+            {
+                "version": _REPO_INPUTS_CACHE_VERSION,
+                "signature": signature_digest,
+                "metadata": metadata,
+                "payload": payload,
+            },
+        )
+    return payload
 
 
 def repository_agents_summary(repo_dir: Path, *, max_chars: int = 1500) -> str:
@@ -299,6 +439,63 @@ def followup_planning_repository_inputs(repo_inputs: dict[str, str]) -> dict[str
         docs_chars=1400,
         source_chars=750,
     )
+
+
+def _planning_prompt_bundle_signature(context: ProjectContext, repo_inputs: dict[str, str]) -> dict[str, Any]:
+    runtime = getattr(context, "runtime", None)
+    return {
+        "repo_dir": str(context.paths.repo_dir.resolve()),
+        "repo_inputs": _stable_digest(repo_inputs),
+        "spine": _path_cache_token(context.paths.spine_file),
+        "shared_contracts": _path_cache_token(context.paths.shared_contracts_file),
+        "workflow_mode": normalize_workflow_mode(getattr(runtime, "workflow_mode", "standard")),
+    }
+
+
+def _planning_prompt_bundle(context: ProjectContext, repo_inputs: dict[str, str]) -> dict[str, str]:
+    cache_file = getattr(context.paths, "planning_prompt_cache_file", None)
+    cache_key = _cache_file_key(cache_file, context.paths.repo_dir / ".planning_prompt_cache")
+    signature_digest = _stable_digest(_planning_prompt_bundle_signature(context, repo_inputs))
+    cached_memory = _PROMPT_BUNDLE_MEMORY_CACHE.get(cache_key)
+    if cached_memory is not None and cached_memory[0] == signature_digest:
+        return dict(cached_memory[1])
+    if cache_file:
+        cached = read_json(cache_file, default=None)
+        if (
+            isinstance(cached, dict)
+            and int(cached.get("version", 0) or 0) == _PROMPT_BUNDLE_CACHE_VERSION
+            and str(cached.get("signature", "")).strip() == signature_digest
+            and isinstance(cached.get("payload"), dict)
+        ):
+            payload = {
+                "readme": str(cached["payload"].get("readme", "")).strip() or "README.md not found.",
+                "agents": str(cached["payload"].get("agents", "")).strip() or "AGENTS.md not found.",
+                "docs": str(cached["payload"].get("docs", "")).strip() or "No markdown files under repo/docs.",
+                "source": str(cached["payload"].get("source", "")).strip() or "Source inventory unavailable.",
+                "spine_version": str(cached["payload"].get("spine_version", "")).strip() or DEFAULT_SPINE_VERSION,
+                "shared_contracts_snapshot": (
+                    str(cached["payload"].get("shared_contracts_snapshot", "")).strip()
+                    or "# Shared Contracts\n\nNo shared contracts recorded yet.\n"
+                ),
+            }
+            _PROMPT_BUNDLE_MEMORY_CACHE[cache_key] = (signature_digest, dict(payload))
+            return payload
+    payload = {
+        **followup_planning_repository_inputs(repo_inputs),
+        "spine_version": _planning_spine_version(context),
+        "shared_contracts_snapshot": _planning_shared_contracts_snapshot(context),
+    }
+    _PROMPT_BUNDLE_MEMORY_CACHE[cache_key] = (signature_digest, dict(payload))
+    if cache_file:
+        write_json_if_changed(
+            cache_file,
+            {
+                "version": _PROMPT_BUNDLE_CACHE_VERSION,
+                "signature": signature_digest,
+                "payload": payload,
+            },
+        )
+    return payload
 
 
 def _candidate_owned_paths_from_source_summary(source_summary: str, limit: int = 4) -> list[str]:
