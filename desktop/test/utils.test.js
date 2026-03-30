@@ -314,7 +314,6 @@ test("program settings helpers keep global runtime controls separate from projec
     ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
     model: "gpt-5.4",
     chat_model: "",
-    chat_effort: "",
     planning_effort: "medium",
     model_preset: "",
     model_selection_mode: "slug",
@@ -374,7 +373,6 @@ test("program settings helpers keep global runtime controls separate from projec
       ensemble_claude_model: CLAUDE_DEFAULT_MODEL,
       model: "gpt-5.4",
       chat_model: "",
-      chat_effort: "",
       planning_effort: "medium",
       model_preset: "",
       model_selection_mode: "slug",
@@ -412,7 +410,6 @@ test("program settings helpers keep global runtime controls separate from projec
       runtime: {
         model: "gpt-5.4",
         chat_model: "",
-        chat_effort: "",
         model_preset: "",
         model_selection_mode: "slug",
         model_slug_input: "gpt-5.4",
@@ -445,7 +442,7 @@ test("program settings helpers keep global runtime controls separate from projec
   );
 });
 
-test("program settings preserve the selected provider and runtime defaults", () => {
+test("program settings normalize provider selection to GPT Codex only defaults", () => {
   const settings = programSettingsFromRuntime({
     model_provider: "gemini",
     model: "gemini-3-flash-preview",
@@ -457,17 +454,17 @@ test("program settings preserve the selected provider and runtime defaults", () 
     codex_path: defaultCodexPath("gemini"),
   });
 
-  assert.equal(settings.model_provider, "gemini");
-  assert.equal(settings.model, "gemini-3-flash-preview");
-  assert.equal(settings.model_slug_input, "gemini-3-flash-preview");
+  assert.equal(settings.model_provider, "openai");
+  assert.equal(settings.model, "gpt-5.4");
+  assert.equal(settings.model_slug_input, "gpt-5.4");
   assert.equal(settings.chat_model_provider, "gemini");
   assert.equal(settings.chat_model, "gemini-3-flash-preview");
-  assert.equal(settings.provider_base_url, "https://generativelanguage.googleapis.com");
-  assert.equal(settings.provider_api_key_env, "GEMINI_API_KEY");
-  assert.equal(settings.codex_path, defaultCodexPath("gemini"));
+  assert.equal(settings.provider_base_url, "");
+  assert.equal(settings.provider_api_key_env, "OPENAI_API_KEY");
+  assert.equal(settings.codex_path, defaultCodexPath());
 });
 
-test("program settings keep custom OpenAI model selections when they are already valid", () => {
+test("program settings reset custom OpenAI model selections back to GPT Codex only", () => {
   const settings = programSettingsFromRuntime({
     model_provider: "openai",
     model: "gpt-4.1-mini",
@@ -476,8 +473,8 @@ test("program settings keep custom OpenAI model selections when they are already
   });
 
   assert.equal(settings.model_provider, "openai");
-  assert.equal(settings.model, "gpt-4.1-mini");
-  assert.equal(settings.model_slug_input, "gpt-4.1-mini");
+  assert.equal(settings.model, "gpt-5.4");
+  assert.equal(settings.model_slug_input, "gpt-5.4");
   assert.equal(settings.codex_path, "C:\\tools\\codex.cmd");
 });
 

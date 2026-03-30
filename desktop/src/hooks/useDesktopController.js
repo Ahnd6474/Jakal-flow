@@ -38,15 +38,12 @@ import {
   buildRunPlanPayloadFromDetail,
   cloneValue,
   commandLabel,
-  filterModelCatalogByProvider,
   inheritProjectIdentityForm,
   isActiveExecutionStatus,
   isDuplicateProjectJobError,
   isChatCommand,
   isPlanningProgressRunning,
   jobHasNewerActiveReplacement,
-  normalizedLocalModelProvider,
-  normalizedModelProvider,
   planDependencyValidationMessage,
   projectJobFromJobs,
   programSettingsEqual,
@@ -142,7 +139,7 @@ export function useDesktopController() {
   const projectSupplementRequestDeduperRef = useRef(createRequestDeduper());
   const workspaceShareRequestDeduperRef = useRef(createRequestDeduper());
 
-  const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "ai-chat");
+  const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "run");
   const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
   const [sidebarTab, setSidebarTab] = usePersistentState("jakal-flow:sidebar-tab-v2", "workspace");
   const [bottomCollapsed, setBottomCollapsed] = usePersistentState("jakal-flow:bottom-collapsed", false);
@@ -228,11 +225,7 @@ export function useDesktopController() {
 
   useEffect(() => {
     if (centerTab === "overview") {
-      setCenterTab("dashboard");
-      return;
-    }
-    if (centerTab === "run") {
-      setCenterTab("flow");
+      setCenterTab("run");
     }
   }, [centerTab, setCenterTab]);
 
@@ -956,10 +949,6 @@ export function useDesktopController() {
           ) {
             applyProjectDetail(job.result, { preserveDirtyPlan: false, runningJob: nextSelectedJob, force: true });
           }
-          if (job.command === BRIDGE_COMMANDS.GENERATE_PLAN && jobStatus === "completed") {
-            setCenterTab("flow");
-            setRightCollapsed(false);
-          }
           if (
             jobStatus === "completed"
             && job.command === BRIDGE_COMMANDS.GENERATE_PLAN
@@ -1370,15 +1359,6 @@ export function useDesktopController() {
     }));
   }
 
-  function setChatReasoningEffort(value = "") {
-    const nextSettings = programSettingsFromRuntime({
-      ...programSettings,
-      chat_effort: String(value || "").trim().toLowerCase(),
-    });
-    setStoredProgramSettings(nextSettings);
-    setProgramSettings(nextSettings);
-  }
-
   function saveProgramSettings(settingsOverride = null) {
     const nextSettings = programSettingsFromRuntime(settingsOverride || programSettings);
     applyProgramSettingsNow(nextSettings);
@@ -1720,20 +1700,7 @@ export function useDesktopController() {
       }
       mergeJobUpdate(job);
       reapplyProjectJobState(jobsRef.current);
-      if (command === BRIDGE_COMMANDS.SEND_CHAT_MESSAGE) {
-        setCenterTab("ai-chat");
-      } else if (
-        [
-          BRIDGE_COMMANDS.GENERATE_PLAN,
-          BRIDGE_COMMANDS.RUN_PLAN,
-          BRIDGE_COMMANDS.RUN_CLOSEOUT,
-          BRIDGE_COMMANDS.RUN_MANUAL_DEBUGGER,
-          BRIDGE_COMMANDS.RUN_MANUAL_MERGER,
-        ].includes(command)
-      ) {
-        setCenterTab("flow");
-        setRightCollapsed(false);
-      }
+      setCenterTab("run");
       setBottomTab("json");
       setMessage(
         messagePayload(
@@ -1819,8 +1786,6 @@ export function useDesktopController() {
     ) {
       return;
     }
-    setCenterTab("flow");
-    setRightCollapsed(false);
     await startJob(BRIDGE_COMMANDS.GENERATE_PLAN, {
       ...buildProjectPayload(projectForm),
       prompt,
@@ -1966,33 +1931,15 @@ export function useDesktopController() {
         : (selectedChatSessionId || projectDetail?.chat?.active_session_id || ""),
     ).trim();
     const basePayload = buildProjectPayload(projectForm, planDraft);
-    const chatProviderRuntime = {
-      ...(basePayload.runtime || {}),
-      model_provider: normalizedModelProvider(programSettings),
-      local_model_provider: normalizedLocalModelProvider(programSettings),
-      model: String(programSettings?.model || "").trim().toLowerCase(),
-      model_slug_input: String(programSettings?.model_slug_input || programSettings?.model || "").trim(),
-    };
-    const scopedChatCatalog = filterModelCatalogByProvider(modelCatalog, chatProviderRuntime);
-    const requestedChatProvider = String(programSettings?.chat_model_provider || "").trim().toLowerCase();
-    const requestedChatLocalProvider = String(programSettings?.chat_local_model_provider || "").trim().toLowerCase();
-    const requestedChatModel = String(programSettings?.chat_model || "").trim().toLowerCase();
-    const allowedChatEntry = scopedChatCatalog.find((item) => (
-      String(item?.provider || "").trim().toLowerCase() === requestedChatProvider
-      && String(item?.local_provider || "").trim().toLowerCase() === requestedChatLocalProvider
-      && String(item?.model || "").trim().toLowerCase() === requestedChatModel
-    )) || null;
-    const chatEffort = String(programSettings?.chat_effort || "").trim().toLowerCase();
     return startJob(
       BRIDGE_COMMANDS.SEND_CHAT_MESSAGE,
       {
         ...basePayload,
         runtime: {
           ...(basePayload.runtime || {}),
-          chat_model_provider: String(allowedChatEntry?.provider || "").trim().toLowerCase(),
-          chat_local_model_provider: String(allowedChatEntry?.local_provider || "").trim().toLowerCase(),
-          chat_model: String(allowedChatEntry?.model || "").trim().toLowerCase(),
-          effort: chatEffort || String(basePayload?.runtime?.effort || "").trim().toLowerCase(),
+          chat_model_provider: String(programSettings?.chat_model_provider || "").trim().toLowerCase(),
+          chat_local_model_provider: String(programSettings?.chat_local_model_provider || "").trim().toLowerCase(),
+          chat_model: String(programSettings?.chat_model || "").trim().toLowerCase(),
         },
         message: messageText,
         chat_mode: normalizedMode,
@@ -2513,7 +2460,6 @@ export function useDesktopController() {
     setSelectedHistoryId,
     setProgramSettings: updateProgramSettings,
     setChatModelSelection,
-    setChatReasoningEffort,
     setCenterTab,
     setBottomTab,
     setSidebarTab,

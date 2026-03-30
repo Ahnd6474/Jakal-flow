@@ -4,18 +4,18 @@ import { IdeToolbar } from "./components/layout/IdeToolbar";
 import { RunProgressPanel } from "./components/layout/RunProgressPanel";
 import { Splitter } from "./components/layout/Splitter";
 import { StatusBar } from "./components/layout/StatusBar";
-import { nextRightSidebarState, nextSidebarTab } from "./controllerHelpers";
+import { nextSidebarTab } from "./controllerHelpers";
 import { useDesktopController } from "./hooks/useDesktopController";
 import { useI18n } from "./i18n";
 import { isActiveExecutionStatus, toggleStepSelection } from "./utils";
 
-const SIDEBAR_MIN = 200;
-const SIDEBAR_MAX = 500;
+/* ── Layout mode constants ── */
 const WORKSPACE_MIN = 320;
 const WORKSPACE_MAX = 900;
-const RIGHT_MIN = 260;
-const RIGHT_MAX = 520;
-const RIGHT_COLLAPSED_WIDTH = 52;
+
+/* ── Clamp helpers ── */
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 500;
 const BOTTOM_MIN = 120;
 const BOTTOM_MAX = 600;
 
@@ -79,14 +79,15 @@ export default function App() {
   const keybindingActionsRef = useRef({
     setCenterTab: controller.setCenterTab,
     setSidebarTab: controller.setSidebarTab,
-    toggleBottom: () => controller.setBottomCollapsed((value) => !value),
+    toggleBottom: () => controller.setBottomCollapsed((v) => !v),
   });
 
+  /* Keep ref fresh */
   useEffect(() => {
     keybindingActionsRef.current = {
       setCenterTab: controller.setCenterTab,
       setSidebarTab: controller.setSidebarTab,
-      toggleBottom: () => controller.setBottomCollapsed((value) => !value),
+      toggleBottom: () => controller.setBottomCollapsed((v) => !v),
     };
   }, [controller.setCenterTab, controller.setSidebarTab, controller.setBottomCollapsed]);
 
@@ -117,30 +118,33 @@ export default function App() {
     void import("./components/layout/BottomToolPanel");
   }), []);
 
+  /* Theme */
   useEffect(() => {
     const nextTheme = controller.programSettings?.ui_theme === "light" ? "light" : "dark";
     document.documentElement.dataset.theme = nextTheme;
   }, [controller.programSettings?.ui_theme]);
 
+  /* Auto-dismiss non-error messages */
   useEffect(() => {
-    if (!controller.message || controller.message.tone === "error") {
-      return undefined;
-    }
+    if (!controller.message || controller.message.tone === "error") return undefined;
     const timer = window.setTimeout(() => controller.setMessage(null), 3000);
     return () => window.clearTimeout(timer);
   }, [controller.message, controller.setMessage]);
 
+  /* Keyboard shortcuts */
   useEffect(() => {
     function handleKeyDown(event) {
       const { setCenterTab, setSidebarTab, toggleBottom } = keybindingActionsRef.current;
 
+      /* Ctrl+1..6 → center tabs */
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key >= "1" && event.key <= "6") {
-        const tabs = ["ai-chat", "config", "flow", "dashboard", "history", "app-settings"];
+        const tabs = ["run", "config", "dashboard", "reports", "history", "app-settings"];
         setCenterTab(tabs[Number.parseInt(event.key, 10) - 1]);
         event.preventDefault();
         return;
       }
 
+      /* Alt+1..6 → sidebar tool windows */
       if (event.altKey && !event.ctrlKey && !event.metaKey && event.key >= "1" && event.key <= "3") {
         const sidebarTabs = ["workspace", "plans", "reservations"];
         const target = sidebarTabs[Number.parseInt(event.key, 10) - 1];
@@ -149,18 +153,21 @@ export default function App() {
         return;
       }
 
+      /* Alt+B → toggle bottom panel */
       if (event.altKey && (event.key === "b" || event.key === "B")) {
         toggleBottom();
         event.preventDefault();
         return;
       }
 
+      /* Ctrl+Shift+A → command palette */
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "a" || event.key === "A")) {
-        setCommandPaletteOpen((value) => !value);
+        setCommandPaletteOpen((v) => !v);
         event.preventDefault();
         return;
       }
 
+      /* Double Shift → command palette */
       if (event.key === "Shift" && !event.ctrlKey && !event.altKey && !event.metaKey) {
         const now = Date.now();
         if (now - lastShiftRef.current < 400) {
@@ -176,38 +183,33 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  /* ── Splitter resize callbacks ──
+     Each ref stores the "snapshot" value captured when the drag starts.
+     The Splitter reports cumulative delta from drag start, so we compute
+     newValue = snapshot + delta on each move event. */
   const sidebarSnap = useRef(controller.sidebarWidth);
+  const bottomSnap = useRef(controller.bottomHeight);
   const [workspaceWidth, setWorkspaceWidth] = useState(480);
   const workspaceSnap = useRef(480);
-  const rightSnap = useRef(controller.rightWidth);
-  const bottomSnap = useRef(controller.bottomHeight);
+
+  /* Snapshot the current value before each drag by keeping refs in sync
+     ONLY when no drag is active (dragging flag is managed per-splitter). */
   const draggingRef = useRef(null);
 
   const makeSplitterHandlers = useCallback((name, snap, setter, min, max, sign) => ({
     onResize: (delta) => {
       if (draggingRef.current !== name) {
-        snap.current =
-          name === "sidebar"
-            ? controller.sidebarWidth
-            : name === "right"
-              ? controller.rightWidth
-              : controller.bottomHeight;
+        snap.current = name === "sidebar" ? controller.sidebarWidth : controller.bottomHeight;
         draggingRef.current = name;
       }
       setter(clamp(snap.current + delta * sign, min, max));
     },
-    onDragEnd: () => {
-      draggingRef.current = null;
-    },
-  }), [controller.bottomHeight, controller.rightWidth, controller.sidebarWidth]);
+    onDragEnd: () => { draggingRef.current = null; },
+  }), [controller.sidebarWidth, controller.bottomHeight]);
 
   const sidebarSplitter = useMemo(
     () => makeSplitterHandlers("sidebar", sidebarSnap, controller.setSidebarWidth, SIDEBAR_MIN, SIDEBAR_MAX, 1),
-    [controller.setSidebarWidth, makeSplitterHandlers],
-  );
-  const bottomSplitter = useMemo(
-    () => makeSplitterHandlers("bottom", bottomSnap, controller.setBottomHeight, BOTTOM_MIN, BOTTOM_MAX, -1),
-    [controller.setBottomHeight, makeSplitterHandlers],
+    [makeSplitterHandlers, controller.setSidebarWidth],
   );
   const workspaceSplitter = useMemo(
     () => ({
@@ -218,15 +220,13 @@ export default function App() {
         }
         setWorkspaceWidth(clamp(workspaceSnap.current - delta, WORKSPACE_MIN, WORKSPACE_MAX));
       },
-      onDragEnd: () => {
-        draggingRef.current = null;
-      },
+      onDragEnd: () => { draggingRef.current = null; },
     }),
     [workspaceWidth],
   );
-  const rightSplitter = useMemo(
-    () => makeSplitterHandlers("right", rightSnap, controller.setRightWidth, RIGHT_MIN, RIGHT_MAX, -1),
-    [controller.setRightWidth, makeSplitterHandlers],
+  const bottomSplitter = useMemo(
+    () => makeSplitterHandlers("bottom", bottomSnap, controller.setBottomHeight, BOTTOM_MIN, BOTTOM_MAX, -1),
+    [makeSplitterHandlers, controller.setBottomHeight],
   );
 
   const detail = controller.projectDetail;
@@ -238,23 +238,18 @@ export default function App() {
   const sidebarDetail = useLiveExecutionDetail ? detail : deferredDetail;
   const sidebarPlanDraft = useLiveExecutionDetail && detail?.plan ? detail.plan : deferredPlanDraft;
   const sidebarOpen = Boolean(controller.sidebarTab);
-  const showRightSidebar = controller.centerTab !== "ai-chat";
   const sidebarStyle = sidebarOpen ? { width: controller.sidebarWidth, flex: `0 0 ${controller.sidebarWidth}px` } : undefined;
-  const rightPaneWidth = controller.rightCollapsed ? RIGHT_COLLAPSED_WIDTH : controller.rightWidth;
-  const rightSidebarStyle = showRightSidebar
-    ? { width: rightPaneWidth, minWidth: rightPaneWidth, flex: `0 0 ${rightPaneWidth}px` }
-    : undefined;
   const compact = Boolean(controller.programSettings?.compact_mode);
-
   const handleRightTabChange = useCallback((nextTab) => {
     const requestedTab = String(nextTab || "").trim();
-    if (requestedTab) {
-      setRightTab(requestedTab);
-    }
+    if (requestedTab) setRightTab(requestedTab);
   }, []);
-  const handleSelectStep = useCallback((stepId) => {
-    controller.setSelectedStepId((current) => toggleStepSelection(current, stepId));
-  }, [controller.setSelectedStepId]);
+  const handleSelectStep = useCallback(
+    (stepId) => {
+      controller.setSelectedStepId((current) => toggleStepSelection(current, stepId));
+    },
+    [controller.setSelectedStepId],
+  );
   const handleOpenSettings = useCallback(() => {
     controller.setCenterTab("app-settings");
   }, [controller.setCenterTab]);
@@ -266,10 +261,9 @@ export default function App() {
   }, []);
 
   const paletteActions = useMemo(() => [
-    { id: "tab-ai-chat", label: t("tab.aiChat"), shortcut: "Ctrl+1", category: "Tab", keywords: "ai chat prompt plan flow", onExecute: () => controllerCommandRef.current.setCenterTab("ai-chat") },
+    { id: "tab-run", label: t("tab.flow"), shortcut: "Ctrl+1", category: "Tab", keywords: "run flow execution", onExecute: () => controllerCommandRef.current.setCenterTab("run") },
     { id: "tab-config", label: t("tab.config"), shortcut: "Ctrl+2", category: "Tab", keywords: "config settings project", onExecute: () => controllerCommandRef.current.setCenterTab("config") },
-    { id: "tab-flow", label: t("tab.flow"), shortcut: "Ctrl+3", category: "Tab", keywords: "flow run plan execution", onExecute: () => controllerCommandRef.current.setCenterTab("flow") },
-    { id: "tab-dashboard", label: t("tab.dashboard"), shortcut: "Ctrl+4", category: "Tab", keywords: "dashboard metrics", onExecute: () => controllerCommandRef.current.setCenterTab("dashboard") },
+    { id: "tab-dashboard", label: t("tab.dashboard"), shortcut: "Ctrl+3", category: "Tab", keywords: "dashboard metrics", onExecute: () => controllerCommandRef.current.setCenterTab("dashboard") },
     { id: "tab-history", label: t("tab.history"), shortcut: "Ctrl+5", category: "Tab", keywords: "history runs", onExecute: () => controllerCommandRef.current.setCenterTab("history") },
     { id: "tab-settings", label: t("toolbar.programSettings"), shortcut: "Ctrl+6", category: "Tab", keywords: "settings preferences program", onExecute: () => controllerCommandRef.current.setCenterTab("app-settings") },
     { id: "sidebar-workspace", label: t("sidebar.explorer"), shortcut: "Alt+1", category: "Sidebar", keywords: "explorer files workspace", onExecute: () => controllerCommandRef.current.setSidebarTab((current) => nextSidebarTab(current, "workspace")) },
@@ -284,6 +278,7 @@ export default function App() {
 
   return (
     <main className={`ide-shell ${compact ? "ide-shell--compact" : ""}`.trim()}>
+      {/* ── Top toolbar ── */}
       <IdeToolbar
         projects={controller.filteredProjects}
         selectedProjectId={controller.selectedProjectId}
@@ -314,8 +309,10 @@ export default function App() {
         onOpenGithub={controller.openRepoOnGithub}
       />
 
+      {/* ── Live run progress banner ── */}
       <RunProgressPanel detail={detail} planDraft={controller.planDraft} activeJob={controller.activeJob} />
 
+      {/* ── Toast messages ── */}
       {controller.message ? (
         <section className={`banner banner--${controller.message.tone}`}>
           <span>{controller.message.text}</span>
@@ -325,7 +322,9 @@ export default function App() {
         </section>
       ) : null}
 
+      {/* ── Main body: sidebar | chat-center | workspace-right ── */}
       <div className="ide-body">
+        {/* Left sidebar */}
         <div
           className={`ide-pane ide-pane--sidebar ${sidebarOpen ? "" : "ide-pane--sidebar-collapsed"}`.trim()}
           style={sidebarStyle}
@@ -370,6 +369,7 @@ export default function App() {
           </Suspense>
         </div>
 
+        {/* Left splitter */}
         {sidebarOpen ? (
           <Splitter axis="vertical" onResize={sidebarSplitter.onResize} onDragEnd={sidebarSplitter.onDragEnd} title="Resize sidebar" />
         ) : null}
@@ -446,9 +446,6 @@ export default function App() {
                 canCancelReservation={controller.canCancelReservation}
                 shareBusy={controller.shareBusy}
                 queuedJobs={controller.queuedJobs}
-                chat={detail?.chat}
-                selectedChatSessionId={controller.selectedChatSessionId}
-                chatDraftSession={controller.chatDraftSession}
                 onChangeForm={controller.setProjectForm}
                 onChangeProgramSettings={controller.setProgramSettings}
                 onSaveProject={controller.saveProject}
@@ -483,16 +480,12 @@ export default function App() {
                 onAddStep={controller.addStep}
                 onDeleteStep={controller.deleteStep}
                 onMoveStep={controller.moveStep}
-                onSelectChatSession={controller.loadChatSession}
-                onStartNewChatSession={controller.startNewChatSession}
-                onSendChatMessage={controller.sendChatMessage}
-                onChangeChatModelSelection={controller.setChatModelSelection}
-                onChangeChatReasoningEffort={controller.setChatReasoningEffort}
                 activeJob={controller.activeJob}
                 hidePromptStrip
               />
             </div>
 
+            {/* Bottom splitter + tool panel */}
             {!controller.bottomCollapsed ? (
               <>
                 <Splitter axis="horizontal" onResize={bottomSplitter.onResize} onDragEnd={bottomSplitter.onDragEnd} title="Resize bottom panel" />
@@ -509,47 +502,10 @@ export default function App() {
               </>
             ) : null}
           </div>
-
-          {showRightSidebar ? (
-            <>
-              <Splitter axis="vertical" onResize={rightSplitter.onResize} onDragEnd={rightSplitter.onDragEnd} title="Resize right sidebar" />
-              <div className="ide-pane" style={rightSidebarStyle}>
-                <Suspense fallback={<PanelSuspenseFallback className="ide-pane" />}>
-                  <LazyRightSidebarPane
-                    activeTab={rightTab}
-                    collapsed={controller.rightCollapsed}
-                    includeChatTab={false}
-                    onChangeTab={(nextTab) => {
-                      const nextState = nextRightSidebarState(rightTab, nextTab, controller.rightCollapsed);
-                      setRightTab(nextState.tab);
-                      controller.setRightCollapsed(nextState.collapsed);
-                    }}
-                    detail={detail}
-                    planDraft={controller.planDraft}
-                    selectedStepId={controller.selectedStepId}
-                    modelPresets={controller.modelPresets}
-                    modelCatalog={controller.modelCatalog}
-                    form={controller.projectForm}
-                    activeJob={controller.activeJob}
-                    busy={controller.busy}
-                    onChangeForm={controller.setProjectForm}
-                    chat={detail?.chat}
-                    chatSettings={controller.programSettings}
-                    selectedChatSessionId={controller.selectedChatSessionId}
-                    chatDraftSession={controller.chatDraftSession}
-                    onSelectChatSession={controller.loadChatSession}
-                    onStartNewChatSession={controller.startNewChatSession}
-                    onSendChatMessage={controller.sendChatMessage}
-                    onChangeChatModelSelection={controller.setChatModelSelection}
-                    onChangeChatReasoningEffort={controller.setChatReasoningEffort}
-                  />
-                </Suspense>
-              </div>
-            </>
-          ) : null}
         </div>
       </div>
 
+      {/* ── Status bar ── */}
       <StatusBar
         detail={detail}
         activeJob={controller.activeJob}
@@ -559,6 +515,7 @@ export default function App() {
         onToggleBottom={handleToggleBottom}
       />
 
+      {/* ── Command palette (Double Shift / Ctrl+Shift+A) ── */}
       {commandPaletteOpen ? (
         <Suspense fallback={null}>
           <LazyCommandPalette

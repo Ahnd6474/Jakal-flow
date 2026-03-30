@@ -13,6 +13,15 @@ function RefreshIcon() {
   );
 }
 
+function PlanIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M9 11l3 3L22 4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function RunIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -297,6 +306,7 @@ export const IdeToolbar = memo(function IdeToolbar({
   shareBusy,
   onRefresh,
   onOpenSettings,
+  onGeneratePlan,
   onRunPlan,
   onApproveCheckpoint,
   onSmartShareLink,
@@ -434,6 +444,18 @@ export const IdeToolbar = memo(function IdeToolbar({
         </button>
 
         <div className="toolbar-divider" />
+
+        <button
+          className="toolbar-btn"
+          onClick={onGeneratePlan}
+          type="button"
+          disabled={busy}
+          title={t("action.generatePlan")}
+        >
+          <PlanIcon />
+          <span>{t("action.generatePlan")}</span>
+        </button>
+
         <button
           className="toolbar-btn toolbar-btn--accent"
           onClick={onRunPlan}
