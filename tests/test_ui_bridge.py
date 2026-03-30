@@ -5274,6 +5274,9 @@ class UIBridgeTests(unittest.TestCase):
                 )
 
                 with mock.patch(
+                    "jakal_flow.ui_bridge_payloads._preview_tree_structure_token",
+                    side_effect=AssertionError("recent content signature cache should bypass preview tree structure rescans"),
+                ), mock.patch(
                     "jakal_flow.ui_bridge_payloads._preview_tree_signature",
                     side_effect=AssertionError("recent content signature cache should bypass preview tree rescans"),
                 ):

@@ -5,6 +5,7 @@ import {
   mergeRefreshRepoId,
   projectRefreshDebounceMs,
   shouldForceCodexRefreshForManualRefresh,
+  shouldRefreshListingForManualRefresh,
   shouldRefreshListingForProjectEvent,
   shouldRefreshSelectedProject,
 } from "../src/controller/projectRefresh.js";
@@ -33,6 +34,12 @@ test("shouldRefreshListingForProjectEvent skips full listing reloads for the sel
   assert.equal(shouldRefreshListingForProjectEvent("repo-1", "repo-2"), true);
   assert.equal(shouldRefreshListingForProjectEvent("repo-1", ""), true);
   assert.equal(shouldRefreshListingForProjectEvent("", "repo-1"), true);
+});
+
+test("shouldRefreshListingForManualRefresh only reloads the full listing when no project is selected", () => {
+  assert.equal(shouldRefreshListingForManualRefresh("repo-1"), false);
+  assert.equal(shouldRefreshListingForManualRefresh(""), true);
+  assert.equal(shouldRefreshListingForManualRefresh("   "), true);
 });
 
 test("shouldForceCodexRefreshForManualRefresh only refreshes live model state on config surfaces", () => {

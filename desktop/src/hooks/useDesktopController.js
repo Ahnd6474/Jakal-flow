@@ -7,6 +7,7 @@ import {
   mergeRefreshRepoId,
   projectRefreshDebounceMs,
   shouldForceCodexRefreshForManualRefresh,
+  shouldRefreshListingForManualRefresh,
   shouldRefreshListingForProjectEvent,
   shouldRefreshSelectedProject,
 } from "../controller/projectRefresh";
@@ -1094,6 +1095,7 @@ export function useDesktopController() {
   async function forceRefresh() {
     try {
       const refreshCodexStatus = shouldForceCodexRefreshForManualRefresh(centerTab);
+      const refreshListing = shouldRefreshListingForManualRefresh(selectedProjectId);
       const jobSnapshotPromise = syncRunningJobSnapshot(activeJobId);
       const projectStatePromise = selectedProjectId
         ? refreshVisibleProjectState(
@@ -1103,7 +1105,7 @@ export function useDesktopController() {
             {
               refreshCodexStatus,
               detailLevel: wantsExpandedDetail ? "full" : "core",
-              refreshListing: true,
+              refreshListing,
             },
           )
         : loadProjectListing(bridgeRequest, workspaceRoot);
@@ -1117,19 +1119,23 @@ export function useDesktopController() {
       });
       if (selectedProjectId) {
         const { listing, detail } = refreshedState || {};
-        const nextProjects = applyListingState({
-          listing,
-          runningJob: jobsRef.current,
-          setProjects,
-          setWorkspaceStats,
-        });
-        startTransition(() => {
-          setHistoryProjects(listing?.history || []);
-          projectsRef.current = nextProjects;
-          if (detail) {
-            applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob });
-          }
-        });
+        if (listing) {
+          const nextProjects = applyListingState({
+            listing,
+            runningJob: jobsRef.current,
+            setProjects,
+            setWorkspaceStats,
+          });
+          startTransition(() => {
+            setHistoryProjects(listing?.history || []);
+            projectsRef.current = nextProjects;
+            if (detail) {
+              applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob });
+            }
+          });
+        } else if (detail) {
+          applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob });
+        }
       } else {
         const listing = refreshedState;
         const nextProjects = applyListingState({
