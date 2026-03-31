@@ -1,0 +1,16 @@
+{
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "attempt": 1,
+      "duration_seconds": 1668.516,
+      "last_message_excerpt": "{\n  \"title\": \"experiment2 jakal-flow harness\",\n  \"strategy_summary\": \"The harness already has the right top-level shape, so this is an extension job rather than a fresh scaffold. Real checks against the upstream `jakal-flow` repo exposed two concrete blockers: Windows path-length failures during source/target clone under the current `.local/` layout, and a default verification flow that assumes a pre-materialized target and a passing upstream `python -m pytest` run. The safest plan is to make...",
+      "returncode": 0,
+      "stderr_excerpt": "",
+      "stdout_excerpt": "{\"type\":\"thread.started\",\"thread_id\":\"019d370c-547e-7531-9efe-1ea38404fea6\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"\uc694\uccad\uc740 `experiment2` \uc800\uc7a5\uc18c \uc548\uc5d0 `jakal-flow` \uc2e4\ud589 \ud658\uacbd \uad6c\ucd95 \uc791\uc5c5\uc744 \uc5b4\ub5bb\uac8c \ub098\ub20c\uc9c0 \uc124\uacc4\ud558\ub294 \uac83\uc785\ub2c8\ub2e4. \uba3c\uc800 \ub85c\uceec \uc800\uc7a5\uc18c \uad6c\uc870\uc640 \ubb38\uc11c\ub97c \ud655\uc778\ud558\uace0, \uc774\uc5b4\uc11c \ucc38\uc870\ub41c `jakal-flow` \uc800\uc7a5\uc18c\uc758 \uc2e4\uc81c \uc2e4\ud589 \uc694\uad6c\uc0ac\ud56d\uc744 \ud655\uc778\ud574 \ubcd1\ub82c \ubd84\ud574\uc5d0 \ud544\uc694\ud55c \uacc4\uc57d\uacfc \ube14\ub85d \uacbd\uacc4\ub97c \uc7a1\uaca0\uc2b5\ub2c8\ub2e4.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"web_search\",\"id\":\"ws_01a3d77957e194c90169c875e583d4819188934d346c69d8e5\",\"query\":\"\",\"action\":{\"ty...",
+      "unexpected_token_detected": false
+    }
+  ],
+  "recovered_after_retry": false,
+  "unexpected_token_detected": false
+}

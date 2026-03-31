@@ -1,0 +1,16 @@
+{
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "attempt": 1,
+      "duration_seconds": 232.906,
+      "last_message_excerpt": "{\n  \"title\": \"Jakal-flow Local Harness\",\n  \"summary\": \"First remove the real Windows blocker by making bootstrap and target materialization long-path-safe within the fixed `.local/` layout. Once that contract is stable, fan out into a runtime verification task that turns `jakal-flow-local` into a clean materialize-install-smoke flow and a documentation task that publishes the same shipped operator contract so the harness is both runnable and handoff-ready.\",\n  \"tasks\": [\n    {\n      \"step_id\"...",
+      "returncode": 0,
+      "stderr_excerpt": "",
+      "stdout_excerpt": "{\"type\":\"thread.started\",\"thread_id\":\"019d3725-fd55-73a1-b68f-5241a669f5cf\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"Planner Agent B is turning Agent A's decomposition into a final 3-node execution DAG. I\u2019m checking the repository docs and current harness layout so the graph matches the actual files and the stated Windows/bootstrap constraints.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"\\\"...",
+      "unexpected_token_detected": false
+    }
+  ],
+  "recovered_after_retry": false,
+  "unexpected_token_detected": false
+}

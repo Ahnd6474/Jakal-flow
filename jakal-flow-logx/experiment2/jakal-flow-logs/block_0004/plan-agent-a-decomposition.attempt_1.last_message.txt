@@ -1,0 +1,121 @@
+{
+  "title": "experiment harness environment",
+  "strategy_summary": "Use `origin/main` as the restore source for the existing harness implementation instead of redesigning it from scratch. Freeze the shared config/profile/helper contract first, then fan out in parallel across the remote-bootstrap lifecycle and the sample-fixture track, and finish with the still-missing generic orchestration entrypoints that the config already declares but the current upstream implementation does not yet provide.",
+  "shared_contracts": [
+    "All generated state stays under `.local/`; tracked top-level deliverables remain in `config/`, `docs/`, `fixtures/`, `scripts/`, and `tests/`.",
+    "`config/experiment.example.json` stays at `schemaVersion: 1` with top-level `paths`, `runtime`, `entryScripts`, and `prerequisites`, and `runtime.defaultProfile` remains `jakal-flow-local`.",
+    "Fixed entry script ids are `checkPrereqs`, `bootstrap`, `cleanLocalState`, `materializeTarget`, and `invokeVerification`; `scripts/profile-common.ps1` is the canonical resolver surface and `scripts/common.ps1` remains only a compatibility loader.",
+    "`Normalize-ExperimentProfile` should yield one stable normalized shape that generic orchestration can consume for both the default remote target and the tracked sample fixture profile, instead of leaving sample-profile handling ambiguous.",
+    "`config/profiles/jakal-flow-local.json` remains the default remote-target contract with required `OPENAI_API_KEY`, optional `GITHUB_TOKEN`, upstream checkout at `.local/upstream/jakal-flow`, and ordered verification phases.",
+    "`fixtures/sample-seed` plus `sample-local` remain the network-free smoke target used to validate local materialization and verification behavior."
+  ],
+  "skeleton_step": {
+    "block_id": "",
+    "needed": false,
+    "task_title": "",
+    "purpose": "",
+    "contract_docstring": "",
+    "candidate_owned_paths": [],
+    "success_criteria": ""
+  },
+  "candidate_blocks": [
+    {
+      "block_id": "B1",
+      "goal": "Restore and freeze the shared harness contract bundle in the local repo.",
+      "work_items": [
+        "Restore `.gitignore` and `.env.example` so `.local/` state and secret inputs are documented correctly.",
+        "Restore `config/experiment.example.json` and the tracked profiles under `config/profiles/` from `origin/main`.",
+        "Restore `docs/ARCHITECTURE.md`, `scripts/profile-common.ps1`, and `scripts/common.ps1` as the canonical shared contract surface.",
+        "Restore `tests/test_harness_contract.py` and `conftest.py` to lock the shared contract in automation.",
+        "Tighten the helper/profile contract so fixture-profile handling is either fully normalized or explicitly narrowed with no doc/test mismatch."
+      ],
+      "implementation_notes": "This block should mostly restore the already-working contract bundle from `origin/main` rather than inventing new paths or names. The only intentional tightening is the current ambiguity around whether `profile-common.ps1` truly supports fixture profiles; that needs one consistent answer reflected in config, docs, and tests. After this lands, later blocks should avoid reopening these files unless a contract bug is discovered.",
+      "testable_boundary": "`pytest tests/test_harness_contract.py` passes and the shared config/helper/docs surface exists with stable names.",
+      "candidate_owned_paths": [
+        ".gitignore",
+        ".env.example",
+        "config/experiment.example.json",
+        "config/profiles",
+        "docs/ARCHITECTURE.md",
+        "scripts/profile-common.ps1",
+        "scripts/common.ps1",
+        "tests/test_harness_contract.py",
+        "conftest.py"
+      ],
+      "parallelizable_after": [],
+      "parallel_notes": "This is the broad shared root for the rest of the work and should run first; later blocks should treat it as frozen."
+    },
+    {
+      "block_id": "B2",
+      "goal": "Restore prerequisite checking, upstream bootstrap, and local-state cleanup for the default remote profile.",
+      "work_items": [
+        "Restore `scripts/check-prereqs.ps1`.",
+        "Restore `scripts/bootstrap.ps1` to clone or refresh the upstream checkout, manage `.local/venv`, and install the upstream package in editable mode.",
+        "Restore `scripts/clean-local-state.ps1` with a guarded `.local` deletion path.",
+        "Restore `tests/test_bootstrap_scripts.py`."
+      ],
+      "implementation_notes": "This block should use the shared resolver and prerequisite helpers from B1 instead of hardcoding paths or tool commands. Keep bootstrap idempotent so reruns realign the upstream checkout and rebuild the venv only when needed. Preserve the existing temporary-local-git-repo testing pattern so clone, refresh, and editable install behavior are validated without depending on the network.",
+      "testable_boundary": "`pytest tests/test_bootstrap_scripts.py` passes and the lifecycle scripts are safe to rerun on the same checkout.",
+      "candidate_owned_paths": [
+        "scripts/check-prereqs.ps1",
+        "scripts/bootstrap.ps1",
+        "scripts/clean-local-state.ps1",
+        "tests/test_bootstrap_scripts.py"
+      ],
+      "parallelizable_after": [
+        "B1"
+      ],
+      "parallel_notes": "This is a clean second-wave block once the shared config/helper contract is frozen, and it can run in parallel with the sample-fixture track."
+    },
+    {
+      "block_id": "B3",
+      "goal": "Restore the sample fixture target path so the harness can materialize and verify a network-free local repository.",
+      "work_items": [
+        "Restore `fixtures/sample-seed/**`.",
+        "Restore `scripts/materialize-sample-target.ps1`.",
+        "Restore `tests/test_sample_profile_fixture.py`."
+      ],
+      "implementation_notes": "Keep this track deterministic and small: copy the tracked seed into `.local/targets/sample-local`, preserve `.git` on reruns, and prove the materialized repository passes its smoke test. This block should consume the shared path and profile contract from B1 instead of introducing separate fixture-only path rules. The end result is the local fallback environment that exercises the harness without external source checkout risk.",
+      "testable_boundary": "`pytest tests/test_sample_profile_fixture.py` passes and materializing `sample-local` creates a valid git repo with a passing pytest smoke run.",
+      "candidate_owned_paths": [
+        "fixtures/sample-seed",
+        "scripts/materialize-sample-target.ps1",
+        "tests/test_sample_profile_fixture.py"
+      ],
+      "parallelizable_after": [
+        "B1"
+      ],
+      "parallel_notes": "This is largely isolated from remote bootstrap logic and is a good parallel companion to B2 after the common contract lands."
+    },
+    {
+      "block_id": "B4",
+      "goal": "Close the declared entrypoint gap by implementing generic target materialization and ordered verification orchestration.",
+      "work_items": [
+        "Add `scripts/materialize-target.ps1` as the stable dispatcher named in config.",
+        "Add `scripts/invoke-verification.ps1` to execute normalized verification phases, including entry-script phases and direct command phases.",
+        "Add focused tests that cover dispatch and phase ordering for both `sample-local` and `jakal-flow-local`.",
+        "Add minimal operator-facing usage text where the new entrypoints need explicit invocation examples."
+      ],
+      "implementation_notes": "This block should orchestrate through the frozen entry-script names and normalized profile metadata from B1, and it should call the concrete scripts from B2 and B3 rather than duplicating their internals. The direct-command phase runner should honor working directory and timeout values from profile data instead of branching on profile id. Keep ownership narrow: new orchestration scripts, their tests, and only the minimum docs touch-up needed to explain how they are run.",
+      "testable_boundary": "A focused orchestration test suite passes, and one stable command path can materialize a chosen profile and run its declared verification phases in order.",
+      "candidate_owned_paths": [
+        "scripts/materialize-target.ps1",
+        "scripts/invoke-verification.ps1",
+        "tests/test_verification_entrypoints.py",
+        "README.md"
+      ],
+      "parallelizable_after": [
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "parallel_notes": "Best as the final wave because it depends on the shared contract being frozen and on the concrete lifecycle behaviors from both second-wave blocks."
+    }
+  ],
+  "packing_notes": [
+    "Use `origin/main` as the restore baseline for files that already exist upstream; reserve net-new design work mainly for the missing orchestration entrypoints and any contract-tightening needed to support them cleanly.",
+    "Suggested wave shape is `B1` first, `B2` and `B3` in parallel second, and `B4` last.",
+    "Treat `config/experiment.example.json`, `config/profiles/*`, and `scripts/profile-common.ps1` as shared roots that should not be reopened after `B1` unless there is a confirmed contract bug.",
+    "Ignore untracked scratch directories like `_tmp_remote_experiment_repo`, `_tmp_jakal_flow_remote`, and local `.venv/` state when assigning ownership; they are not target deliverables."
+  ]
+}

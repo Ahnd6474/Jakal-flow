@@ -1,0 +1,97 @@
+{
+  "title": "jakal-flow harness setup",
+  "strategy_summary": "Use the existing PowerShell harness as the backbone rather than inventing a new bootstrap path. First freeze the default `jakal-flow-local` profile and normalization contract so Python CLI setup, desktop/Tauri setup, and verification all agree on the same declarative shape; then split implementation between source-side provisioning and target-side orchestration, with docs finalized after the code paths stabilize.",
+  "shared_contracts": [
+    "All generated state must remain under the configured `.local` root, including upstream checkouts, target repos, workspaces, virtualenvs, npm caches, and any desktop build/setup side effects.",
+    "`scripts/profile-common.ps1` remains the single normalization surface for config, profile, prerequisite, environment-variable, setup/provisioning, and verification metadata; entry scripts must not hardcode new tool names or path rules outside it.",
+    "The default `config/profiles/jakal-flow-local.json` should describe both Python CLI and React+Tauri desktop requirements declaratively, including required/optional environment variables, prerequisite overlays, source-side setup/provisioning phases, and ordered target-side verification phases.",
+    "Bootstrap owns shared source-checkout provisioning; materialization clones that prepared checkout into the managed target; verification runs declared validation phases against the target without inventing extra mutable roots.",
+    "Windows-friendly command resolution for `python`, `npm.cmd`, `node`, `cargo`, `rustc`, and Tauri-related commands must be expressed through config/profile data and helper resolution, not scattered ad hoc across scripts."
+  ],
+  "skeleton_step": {
+    "block_id": "SK1",
+    "needed": true,
+    "task_title": "Freeze multi-surface setup contract",
+    "purpose": "This small step removes the main merge-risk hotspot by deciding once where Python and desktop dependency setup lives, how the default profile declares those requirements, and what normalized shape downstream scripts consume.",
+    "contract_docstring": "\"\"\"Normalize a jakal-flow experiment profile into immutable source metadata, managed target/workspace paths, explicit prerequisite and environment requirements, source-bootstrap setup phases, and ordered target verification phases for both the Python CLI and React+Tauri desktop surfaces. Bootstrap provisions shared source-side dependencies, materialization clones the prepared checkout, and verification only validates the managed target without inventing new paths or tool names.\"\"\"",
+    "candidate_owned_paths": [
+      "scripts/profile-common.ps1",
+      "config/experiment.example.json",
+      "config/profiles/jakal-flow-local.json",
+      "docs/ARCHITECTURE.md",
+      "tests/test_harness_contract.py"
+    ],
+    "success_criteria": "The normalized profile contract and architecture doc clearly encode the multi-surface setup/verification shape, and a contract test locks that shape so later blocks can implement against it without re-deciding boundaries."
+  },
+  "candidate_blocks": [
+    {
+      "block_id": "B1",
+      "goal": "Implement shared prerequisite checks and source bootstrap provisioning for the real jakal-flow runtime.",
+      "work_items": [
+        "Expand the prerequisite catalog and overlays to cover the actual jakal-flow runtime tools needed for Python CLI and desktop development.",
+        "Extend `check-prereqs.ps1` to validate tool availability, minimum versions, and declared environment variables with clearer profile-specific failure output.",
+        "Update `bootstrap.ps1` so the upstream checkout is refreshed and provisioned for both Python editable install and desktop dependency setup while keeping caches/state under `.local`.",
+        "Add bootstrap regressions for reruns, missing-tool failures, and a desktop-like synthetic upstream repository."
+      ],
+      "implementation_notes": "Keep provisioning responsibilities concentrated in `bootstrap.ps1`; do not let target verification silently install missing dependencies. Preserve the existing long-path-safe git behavior and reuse of the repo-local Python environment. Any desktop dependency installation should be repeatable and cache-aware, and it should not move mutable state outside the configured `.local` tree.",
+      "testable_boundary": "Running prerequisite checks and bootstrap against the default profile yields deterministic pass/fail output, refreshes the upstream checkout safely, and leaves the source checkout ready for both Python and desktop validation paths.",
+      "candidate_owned_paths": [
+        "scripts/check-prereqs.ps1",
+        "scripts/bootstrap.ps1",
+        "tests/test_bootstrap_scripts.py"
+      ],
+      "parallelizable_after": [
+        "SK1"
+      ],
+      "parallel_notes": "This is a good parallel track once the contract is frozen, but it should stay as one block because prerequisite resolution and bootstrap provisioning are tightly coupled and would otherwise fight over the same behavior."
+    },
+    {
+      "block_id": "B2",
+      "goal": "Materialize the prepared target and execute the default jakal-flow verification flow across the declared surfaces.",
+      "work_items": [
+        "Tighten `materialize-target.ps1` so it clones the prepared upstream checkout into the managed target without breaking local-root safety or long-path handling.",
+        "Update `invoke-verification.ps1` to consume the frozen profile phases for target-local Python and desktop checks with correct working-directory and timeout handling on Windows.",
+        "Add orchestration regressions that prove the declared phases run in order for the default profile and that long-path-safe materialization still holds."
+      ],
+      "implementation_notes": "This block should consume the setup/verification contract rather than redesign it. Keep verification generic: phase order, commands, working directories, and timeouts come from the normalized profile, while the orchestration script just dispatches them safely. Preserve the current target/workspace boundary checks so managed repositories cannot escape `.local`.",
+      "testable_boundary": "Materialization and verification succeed against the default profile in the declared order, using the managed target path, and long-path/target-root safety regressions remain covered.",
+      "candidate_owned_paths": [
+        "scripts/materialize-target.ps1",
+        "scripts/invoke-verification.ps1",
+        "tests/test_orchestration_scripts.py",
+        "tests/test_jakal_flow_longpaths.py"
+      ],
+      "parallelizable_after": [
+        "SK1"
+      ],
+      "parallel_notes": "This can run in parallel with the bootstrap/prereq block if SK1 clearly freezes that bootstrap is the provisioning step and verification is install-free; avoid reopening the shared profile contract here."
+    },
+    {
+      "block_id": "B3",
+      "goal": "Publish operator-facing setup instructions for the harnessed jakal-flow environment.",
+      "work_items": [
+        "Add a focused setup guide that documents prerequisites, environment variables, bootstrap/materialize/verify commands, and `.local` layout.",
+        "Document how to launch the Python CLI and desktop dev flow from the managed target after provisioning completes.",
+        "Link the guide from the top-level README without duplicating the full upstream README."
+      ],
+      "implementation_notes": "Keep this documentation anchored to the harness scripts and profile names that actually exist in the repository. A dedicated guide file is preferable to repeatedly expanding the architecture contract doc after SK1. The doc should explain the local harness workflow, not restate upstream product marketing or broad architecture already covered elsewhere.",
+      "testable_boundary": "A new operator can follow the checked-in instructions to run prerequisite checks, bootstrap the upstream source, materialize the target, verify it, and find the right commands for CLI and desktop development without guessing paths.",
+      "candidate_owned_paths": [
+        "README.md",
+        "docs/JAKAL_FLOW_SETUP.md"
+      ],
+      "parallelizable_after": [
+        "B1",
+        "B2"
+      ],
+      "parallel_notes": "This is an isolated late-wave block. Keep it docs-only so implementation workers do not contend on shared script or contract files."
+    }
+  ],
+  "packing_notes": [
+    "Run `SK1` alone first and treat `scripts/profile-common.ps1`, `config/experiment.example.json`, `config/profiles/jakal-flow-local.json`, and the matching contract test as frozen shared roots afterward.",
+    "After `SK1`, the main parallel wave is `B1` and `B2`; they split cleanly along bootstrap/prereq versus materialize/verification ownership if the provisioning boundary is already fixed.",
+    "Do not split `scripts/check-prereqs.ps1` away from `scripts/bootstrap.ps1`; they share command-resolution and setup responsibilities too closely.",
+    "Do not fan out extra workers on `config/profiles/` or `scripts/profile-common.ps1` after the skeleton step unless a blocker forces a deliberate contract revision.",
+    "Keep tests paired with their implementation blocks to avoid a single shared integration-test hotspot, and reserve docs for the final wave so command examples match the landed behavior."
+  ]
+}
