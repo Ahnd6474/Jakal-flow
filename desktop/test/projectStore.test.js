@@ -421,6 +421,212 @@ test("applyProjectDetailState force reapplies the same detail signature on a man
   assert.equal(nextProjectForm.project_dir, "/repo");
 });
 
+test("applyProjectDetailState clears stale checkpoint approval state when the refreshed project is idle", () => {
+  let nextProjectDetail = null;
+
+  const applied = applyProjectDetailState({
+    detail: {
+      project: {
+        repo_id: "demo",
+        repo_path: "/repo",
+        display_name: "Demo",
+        slug: "demo",
+        branch: "main",
+        origin_url: "",
+        current_status: "setup_ready",
+      },
+      runtime: {
+        model: "gpt-5.4-mini",
+        effort: "high",
+      },
+      loop_state: {
+        current_checkpoint_id: null,
+        current_checkpoint_lineage_id: null,
+        pending_checkpoint_approval: false,
+      },
+      plan: {
+        closeout_status: "not_started",
+        steps: [],
+      },
+      codex_status: {
+        model_catalog: [],
+      },
+      detail_level: "core",
+      checkpoints: {
+        current_checkpoint_id: "CP1",
+        current_checkpoint_lineage_id: "LN1",
+        items: [
+          {
+            checkpoint_id: "CP1",
+            lineage_id: "LN1",
+            title: "Review work",
+            target_block: 2,
+            status: "awaiting_review",
+          },
+        ],
+        pending: {
+          checkpoint_id: "CP1",
+          lineage_id: "LN1",
+          title: "Review work",
+          target_block: 2,
+          status: "awaiting_review",
+        },
+        timeline_markdown: "- CP1 | awaiting_review | Review work",
+      },
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: {
+        current: "",
+      },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "demo",
+        },
+        checkpoints: {
+          current_checkpoint_id: "CP1",
+          current_checkpoint_lineage_id: "LN1",
+          items: [
+            {
+              checkpoint_id: "CP1",
+              lineage_id: "LN1",
+              title: "Review work",
+              target_block: 2,
+              status: "awaiting_review",
+            },
+          ],
+          pending: {
+            checkpoint_id: "CP1",
+            lineage_id: "LN1",
+            title: "Review work",
+            target_block: 2,
+            status: "awaiting_review",
+          },
+          timeline_markdown: "- CP1 | awaiting_review | Review work",
+        },
+        codex_status: {},
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model: "gpt-5.4-mini",
+        effort: "high",
+      },
+      planDirty: false,
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: (value) => {
+        nextProjectDetail = value;
+      },
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: () => {},
+      setPlanDraft: () => {},
+      setSelectedStepId: () => {},
+      setPlanDirty: () => {},
+    },
+  });
+
+  assert.equal(applied.project.current_status, "setup_ready");
+  assert.equal(nextProjectDetail.checkpoints.current_checkpoint_id, null);
+  assert.equal(nextProjectDetail.checkpoints.pending, null);
+  assert.equal(nextProjectDetail.checkpoints.items[0].status, "awaiting_review");
+  assert.match(nextProjectDetail.checkpoints.timeline_markdown, /awaiting_review/);
+});
+
+test("applyProjectDetailState preserves checkpoint approval state when the refreshed project is actually waiting", () => {
+  let nextProjectDetail = null;
+
+  const applied = applyProjectDetailState({
+    detail: {
+      project: {
+        repo_id: "demo",
+        repo_path: "/repo",
+        display_name: "Demo",
+        slug: "demo",
+        branch: "main",
+        origin_url: "",
+        current_status: "awaiting_checkpoint_approval",
+      },
+      runtime: {
+        model: "gpt-5.4-mini",
+        effort: "high",
+      },
+      loop_state: {
+        current_checkpoint_id: "CP1",
+        current_checkpoint_lineage_id: "LN1",
+        pending_checkpoint_approval: true,
+      },
+      plan: {
+        closeout_status: "not_started",
+        steps: [],
+      },
+      codex_status: {
+        model_catalog: [],
+      },
+      detail_level: "core",
+      checkpoints: {
+        current_checkpoint_id: "CP1",
+        current_checkpoint_lineage_id: "LN1",
+        items: [
+          {
+            checkpoint_id: "CP1",
+            lineage_id: "LN1",
+            title: "Review work",
+            target_block: 2,
+            status: "running",
+          },
+        ],
+        pending: null,
+        timeline_markdown: "",
+      },
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: {
+        current: "",
+      },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "demo",
+        },
+        codex_status: {},
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model: "gpt-5.4-mini",
+        effort: "high",
+      },
+      planDirty: false,
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: (value) => {
+        nextProjectDetail = value;
+      },
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: () => {},
+      setPlanDraft: () => {},
+      setSelectedStepId: () => {},
+      setPlanDirty: () => {},
+    },
+  });
+
+  assert.equal(applied.project.current_status, "awaiting_checkpoint_approval");
+  assert.equal(nextProjectDetail.checkpoints.current_checkpoint_id, "CP1");
+  assert.equal(nextProjectDetail.checkpoints.pending.checkpoint_id, "CP1");
+  assert.equal(nextProjectDetail.checkpoints.pending.status, "awaiting_review");
+  assert.equal(nextProjectDetail.checkpoints.items[0].status, "awaiting_review");
+  assert.match(nextProjectDetail.checkpoints.timeline_markdown, /awaiting_review/);
+});
+
 test("applyProjectDetailState clears a stale selected step when the refreshed plan is already complete", () => {
   let nextSelectedStepId = "ST1";
   let nextPlanDraft = null;

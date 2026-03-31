@@ -10,6 +10,13 @@ import {
   loadProjectWorkspace,
 } from "./projectDetails.js";
 
+function requestedDetailLevel(detailLevel = "full", bypassDetailCache = false) {
+  if (bypassDetailCache) {
+    return "full";
+  }
+  return (detailLevel ?? "full") === "core" ? "core" : "full";
+}
+
 function listBridgeJobsRequest() {
   if (typeof globalThis.__JAKAL_FLOW_TEST_LIST_BRIDGE_JOBS__ === "function") {
     return globalThis.__JAKAL_FLOW_TEST_LIST_BRIDGE_JOBS__();
@@ -32,7 +39,7 @@ export async function loadWorkspaceShareDetail(bridgeRequest, workspaceRoot) {
 export async function fetchProjectDetailBySelector(bridgeRequest, selector, workspaceRoot, options = {}) {
   return loadProjectDetail(bridgeRequest, selector, workspaceRoot || null, {
     refreshCodexStatus: options.refreshCodexStatus ?? false,
-    includeFull: (options.detailLevel ?? "full") === "full",
+    includeFull: requestedDetailLevel(options.detailLevel, options.bypassDetailCache) === "full",
     bypassDetailCache: options.bypassDetailCache ?? false,
   });
 }
@@ -90,12 +97,13 @@ export async function fetchProjectHistory(bridgeRequest, repoId, workspaceRoot) 
 }
 
 export async function refreshVisibleProjectState(bridgeRequest, workspaceRoot, repoId, options = {}) {
+  const detailLevel = requestedDetailLevel(options.detailLevel, options.bypassDetailCache ?? false);
   const result = await bridgeRequest(
     BRIDGE_COMMANDS.LOAD_VISIBLE_PROJECT_STATE,
     {
       ...(repoId ? { repo_id: repoId } : {}),
       refresh_codex_status: options.refreshCodexStatus ?? false,
-      detail_level: options.detailLevel ?? "core",
+      detail_level: detailLevel,
       include_listing: options.refreshListing ?? true,
       bypass_detail_cache: options.bypassDetailCache ?? false,
       bypass_listing_cache: options.bypassListingCache ?? false,

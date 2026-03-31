@@ -143,7 +143,7 @@ test("refreshVisibleProjectState can bypass cached detail when manually refreshi
       payload: {
         repo_id: "demo",
         refresh_codex_status: false,
-        detail_level: "core",
+        detail_level: "full",
         include_listing: true,
         bypass_detail_cache: true,
         bypass_listing_cache: false,
@@ -182,7 +182,7 @@ test("refreshVisibleProjectState can bypass cached listing and cached detail tog
       payload: {
         repo_id: "demo",
         refresh_codex_status: false,
-        detail_level: "core",
+        detail_level: "full",
         include_listing: true,
         bypass_detail_cache: true,
         bypass_listing_cache: true,
@@ -215,7 +215,7 @@ test("fetchProjectDetail forwards bypassDetailCache to the bridge payload", asyn
       payload: {
         repo_id: "demo",
         refresh_codex_status: false,
-        detail_level: "core",
+        detail_level: "full",
         bypass_detail_cache: true,
       },
       workspaceRoot: "/workspace",

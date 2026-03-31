@@ -344,6 +344,107 @@ function mergeCheckpointsSection(primary = null, fallback = null, preserveSparse
   return nextCheckpoints;
 }
 
+function checkpointApprovalIsActive(detail = null) {
+  const currentStatus = String(detail?.project?.current_status || "").trim().toLowerCase();
+  return Boolean(detail?.loop_state?.pending_checkpoint_approval) || currentStatus === "awaiting_checkpoint_approval";
+}
+
+function checkpointTimelineMarkdownFromItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => item && typeof item === "object")
+    .map((item) => {
+      const checkpointId = String(item.checkpoint_id || "").trim();
+      const status = String(item.status || "").trim();
+      const title = String(item.title || "").trim();
+      const parts = [checkpointId, status, title].filter(Boolean);
+      return parts.length ? `- ${parts.join(" | ")}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normalizeCheckpointSectionForDetail(detail = null) {
+  const checkpoints = detail?.checkpoints && typeof detail.checkpoints === "object" ? detail.checkpoints : null;
+  if (!checkpoints) {
+    return detail;
+  }
+
+  const waitingForApproval = checkpointApprovalIsActive(detail);
+  const activeCheckpointId = String(detail?.loop_state?.current_checkpoint_id || checkpoints?.pending?.checkpoint_id || "")
+    .trim();
+  const activeCheckpointLineageId = String(detail?.loop_state?.current_checkpoint_lineage_id || "").trim();
+  const items = (Array.isArray(checkpoints.items) ? checkpoints.items : []).map((item) => {
+    if (!item || typeof item !== "object") {
+      return item;
+    }
+    const nextItem = cloneValue(item);
+    const itemCheckpointId = String(nextItem.checkpoint_id || "").trim();
+    const itemLineageId = String(nextItem.lineage_id || "").trim();
+    const matchesActiveCheckpoint =
+      Boolean(activeCheckpointId)
+      && itemCheckpointId === activeCheckpointId
+      && (
+        !activeCheckpointLineageId
+        || !itemLineageId
+        || itemLineageId === activeCheckpointLineageId
+      );
+
+    if (waitingForApproval) {
+      if (matchesActiveCheckpoint) {
+        nextItem.status = "awaiting_review";
+      }
+    }
+    return nextItem;
+  });
+
+  let pending = null;
+  if (waitingForApproval) {
+    const pendingSource =
+      checkpoints.pending && typeof checkpoints.pending === "object"
+        ? cloneValue(checkpoints.pending)
+        : null;
+    if (pendingSource) {
+      pending = pendingSource;
+    } else if (activeCheckpointId) {
+      const matchingItem = items.find((item) => {
+        if (!item || typeof item !== "object") {
+          return false;
+        }
+        const itemCheckpointId = String(item.checkpoint_id || "").trim();
+        const itemLineageId = String(item.lineage_id || "").trim();
+        return (
+          itemCheckpointId === activeCheckpointId
+          && (
+            !activeCheckpointLineageId
+            || !itemLineageId
+            || itemLineageId === activeCheckpointLineageId
+          )
+        );
+      });
+      pending = matchingItem ? cloneValue(matchingItem) : { checkpoint_id: activeCheckpointId };
+    }
+    if (pending) {
+      pending.checkpoint_id = String(pending.checkpoint_id || activeCheckpointId || "").trim();
+      pending.status = "awaiting_review";
+      if (!String(pending.checkpoint_id || "").trim() && activeCheckpointId) {
+        pending.checkpoint_id = activeCheckpointId;
+      }
+    }
+  }
+
+  return {
+    ...detail,
+    checkpoints: {
+      ...checkpoints,
+      current_checkpoint_id: waitingForApproval ? activeCheckpointId : null,
+      current_checkpoint_lineage_id: waitingForApproval ? activeCheckpointLineageId : null,
+      items,
+      pending,
+      timeline_markdown: checkpointTimelineMarkdownFromItems(items),
+    },
+  };
+}
+
 function mergeHistorySection(primary = null, fallback = null, preserveSparse = false) {
   if (!primary && !fallback) {
     return primary ?? fallback;
@@ -700,7 +801,8 @@ export function applyProjectDetailState({
 }) {
   const preservedDetail = preserveProjectDetailSupplement(detail, state.projectDetail);
   const mergedDetail = mergeProjectDetailCodexStatus(preservedDetail, state.projectDetail?.codex_status, state.modelCatalog);
-  const normalizedDetail = sanitizeProjectDetailForJobState(mergedDetail, options.runningJob ?? state.activeJob);
+  const checkpointNormalizedDetail = normalizeCheckpointSectionForDetail(mergedDetail);
+  const normalizedDetail = sanitizeProjectDetailForJobState(checkpointNormalizedDetail, options.runningJob ?? state.activeJob);
   const applySignature = detailApplySignature(normalizedDetail, options.runningJob ?? state.activeJob);
   if (
     !options.force &&
