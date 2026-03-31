@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
@@ -512,10 +512,21 @@ class ExecutionPlanState:
     default_test_command: str = "python -m pytest"
     last_updated_at: str | None = None
     closeout_status: str = "not_started"
+    closeout_title: str = "Closeout"
+    closeout_display_description: str = "Closeout"
+    closeout_codex_description: str = "Closeout"
+    closeout_success_criteria: str = "Closeout"
+    closeout_deadline_at: str = ""
+    closeout_reasoning_effort: str = "high"
+    closeout_model_provider: str = ""
+    closeout_model: str = ""
+    closeout_parallel_group: str = ""
+    closeout_depends_on: list[str] = field(default_factory=list)
+    closeout_owned_paths: list[str] = field(default_factory=lambda: ["README.md", "docs/CLOSEOUT_REPORT.md"])
+    closeout_notes: str = ""
     closeout_started_at: str | None = None
     closeout_completed_at: str | None = None
     closeout_commit_hash: str | None = None
-    closeout_notes: str = ""
     steps: list[ExecutionStep] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -538,10 +549,22 @@ class ExecutionPlanState:
             default_test_command=str(data.get("default_test_command", "python -m pytest")).strip() or "python -m pytest",
             last_updated_at=data.get("last_updated_at"),
             closeout_status=str(data.get("closeout_status", "not_started")).strip() or "not_started",
+            closeout_title=str(data.get("closeout_title", "Closeout")).strip() or "Closeout",
+            closeout_display_description=str(data.get("closeout_display_description", "Closeout")).strip() or "Closeout",
+            closeout_codex_description=str(data.get("closeout_codex_description", "Closeout")).strip() or "Closeout",
+            closeout_success_criteria=str(data.get("closeout_success_criteria", "Closeout")).strip() or "Closeout",
+            closeout_deadline_at=str(data.get("closeout_deadline_at", "")).strip(),
+            closeout_reasoning_effort=str(data.get("closeout_reasoning_effort", "high")).strip() or "high",
+            closeout_model_provider=str(data.get("closeout_model_provider", "")).strip().lower(),
+            closeout_model=str(data.get("closeout_model", "")).strip().lower(),
+            closeout_parallel_group=str(data.get("closeout_parallel_group", "")).strip(),
+            closeout_depends_on=_string_list(data.get("closeout_depends_on", [])),
+            closeout_owned_paths=_string_list(data.get("closeout_owned_paths", ["README.md", "docs/CLOSEOUT_REPORT.md"]))
+            or ["README.md", "docs/CLOSEOUT_REPORT.md"],
+            closeout_notes=str(data.get("closeout_notes", "")).strip(),
             closeout_started_at=data.get("closeout_started_at"),
             closeout_completed_at=data.get("closeout_completed_at"),
             closeout_commit_hash=data.get("closeout_commit_hash"),
-            closeout_notes=str(data.get("closeout_notes", "")).strip(),
             steps=steps,
         )
 

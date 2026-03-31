@@ -1,15 +1,13 @@
 import { useI18n } from "../../i18n";
 import {
+  AUTO_REASONING_OPTION,
   applyConfigRuntimeModelSelection,
   applyProviderDefaults,
-  configReasoningOptions,
-  defaultModelForRuntime,
-  filterModelCatalogByProvider,
+  MODEL_REASONING_OPTIONS,
   MODEL_PROVIDER_OPTIONS,
   normalizedModelProvider,
   providerSupportsCatalog,
   runtimeSummary,
-  selectedConfigReasoning,
 } from "../../utils";
 
 const PROVIDER_LABELS = {
@@ -40,16 +38,17 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
   const { t } = useI18n();
   const runtime = form?.runtime || {};
   const selectedProvider = normalizedModelProvider(runtime);
-  const scopedModelCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
   const providerHasCatalog = providerSupportsCatalog(selectedProvider);
-  const selectedModel = runtime.model || runtime.model_slug_input || defaultModelForRuntime(modelCatalog, runtime) || "";
-  const selectedEffort = selectedConfigReasoning(scopedModelCatalog, runtime) || "medium";
-  const visibleModels = (scopedModelCatalog || []).filter((item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto");
-  const reasoningOptions = configReasoningOptions(scopedModelCatalog, selectedModel, runtime.effort || "medium");
+  const visibleModels = (modelCatalog || []).filter((item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto");
+  const selectedModel = String(runtime.model_slug_input || runtime.model || "").trim();
+  const selectedEffort = String(runtime.effort_selection_mode || "").trim().toLowerCase() === AUTO_REASONING_OPTION
+    ? AUTO_REASONING_OPTION
+    : String(runtime.effort || "medium").trim().toLowerCase() || "medium";
+  const reasoningOptions = MODEL_REASONING_OPTIONS;
 
   function applyModelChange(nextModel) {
     if (!form) return;
-    const nextRuntime = applyConfigRuntimeModelSelection(runtime, scopedModelCatalog, nextModel, null);
+    const nextRuntime = applyConfigRuntimeModelSelection(runtime, modelCatalog, nextModel, null);
     onChangeForm((current) => ({ ...current, runtime: nextRuntime }));
   }
 
@@ -105,11 +104,14 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
 
           {providerHasCatalog && visibleModels.length > 0 ? (
             <div className="model-pane__section">
-            <label className="model-pane__label">{t("field.model")}</label>
+              <label className="model-pane__label">{t("field.model")}</label>
               <select
                 value={selectedModel}
                 onChange={(e) => applyModelChange(e.target.value)}
               >
+                {selectedModel && !visibleModels.some((item) => String(item.model || "").trim().toLowerCase() === selectedModel.toLowerCase()) ? (
+                  <option value={selectedModel}>{selectedModel}</option>
+                ) : null}
                 {visibleModels.map((item) => (
                   <option key={item.model} value={item.model}>{item.display_name || item.model}</option>
                 ))}
@@ -121,7 +123,7 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
             <label className="model-pane__label">Reasoning Effort</label>
             <select
               value={selectedEffort}
-              onChange={(e) => applyRuntimePatch(applyConfigRuntimeModelSelection(runtime, scopedModelCatalog, selectedModel, e.target.value))}
+              onChange={(e) => applyRuntimePatch(applyConfigRuntimeModelSelection(runtime, modelCatalog, selectedModel, e.target.value))}
             >
               {reasoningOptions.map((opt) => (
                 <option key={opt} value={opt}>{EFFORT_LABELS[opt] || opt}</option>
@@ -131,7 +133,7 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
 
           <div className="model-pane__summary">
             <span className="model-pane__summary-label">현재 설정</span>
-            <span className="model-pane__summary-value">{runtimeSummary(runtime, modelPresets, "en", scopedModelCatalog)}</span>
+            <span className="model-pane__summary-value">{runtimeSummary(runtime, modelPresets, "en", modelCatalog)}</span>
           </div>
         </div>
       )}

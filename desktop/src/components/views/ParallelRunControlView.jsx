@@ -13,7 +13,6 @@ import {
   effectiveStepStatus,
   failureReasonCode,
   failureReasonLabel,
-  filterModelCatalogByProvider,
   formatDurationCompact,
   formatUsd,
   GEMINI_DEFAULT_MODEL,
@@ -21,7 +20,6 @@ import {
   isSystemStep,
   KIMI_DEFAULT_MODEL,
   MINIMAX_DEFAULT_MODEL,
-  defaultModelForRuntime,
   modelDisplayName,
   mergeModelCatalogs,
   providerDisplayName,
@@ -37,9 +35,9 @@ import {
   isPlanningProgressRunning,
   QWEN_CODE_DEFAULT_MODEL,
   REASONING_OPTIONS,
-  configReasoningOptions,
   reasoningEffortLabel,
-  selectedConfigReasoning,
+  AUTO_REASONING_OPTION,
+  MODEL_REASONING_OPTIONS,
   shouldShowEstimatedCost,
   statusTone,
   deriveExecutionUiState,
@@ -270,6 +268,7 @@ function sameQueuedJobs(previousJobs = [], nextJobs = []) {
 function parallelRunControlViewPropsEqual(previousProps, nextProps) {
   return (
     previousProps.detail === nextProps.detail
+    && previousProps.modelCatalog === nextProps.modelCatalog
     && previousProps.codexStatus === nextProps.codexStatus
     && previousProps.planDraft === nextProps.planDraft
     && previousProps.activeJob === nextProps.activeJob
@@ -298,10 +297,11 @@ function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCata
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const runtime = form?.runtime || detail?.runtime || {};
-  const scopedModelCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
   const selectedModel = String(runtime?.model || runtime?.model_slug_input || "").trim();
-  const reasoningOptions = configReasoningOptions(scopedModelCatalog, selectedModel, runtime?.effort || "medium");
-  const currentEffort = selectedConfigReasoning(scopedModelCatalog, runtime) || "medium";
+  const reasoningOptions = MODEL_REASONING_OPTIONS;
+  const currentEffort = String(runtime?.effort_selection_mode || "").trim().toLowerCase() === AUTO_REASONING_OPTION
+    ? AUTO_REASONING_OPTION
+    : String(runtime?.effort || "medium").trim().toLowerCase() || "medium";
   const chipModel = modelChipLabel(form, detail);
 
   useEffect(() => {
@@ -348,7 +348,7 @@ function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCata
                   onClick={() => {
                     onChangeForm?.((c) => ({
                       ...c,
-                      runtime: applyConfigRuntimeModelSelection(c.runtime || {}, scopedModelCatalog, selectedModel, opt),
+                      runtime: applyConfigRuntimeModelSelection(c.runtime || {}, modelCatalog, selectedModel, opt),
                     }));
                     setOpen(false);
                   }}
@@ -405,7 +405,7 @@ function stepModelPlaceholder(step, runtime) {
 
 function executionModelLabel(modelCatalog = [], runtime = {}) {
   const model = String(runtime?.execution_model || runtime?.model_slug_input || runtime?.model || "").trim();
-  return modelDisplayName(modelCatalog, model) || model || defaultModelForRuntime(modelCatalog, runtime) || "gpt-5.4";
+  return modelDisplayName(modelCatalog, model) || model || "gpt-5.4";
 }
 
 function stepModelOptions(modelCatalog = [], runtime = {}, stepProvider = "") {
@@ -450,6 +450,7 @@ function reservationProjectLabel(job, fallbackLabel) {
 /* ?? Main view ?? */
 export const ParallelRunControlView = memo(function ParallelRunControlView({
   detail,
+  modelCatalog: sharedModelCatalog = [],
   codexStatus,
   planDraft,
   activeJob,
@@ -507,7 +508,11 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
     () => steps.find((step) => step.step_id === selectedStepId) || null,
     [selectedStepId, steps],
   );
-  const modelCatalog = mergeModelCatalogs(codexStatus?.model_catalog || [], detail?.codex_status?.model_catalog || []);
+  const modelCatalog = mergeModelCatalogs(
+    sharedModelCatalog || [],
+    codexStatus?.model_catalog || [],
+    detail?.codex_status?.model_catalog || [],
+  );
   const runtimeInsights = detail?.runtime_insights || {};
   const executionEstimate = runtimeInsights?.execution || {};
   const costEstimate = runtimeInsights?.cost || {};
@@ -521,7 +526,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
     () => steps.filter((step) => step.status === "completed").length,
     [steps],
   );
-  const selectedSystemStep = isSystemStep(selectedStep);
+  const selectedSystemStep = isSystemStep(selectedStep) && selectedStep?.step_id !== CLOSEOUT_STEP_ID;
   const selectedStepIndex = selectedStep ? steps.findIndex((s) => s.step_id === selectedStepId) : -1;
   const selectedStepModel = String(selectedStep?.model || "").trim();
   const selectedStepModelProvider = String(selectedStep?.model_provider || detail?.runtime?.model_provider || "").trim();
@@ -820,8 +825,8 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
 
               <div className="action-row field--wide" style={{ paddingTop: "6px", borderTop: "1px solid var(--border)" }}>
                 <button className="toolbar-btn toolbar-btn--accent" onClick={onSaveStepLocal} type="button" disabled={busy}><SaveIcon /><span>{t("action.saveLocal")}</span></button>
-                <button className="toolbar-btn" onClick={onAddStep} type="button" disabled={busy}><span>{t("action.add")}</span></button>
-                <button className="toolbar-btn" onClick={onDeleteStep} type="button" disabled={!editableStep} style={editableStep ? { color: "var(--danger)" } : {}}><span>{t("action.delete")}</span></button>
+                <button className="toolbar-btn" onClick={onAddStep} type="button" disabled={busy || selectedStep?.step_id === CLOSEOUT_STEP_ID}><span>{t("action.add")}</span></button>
+                <button className="toolbar-btn" onClick={onDeleteStep} type="button" disabled={!editableStep || selectedStep?.step_id === CLOSEOUT_STEP_ID} style={editableStep && selectedStep?.step_id !== CLOSEOUT_STEP_ID ? { color: "var(--danger)" } : {}}><span>{t("action.delete")}</span></button>
               </div>
             </div>
           )}
@@ -844,7 +849,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                 >
                   {language === "ko" ? "Collapse" : "Collapse"}
                 </button>
-                <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={detail?.codex_status?.model_catalog || []} />
+                <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={modelCatalog} />
               </div>
               <textarea
                 ref={promptRef}
@@ -876,7 +881,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
               <span className="status-badge status-badge--info" style={{ fontSize: "10px" }}>
                 {language === "ko" ? "Read only" : "Read only"}
               </span>
-              <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={detail?.codex_status?.model_catalog || []} />
+              <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={modelCatalog} />
             </div>
           )}
         </div>
@@ -884,4 +889,3 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
     </section>
   );
 }, parallelRunControlViewPropsEqual);
-

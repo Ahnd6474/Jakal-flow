@@ -5,6 +5,7 @@ import {
   computePlanStats,
   detailApplySignature,
   deriveIdleProjectStatus,
+  CLOSEOUT_STEP_ID,
   mergeProjectDetailCodexStatus,
   mergeModelCatalogs,
   normalizedLocalModelProvider,
@@ -358,6 +359,181 @@ function preserveProjectChatSelection(currentForm = null, nextForm = null) {
     ...next,
     runtime: nextChatRuntime,
   };
+}
+
+function preserveProjectStepSelection(currentPlan = null, nextPlan = null, sameProject = false) {
+  if (!sameProject) {
+    return nextPlan;
+  }
+  const current = currentPlan && typeof currentPlan === "object" ? currentPlan : {};
+  const next = nextPlan && typeof nextPlan === "object" ? nextPlan : {};
+  const currentSteps = Array.isArray(current.steps) ? current.steps : [];
+  const nextSteps = Array.isArray(next.steps) ? next.steps : [];
+  if (!currentSteps.length || !nextSteps.length) {
+    const mergedPlan = {
+      ...next,
+    };
+    let changed = false;
+    const preservedCloseoutFields = [
+      "closeout_title",
+      "closeout_display_description",
+      "closeout_codex_description",
+      "closeout_success_criteria",
+      "closeout_deadline_at",
+      "closeout_reasoning_effort",
+      "closeout_model_provider",
+      "closeout_model",
+      "closeout_parallel_group",
+      "closeout_depends_on",
+      "closeout_owned_paths",
+      "closeout_notes",
+    ];
+    preservedCloseoutFields.forEach((key) => {
+      if (!hasOwnValue(current, key)) {
+        return;
+      }
+      const currentValue = current[key];
+      if (Array.isArray(currentValue)) {
+        if (currentValue.length && !Array.isArray(mergedPlan[key])) {
+          mergedPlan[key] = cloneValue(currentValue);
+          changed = true;
+        }
+        return;
+      }
+      const currentText = String(currentValue || "").trim();
+      if (!currentText) {
+        return;
+      }
+      const nextText = String(mergedPlan[key] || "").trim();
+      if (!nextText) {
+        mergedPlan[key] = currentValue;
+        changed = true;
+      }
+    });
+    return changed ? mergedPlan : nextPlan;
+  }
+
+  const currentById = new Map(
+    currentSteps
+      .map((step) => [String(step?.step_id || "").trim(), step])
+      .filter(([stepId]) => Boolean(stepId)),
+  );
+  const preservedFields = ["model_provider", "model", "reasoning_effort"];
+  let changed = false;
+  const mergedSteps = nextSteps.map((step) => {
+    const stepId = String(step?.step_id || "").trim();
+    if (!stepId) {
+      return step;
+    }
+    const currentStep = currentById.get(stepId);
+    if (!currentStep) {
+      return step;
+    }
+    const mergedStep = { ...step };
+    preservedFields.forEach((key) => {
+      const currentValue = String(currentStep?.[key] || "").trim();
+      if (!currentValue) {
+        return;
+      }
+      const nextValue = String(mergedStep?.[key] || "").trim();
+      if (nextValue && String(nextValue).toLowerCase() !== "auto") {
+        return;
+      }
+      if (!Object.is(mergedStep[key], currentStep[key])) {
+        mergedStep[key] = cloneValue(currentStep[key]);
+        changed = true;
+      }
+    });
+    return mergedStep;
+  });
+
+  if (!changed) {
+    const mergedPlan = {
+      ...next,
+    };
+    let closeoutChanged = false;
+    const preservedCloseoutFields = [
+      "closeout_title",
+      "closeout_display_description",
+      "closeout_codex_description",
+      "closeout_success_criteria",
+      "closeout_deadline_at",
+      "closeout_reasoning_effort",
+      "closeout_model_provider",
+      "closeout_model",
+      "closeout_parallel_group",
+      "closeout_depends_on",
+      "closeout_owned_paths",
+      "closeout_notes",
+    ];
+    preservedCloseoutFields.forEach((key) => {
+      if (!hasOwnValue(current, key)) {
+        return;
+      }
+      const currentValue = current[key];
+      if (Array.isArray(currentValue)) {
+        const nextValue = Array.isArray(mergedPlan[key]) ? mergedPlan[key] : [];
+        if (!nextValue.length && currentValue.length) {
+          mergedPlan[key] = cloneValue(currentValue);
+          closeoutChanged = true;
+        }
+        return;
+      }
+      const currentText = String(currentValue || "").trim();
+      if (!currentText) {
+        return;
+      }
+      const nextText = String(mergedPlan[key] || "").trim();
+      if (!nextText) {
+        mergedPlan[key] = currentValue;
+        closeoutChanged = true;
+      }
+    });
+    return closeoutChanged ? mergedPlan : nextPlan;
+  }
+  const mergedPlan = {
+    ...next,
+    steps: mergedSteps,
+  };
+  const preservedCloseoutFields = [
+    "closeout_title",
+    "closeout_display_description",
+    "closeout_codex_description",
+    "closeout_success_criteria",
+    "closeout_deadline_at",
+    "closeout_reasoning_effort",
+    "closeout_model_provider",
+    "closeout_model",
+    "closeout_parallel_group",
+    "closeout_depends_on",
+    "closeout_owned_paths",
+    "closeout_notes",
+  ];
+  let closeoutChanged = false;
+  preservedCloseoutFields.forEach((key) => {
+    if (!hasOwnValue(current, key)) {
+      return;
+    }
+    const currentValue = current[key];
+    if (Array.isArray(currentValue)) {
+      const nextValue = Array.isArray(mergedPlan[key]) ? mergedPlan[key] : [];
+      if (!nextValue.length && currentValue.length) {
+        mergedPlan[key] = cloneValue(currentValue);
+        closeoutChanged = true;
+      }
+      return;
+    }
+    const currentText = String(currentValue || "").trim();
+    if (!currentText) {
+      return;
+    }
+    const nextText = String(mergedPlan[key] || "").trim();
+    if (!nextText) {
+      mergedPlan[key] = currentValue;
+      closeoutChanged = true;
+    }
+  });
+  return mergedPlan;
 }
 
 function mergeReportsSection(primary = null, fallback = null, preserveSparse = false) {
@@ -981,6 +1157,7 @@ export function applyProjectDetailState({
   );
   const sameProject = sameProjectDetail(normalizedDetail, state.projectDetail);
   refs.lastAppliedDetailSignatureRef.current = applySignature;
+  const preservedPlan = preserveProjectStepSelection(state.planDraft, normalizedDetail.plan, sameProject);
     setters.transition(() => {
       setters.setProjectDetail(normalizedDetail);
       setters.setModelCatalog(
@@ -1012,10 +1189,13 @@ export function applyProjectDetailState({
       return enforceProgramModelDefaults(nextProjectFormWithChat, state.defaultRuntime);
     });
     if (!preserveDirtyPlan) {
-      setters.setPlanDraft(cloneValue(normalizedDetail.plan));
+      setters.setPlanDraft(cloneValue(preservedPlan));
       setters.setSelectedStepId((current) => {
         const currentStepId = String(current || "").trim();
-        const currentStep = (normalizedDetail?.plan?.steps || []).find((step) => step?.step_id === currentStepId);
+        if (currentStepId === CLOSEOUT_STEP_ID) {
+          return currentStepId;
+        }
+        const currentStep = (preservedPlan?.steps || []).find((step) => step?.step_id === currentStepId);
         if (currentStep && currentStep.status !== "completed") {
           return currentStepId;
         }

@@ -68,6 +68,7 @@ import {
   sanitizeProjectDetailForJobState,
   sanitizeProjectListForJobState,
   selectedConfigReasoning,
+  stepModelSelectionPatch,
   shouldKeepUnsavedPlan,
   shouldShowEstimatedCost,
   shouldReplaceVisibleProject,
@@ -1928,6 +1929,16 @@ test("planStepsWithCloseout appends a synthetic final closeout node", () => {
   const steps = planStepsWithCloseout(
     {
       closeout_status: "not_started",
+      closeout_title: "Custom Closeout",
+      closeout_display_description: "Wrap up the project",
+      closeout_codex_description: "Wrap up the project",
+      closeout_success_criteria: "Confirm the repo is ready to ship",
+      closeout_reasoning_effort: "xhigh",
+      closeout_model_provider: "claude",
+      closeout_model: "claude-sonnet-4-6",
+      closeout_parallel_group: "final",
+      closeout_depends_on: ["ST2"],
+      closeout_owned_paths: ["README.md"],
       closeout_notes: "",
       steps: [
         { step_id: "ST1", status: "completed" },
@@ -1943,9 +1954,18 @@ test("planStepsWithCloseout appends a synthetic final closeout node", () => {
 
   assert.equal(steps.length, 3);
   assert.equal(steps[2].step_id, "CO1");
+  assert.equal(steps[2].title, "Custom Closeout");
+  assert.equal(steps[2].display_description, "Wrap up the project");
+  assert.equal(steps[2].codex_description, "Wrap up the project");
+  assert.equal(steps[2].success_criteria, "Confirm the repo is ready to ship");
+  assert.equal(steps[2].reasoning_effort, "xhigh");
+  assert.equal(steps[2].model_provider, "claude");
+  assert.equal(steps[2].model, "claude-sonnet-4-6");
+  assert.equal(steps[2].parallel_group, "final");
+  assert.deepEqual(steps[2].owned_paths, ["README.md"]);
   assert.equal(steps[2].status, "pending");
-  assert.deepEqual(steps[2].depends_on, ["ST1", "ST2"]);
-  assert.equal(canEditStep(steps[2], false), false);
+  assert.deepEqual(steps[2].depends_on, ["ST2"]);
+  assert.equal(canEditStep(steps[2], false), true);
 });
 
 test("planStepsWithCloseout only depends on terminal steps in a DAG", () => {
@@ -2160,6 +2180,36 @@ test("applyConfigRuntimeModelSelection updates reasoning for models with stricte
   assert.equal(nextRuntime.effort, "high");
   assert.equal(nextRuntime.planning_effort, "high");
   assert.equal(nextRuntime.effort_selection_mode, "auto");
+});
+
+test("stepModelSelectionPatch maps a selected model back to its provider", () => {
+  const modelCatalog = [
+    {
+      model: "gpt-5.4",
+      display_name: "GPT-5.4",
+      provider: "openai",
+    },
+    {
+      model: "claude-sonnet-4-6",
+      display_name: "Claude Sonnet 4-6",
+      provider: "claude",
+    },
+  ];
+
+  assert.deepEqual(
+    stepModelSelectionPatch(modelCatalog, { execution_model: "gpt-5.4", model_slug_input: "gpt-5.4" }, "claude-sonnet-4-6"),
+    {
+      model_provider: "claude",
+      model: "claude-sonnet-4-6",
+    },
+  );
+  assert.deepEqual(
+    stepModelSelectionPatch(modelCatalog, { execution_model: "gpt-5.4", model_slug_input: "gpt-5.4" }, "gpt-5.4"),
+    {
+      model_provider: "",
+      model: "",
+    },
+  );
 });
 
 test("codexUsageBuckets separates 5h, 7d, and spark usage windows", () => {

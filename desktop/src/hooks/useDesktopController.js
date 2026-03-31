@@ -19,6 +19,7 @@ import {
   carryProjectPromptDraft,
   defaultShareSettings,
   emptyPlanDraft,
+  CLOSEOUT_STEP_ID,
   messagePayload,
   needsExpandedProjectDetail,
   planGenerationValidation,
@@ -421,6 +422,7 @@ export function useDesktopController() {
       },
       state: {
         projectDetail,
+        planDraft,
         modelCatalog,
         activeJob: activeJobRef.current,
         defaultRuntime: defaultRuntimeRef.current,
@@ -1349,6 +1351,65 @@ export function useDesktopController() {
 
   function updateSelectedStep(field, value) {
     if (!selectedStepId) {
+      return;
+    }
+    if (selectedStepId === CLOSEOUT_STEP_ID) {
+      const patch = field && typeof field === "object" && value === undefined
+        ? field
+        : {
+            [field]: value,
+          };
+      const closeoutPatch = {};
+      Object.entries(patch).forEach(([key, nextValue]) => {
+        switch (key) {
+          case "title":
+            closeoutPatch.closeout_title = nextValue;
+            break;
+          case "display_description":
+            closeoutPatch.closeout_display_description = nextValue;
+            break;
+          case "codex_description":
+            closeoutPatch.closeout_codex_description = nextValue;
+            break;
+          case "success_criteria":
+            closeoutPatch.closeout_success_criteria = nextValue;
+            break;
+          case "deadline_at":
+            closeoutPatch.closeout_deadline_at = nextValue;
+            break;
+          case "reasoning_effort":
+            closeoutPatch.closeout_reasoning_effort = nextValue;
+            break;
+          case "model_provider":
+            closeoutPatch.closeout_model_provider = nextValue;
+            break;
+          case "model":
+            closeoutPatch.closeout_model = nextValue;
+            break;
+          case "parallel_group":
+            closeoutPatch.closeout_parallel_group = nextValue;
+            break;
+          case "depends_on":
+            closeoutPatch.closeout_depends_on = nextValue;
+            break;
+          case "owned_paths":
+            closeoutPatch.closeout_owned_paths = nextValue;
+            break;
+          case "notes":
+            closeoutPatch.closeout_notes = nextValue;
+            break;
+          default:
+            break;
+        }
+      });
+      if (!Object.keys(closeoutPatch).length) {
+        return;
+      }
+      setPlanDraft((current) => ({
+        ...(current || {}),
+        ...closeoutPatch,
+      }));
+      setPlanDirty(true);
       return;
     }
     const patch = field && typeof field === "object" && value === undefined
@@ -2518,6 +2579,11 @@ export function useDesktopController() {
       setMessage(messagePayload("error", translate(language, "message.selectPendingStepFirst")));
       return;
     }
+    if (selectedStepId === CLOSEOUT_STEP_ID) {
+      setPlanDirty(true);
+      setMessage(messagePayload("info", translate(language, "message.stepUpdatedLocally")));
+      return;
+    }
     const step = (planDraft?.steps || []).find((item) => item.step_id === selectedStepId);
     if (!step || step.status !== "pending") {
       setMessage(messagePayload("error", translate(language, "message.onlyPendingEdit")));
@@ -2528,6 +2594,9 @@ export function useDesktopController() {
   }
 
   function addStep() {
+    if (selectedStepId === CLOSEOUT_STEP_ID) {
+      return;
+    }
     const steps = cloneValue(planDraft?.steps || []);
     if (selectedStepId) {
       const selectedStep = steps.find((step) => step.step_id === selectedStepId);
@@ -2563,6 +2632,9 @@ export function useDesktopController() {
   }
 
   function deleteStep() {
+    if (selectedStepId === CLOSEOUT_STEP_ID) {
+      return;
+    }
     const step = (planDraft?.steps || []).find((item) => item.step_id === selectedStepId);
     if (!step) {
       setMessage(messagePayload("error", translate(language, "message.selectStepFirst")));
@@ -2580,6 +2652,9 @@ export function useDesktopController() {
   }
 
   function moveStep(direction) {
+    if (selectedStepId === CLOSEOUT_STEP_ID) {
+      return;
+    }
     const steps = cloneValue(planDraft?.steps || []);
     const index = steps.findIndex((step) => step.step_id === selectedStepId);
     if (index < 0) {

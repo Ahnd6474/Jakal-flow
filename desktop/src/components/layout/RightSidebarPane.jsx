@@ -3,15 +3,11 @@ import { ChatMessageContent } from "../../chatMarkdown";
 import { useI18n } from "../../i18n";
 import { usePersistentState } from "../../hooks/usePersistentState";
 import {
-  defaultModelForRuntime,
+  MODEL_REASONING_OPTIONS,
   formatChatSessionTitle,
   formatDurationCompact,
-  filterModelCatalogByProvider,
-  normalizedLocalModelProvider,
-  normalizedModelProvider,
   reasoningEffortLabel,
   resolveExecutionDisplayPlan,
-  supportedReasoningOptions,
   visibleExecutionJob,
 } from "../../utils";
 
@@ -429,9 +425,6 @@ const ProjectChatPane = memo(function ProjectChatPane({
   const deferredRemoteMessages = useDeferredValue(remoteMessages);
   const activeSessionId = String(selectedChatSessionId || chat?.active_session_id || "").trim();
   const summaryFile = String(chat?.summary_file || "").trim();
-  const projectRuntime = detail?.runtime || {};
-  const currentProvider = normalizedModelProvider(projectRuntime);
-  const currentLocalProvider = normalizedLocalModelProvider(projectRuntime);
   const selectedChatProvider = String(chatSettings?.chat_model_provider || "").trim().toLowerCase();
   const selectedChatLocalProvider = String(chatSettings?.chat_local_model_provider || "").trim().toLowerCase();
   const selectedChatModel = String(chatSettings?.chat_model || "").trim().toLowerCase();
@@ -459,57 +452,35 @@ const ProjectChatPane = memo(function ProjectChatPane({
     const startedAtMs = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
     return Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
   });
-  const projectDefaultRuntime = useMemo(
-    () => ({
-      ...projectRuntime,
-      model_provider: currentProvider,
-      local_model_provider: currentLocalProvider,
-      model: String(projectRuntime?.model || "").trim().toLowerCase(),
-      model_slug_input: String(projectRuntime?.model_slug_input || projectRuntime?.model || "").trim(),
-    }),
-    [currentLocalProvider, currentProvider, projectRuntime],
-  );
   const availableChatModels = useMemo(
-    () => filterModelCatalogByProvider(modelCatalog, projectDefaultRuntime).filter((item) => {
+    () => (modelCatalog || []).filter((item) => {
       const model = String(item?.model || "").trim();
       return Boolean(model) && !item?.hidden;
     }),
-    [modelCatalog, projectDefaultRuntime],
+    [modelCatalog],
   );
   const selectedChatKey = useMemo(
     () => (selectedChatModel ? [selectedChatProvider, selectedChatLocalProvider, selectedChatModel].join("::") : ""),
     [selectedChatLocalProvider, selectedChatModel, selectedChatProvider],
   );
-  const selectedChatIsAllowed = useMemo(
-    () => Boolean(selectedChatKey) && availableChatModels.some((item) => chatModelOptionValue(item) === selectedChatKey),
-    [availableChatModels, selectedChatKey],
-  );
   const selectedChatValue = useMemo(
-    () => (selectedChatIsAllowed ? selectedChatKey : ""),
-    [selectedChatIsAllowed, selectedChatKey],
+    () => selectedChatKey,
+    [selectedChatKey],
   );
   const selectedChatEntry = useMemo(
     () => (
-      availableChatModels.find((item) => chatModelOptionValue(item) === selectedChatValue)
+      (modelCatalog || []).find((item) => chatModelOptionValue(item) === selectedChatValue)
       || null
     ),
-    [availableChatModels, selectedChatValue],
-  );
-  const effectiveChatModel = useMemo(
-    () => selectedChatEntry?.model || defaultModelForRuntime(modelCatalog, projectDefaultRuntime) || "",
-    [modelCatalog, projectDefaultRuntime, selectedChatEntry?.model],
+    [modelCatalog, selectedChatValue],
   );
   const availableChatEfforts = useMemo(
-    () => supportedReasoningOptions(
-      availableChatModels,
-      effectiveChatModel,
-      String(projectRuntime?.effort || "medium").trim().toLowerCase() || "medium",
-    ),
-    [availableChatModels, effectiveChatModel, projectRuntime?.effort],
+    () => MODEL_REASONING_OPTIONS,
+    [],
   );
   const effectiveChatEffort = useMemo(
-    () => (availableChatEfforts.includes(selectedChatEffort) ? selectedChatEffort : ""),
-    [availableChatEfforts, selectedChatEffort],
+    () => selectedChatEffort,
+    [selectedChatEffort],
   );
   const projectDefaultLabel = language === "ko" ? "프로젝트 실행 모델" : "Project execution model";
   const chatTargetSummary = useMemo(
@@ -1243,6 +1214,7 @@ export const RightSidebarPane = memo(function RightSidebarPane({
             <LazyFlowWorkspaceView
               detail={detail}
               form={form}
+              modelCatalog={modelCatalog}
               planDraft={planDraft}
               activeJob={activeJob}
               autoRunAfterPlan={autoRunAfterPlan}

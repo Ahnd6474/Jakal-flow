@@ -3,11 +3,10 @@ import { useI18n } from "../../i18n";
 import {
   applyProviderDefaults,
   applyProjectModelSelection,
-  configReasoningOptions,
-  defaultModelForRuntime,
+  AUTO_REASONING_OPTION,
+  MODEL_REASONING_OPTIONS,
   defaultProviderApiKeyEnv,
   defaultProviderBaseUrl,
-  filterModelCatalogByProvider,
   modelDisplayName,
   normalizeMemoryBudgetGiB,
   normalizedModelProvider,
@@ -15,7 +14,6 @@ import {
   providerStatusReason,
   programSettingsAllowsModelSlugInput,
   reasoningEffortLabel,
-  selectedConfigReasoning,
 } from "../../utils";
 
 function ConfigHeaderIcon() {
@@ -179,19 +177,19 @@ export const ConfigEditorView = memo(function ConfigEditorView({
   const liveRuntimeEditable = isRunning;
   const autoParallelWorkers = String(runtime.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
   const selectedProvider = normalizedModelProvider(runtime);
-  const scopedModelCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
-  const visibleModels = scopedModelCatalog.filter(
+  const visibleModels = (modelCatalog || []).filter(
     (item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto",
   );
-  const selectedModel = String(runtime.model_slug_input || runtime.model || defaultModelForRuntime(modelCatalog, runtime) || "").trim();
-  const reasoningOptions = configReasoningOptions(scopedModelCatalog, selectedModel, runtime.effort || "medium");
-  const selectedReasoning = selectedConfigReasoning(scopedModelCatalog, runtime);
+  const selectedModel = String(runtime.model_slug_input || runtime.model || "").trim();
+  const selectedReasoning = String(runtime.effort_selection_mode || "").trim().toLowerCase() === AUTO_REASONING_OPTION
+    ? AUTO_REASONING_OPTION
+    : String(runtime.effort || "medium").trim().toLowerCase() || "medium";
+  const reasoningOptions = MODEL_REASONING_OPTIONS;
   const executionModel = String(runtime.execution_model || "").trim();
-  const executionModelOptions = filterModelCatalogByProvider(modelCatalog, runtime).filter(
+  const executionModelOptions = visibleModels.filter(
     (item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto",
   );
-  const defaultExecutionModel = defaultModelForRuntime(modelCatalog, runtime) || runtime.model || "gpt-5.4";
-  const selectedExecutionModel = executionModel || defaultExecutionModel;
+  const selectedExecutionModel = executionModel || "";
   const selectedExecutionModelVisible = executionModelOptions.some(
     (item) => String(item.model || "").trim().toLowerCase() === selectedExecutionModel.toLowerCase(),
   );
@@ -344,7 +342,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 ...current,
                 runtime: applyProjectModelSelection(
                   current.runtime || {},
-                  scopedModelCatalog,
+                  modelCatalog,
                   event.target.value,
                   null,
                 ),
@@ -352,6 +350,11 @@ export const ConfigEditorView = memo(function ConfigEditorView({
             }
             disabled={busy}
           >
+            {selectedModel && !visibleModels.some((item) => String(item.model || "").trim().toLowerCase() === selectedModel.toLowerCase()) ? (
+              <option value={selectedModel}>
+                {modelDisplayName(modelCatalog, selectedModel) || selectedModel}
+              </option>
+            ) : null}
             {visibleModels.map((item) => (
               <option key={item.model} value={item.model}>
                 {item.display_name || item.model}
@@ -369,7 +372,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 ...current,
                 runtime: applyProjectModelSelection(
                   current.runtime || {},
-                  scopedModelCatalog,
+                  modelCatalog,
                   event.target.value,
                   null,
                 ),
@@ -389,7 +392,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               ...current,
               runtime: applyProjectModelSelection(
                 current.runtime || {},
-                scopedModelCatalog,
+                modelCatalog,
                 selectedModel,
                 event.target.value,
               ),
@@ -415,8 +418,8 @@ export const ConfigEditorView = memo(function ConfigEditorView({
             }))
           }
           disabled={busy}
-        >
-          {!selectedExecutionModelVisible && selectedExecutionModel ? (
+          >
+          {selectedExecutionModel && !selectedExecutionModelVisible ? (
             <option value={selectedExecutionModel}>
               {modelDisplayName(modelCatalog, selectedExecutionModel) || selectedExecutionModel}
             </option>

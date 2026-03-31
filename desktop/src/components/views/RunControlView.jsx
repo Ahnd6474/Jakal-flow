@@ -10,10 +10,10 @@ import {
   formatUsd,
   GEMINI_DEFAULT_MODEL,
   GLM_DEFAULT_MODEL,
+  CLOSEOUT_STEP_ID,
   isSystemStep,
   KIMI_DEFAULT_MODEL,
   MINIMAX_DEFAULT_MODEL,
-  defaultModelForRuntime,
   modelDisplayName,
   mergeModelCatalogs,
   providerDisplayName,
@@ -113,7 +113,7 @@ function stepModelPlaceholder(step, runtime) {
 
 function executionModelLabel(modelCatalog = [], runtime = {}) {
   const model = String(runtime?.execution_model || runtime?.model_slug_input || runtime?.model || "").trim();
-  return modelDisplayName(modelCatalog, model) || model || defaultModelForRuntime(modelCatalog, runtime) || "gpt-5.4";
+  return modelDisplayName(modelCatalog, model) || model || "gpt-5.4";
 }
 
 function stepModelOptions(modelCatalog = [], runtime = {}, stepProvider = "") {
@@ -159,6 +159,7 @@ function FlowNode({ step, projectStatus, selected, onSelect, language, t }) {
 
 export function RunControlView({
   detail,
+  modelCatalog: sharedModelCatalog = [],
   codexStatus,
   planDraft,
   activeJob,
@@ -201,7 +202,11 @@ export function RunControlView({
     successCriteria: t("reports.closeoutReport"),
   });
   const selectedStep = steps.find((step) => step.step_id === selectedStepId) || null;
-  const modelCatalog = mergeModelCatalogs(codexStatus?.model_catalog || [], detail?.codex_status?.model_catalog || []);
+  const modelCatalog = mergeModelCatalogs(
+    sharedModelCatalog || [],
+    codexStatus?.model_catalog || [],
+    detail?.codex_status?.model_catalog || [],
+  );
   const runtimeInsights = detail?.runtime_insights || {};
   const executionEstimate = runtimeInsights?.execution || {};
   const costEstimate = runtimeInsights?.cost || {};
@@ -210,7 +215,7 @@ export function RunControlView({
   const completedCount = steps.filter((step) => step.status === "completed").length;
   const executionMode = "parallel";
   const flowColumns = 3;
-  const selectedSystemStep = isSystemStep(selectedStep);
+  const selectedSystemStep = isSystemStep(selectedStep) && selectedStep?.step_id !== CLOSEOUT_STEP_ID;
   const executionJob = visibleExecutionJob(activeJob);
   const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", executionJob);
   const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
@@ -501,16 +506,16 @@ export function RunControlView({
                   <button className="toolbar-button toolbar-button--accent" onClick={onSaveStepLocal} type="button" disabled={busy}>
                     {t("action.saveLocal")}
                   </button>
-                  <button className="toolbar-button" onClick={onAddStep} type="button" disabled={busy}>
+                  <button className="toolbar-button" onClick={onAddStep} type="button" disabled={busy || selectedStep?.step_id === CLOSEOUT_STEP_ID}>
                     {t("action.add")}
                   </button>
-                  <button className="toolbar-button toolbar-button--ghost" onClick={onDeleteStep} type="button" disabled={!editableStep}>
+                  <button className="toolbar-button toolbar-button--ghost" onClick={onDeleteStep} type="button" disabled={!editableStep || selectedStep?.step_id === CLOSEOUT_STEP_ID}>
                     {t("action.delete")}
                   </button>
-                  <button className="toolbar-button toolbar-button--ghost" onClick={() => onMoveStep(-1)} type="button" disabled={!editableStep}>
+                  <button className="toolbar-button toolbar-button--ghost" onClick={() => onMoveStep(-1)} type="button" disabled={!editableStep || selectedStep?.step_id === CLOSEOUT_STEP_ID}>
                     {t("action.up")}
                   </button>
-                  <button className="toolbar-button toolbar-button--ghost" onClick={() => onMoveStep(1)} type="button" disabled={!editableStep}>
+                  <button className="toolbar-button toolbar-button--ghost" onClick={() => onMoveStep(1)} type="button" disabled={!editableStep || selectedStep?.step_id === CLOSEOUT_STEP_ID}>
                     {t("action.down")}
                   </button>
                 </div>

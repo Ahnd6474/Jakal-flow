@@ -1,15 +1,11 @@
 ﻿import { memo, startTransition, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import {
-  applyConfigRuntimeModelSelection,
   applyProviderDefaults,
   cloneValue,
-  configReasoningOptions,
   defaultCodexPath,
   defaultProviderApiKeyEnv,
   defaultProviderBaseUrl,
-  defaultModelForRuntime,
-  filterModelCatalogByProvider,
   normalizeMemoryBudgetGiB,
   normalizeDashboardVisibility,
   normalizedModelProvider,
@@ -17,9 +13,6 @@ import {
   providerUsable,
   providerStatusReason,
   programSettingsEqual,
-  programSettingsAllowsModelSlugInput,
-  reasoningEffortLabel,
-  selectedConfigReasoning,
 } from "../../utils";
 
 /* ?? Reusable toggle row ?? */
@@ -209,11 +202,6 @@ export const AppSettingsView = memo(function AppSettingsView({
   const activeShare = shareDetail?.active_session || shareDetail?.project_active_session || null;
   const shareServer = shareDetail?.server || null;
   const selectedProvider = normalizedModelProvider(draftSettings);
-  const scopedModelCatalog = filterModelCatalogByProvider(modelCatalog, draftSettings);
-  const visibleModels = scopedModelCatalog.filter((item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto");
-  const selectedModel = String(draftSettings.model_slug_input || draftSettings.model || defaultModelForRuntime(modelCatalog, draftSettings) || "").trim();
-  const reasoningOptions = configReasoningOptions(scopedModelCatalog, selectedModel, draftSettings.effort || "medium");
-  const selectedReasoning = selectedConfigReasoning(scopedModelCatalog, draftSettings);
   const dashboardVisibility = normalizeDashboardVisibility(draftSettings?.dashboard_visibility);
   const runtimeBusy = busy;
   const autoParallelWorkers = String(draftSettings?.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";

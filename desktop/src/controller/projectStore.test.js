@@ -1029,6 +1029,93 @@ test("applyProjectDetailState preserves a manually cleared step selection on sam
   assert.equal(capturedSelectedStepId, "");
 });
 
+test("applyProjectDetailState preserves step model selection on same-project refresh when the backend detail is stale", () => {
+  let capturedPlanDraft = null;
+  let capturedSelectedStepId = "__unset__";
+
+  applyProjectDetailState({
+    detail: {
+      project: {
+        repo_id: "repo-1",
+        repo_path: "C:/repo",
+      },
+      runtime: {
+        model_provider: "openai",
+        model: "gpt-5.4",
+        execution_model: "gpt-5.4",
+        model_slug_input: "gpt-5.4",
+        effort: "medium",
+        planning_effort: "medium",
+      },
+      plan: {
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          {
+            step_id: "ST2",
+            title: "Build",
+            status: "pending",
+            model_provider: "",
+            model: "",
+            reasoning_effort: "",
+          },
+        ],
+      },
+      codex_status: {
+        model_catalog: [],
+      },
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: { current: "" },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "repo-1",
+        },
+      },
+      planDraft: {
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          {
+            step_id: "ST2",
+            title: "Build",
+            status: "pending",
+            model_provider: "claude",
+            model: "claude-sonnet-4-6",
+            reasoning_effort: "high",
+          },
+        ],
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model_provider: "openai",
+      },
+      planDirty: false,
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: () => {},
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: () => {},
+      setPlanDraft: (updater) => {
+        capturedPlanDraft = typeof updater === "function" ? updater(capturedPlanDraft) : updater;
+      },
+      setSelectedStepId: (updater) => {
+        capturedSelectedStepId = typeof updater === "function" ? updater("ST2") : updater;
+      },
+      setPlanDirty: () => {},
+    },
+  });
+
+  assert.equal(capturedSelectedStepId, "ST2");
+  assert.equal(capturedPlanDraft.steps[1].model_provider, "claude");
+  assert.equal(capturedPlanDraft.steps[1].model, "claude-sonnet-4-6");
+  assert.equal(capturedPlanDraft.steps[1].reasoning_effort, "high");
+});
+
 test("applyProjectDetailState keeps the step editor closed when switching to a different project", () => {
   let capturedSelectedStepId = "__unset__";
 

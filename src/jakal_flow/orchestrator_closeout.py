@@ -477,10 +477,17 @@ class OrchestratorCloseoutMixin:
             self.workspace.save_project(context)
 
         previous_runtime = context.runtime
+        closeout_model_provider = str(plan_state.closeout_model_provider or previous_runtime.model_provider or "").strip().lower()
+        closeout_model = str(plan_state.closeout_model or previous_runtime.execution_model or previous_runtime.model or "").strip()
+        closeout_effort = str(plan_state.closeout_reasoning_effort or previous_runtime.effort or "high").strip().lower() or "high"
         context.runtime = RuntimeOptions(
             **{
                 **previous_runtime.to_dict(),
                 "test_cmd": plan_state.default_test_command or runtime.test_cmd,
+                "model_provider": closeout_model_provider or previous_runtime.model_provider,
+                "model": closeout_model or previous_runtime.model,
+                "execution_model": closeout_model or previous_runtime.execution_model or previous_runtime.model,
+                "effort": closeout_effort,
                 "allow_push": True,
                 "approval_mode": runtime.approval_mode,
                 "sandbox_mode": runtime.sandbox_mode,

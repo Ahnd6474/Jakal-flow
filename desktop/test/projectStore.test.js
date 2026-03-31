@@ -332,6 +332,187 @@ test("applyProjectDetailState preserves an unsaved plan draft and selected step 
   assert.equal(nextPlanDirty, true);
 });
 
+test("applyProjectDetailState preserves closeout draft fields on same-project refresh", () => {
+  let nextPlanDraft = {
+    project_prompt: "Unsaved prompt",
+    execution_mode: "parallel",
+    closeout_status: "not_started",
+    closeout_title: "Custom Closeout",
+    closeout_display_description: "Wrap up the project",
+    closeout_codex_description: "Wrap up the project",
+    closeout_success_criteria: "Close the project cleanly",
+    closeout_reasoning_effort: "high",
+    closeout_model_provider: "claude",
+    closeout_model: "claude-sonnet-4-6",
+    closeout_depends_on: ["ST2"],
+    closeout_owned_paths: ["README.md"],
+    steps: [
+      { step_id: "ST1", title: "Plan", status: "completed" },
+      { step_id: "ST2", title: "Build", status: "running" },
+    ],
+  };
+
+  applyProjectDetailState({
+    detail: {
+      project: {
+        repo_id: "demo",
+        repo_path: "/repo",
+        display_name: "Demo",
+        slug: "demo",
+        branch: "main",
+        origin_url: "",
+      },
+      runtime: {
+        model: "gpt-5.4-mini",
+        effort: "high",
+        test_cmd: "npm test",
+      },
+      plan: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "running" },
+        ],
+      },
+      codex_status: {
+        model_catalog: [],
+      },
+    },
+    options: {
+      preserveDirtyPlan: false,
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: {
+        current: "",
+      },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "demo",
+        },
+        codex_status: {},
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model: "auto",
+        effort: "medium",
+        test_cmd: "python -m pytest",
+      },
+      planDirty: false,
+      planDraft: nextPlanDraft,
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: () => {},
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: () => {},
+      setPlanDraft: (value) => {
+        nextPlanDraft = typeof value === "function" ? value(nextPlanDraft) : value;
+      },
+      setSelectedStepId: () => {},
+      setPlanDirty: () => {},
+    },
+  });
+
+  assert.equal(nextPlanDraft.closeout_title, "Custom Closeout");
+  assert.equal(nextPlanDraft.closeout_display_description, "Wrap up the project");
+  assert.equal(nextPlanDraft.closeout_codex_description, "Wrap up the project");
+  assert.equal(nextPlanDraft.closeout_success_criteria, "Close the project cleanly");
+  assert.equal(nextPlanDraft.closeout_model_provider, "claude");
+  assert.equal(nextPlanDraft.closeout_model, "claude-sonnet-4-6");
+  assert.deepEqual(nextPlanDraft.closeout_depends_on, ["ST2"]);
+  assert.deepEqual(nextPlanDraft.closeout_owned_paths, ["README.md"]);
+});
+
+test("applyProjectDetailState keeps the synthetic closeout step selected on refresh", () => {
+  let nextSelectedStepId = "CO1";
+
+  applyProjectDetailState({
+    detail: {
+      project: {
+        repo_id: "demo",
+        repo_path: "/repo",
+        display_name: "Demo",
+        slug: "demo",
+        branch: "main",
+        origin_url: "",
+      },
+      runtime: {
+        model: "gpt-5.4-mini",
+        effort: "high",
+        test_cmd: "npm test",
+      },
+      plan: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "running" },
+        ],
+      },
+      codex_status: {
+        model_catalog: [],
+      },
+    },
+    options: {
+      preserveDirtyPlan: false,
+      force: true,
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: {
+        current: "",
+      },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "demo",
+        },
+        codex_status: {},
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model: "auto",
+        effort: "medium",
+        test_cmd: "python -m pytest",
+      },
+      planDirty: false,
+      planDraft: {
+        closeout_status: "not_started",
+        closeout_title: "Closeout",
+        closeout_display_description: "Closeout",
+        closeout_codex_description: "Closeout",
+        closeout_success_criteria: "Closeout",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          { step_id: "ST2", title: "Build", status: "running" },
+        ],
+      },
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: () => {},
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: () => {},
+      setPlanDraft: () => {},
+      setSelectedStepId: (value) => {
+        nextSelectedStepId = typeof value === "function" ? value(nextSelectedStepId) : value;
+      },
+      setPlanDirty: () => {},
+    },
+  });
+
+  assert.equal(nextSelectedStepId, "CO1");
+});
+
 test("applyProjectDetailState force reapplies the same detail signature on a manual refresh", () => {
   let nextProjectDetail = null;
   let nextProjectForm = {

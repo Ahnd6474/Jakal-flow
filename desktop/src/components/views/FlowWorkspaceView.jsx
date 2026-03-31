@@ -4,6 +4,7 @@ export function FlowWorkspaceView(props) {
   const {
     detail,
     form,
+    modelCatalog = [],
     planDraft,
     activeJob,
     autoRunAfterPlan,
@@ -34,6 +35,7 @@ export function FlowWorkspaceView(props) {
   return (
     <ParallelRunControlView
       detail={detail}
+      modelCatalog={modelCatalog}
       codexStatus={detail?.codex_status}
       planDraft={planDraft}
       activeJob={activeJob}

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   carryProjectPromptDraft,
+  emptyPlanDraft,
   needsExpandedProjectDetail,
   nextSidebarTab,
   resolveConfirmation,
@@ -72,11 +73,9 @@ test("carryProjectPromptDraft preserves only the prompt for unfinished work", ()
       steps: [{ step_id: "ST1", status: "completed" }],
     }),
     {
-      steps: [],
+      ...emptyPlanDraft(),
       project_prompt: "Ship the desktop app.",
       workflow_mode: "ml",
-      execution_mode: "parallel",
-      closeout_status: "not_started",
     },
   );
   assert.deepEqual(
@@ -86,13 +85,7 @@ test("carryProjectPromptDraft preserves only the prompt for unfinished work", ()
       closeout_status: "completed",
       steps: [{ step_id: "ST1", status: "completed" }],
     }),
-    {
-      steps: [],
-      project_prompt: "",
-      workflow_mode: "standard",
-      execution_mode: "parallel",
-      closeout_status: "not_started",
-    },
+    emptyPlanDraft(),
   );
 });
 

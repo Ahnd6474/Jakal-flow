@@ -2526,6 +2526,10 @@ export function isSystemStep(step) {
   return Boolean(step?.metadata?.system_step);
 }
 
+export function isCloseoutStep(step) {
+  return String(step?.step_id || "").trim() === CLOSEOUT_STEP_ID;
+}
+
 export function planStepsWithCloseout(plan, labels = {}) {
   const steps = Array.isArray(plan?.steps) ? plan.steps.map((step) => cloneValue(step)) : [];
   if (!steps.length) {
@@ -2543,7 +2547,14 @@ export function planStepsWithCloseout(plan, labels = {}) {
       }
     });
   });
-  const closeoutDependsOn = stepIds.filter((stepId) => !dependedOnStepIds.has(stepId));
+  const explicitCloseoutDependsOn = Array.isArray(plan?.closeout_depends_on)
+    ? plan.closeout_depends_on
+        .map((stepId) => String(stepId || "").trim())
+        .filter((stepId) => stepId && stepId !== CLOSEOUT_STEP_ID)
+    : [];
+  const closeoutDependsOn = explicitCloseoutDependsOn.length
+    ? explicitCloseoutDependsOn
+    : stepIds.filter((stepId) => !dependedOnStepIds.has(stepId));
   const closeoutStatus = String(plan?.closeout_status || "not_started").trim().toLowerCase();
   let status = "pending";
   if (closeoutStatus === "running") {
@@ -2553,19 +2564,37 @@ export function planStepsWithCloseout(plan, labels = {}) {
   } else if (closeoutStatus === "failed") {
     status = "failed";
   }
+  const closeoutTitle = String(plan?.closeout_title || labels.title || "Closeout").trim() || labels.title || "Closeout";
+  const closeoutDisplayDescription = String(plan?.closeout_display_description || labels.description || labels.title || "Closeout").trim()
+    || labels.description
+    || labels.title
+    || "Closeout";
+  const closeoutCodexDescription = String(plan?.closeout_codex_description || labels.description || labels.title || "Closeout").trim()
+    || labels.description
+    || labels.title
+    || "Closeout";
+  const closeoutSuccessCriteria = String(plan?.closeout_success_criteria || labels.successCriteria || labels.description || labels.title || "Closeout").trim()
+    || labels.successCriteria
+    || labels.description
+    || labels.title
+    || "Closeout";
   steps.push({
     step_id: CLOSEOUT_STEP_ID,
-    title: labels.title || "Closeout",
-    display_description: labels.description || labels.title || "Closeout",
-    codex_description: labels.description || labels.title || "Closeout",
-    success_criteria: labels.successCriteria || labels.description || labels.title || "Closeout",
-    deadline_at: "",
-    reasoning_effort: "high",
-    parallel_group: "",
+    title: closeoutTitle,
+    display_description: closeoutDisplayDescription,
+    codex_description: closeoutCodexDescription,
+    success_criteria: closeoutSuccessCriteria,
+    deadline_at: String(plan?.closeout_deadline_at || "").trim(),
+    reasoning_effort: String(plan?.closeout_reasoning_effort || "high").trim().toLowerCase() || "high",
+    model_provider: String(plan?.closeout_model_provider || "").trim().toLowerCase(),
+    model: String(plan?.closeout_model || "").trim().toLowerCase(),
+    parallel_group: String(plan?.closeout_parallel_group || "").trim(),
     // Closeout should attach to terminal steps, otherwise the DAG renders redundant
     // shortcut edges like ST2 -> CO1 alongside ST2 -> ... -> CO1.
     depends_on: closeoutDependsOn.length ? closeoutDependsOn : stepIds,
-    owned_paths: ["README.md", "docs/CLOSEOUT_REPORT.md"],
+    owned_paths: Array.isArray(plan?.closeout_owned_paths) && plan.closeout_owned_paths.length
+      ? plan.closeout_owned_paths.map((path) => String(path || "").trim()).filter(Boolean)
+      : ["README.md", "docs/CLOSEOUT_REPORT.md"],
     status,
     notes: String(plan?.closeout_notes || "").trim(),
     metadata: {
@@ -2727,7 +2756,7 @@ export function executionProgressCaption(plan, language = "en") {
 
 export function canEditStep(step, busy) {
   const normalizedStatus = String(step?.status || "").trim().toLowerCase();
-  return Boolean(step) && !isSystemStep(step) && ["pending", "failed"].includes(normalizedStatus) && !busy;
+  return Boolean(step) && (!isSystemStep(step) || isCloseoutStep(step)) && ["pending", "failed"].includes(normalizedStatus) && !busy;
 }
 
 export function toolbarProgressCaption(plan) {

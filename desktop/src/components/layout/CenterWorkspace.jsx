@@ -447,6 +447,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
           <FlowWorkspaceView
             detail={detail}
             form={form}
+            modelCatalog={modelCatalog}
             planDraft={planDraft}
             activeJob={activeJob}
             autoRunAfterPlan={autoRunAfterPlan}

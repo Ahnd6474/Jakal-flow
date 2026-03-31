@@ -617,6 +617,101 @@ test("ParallelRunControlView shows failure reasons for failed blocks", async () 
   assert.match(html, /verification_test_failed/);
 });
 
+test("ParallelRunControlView treats closeout as editable and exposes all model choices", async () => {
+  const html = await renderBundledComponent(
+    "parallel-run-control-closeout-editable-render",
+    "./src/components/views/ParallelRunControlView.jsx",
+    "ParallelRunControlView",
+    {
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+        runtime: {
+          execution_mode: "parallel",
+          model_provider: "openai",
+          model: "gpt-5.4",
+          execution_model: "gpt-5.4",
+          effort: "high",
+        },
+        runtime_insights: {
+          execution: {
+            remaining_seconds: 0,
+          },
+          parallel: {
+            recommended_workers: 1,
+            cpu_parallel_limit: 4,
+            cpu_logical_count: 16,
+            memory_parallel_limit: 4,
+            memory_available_bytes: 8589934592,
+          },
+        },
+      },
+      planDraft: {
+        project_prompt: "Ship the UI",
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        closeout_title: "Wrap up",
+        closeout_display_description: "Wrap up the project",
+        closeout_codex_description: "Wrap up the project",
+        closeout_success_criteria: "Confirm the repo is ready to ship.",
+        closeout_reasoning_effort: "high",
+        closeout_model_provider: "claude",
+        closeout_model: "claude-sonnet-4-6",
+        closeout_depends_on: ["ST2"],
+        closeout_owned_paths: ["README.md"],
+        steps: [
+          {
+            step_id: "ST1",
+            title: "Plan",
+            display_description: "Prepare the flow",
+            codex_description: "Prepare the flow",
+            success_criteria: "Flow exists",
+            reasoning_effort: "medium",
+            status: "completed",
+          },
+          {
+            step_id: "ST2",
+            title: "Build",
+            display_description: "Build the screen",
+            codex_description: "Build the screen",
+            success_criteria: "Screen renders",
+            reasoning_effort: "high",
+            status: "pending",
+          },
+        ],
+      },
+      activeJob: null,
+      autoRunAfterPlan: false,
+      selectedStepId: "CO1",
+      busy: false,
+      onPromptChange: noop,
+      onGeneratePlan: noop,
+      onSavePlan: noop,
+      onResetPlan: noop,
+      onRunPlan: noop,
+      onRequestStop: noop,
+      onAutoRunAfterPlanChange: noop,
+      onSelectStep: noop,
+      onUpdateStepField: noop,
+      onSaveStepLocal: noop,
+      onAddStep: noop,
+      onDeleteStep: noop,
+      modelCatalog: [
+        { model: "gpt-5.4", display_name: "GPT-5.4", provider: "openai" },
+        { model: "claude-sonnet-4-6", display_name: "Claude Sonnet 4.6", provider: "claude" },
+      ],
+    },
+  );
+
+  assert.match(html, /Wrap up the project/);
+  assert.match(html, /Use execution model/);
+  assert.match(html, /GPT-5\.4/);
+  assert.match(html, /Claude Sonnet 4\.6/);
+  assert.match(html, /claude-sonnet-4-6/);
+  assert.doesNotMatch(html, /Report Formats/);
+});
+
 test("CenterWorkspace upgrades legacy serial plans into the parallel execution tree view", async () => {
   const html = await renderBundledComponent(
     "center-workspace-render",
@@ -699,6 +794,7 @@ test("CenterWorkspace forwards explicit chat settings into the AI chat workspace
 
   assert.match(html, /<option value="openai::::gpt-5\.4-mini" selected="">GPT-5\.4 Mini \/ OpenAI<\/option>/);
   assert.doesNotMatch(html, /<option value="openai::::gpt-5\.4" selected="">GPT-5\.4 \/ OpenAI<\/option>/);
+  assert.match(html, /<option value="high" selected="">High<\/option>/);
 });
 
 test("CenterWorkspace forwards stop requests into the AI chat workspace", async () => {
@@ -1605,7 +1701,118 @@ test("CenterWorkspace and RightSidebarPane inspector keep the same live step vis
   assert.doesNotMatch(sidebarHtml, /Do not use the stale draft/);
 });
 
-test("RightSidebarPane limits chat model choices to the project runtime provider", async () => {
+test("RightSidebarPane flow inspector uses the shared model catalog for step model selection", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-flow-shared-model-catalog-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      activeTab: "flow",
+      collapsed: false,
+      detail: {
+        project: {
+          current_status: "plan_ready",
+          display_name: "Demo",
+          branch: "main",
+          repo_path: "C:/demo",
+        },
+        runtime: {
+          model_provider: "openai",
+          execution_model: "gpt-5.4",
+          model: "gpt-5.4",
+          model_slug_input: "gpt-5.4",
+          effort: "medium",
+        },
+        plan: {
+          execution_mode: "parallel",
+          closeout_status: "not_started",
+          steps: [
+            { step_id: "ST1", title: "Plan", status: "completed" },
+            {
+              step_id: "ST2",
+              title: "Build",
+              status: "pending",
+              model_provider: "claude",
+              model: "claude-sonnet-4-6",
+              reasoning_effort: "medium",
+            },
+          ],
+        },
+        codex_status: {
+          model_catalog: [
+            {
+              model: "gpt-5.4",
+              display_name: "GPT-5.4",
+              provider: "openai",
+              hidden: false,
+            },
+          ],
+        },
+      },
+      planDraft: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          { step_id: "ST1", title: "Plan", status: "completed" },
+          {
+            step_id: "ST2",
+            title: "Build",
+            status: "pending",
+            model_provider: "claude",
+            model: "claude-sonnet-4-6",
+            reasoning_effort: "medium",
+          },
+        ],
+      },
+      selectedStepId: "ST2",
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.4",
+          display_name: "GPT-5.4",
+          provider: "openai",
+          hidden: false,
+        },
+        {
+          model: "claude-sonnet-4-6",
+          display_name: "Claude Sonnet 4-6",
+          provider: "claude",
+          hidden: false,
+        },
+      ],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: null,
+      busy: false,
+      onPromptChange: noop,
+      onChangeForm: noop,
+      onGeneratePlan: noop,
+      onSavePlan: noop,
+      onResetPlan: noop,
+      onRunPlan: noop,
+      onRunManualDebugger: noop,
+      onRunManualMerger: noop,
+      onRequestStop: noop,
+      onCancelQueuedJob: noop,
+      onChangeAutoRunAfterPlan: noop,
+      onSelectStep: noop,
+      onUpdateStepField: noop,
+      onSaveStepLocal: noop,
+      onAddStep: noop,
+      onDeleteStep: noop,
+    },
+  );
+
+  assert.match(html, /Use execution model \(GPT-5\.4\)/);
+  assert.match(html, /GPT-5\.4 \/ OpenAI/);
+  assert.match(html, /Claude Sonnet 4-6 \/ Claude Code/);
+  assert.match(html, /claude-sonnet-4-6/);
+});
+
+test("RightSidebarPane keeps all visible chat models available regardless of project runtime provider", async () => {
   const html = await renderBundledComponent(
     "right-sidebar-chat-custom-model-render",
     "./src/components/layout/RightSidebarPane.jsx",
@@ -1666,7 +1873,7 @@ test("RightSidebarPane limits chat model choices to the project runtime provider
   );
 
   assert.match(html, /Execution model/);
-  assert.doesNotMatch(html, /Gemini 2\.5 Pro/);
+  assert.match(html, /Gemini 2\.5 Pro/);
   assert.match(html, /GPT-5\.4 Mini/);
 });
 
@@ -4489,6 +4696,53 @@ test("IdeToolbar, StatusBar, and ConfigEditorView stay aligned on the selected p
   assert.match(configHtml, /<option value="gpt-5\.4" selected="">gpt-5\.4<\/option>/);
 });
 
+test("ConfigEditorView keeps a saved execution model visible even when the provider differs", async () => {
+  const html = await renderBundledComponent(
+    "config-editor-model-stability-render",
+    "./src/components/views/ConfigEditorView.jsx",
+    "ConfigEditorView",
+    {
+      form: {
+        project_dir: "C:/demo",
+        display_name: "Demo",
+        branch: "main",
+        github_mode: "existing",
+        origin_url: "",
+        runtime: {
+          model_provider: "openai",
+          model: "claude-3.7-sonnet",
+          model_slug_input: "claude-3.7-sonnet",
+          effort: "high",
+          effort_selection_mode: "explicit",
+          execution_model: "claude-3.7-sonnet",
+        },
+      },
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.4",
+          display_name: "GPT-5.4",
+          hidden: false,
+        },
+        {
+          model: "claude-3.7-sonnet",
+          display_name: "Claude 3.7 Sonnet",
+          hidden: false,
+        },
+      ],
+      busy: false,
+      onChangeForm: noop,
+      onSaveProject: noop,
+      onChooseDirectory: noop,
+      onArchiveProject: noop,
+      onDeleteProject: noop,
+    },
+  );
+
+  assert.match(html, /<option value="claude-3\.7-sonnet" selected="">Claude 3\.7 Sonnet<\/option>/);
+  assert.match(html, /<option value="gpt-5\.4">GPT-5\.4<\/option>/);
+});
+
 test("ModelPane shows the selected model when only model_slug_input is populated", async () => {
   const html = await renderBundledComponent(
     "model-pane-model-slug-input-render",
@@ -4510,12 +4764,18 @@ test("ModelPane shows the selected model when only model_slug_input is populated
           display_name: "GPT-5.4 Mini",
           hidden: false,
         },
+        {
+          model: "claude-3.7-sonnet",
+          display_name: "Claude 3.7 Sonnet",
+          hidden: false,
+        },
       ],
       onChangeForm: noop,
     },
   );
 
   assert.match(html, /<option value="gpt-5\.4-mini" selected="">GPT-5\.4 Mini<\/option>/);
+  assert.match(html, /Claude 3\.7 Sonnet/);
   assert.match(html, /OpenAI\/Codex \| Standard Mode \| GPT-5\.4 Mini \| reasoning Medium \| parallel auto/);
 });
 

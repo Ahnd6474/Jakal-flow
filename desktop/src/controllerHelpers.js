@@ -21,6 +21,18 @@ export function emptyPlanDraft() {
     workflow_mode: "standard",
     execution_mode: "parallel",
     closeout_status: "not_started",
+    closeout_title: "Closeout",
+    closeout_display_description: "Closeout",
+    closeout_codex_description: "Closeout",
+    closeout_success_criteria: "Closeout",
+    closeout_deadline_at: "",
+    closeout_reasoning_effort: "high",
+    closeout_model_provider: "",
+    closeout_model: "",
+    closeout_parallel_group: "",
+    closeout_depends_on: [],
+    closeout_owned_paths: ["README.md", "docs/CLOSEOUT_REPORT.md"],
+    closeout_notes: "",
   };
 }
 
