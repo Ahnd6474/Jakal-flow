@@ -1430,6 +1430,12 @@ class OrchestratorLineageMixin:
         for step in steps:
             metadata = deepcopy(step.metadata) if isinstance(step.metadata, dict) else {}
             step_kind = self._normalize_hybrid_step_kind(metadata.get("step_kind", ""))
+            if step_kind == "join" and len(step.depends_on) < 2:
+                # A join node must reconcile at least two prior branches. If only one dependency
+                # is provided, treat the step as a regular task so execution can continue safely.
+                step_kind = "task"
+                metadata.pop("merge_from", None)
+                metadata.pop("join_policy", None)
             if step_kind != "task":
                 metadata["step_kind"] = step_kind
             else:
