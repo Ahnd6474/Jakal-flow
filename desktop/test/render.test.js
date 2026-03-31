@@ -931,6 +931,29 @@ test("ExecutionFlowChart centers sparse columns and keeps a fan-out/fan-in DAG v
   assert.equal(mergeBusByKey.get("ST4-merge-bus"), "M 690 140 V 472");
 });
 
+test("ExecutionFlowChart overlays the active lineage as running while the stored step status is stale", async () => {
+  const html = await renderBundledComponent(
+    "execution-flow-chart-active-lineage-render",
+    "./src/components/common/ExecutionFlowChart.jsx",
+    "ExecutionFlowChart",
+    {
+      steps: [
+        { step_id: "ST1", title: "Plan", status: "completed", metadata: { lineage_id: "LN1" } },
+        { step_id: "ST2", title: "Build", status: "pending", metadata: { lineage_id: "LN2" } },
+      ],
+      projectStatus: "running:run-plan",
+      activeLineageId: "LN2",
+      selectedStepId: "ST2",
+      language: "en",
+      onSelectStep: noop,
+    },
+  );
+
+  assert.match(html, /Running/);
+  assert.match(html, /execution-flow-chart__node--info selected/);
+  assert.doesNotMatch(html, />Pending<\/tspan>/);
+});
+
 test("CenterWorkspace keeps the step editor hidden until a block is selected", async () => {
   const html = await renderBundledComponent(
     "parallel-workspace-no-selection-render",
@@ -1246,6 +1269,11 @@ test("StatusBar falls back to syncing when execution surfaces diverge", async ()
             },
           ],
         },
+        loop_state: {
+          current_checkpoint_id: "CP1",
+          current_checkpoint_lineage_id: "L1",
+          pending_checkpoint_approval: true,
+        },
       },
       activeJob: {
         id: "job-run",
@@ -1302,6 +1330,11 @@ test("IdeToolbar falls back to syncing when execution surfaces diverge", async (
               title: "Review build",
             },
           ],
+        },
+        loop_state: {
+          current_checkpoint_id: "CP1",
+          current_checkpoint_lineage_id: "L1",
+          pending_checkpoint_approval: true,
         },
         planning_progress: {
           currentStageStatus: "running",
@@ -2301,7 +2334,7 @@ test("CenterWorkspace keeps using the live detail plan when project status is ru
   assert.equal(runningNodeMatches.length, 1);
 });
 
-test("CenterWorkspace shows debugging badges in yellow while debugger recovery is active", async () => {
+test("CenterWorkspace keeps running badges stable while a run-plan job is active", async () => {
   const html = await renderBundledComponent(
     "parallel-workspace-debugging-render",
     "./src/components/layout/CenterWorkspace.jsx",
@@ -2345,9 +2378,10 @@ test("CenterWorkspace shows debugging badges in yellow while debugger recovery i
     }),
   );
 
-  assert.match(html, /Debugging/);
-  assert.match(html, /status-badge--warning">Debugging<\/span>/);
-  assert.match(html, /execution-flow-chart__node--warning/);
+  assert.match(html, /Running/);
+  assert.doesNotMatch(html, /Debugging/);
+  assert.match(html, /status-badge--info">Running<\/span>/);
+  assert.match(html, /execution-flow-chart__node--info selected/);
 });
 
 test("IdeToolbar renders the active execution state and DAG-ready progress text", async () => {
@@ -2719,7 +2753,7 @@ test("IdeToolbar exposes checkpoint approval when a checkpoint is waiting for re
   assert.match(html, /Approve Checkpoint/);
 });
 
-test("IdeToolbar prioritizes the debugging status over the generic active command", async () => {
+test("IdeToolbar keeps an active run-plan job from inheriting stale debugging status", async () => {
   const html = await renderBundledComponent(
     "ide-toolbar-debugging-render",
     "./src/components/layout/IdeToolbar.jsx",
@@ -2753,7 +2787,8 @@ test("IdeToolbar prioritizes the debugging status over the generic active comman
     onApproveCheckpoint: noop,
   });
 
-  assert.match(html, /Debugging/);
+  assert.match(html, /Running/);
+  assert.doesNotMatch(html, /Debugging/);
 });
 
 test("IdeToolbar, StatusBar, and RunProgressPanel agree on the debugging label", async () => {
@@ -2802,7 +2837,7 @@ test("IdeToolbar, StatusBar, and RunProgressPanel agree on the debugging label",
       busy: true,
       activeJob: {
         status: "running",
-        command: "run-plan",
+        command: "run-manual-debugger",
       },
       activeCenterTab: "run",
       projectPath: "C:/demo",
@@ -2838,7 +2873,7 @@ test("IdeToolbar, StatusBar, and RunProgressPanel agree on the debugging label",
       },
       activeJob: {
         status: "running",
-        command: "run-plan",
+        command: "run-manual-debugger",
       },
       queuedJobs: [],
       modelPresets: [],
@@ -2871,7 +2906,7 @@ test("IdeToolbar, StatusBar, and RunProgressPanel agree on the debugging label",
       planDraft: sharedPlan,
       activeJob: {
         status: "running",
-        command: "run-plan",
+        command: "run-manual-debugger",
       },
     },
   );
@@ -3232,7 +3267,7 @@ test("RunProgressPanel renders current work, progress, and recent activity", asy
   assert.match(html, /Running ST3: Build the backend/);
 });
 
-test("RunProgressPanel renders debugging state from the project status", async () => {
+test("RunProgressPanel renders debugging state from the debugger job", async () => {
   const html = await renderBundledComponent(
     "run-progress-panel-debugging-render",
     "./src/components/layout/RunProgressPanel.jsx",
@@ -3271,7 +3306,7 @@ test("RunProgressPanel renders debugging state from the project status", async (
     },
     activeJob: {
       status: "running",
-      command: "run-plan",
+      command: "run-manual-debugger",
     },
   });
 

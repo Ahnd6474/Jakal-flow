@@ -1,6 +1,7 @@
 import {
   computePlanStats,
   deriveIdleProjectStatus,
+  resolveCheckpointExecutionState,
   visibleExecutionJob,
 } from "../utils.js";
 
@@ -87,95 +88,66 @@ function patchCheckpointsFromRunEvent(checkpoints = null, record = null, loopSta
     return checkpoints;
   }
 
-  const processJob = visibleExecutionJob(activeJob);
-  const processStatus = normalizedText(processJob?.status).toLowerCase();
-  const processActive = Boolean(processJob) && (processStatus === "running" || processStatus === "queued");
-  const currentCheckpointId = normalizedText(
-    record.eventType === "project-state-synced"
-      ? record.details?.current_checkpoint_id
-      : loopState?.current_checkpoint_id,
-  ) || normalizedText(loopState?.current_checkpoint_id);
-  const waitingForApproval =
-    record.eventType === "checkpoint-approved"
-      ? false
-      : processActive && record.details?.pending_checkpoint_approval !== undefined
-        ? Boolean(record.details.pending_checkpoint_approval)
-        : processActive && Boolean(loopState?.pending_checkpoint_approval);
-  const previousPendingId = normalizedText(checkpoints?.pending?.checkpoint_id);
-  const targetCheckpointId = currentCheckpointId || previousPendingId;
-  const items = Array.isArray(checkpoints.items) ? checkpoints.items : [];
-  let changed = false;
-  const nextItems = items.map((item) => {
-    if (!item || typeof item !== "object") {
+  if (record.eventType === "checkpoint-approved") {
+    const nextItems = (Array.isArray(checkpoints.items) ? checkpoints.items : []).map((item) => {
+      if (!item || typeof item !== "object") {
+        return item;
+      }
+      const status = normalizedText(item.status).toLowerCase();
+      if (status === "awaiting_review") {
+        return {
+          ...item,
+          status: "approved",
+        };
+      }
       return item;
-    }
-    const itemId = normalizedText(item.checkpoint_id);
-    const status = normalizedText(item.status).toLowerCase();
-    if (record.eventType === "checkpoint-approved" && status === "awaiting_review") {
-      changed = true;
-      return {
-        ...item,
-        status: "approved",
-      };
-    }
-    if (waitingForApproval && targetCheckpointId && itemId === targetCheckpointId && status !== "awaiting_review") {
-      changed = true;
-      return {
-        ...item,
-        status: "awaiting_review",
-      };
-    }
-    if (!waitingForApproval && ["running", "awaiting_review"].includes(status)) {
-      changed = true;
-      return {
-        ...item,
-        status: "pending",
-      };
-    }
-    return item;
-  });
-
-  let nextPending = checkpoints?.pending && typeof checkpoints.pending === "object"
-    ? { ...checkpoints.pending }
-    : null;
-  if (waitingForApproval) {
-    const matchingItem = targetCheckpointId
-      ? nextItems.find((item) => normalizedText(item?.checkpoint_id) === targetCheckpointId) || null
-      : null;
-    if (matchingItem) {
-      nextPending = {
-        ...matchingItem,
-        status: "awaiting_review",
-      };
-    } else if (nextPending && (!targetCheckpointId || normalizedText(nextPending.checkpoint_id) === targetCheckpointId)) {
-      nextPending = {
-        ...nextPending,
-        checkpoint_id: normalizedText(nextPending.checkpoint_id) || targetCheckpointId,
-        status: "awaiting_review",
-      };
-    } else if (targetCheckpointId) {
-      nextPending = {
-        checkpoint_id: targetCheckpointId,
-        status: "awaiting_review",
-      };
-    } else {
-      nextPending = nextItems.find((item) => normalizedText(item?.status).toLowerCase() === "awaiting_review") || null;
-    }
-  } else {
-    nextPending = null;
+    });
+    return {
+      ...checkpoints,
+      current_checkpoint_id: null,
+      current_checkpoint_lineage_id: null,
+      items: nextItems,
+      pending: null,
+    };
   }
 
-  const nextCurrentCheckpointId = waitingForApproval ? currentCheckpointId : null;
-  const nextCurrentCheckpointLineageId = waitingForApproval ? normalizedText(loopState?.current_checkpoint_lineage_id) : null;
+  const checkpointState = resolveCheckpointExecutionState(
+    {
+      project: {
+        current_status: normalizedText(record.projectStatus || ""),
+      },
+      loop_state: {
+        ...(loopState && typeof loopState === "object" ? loopState : {}),
+        current_checkpoint_id: record.eventType === "project-state-synced"
+          ? normalizedText(record.details?.current_checkpoint_id)
+          : normalizedText(loopState?.current_checkpoint_id),
+        current_checkpoint_lineage_id: record.eventType === "project-state-synced"
+          ? normalizedText(record.details?.current_checkpoint_lineage_id)
+          : normalizedText(loopState?.current_checkpoint_lineage_id),
+        pending_checkpoint_approval:
+          record.eventType === "checkpoint-approved"
+            ? false
+            : record.eventType === "project-state-synced" && record.details?.pending_checkpoint_approval !== undefined
+              ? Boolean(record.details.pending_checkpoint_approval)
+              : Boolean(loopState?.pending_checkpoint_approval),
+      },
+      checkpoints,
+    },
+    activeJob,
+  );
 
-  if (
+  const nextPending = checkpointState.waitingForApproval
+    ? (checkpointState.pending ? { ...checkpointState.pending } : null)
+    : null;
+  const nextCurrentCheckpointId = checkpointState.processActive ? checkpointState.currentCheckpointId : null;
+  const nextCurrentCheckpointLineageId = checkpointState.processActive ? checkpointState.currentCheckpointLineageId : null;
+  const items = Array.isArray(checkpointState.items) ? checkpointState.items : [];
+  const changed =
     normalizedText(nextPending?.checkpoint_id) !== normalizedText(checkpoints?.pending?.checkpoint_id)
     || normalizedText(nextPending?.status) !== normalizedText(checkpoints?.pending?.status)
     || normalizedText(nextCurrentCheckpointId) !== normalizedText(checkpoints?.current_checkpoint_id)
     || normalizedText(nextCurrentCheckpointLineageId) !== normalizedText(checkpoints?.current_checkpoint_lineage_id)
-  ) {
-    changed = true;
-  }
+    || items !== checkpoints.items;
 
   if (!changed) {
     return checkpoints;
@@ -184,7 +156,7 @@ function patchCheckpointsFromRunEvent(checkpoints = null, record = null, loopSta
     ...checkpoints,
     current_checkpoint_id: nextCurrentCheckpointId,
     current_checkpoint_lineage_id: nextCurrentCheckpointLineageId,
-    items: nextItems,
+    items,
     pending: nextPending,
   };
 }

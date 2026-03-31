@@ -271,66 +271,66 @@ test("execution consistency reports surface mismatches when checkpoint state div
   const state = deriveExecutionUiState(
     {
       project: {
-        current_status: "running:run-plan",
+        current_status: "running:debugging",
       },
       plan,
       checkpoints: {
-        pending: {
-          checkpoint_id: "CP1",
-          status: "awaiting_review",
-          title: "Review build",
-        },
         items: [
           {
             checkpoint_id: "CP1",
-            status: "awaiting_review",
+            status: "running",
             title: "Review build",
           },
         ],
+        pending: {
+          checkpoint_id: "CP1",
+          status: "running",
+          title: "Review build",
+        },
       },
     },
     plan,
     {
       id: "job-run",
       status: "running",
-      command: "run-plan",
+      command: "run-manual-debugger",
     },
   );
   const report = executionConsistencyReport(
     {
       project: {
-        current_status: "running:run-plan",
+        current_status: "running:debugging",
       },
       plan,
       checkpoints: {
-        pending: {
-          checkpoint_id: "CP1",
-          status: "awaiting_review",
-          title: "Review build",
-        },
         items: [
           {
             checkpoint_id: "CP1",
-            status: "awaiting_review",
+            status: "running",
             title: "Review build",
           },
         ],
+        pending: {
+          checkpoint_id: "CP1",
+          status: "running",
+          title: "Review build",
+        },
       },
     },
     plan,
     {
       id: "job-run",
       status: "running",
-      command: "run-plan",
+      command: "run-manual-debugger",
     },
   );
 
   assert.equal(state.consistent, false);
   assert.equal(state.displayFamily, "syncing");
-  assert.match(report, /toolbar: checkpoint/);
-  assert.match(report, /flow: checkpoint/);
-  assert.match(report, /checkpoint: checkpoint/);
-  assert.match(report, /process: running/);
+  assert.match(report, /toolbar: debugging/);
+  assert.match(report, /flow: debugging/);
+  assert.match(report, /checkpoint: running/);
+  assert.match(report, /process: debugging/);
   assert.match(report, /display: syncing/);
   assert.match(report, /diff:/);
 });
@@ -1761,7 +1761,7 @@ test("deriveExecutionProgress marks debugger recovery as an active debugging pha
     null,
     {
       status: "running",
-      command: "run-plan",
+      command: "run-manual-debugger",
     },
   );
 

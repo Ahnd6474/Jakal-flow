@@ -11,6 +11,7 @@ import {
   normalizedLocalModelProvider,
   normalizedModelProvider,
   projectFormFromDetail,
+  resolveCheckpointExecutionState,
   sanitizeProjectDetailForJobState,
   sanitizeProjectListForJobState,
   visibleExecutionJob,
@@ -646,75 +647,21 @@ function normalizeCheckpointSectionForDetail(detail = null, activeJob = null) {
     return detail;
   }
 
-  const processJob = visibleExecutionJob(activeJob);
-  const processStatus = String(processJob?.status || "").trim().toLowerCase();
-  const processActive = Boolean(processJob) && (processStatus === "running" || processStatus === "queued");
-  const waitingForApproval = processActive && checkpointApprovalIsActive(detail, activeJob);
-  const activeCheckpointId = String(detail?.loop_state?.current_checkpoint_id || checkpoints?.pending?.checkpoint_id || "")
-    .trim();
-  const activeCheckpointLineageId = String(detail?.loop_state?.current_checkpoint_lineage_id || "").trim();
-  const items = (Array.isArray(checkpoints.items) ? checkpoints.items : []).map((item) => {
-    if (!item || typeof item !== "object") {
-      return item;
-    }
-    const nextItem = cloneValue(item);
-    const itemCheckpointId = String(nextItem.checkpoint_id || "").trim();
-    const itemLineageId = String(nextItem.lineage_id || "").trim();
-    const matchesActiveCheckpoint =
-      Boolean(activeCheckpointId)
-      && itemCheckpointId === activeCheckpointId
-      && (
-        !activeCheckpointLineageId
-        || !itemLineageId
-        || itemLineageId === activeCheckpointLineageId
-      );
-
-    if (waitingForApproval && matchesActiveCheckpoint) {
-      nextItem.status = "awaiting_review";
-    } else if (!waitingForApproval && ["running", "awaiting_review"].includes(String(nextItem.status || "").trim().toLowerCase())) {
-      nextItem.status = "pending";
-    }
-    return nextItem;
-  });
-
-  let pending = null;
-  if (waitingForApproval) {
-    const pendingSource =
-      checkpoints.pending && typeof checkpoints.pending === "object"
-        ? cloneValue(checkpoints.pending)
-        : null;
-    if (pendingSource) {
-      pending = pendingSource;
-    } else if (activeCheckpointId) {
-      const matchingItem = items.find((item) => {
-        if (!item || typeof item !== "object") {
-          return false;
-        }
-        const itemCheckpointId = String(item.checkpoint_id || "").trim();
-        const itemLineageId = String(item.lineage_id || "").trim();
-        return (
-          itemCheckpointId === activeCheckpointId
-          && (
-            !activeCheckpointLineageId
-            || !itemLineageId
-            || itemLineageId === activeCheckpointLineageId
-          )
-        );
-      });
-      pending = matchingItem ? cloneValue(matchingItem) : { checkpoint_id: activeCheckpointId };
-    }
-    if (pending) {
-      pending.checkpoint_id = String(pending.checkpoint_id || activeCheckpointId || "").trim();
-      pending.status = "awaiting_review";
-      if (!String(pending.checkpoint_id || "").trim() && activeCheckpointId) {
-        pending.checkpoint_id = activeCheckpointId;
-      }
-    }
-  }
+  const checkpointState = resolveCheckpointExecutionState(detail, activeJob);
+  const items = Array.isArray(checkpointState.items) ? checkpointState.items : [];
+  const pending = checkpointState.waitingForApproval
+    ? (checkpointState.pending ? cloneValue(checkpointState.pending) : null)
+    : null;
+  const activeCheckpointId = checkpointState.currentCheckpointId;
+  const activeCheckpointLineageId = checkpointState.currentCheckpointLineageId;
 
   const currentStatus = String(detail?.project?.current_status || "").trim();
-  const nextStatus = waitingForApproval
+  const nextStatus = checkpointState.waitingForApproval
     ? "awaiting_checkpoint_approval"
+    : checkpointState.processActive
+      ? currentStatus.toLowerCase().startsWith("running:")
+        ? currentStatus
+        : "running"
     : deriveIdleProjectStatus(
         detail?.plan,
         computePlanStats(detail?.plan || {}),
@@ -731,8 +678,8 @@ function normalizeCheckpointSectionForDetail(detail = null, activeJob = null) {
       : detail?.project,
     checkpoints: {
       ...checkpoints,
-      current_checkpoint_id: waitingForApproval ? activeCheckpointId : null,
-      current_checkpoint_lineage_id: waitingForApproval ? activeCheckpointLineageId : null,
+      current_checkpoint_id: checkpointState.processActive ? activeCheckpointId : null,
+      current_checkpoint_lineage_id: checkpointState.processActive ? activeCheckpointLineageId : null,
       items,
       pending,
       timeline_markdown: checkpointTimelineMarkdownFromItems(items),
@@ -740,10 +687,10 @@ function normalizeCheckpointSectionForDetail(detail = null, activeJob = null) {
     loop_state: detail?.loop_state
       ? {
           ...detail.loop_state,
-          current_task: waitingForApproval ? detail.loop_state.current_task : "",
-          current_checkpoint_id: waitingForApproval ? activeCheckpointId : null,
-          current_checkpoint_lineage_id: waitingForApproval ? activeCheckpointLineageId : null,
-          pending_checkpoint_approval: waitingForApproval,
+          current_task: checkpointState.processActive ? detail.loop_state.current_task : "",
+          current_checkpoint_id: checkpointState.processActive ? activeCheckpointId : null,
+          current_checkpoint_lineage_id: checkpointState.processActive ? activeCheckpointLineageId : null,
+          pending_checkpoint_approval: checkpointState.waitingForApproval,
         }
       : detail?.loop_state,
     snapshot: detail?.snapshot
@@ -758,10 +705,10 @@ function normalizeCheckpointSectionForDetail(detail = null, activeJob = null) {
           loop_state: detail.snapshot.loop_state
             ? {
                 ...detail.snapshot.loop_state,
-                current_task: waitingForApproval ? detail.snapshot.loop_state.current_task : "",
-                current_checkpoint_id: waitingForApproval ? activeCheckpointId : null,
-                current_checkpoint_lineage_id: waitingForApproval ? activeCheckpointLineageId : null,
-                pending_checkpoint_approval: waitingForApproval,
+                current_task: checkpointState.processActive ? detail.snapshot.loop_state.current_task : "",
+                current_checkpoint_id: checkpointState.processActive ? activeCheckpointId : null,
+                current_checkpoint_lineage_id: checkpointState.processActive ? activeCheckpointLineageId : null,
+                pending_checkpoint_approval: checkpointState.waitingForApproval,
               }
             : detail.snapshot.loop_state,
         }
@@ -773,7 +720,7 @@ function normalizeCheckpointSectionForDetail(detail = null, activeJob = null) {
             ? {
                 ...detail.bottom_panels.git_status,
                 current_status: nextStatus,
-                pending_checkpoint_approval: waitingForApproval,
+                pending_checkpoint_approval: checkpointState.waitingForApproval,
               }
             : detail.bottom_panels.git_status,
         }

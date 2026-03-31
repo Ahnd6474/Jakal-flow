@@ -1,6 +1,6 @@
 import { memo, useId, useMemo } from "react";
 import { displayStatus } from "../../locale";
-import { effectiveStepStatus, failureReasonLabel, statusTone } from "../../utils";
+import { effectiveStepStatus, failureReasonLabel, isDebuggingStatus, statusTone } from "../../utils";
 
 const FONT_FAMILY = '"Segoe UI", "Malgun Gothic", sans-serif';
 const BOX_WIDTH = 220;
@@ -375,12 +375,32 @@ function getChartTopology(steps = []) {
   return topology;
 }
 
-function buildChartData(steps = [], projectStatus = "", language = "en") {
+function effectiveChartStepStatus(step = null, projectStatus = "", activeLineageId = "") {
+  const currentStatus = effectiveStepStatus(step, projectStatus);
+  const normalizedStepStatus = String(step?.status || "").trim().toLowerCase();
+  if (["completed", "failed"].includes(normalizedStepStatus)) {
+    return currentStatus;
+  }
+  const stepLineageId = String(step?.metadata?.lineage_id || "").trim();
+  const activeLineage = String(activeLineageId || "").trim();
+  const normalizedProjectStatus = String(projectStatus || "").trim().toLowerCase();
+  if (
+    activeLineage
+    && stepLineageId
+    && stepLineageId === activeLineage
+    && (normalizedProjectStatus.startsWith("running:") || normalizedProjectStatus === "running" || normalizedProjectStatus.startsWith("queued:") || normalizedProjectStatus === "queued" || isDebuggingStatus(projectStatus))
+  ) {
+    return isDebuggingStatus(projectStatus) ? "running:debugging" : "running";
+  }
+  return currentStatus;
+}
+
+function buildChartData(steps = [], projectStatus = "", language = "en", activeLineageId = "") {
   const topology = getChartTopology(steps);
   return {
     ...topology,
     nodes: topology.nodes.map((node) => {
-      const stepStatus = effectiveStepStatus(node.step, projectStatus);
+      const stepStatus = effectiveChartStepStatus(node.step, projectStatus, activeLineageId);
       const tone = statusTone(stepStatus);
       const palette = PALETTE[tone] || PALETTE.neutral;
       const failureReason = failureReasonLabel(node.step, language);
@@ -403,9 +423,9 @@ function buildChartData(steps = [], projectStatus = "", language = "en") {
   };
 }
 
-function ExecutionFlowChartComponent({ steps = [], projectStatus = "", language = "en", selectedStepId = "", onSelectStep = null }) {
+function ExecutionFlowChartComponent({ steps = [], projectStatus = "", language = "en", selectedStepId = "", activeLineageId = "", onSelectStep = null }) {
   const arrowId = useId().replace(/:/g, "-");
-  const chart = useMemo(() => buildChartData(steps, projectStatus, language), [steps, projectStatus, language]);
+  const chart = useMemo(() => buildChartData(steps, projectStatus, language, activeLineageId), [steps, projectStatus, language, activeLineageId]);
 
   if (!steps.length) {
     return null;

@@ -1317,6 +1317,7 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
   const currentStatus = String(detail?.project?.current_status || "").trim();
   const status = currentStatus.toLowerCase();
   const debugging = isDebuggingStatus(currentStatus);
+  const debuggingCommand = String(progressJob?.command || "").trim().toLowerCase() === "run-manual-debugger";
   const planningProgress = normalizePlanningProgress(detail?.planning_progress);
   const planningRunning = isPlanningProgressRunning(planningProgress);
   const recentActivity = (Array.isArray(detail?.activity) ? detail.activity : [])
@@ -1334,7 +1335,7 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     phase = "planning";
   } else if (command === "run-closeout" || closeoutRunning) {
     phase = "closeout";
-  } else if (debugging) {
+  } else if (debuggingCommand || (debugging && !progressJob)) {
     phase = "debugging";
   } else if (command || runningStepList.length > 0 || nextStep) {
     phase = "step";
@@ -1483,16 +1484,14 @@ function executionFamilyFromJob(job = null) {
 }
 
 function checkpointFamilyFromDetail(detail = null, activeJob = null) {
-  const checkpoints = detail?.checkpoints && typeof detail.checkpoints === "object" ? detail.checkpoints : null;
-  const pending = checkpoints?.pending && typeof checkpoints.pending === "object" ? checkpoints.pending : null;
-  const items = Array.isArray(checkpoints?.items) ? checkpoints.items.filter((item) => item && typeof item === "object") : [];
-  const executionJob = visibleExecutionJob(activeJob);
-  const processStatus = String(executionJob?.status || "").trim().toLowerCase();
-  const processActive = Boolean(executionJob) && (processStatus === "running" || processStatus === "queued");
-  const hasActiveCheckpoint = pending || items.some((item) => ["awaiting_review", "pending"].includes(String(item?.status || "").trim().toLowerCase()));
-  if (processActive && hasActiveCheckpoint) {
+  const checkpointState = resolveCheckpointExecutionState(detail, activeJob);
+  if (checkpointState.waitingForApproval) {
     return "checkpoint";
   }
+  if (checkpointState.processActive && (checkpointState.currentCheckpointId || checkpointState.currentCheckpointLineageId)) {
+    return "running";
+  }
+  const items = Array.isArray(checkpointState.items) ? checkpointState.items : [];
   if (items.length && items.every((item) => ["approved", "completed"].includes(String(item?.status || "").trim().toLowerCase()))) {
     return "completed";
   }
@@ -1512,12 +1511,99 @@ function formatExecutionConsistencyLine(name, signal, raw = "") {
   return `${name}: ${normalized}${rawText && rawText !== normalized ? ` (${rawText})` : ""}`;
 }
 
+export function resolveCheckpointExecutionState(detail = null, activeJob = null) {
+  const checkpoints = detail?.checkpoints && typeof detail.checkpoints === "object" ? detail.checkpoints : null;
+  const executionJob = visibleExecutionJob(activeJob);
+  const processStatus = String(executionJob?.status || "").trim().toLowerCase();
+  const processActive = Boolean(executionJob) && (processStatus === "running" || processStatus === "queued");
+  const loopState = detail?.loop_state && typeof detail.loop_state === "object" ? detail.loop_state : {};
+  const currentCheckpointId = String(loopState.current_checkpoint_id || checkpoints?.pending?.checkpoint_id || "").trim();
+  const currentCheckpointLineageId = String(loopState.current_checkpoint_lineage_id || checkpoints?.pending?.lineage_id || "").trim();
+  const hasCheckpointContext = Boolean(currentCheckpointId || currentCheckpointLineageId);
+  const currentStatus = String(detail?.project?.current_status || "").trim().toLowerCase();
+  const waitingForApproval =
+    processActive
+    && (Boolean(loopState.pending_checkpoint_approval) || currentStatus === "awaiting_checkpoint_approval");
+  const items = Array.isArray(checkpoints?.items)
+    ? checkpoints.items.filter((item) => item && typeof item === "object")
+    : [];
+  const matchesActiveCheckpoint = (item = null) => {
+    if (!item || typeof item !== "object") {
+      return false;
+    }
+    const itemCheckpointId = String(item.checkpoint_id || "").trim();
+    const itemLineageId = String(item.lineage_id || "").trim();
+    if (!currentCheckpointId || itemCheckpointId !== currentCheckpointId) {
+      return false;
+    }
+    return !currentCheckpointLineageId || !itemLineageId || itemLineageId === currentCheckpointLineageId;
+  };
+  let changed = false;
+  const normalizedItems = items.map((item) => {
+    const nextItem = cloneValue(item);
+    const status = String(nextItem.status || "").trim().toLowerCase();
+    const matches = matchesActiveCheckpoint(nextItem);
+    if (waitingForApproval && hasCheckpointContext && matches && status !== "awaiting_review") {
+      nextItem.status = "awaiting_review";
+      changed = true;
+    } else if (processActive && hasCheckpointContext && matches && status !== "running") {
+      nextItem.status = "running";
+      changed = true;
+    } else if (!processActive && ["running", "awaiting_review"].includes(status)) {
+      nextItem.status = "pending";
+      changed = true;
+    }
+    return nextItem;
+  });
+
+  let pending = null;
+  if (waitingForApproval) {
+    const pendingSource =
+      checkpoints?.pending && typeof checkpoints.pending === "object"
+        ? cloneValue(checkpoints.pending)
+        : null;
+    if (pendingSource) {
+      pending = pendingSource;
+    } else if (currentCheckpointId) {
+      const matchingItem = normalizedItems.find((item) => matchesActiveCheckpoint(item)) || null;
+      pending = matchingItem ? cloneValue(matchingItem) : { checkpoint_id: currentCheckpointId };
+    }
+    if (pending) {
+      pending.checkpoint_id = String(pending.checkpoint_id || currentCheckpointId || "").trim();
+      pending.status = "awaiting_review";
+      if (!String(pending.checkpoint_id || "").trim() && currentCheckpointId) {
+        pending.checkpoint_id = currentCheckpointId;
+      }
+    }
+  }
+
+  const hadExplicitChanges =
+    String(checkpoints?.current_checkpoint_id || "") !== currentCheckpointId
+    || String(checkpoints?.current_checkpoint_lineage_id || "") !== currentCheckpointLineageId
+    || String(checkpoints?.pending?.checkpoint_id || "") !== String(pending?.checkpoint_id || "")
+    || String(checkpoints?.pending?.status || "") !== String(pending?.status || "");
+
+  return {
+    executionJob,
+    processActive,
+    waitingForApproval,
+    currentCheckpointId,
+    currentCheckpointLineageId,
+    hasCheckpointContext,
+    items: changed || hadExplicitChanges ? normalizedItems : items,
+    pending,
+    hasActiveCheckpoint: Boolean(currentCheckpointId || currentCheckpointLineageId || pending),
+  };
+}
+
 export function deriveExecutionUiState(detail = null, planDraft = null, activeJob = null) {
   const executionJob = visibleExecutionJob(activeJob);
   const livePlan = resolveExecutionDisplayPlan(detail, planDraft, activeJob);
   const progress = deriveExecutionProgress(detail, planDraft, activeJob);
-  const checkpointState = detail?.checkpoints && typeof detail.checkpoints === "object" ? detail.checkpoints : {};
-  const checkpointPending = checkpointState?.pending && typeof checkpointState.pending === "object" ? checkpointState.pending : null;
+  const checkpointExecutionState = resolveCheckpointExecutionState(detail, executionJob);
+  const checkpointPending = checkpointExecutionState.pending && typeof checkpointExecutionState.pending === "object"
+    ? checkpointExecutionState.pending
+    : null;
   const checkpointFamily = checkpointFamilyFromDetail(detail, executionJob);
   const projectStatus = String(detail?.project?.current_status || "").trim();
   const storedProjectFamily = normalizeExecutionSurfaceStatus(projectStatus);
@@ -1532,7 +1618,7 @@ export function deriveExecutionUiState(detail = null, planDraft = null, activeJo
       )
     : projectStatus;
   const rawProjectFamily = normalizeExecutionSurfaceStatus(resolvedProjectStatus);
-  const processFamily = rawProjectFamily === "debugging" ? "debugging" : executionFamilyFromJob(executionJob);
+  const processFamily = executionFamilyFromJob(executionJob);
   const planningRunning = isPlanningProgressRunning(detail?.planning_progress);
 
   let flowFamily = "idle";
@@ -1542,10 +1628,12 @@ export function deriveExecutionUiState(detail = null, planDraft = null, activeJo
     flowFamily = "planning";
   } else if (progress.phase === "closeout" || progress.closeoutRunning) {
     flowFamily = "closeout";
-  } else if (progress.phase === "debugging" || isDebuggingStatus(progress.status)) {
+  } else if ((progress.phase === "debugging" || isDebuggingStatus(progress.status)) && !executionJob) {
     flowFamily = "debugging";
   } else if (progress.status === "running:merging") {
     flowFamily = "merging";
+  } else if (executionJob && processFamily !== "idle") {
+    flowFamily = processFamily;
   } else if (progress.isActive) {
     flowFamily = normalizeExecutionSurfaceStatus(progress.status) || "running";
   } else if (rawProjectFamily !== "idle") {
@@ -1561,8 +1649,10 @@ export function deriveExecutionUiState(detail = null, planDraft = null, activeJo
     toolbarFamily = "planning";
   } else if (progress.phase === "closeout" || progress.closeoutRunning) {
     toolbarFamily = "closeout";
-  } else if (progress.phase === "debugging" || isDebuggingStatus(projectStatus)) {
+  } else if ((progress.phase === "debugging" || isDebuggingStatus(projectStatus)) && !executionJob) {
     toolbarFamily = "debugging";
+  } else if (executionJob && processFamily !== "idle") {
+    toolbarFamily = processFamily;
   } else if (processFamily !== "idle") {
     toolbarFamily = processFamily;
   } else if (flowFamily !== "idle") {
@@ -1590,7 +1680,7 @@ export function deriveExecutionUiState(detail = null, planDraft = null, activeJo
     displayStatusValue = "running:generate-plan";
   } else if (progress.phase === "closeout" || progress.closeoutRunning) {
     displayStatusValue = "running:closeout";
-  } else if (progress.phase === "debugging" || isDebuggingStatus(progress.status)) {
+  } else if (progress.phase === "debugging" || (!executionJob && isDebuggingStatus(progress.status))) {
     displayStatusValue = "running:debugging";
   } else if (progress.isActive) {
     if (processFamily === "queued") {

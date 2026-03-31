@@ -812,7 +812,7 @@ test("applyProjectDetailState preserves checkpoint approval state when the refre
   assert.match(nextProjectDetail.checkpoints.timeline_markdown, /awaiting_review/);
 });
 
-test("applyProjectDetailState normalizes stale running checkpoints back to pending when approval is not active", () => {
+test("applyProjectDetailState keeps the active checkpoint running while the process is active", () => {
   let nextProjectDetail = null;
 
   const applied = applyProjectDetailState({
@@ -921,11 +921,11 @@ test("applyProjectDetailState normalizes stale running checkpoints back to pendi
     },
   });
 
-  assert.equal(applied.project.current_status, "setup_ready");
-  assert.equal(nextProjectDetail.checkpoints.current_checkpoint_id, null);
+  assert.equal(applied.project.current_status, "running:parallel");
+  assert.equal(nextProjectDetail.checkpoints.current_checkpoint_id, "CP1");
   assert.equal(nextProjectDetail.checkpoints.pending, null);
-  assert.equal(nextProjectDetail.checkpoints.items[0].status, "pending");
-  assert.match(nextProjectDetail.checkpoints.timeline_markdown, /pending/);
+  assert.equal(nextProjectDetail.checkpoints.items[0].status, "running");
+  assert.match(nextProjectDetail.checkpoints.timeline_markdown, /running/);
 });
 
 test("applyProjectDetailState clears a stale selected step when the refreshed plan is already complete", () => {

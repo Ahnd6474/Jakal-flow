@@ -541,6 +541,13 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
   const parallelLimitCardTone = parallelLimitTone(parallelInsight);
   const executionJob = executionState.executionJob;
   const projectStatus = executionState.displayStatusValue;
+  const activeCheckpointLineageId = String(
+    executionState.checkpointPending?.lineage_id
+    || detail?.loop_state?.current_checkpoint_lineage_id
+    || detail?.checkpoints?.current_checkpoint_lineage_id
+    || detail?.checkpoints?.pending?.lineage_id
+    || "",
+  ).trim();
   const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
   const runActionDisabled =
     busy
@@ -672,7 +679,14 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
       {/* ?? Flow chart (main area) ?? */}
       <div className="run-flow-area">
         {steps.length ? (
-          <ExecutionFlowChart steps={steps} projectStatus={projectStatus} language={language} selectedStepId={selectedStepId} onSelectStep={onSelectStep} />
+          <ExecutionFlowChart
+            steps={steps}
+            projectStatus={projectStatus}
+            language={language}
+            selectedStepId={selectedStepId}
+            activeLineageId={activeCheckpointLineageId}
+            onSelectStep={onSelectStep}
+          />
         ) : (
           <div className="empty-block" style={{ margin: "40px auto" }}>
             <svg viewBox="0 0 48 48" fill="none" style={{ width: 48, height: 48 }}>
