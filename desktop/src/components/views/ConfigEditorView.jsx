@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n";
 import {
   applyProviderDefaults,
   applyProjectModelSelection,
+  canEditProjectConfig,
   defaultProviderApiKeyEnv,
   defaultProviderBaseUrl,
   modelDisplayName,
@@ -149,6 +150,7 @@ function configEditorViewPropsEqual(previousProps, nextProps) {
     && previousProps.codexStatus === nextProps.codexStatus
     && previousProps.busy === nextProps.busy
     && previousProps.activeJob === nextProps.activeJob
+    && previousProps.projectStatus === nextProps.projectStatus
   );
 }
 
@@ -159,6 +161,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
   codexStatus,
   busy,
   activeJob,
+  projectStatus = "",
   onChangeForm,
   onChangeProgramSettings,
   onSaveProject,
@@ -172,8 +175,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
 
   const runtime = form.runtime || {};
   const { language, t } = useI18n();
-  const isRunning = ["running", "queued"].includes(String(activeJob?.status || "").trim().toLowerCase());
-  const liveRuntimeEditable = isRunning;
+  const executionLocked = !canEditProjectConfig(projectStatus, activeJob?.status || "");
   const autoParallelWorkers = String(runtime.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
   const selectedProvider = normalizedModelProvider(runtime);
   const selectionState = resolveRuntimeModelSelectionState(runtime, modelCatalog);
@@ -217,7 +219,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 }));
               }}
               type="button"
-              disabled={busy}
+              disabled={executionLocked}
             >
               {category.label}
             </button>
@@ -239,7 +241,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                     }))
                   }
                   type="button"
-                  disabled={busy}
+                  disabled={executionLocked}
                   title={!installed ? providerStatusReason(value, codexStatus) : undefined}
                 >
                   <span className="provider-sub-card__name">{label}</span>
@@ -282,7 +284,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 runtime: { ...(current.runtime || {}), local_model_provider: event.target.value },
               }))
             }
-            disabled={busy}
+            disabled={executionLocked}
           >
             <option value="ollama">{t("option.localProviderOllama")}</option>
             <option value="lmstudio">{t("option.localProviderLmStudio")}</option>
@@ -301,7 +303,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 runtime: { ...(current.runtime || {}), provider_base_url: event.target.value },
               }))
             }
-            disabled={busy}
+            disabled={executionLocked}
           />
         </label>
       ) : null}
@@ -317,7 +319,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 runtime: { ...(current.runtime || {}), provider_api_key_env: event.target.value },
               }))
             }
-            disabled={busy}
+            disabled={executionLocked}
           />
           <small className="field-hint">
             {language === "ko" ? "API 키가 들어 있는 환경 변수 이름입니다." : "The environment variable that holds your API key."}
@@ -340,7 +342,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 ),
               }))
             }
-            disabled={busy}
+            disabled={executionLocked}
           >
             {selectedModel && !visibleModels.some((item) => String(item.model || "").trim().toLowerCase() === selectedModel.toLowerCase()) ? (
               <option value={selectedModel}>
@@ -370,7 +372,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 ),
               }))
             }
-            disabled={busy}
+            disabled={executionLocked}
           />
         </label>
       ) : null}
@@ -390,7 +392,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               ),
             }))
           }
-          disabled={busy}
+          disabled={executionLocked}
         >
           {reasoningOptions.map((effort) => (
             <option key={effort} value={effort}>
@@ -409,7 +411,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               runtime: { ...current.runtime, execution_model: event.target.value },
             }))
           }
-          disabled={busy}
+          disabled={executionLocked}
           >
           {selectedExecutionModel && !selectedExecutionModelVisible ? (
             <option value={selectedExecutionModel}>
@@ -448,7 +450,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
             className="toolbar-button toolbar-button--accent"
             onClick={onSaveProject}
             type="button"
-            disabled={(!liveRuntimeEditable && busy) || !form.project_dir?.trim()}
+            disabled={executionLocked || !form.project_dir?.trim()}
           >
             {t("action.saveConfiguration")}
           </button>
@@ -505,7 +507,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               <input
                 value={form.display_name}
                 onChange={(event) => onChangeForm((current) => ({ ...current, display_name: event.target.value }))}
-                disabled={busy}
+                disabled={executionLocked}
               />
             </label>
 
@@ -515,9 +517,9 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 <input
                   value={form.project_dir}
                   onChange={(event) => onChangeForm((current) => ({ ...current, project_dir: event.target.value }))}
-                  disabled={busy}
+                  disabled={executionLocked}
                 />
-                <button className="toolbar-button" onClick={onChooseDirectory} type="button" disabled={busy} style={{ flexShrink: 0 }}>
+                <button className="toolbar-button" onClick={onChooseDirectory} type="button" disabled={executionLocked} style={{ flexShrink: 0 }}>
                   <FolderIcon />
                   {t("action.browse")}
                 </button>
@@ -529,7 +531,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               <input
                 value={form.branch}
                 onChange={(event) => onChangeForm((current) => ({ ...current, branch: event.target.value }))}
-                disabled={busy}
+                disabled={executionLocked}
               />
             </label>
           </div>
@@ -541,13 +543,13 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               description="Step limits, parallel workers and optimization"
             />
 
-            {liveRuntimeEditable ? (
+            {executionLocked ? (
               <div className="info-callout" style={{ marginTop: "8px" }}>
                 <InfoIcon />
                 <span>
                   {language === "ko"
-                    ? "실행 중에도 체크포인트와 보고서 출력 같은 안전한 설정은 저장할 수 있습니다."
-                    : "Safe runtime settings like checkpoints and report output can still be saved while a run is active."}
+                    ? "실행 중에는 설정 편집이 제한됩니다. 정지 상태에서는 다시 수정할 수 있습니다."
+                    : "Settings are locked while a run is active. They become editable again when paused."}
                 </span>
               </div>
             ) : null}
@@ -563,7 +565,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                       runtime: { ...current.runtime, workflow_mode: event.target.value },
                     }))
                   }
-                  disabled={busy}
+                  disabled={executionLocked}
                 >
                   <option value="standard">{t("option.workflowStandard")}</option>
                   <option value="ml">{t("option.workflowML")}</option>
@@ -583,7 +585,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                         runtime: { ...current.runtime, ml_max_cycles: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1) },
                       }))
                     }
-                    disabled={busy}
+                    disabled={executionLocked}
                   />
                   <small style={{ fontSize: "11px", color: "var(--text-dim)" }}>
                     {language === "ko" ? "ML ?ㅽ뿕 理쒕? 諛섎났 ?잛닔" : "Max ML experiment iterations"}
@@ -602,7 +604,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                         runtime: { ...current.runtime, max_blocks: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1) },
                       }))
                     }
-                    disabled={busy}
+                    disabled={executionLocked}
                   />
                   <small style={{ fontSize: "11px", color: "var(--text-dim)" }}>
                     "Maximum steps in execution plan"
@@ -616,16 +618,16 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                   type="number"
                   min="1"
                   value={runtime.parallel_workers > 0 ? runtime.parallel_workers : 4}
-                  onChange={(event) =>
-                    onChangeForm((current) => ({
-                      ...current,
-                      runtime: {
-                        ...current.runtime,
-                        parallel_workers: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
-                      },
-                    }))
-                  }
-                  disabled={busy || autoParallelWorkers}
+                    onChange={(event) =>
+                      onChangeForm((current) => ({
+                        ...current,
+                        runtime: {
+                          ...current.runtime,
+                          parallel_workers: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
+                        },
+                      }))
+                    }
+                  disabled={executionLocked || autoParallelWorkers}
                 />
               </label>
 
@@ -648,7 +650,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                       },
                     }))
                   }
-                  disabled={busy}
+                  disabled={executionLocked}
                 />
               </label>
 
@@ -667,7 +669,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                       },
                     }))
                   }
-                  disabled={busy && !liveRuntimeEditable}
+                  disabled={executionLocked}
                 />
               </label>
 
@@ -681,7 +683,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                       runtime: { ...current.runtime, optimization_mode: event.target.value },
                     }))
                   }
-                  disabled={busy}
+                  disabled={executionLocked}
                 >
                   <option value="off">{t("option.optimizationOff")}</option>
                   <option value="light">{t("option.optimizationLight")}</option>
@@ -707,7 +709,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 }
                 label={t("preset.auto")}
                 hint={language === "ko" ? "蹂묐젹 ?묒뾽 ?섎? ?먮룞?쇰줈 寃곗젙" : "Automatically determine parallel worker count"}
-                disabled={busy}
+                disabled={executionLocked}
               />
               <ToggleRow
                 checked={runtime.allow_background_queue ?? true}
@@ -718,7 +720,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                   }))
                 }
                 label={t("field.allowBackgroundQueue")}
-                disabled={busy}
+                disabled={executionLocked}
               />
               <ToggleRow
                 checked={Boolean(runtime.require_checkpoint_approval)}
@@ -730,7 +732,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 }
                 label={t("option.requireCheckpointApproval")}
                 hint={language === "ko" ? "泥댄겕?ъ씤?몄뿉 ?꾨떖?섎㈃ ?ㅼ쓬 ?④퀎 ?꾩뿉 寃?좊? ?붿껌?⑸땲??" : "Pause for review when a checkpoint is reached."}
-                disabled={busy && !liveRuntimeEditable}
+                disabled={executionLocked}
               />
               <ToggleRow
                 checked={Boolean(runtime.use_fast_mode)}
@@ -746,7 +748,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                     ? "계획 생성 시간을 줄이기 위해 Planner Agent A를 건너뛰고 더 빠른 계획 경로를 사용합니다."
                     : "Reduce plan generation time by skipping Planner Agent A and using the faster planning path."
                 }
-                disabled={busy}
+                disabled={executionLocked}
               />
             </div>
           </div>
@@ -771,7 +773,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                     type="radio"
                     checked={form.github_mode === value}
                     onChange={() => onChangeForm((current) => ({ ...current, github_mode: value }))}
-                    disabled={busy}
+                    disabled={executionLocked}
                     style={{ width: "auto", border: "none", background: "none", padding: 0, accentColor: "var(--info)" }}
                   />
                 </label>
@@ -783,7 +785,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 <input
                   value={form.origin_url}
                   onChange={(event) => onChangeForm((current) => ({ ...current, origin_url: event.target.value }))}
-                  disabled={busy}
+                  disabled={executionLocked}
                   placeholder="https://github.com/org/repo"
                 />
               </label>

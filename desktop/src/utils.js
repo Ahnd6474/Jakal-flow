@@ -2911,6 +2911,10 @@ export function canEditStep(step, busy) {
     && !busy;
 }
 
+export function canEditProjectConfig(projectStatus = "", activeJobStatus = "") {
+  return !isActiveExecutionStatus(projectStatus) && !isActiveExecutionStatus(activeJobStatus);
+}
+
 export function toolbarProgressCaption(plan) {
   const steps = plan?.steps || [];
   const completed = steps.filter((step) => step.status === "completed").length;

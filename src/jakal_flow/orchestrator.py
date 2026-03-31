@@ -3065,9 +3065,13 @@ class Orchestrator(
 
         block_limit = max(1, context.runtime.max_blocks)
         for _ in range(block_limit):
+            if immediate_stop_requested(context):
+                context.loop_state.stop_reason = "immediate stop requested"
+                context.metadata.current_status = "paused"
+                break
             if context.loop_state.stop_requested:
                 context.loop_state.stop_reason = "user stop requested"
-                context.metadata.current_status = "ready"
+                context.metadata.current_status = "paused"
                 break
             if context.loop_state.pending_checkpoint_approval:
                 context.metadata.current_status = "awaiting_checkpoint_approval"

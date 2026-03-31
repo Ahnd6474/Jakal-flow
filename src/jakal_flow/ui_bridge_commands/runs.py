@@ -101,7 +101,7 @@ def build_run_command_handlers(
             request_source=str(ctx.payload.get("source", "desktop-ui")).strip() or "desktop-ui",
         )
         execution_stop_registry.request_stop(execution_scope_id(project), process_pids=process_pids)
-        append_ui_event(project, "stop-requested", "Immediate stop requested. The current step will be ignored.", control)
+        append_ui_event(project, "immediate-stop-requested", "Immediate stop requested. The current step will be ignored.", control)
         return {
             "repo_id": project.metadata.repo_id,
             "project_dir": str(project.metadata.repo_path),

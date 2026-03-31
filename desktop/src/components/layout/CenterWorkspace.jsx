@@ -1,5 +1,6 @@
 import { Suspense, lazy, memo, useEffect } from "react";
 import { useI18n } from "../../i18n";
+import { projectStatusWithJob } from "../../utils";
 
 function AiChatTabIcon() {
   return (
@@ -270,6 +271,7 @@ function centerWorkspacePropsEqual(previousProps, nextProps) {
         && previousProps.busy === nextProps.busy
         && previousProps.shareBusy === nextProps.shareBusy
         && previousProps.programSettingsDirty === nextProps.programSettingsDirty
+        && previousProps.activeJob === nextProps.activeJob
       );
     default:
       return false;
@@ -343,6 +345,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
   const visibleHistoryDetail = selectedHistoryId ? historyDetail : detail;
   const normalizedActiveTab = normalizeWorkspaceTab(activeTab);
   const hasFlowTab = planHasFlowContent(detail, planDraft);
+  const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", activeJob);
 
   function resolveTabView(tab) {
     switch (normalizeWorkspaceTab(tab)) {
@@ -496,6 +499,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
             codexStatus={detail?.codex_status}
             busy={busy}
             activeJob={activeJob}
+            projectStatus={projectStatus}
             onChangeForm={onChangeForm}
             onChangeProgramSettings={onChangeProgramSettings}
             onSaveProject={onSaveProject}
@@ -514,6 +518,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
             busy={busy}
             shareBusy={shareBusy}
             dirty={programSettingsDirty}
+            projectStatus={projectStatus}
             onChangeSettings={onChangeProgramSettings}
             onSaveSettings={onSaveProgramSettings}
             onGenerateShareLink={onGenerateShareLink}

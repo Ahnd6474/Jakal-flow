@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n";
 import {
   applyProviderDefaults,
   cloneValue,
+  canEditProjectConfig,
   defaultCodexPath,
   defaultProviderApiKeyEnv,
   defaultProviderBaseUrl,
@@ -166,6 +167,7 @@ function appSettingsViewPropsEqual(previousProps, nextProps) {
     && previousProps.busy === nextProps.busy
     && previousProps.shareBusy === nextProps.shareBusy
     && previousProps.initialSettingsTab === nextProps.initialSettingsTab
+    && previousProps.projectStatus === nextProps.projectStatus
   );
 }
 
@@ -178,6 +180,7 @@ export const AppSettingsView = memo(function AppSettingsView({
   busy,
   shareBusy = false,
   initialSettingsTab = "app",
+  projectStatus = "",
   onChangeSettings,
   onGenerateShareLink,
   onCopyShareLink,
@@ -203,7 +206,8 @@ export const AppSettingsView = memo(function AppSettingsView({
   const shareServer = shareDetail?.server || null;
   const selectedProvider = normalizedModelProvider(draftSettings);
   const dashboardVisibility = normalizeDashboardVisibility(draftSettings?.dashboard_visibility);
-  const runtimeBusy = busy;
+  const runtimeBusy = !canEditProjectConfig(projectStatus);
+  void busy;
   const autoParallelWorkers = String(draftSettings?.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
 
   useEffect(() => {
@@ -446,7 +450,7 @@ export const AppSettingsView = memo(function AppSettingsView({
                 <select
                   value={draftSettings.workflow_mode || "standard"}
                   onChange={(event) => updateDraftSettings((current) => ({ ...current, workflow_mode: event.target.value }))}
-                  disabled={busy}
+                  disabled={runtimeBusy}
                 >
                   <option value="standard">{t("option.workflowStandard")}</option>
                   <option value="ml">{t("option.workflowML")}</option>
@@ -481,7 +485,7 @@ export const AppSettingsView = memo(function AppSettingsView({
                       ml_max_cycles: Math.max(1, Number.parseInt(event.target.value || "1", 10) || 1),
                     }))
                   }
-                  disabled={busy}
+                  disabled={runtimeBusy}
                 />
               </label>
             </div>

@@ -6,6 +6,7 @@ import {
   applyConfigRuntimeModelSelection,
   applyProjectModelSelection,
   canEditStep,
+  canEditProjectConfig,
   defaultModelForRuntime,
   failureReasonCode,
   failureReasonLabel,
@@ -88,6 +89,12 @@ test("canEditStep still blocks failed steps while a run is active", () => {
     ),
     false,
   );
+});
+
+test("canEditProjectConfig allows edits while paused but blocks active runs", () => {
+  assert.equal(canEditProjectConfig("paused", ""), true);
+  assert.equal(canEditProjectConfig("ready", "running"), false);
+  assert.equal(canEditProjectConfig("running", ""), false);
 });
 
 test("failureReasonLabel maps step metadata reason codes to readable labels", () => {
