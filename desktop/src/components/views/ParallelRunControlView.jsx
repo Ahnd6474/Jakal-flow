@@ -38,6 +38,7 @@ import {
   reasoningEffortLabel,
   AUTO_REASONING_OPTION,
   MODEL_REASONING_OPTIONS,
+  resolveRuntimeModelSelectionState,
   shouldShowEstimatedCost,
   statusTone,
   deriveExecutionUiState,
@@ -528,7 +529,8 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
   );
   const selectedSystemStep = isSystemStep(selectedStep) && selectedStep?.step_id !== CLOSEOUT_STEP_ID;
   const selectedStepIndex = selectedStep ? steps.findIndex((s) => s.step_id === selectedStepId) : -1;
-  const selectedStepModel = String(selectedStep?.model || "").trim();
+  const selectedStepSelectionState = resolveRuntimeModelSelectionState(selectedStep || {}, modelCatalog);
+  const selectedStepModel = selectedStepSelectionState.selectedModel;
   const selectedStepModelProvider = String(selectedStep?.model_provider || detail?.runtime?.model_provider || "").trim();
   const selectedStepModelOptions = stepModelOptions(modelCatalog, detail?.runtime || {}, selectedStepModelProvider);
   const selectedStepModelVisible = selectedStepModel

@@ -26,6 +26,7 @@ import {
   QWEN_CODE_DEFAULT_MODEL,
   REASONING_OPTIONS,
   reasoningEffortLabel,
+  resolveRuntimeModelSelectionState,
   shouldShowEstimatedCost,
   statusTone,
   visibleExecutionJob,
@@ -220,7 +221,8 @@ export function RunControlView({
   const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", executionJob);
   const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
   const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
-  const selectedStepModel = String(selectedStep?.model || "").trim();
+  const selectedStepSelectionState = resolveRuntimeModelSelectionState(selectedStep || {}, modelCatalog);
+  const selectedStepModel = selectedStepSelectionState.selectedModel;
   const selectedStepModelProvider = String(selectedStep?.model_provider || detail?.runtime?.model_provider || "").trim();
   const selectedStepModelOptions = stepModelOptions(modelCatalog, detail?.runtime || {}, selectedStepModelProvider);
   const selectedStepModelVisible = selectedStepModel
