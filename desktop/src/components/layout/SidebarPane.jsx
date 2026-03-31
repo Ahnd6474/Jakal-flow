@@ -204,21 +204,10 @@ function SidebarSectionTabs({ activeTab, onChange, tabs }) {
 }
 
 /* ── Workspace file tree ── */
-function sortTreeChildren(children = []) {
-  return [...children].sort((left, right) => {
-    const leftFolder = left.kind === "dir" || left.kind === "directory" || Boolean((left.children || []).length);
-    const rightFolder = right.kind === "dir" || right.kind === "directory" || Boolean((right.children || []).length);
-    if (leftFolder !== rightFolder) {
-      return leftFolder ? -1 : 1;
-    }
-    return String(left.label || "").localeCompare(String(right.label || ""));
-  });
-}
-
 function normalizeTree(node) {
   const label = String(node?.label || "");
   const path = String(node?.path || "");
-  const children = sortTreeChildren(node.children || []).map((child) => normalizeTree(child));
+  const children = (node.children || []).map((child) => normalizeTree(child));
   const searchText = `${label}\n${path}`.toLowerCase();
   const subtreeSearchText = [
     searchText,
@@ -456,7 +445,7 @@ const WorkspaceTreeView = memo(function WorkspaceTreeView({
       </div>
     </div>
   );
-});
+}, arePropsEqualExceptFunctions);
 
 /* ── Search input with icon ── */
 function SearchInput({ value, onChange, placeholder }) {

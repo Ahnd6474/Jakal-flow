@@ -3999,6 +3999,61 @@ test("SidebarPane renders a filtered workspace tree without unrelated nodes", as
   assert.doesNotMatch(html, /README\.md/);
 });
 
+test("SidebarPane preserves the workspace tree order from the backend", async () => {
+  const html = await renderBundledComponent(
+    "sidebar-pane-tree-order-render",
+    "./src/components/layout/SidebarPane.jsx",
+    "SidebarPane",
+    {
+      activeTab: "workspace",
+      onChangeTab: noop,
+      projects: [],
+      selectedProjectId: "",
+      loadingProjectId: "",
+      projectFilter: "",
+      workspaceFilter: "",
+      onProjectFilterChange: noop,
+      onWorkspaceFilterChange: noop,
+      onSelectProject: noop,
+      onNewProject: noop,
+      onArchiveProject: noop,
+      onDeleteProject: noop,
+      onDeleteHistoryEntry: noop,
+      onArchiveAllProjects: noop,
+      onDeleteAllProjects: noop,
+      workspaceTree: [
+        {
+          label: "Repository",
+          path: "/repo",
+          kind: "dir",
+          children: [
+            { label: "zeta.md", path: "/repo/zeta.md", kind: "file" },
+            { label: "alpha.md", path: "/repo/alpha.md", kind: "file" },
+            { label: "beta.md", path: "/repo/beta.md", kind: "file" },
+          ],
+        },
+      ],
+      checkpoints: { items: [] },
+      github: {
+        connected: false,
+        origin_url: "",
+        branch: "main",
+        repo_url: "",
+      },
+    },
+  );
+
+  const zetaIndex = html.indexOf("zeta.md");
+  const alphaIndex = html.indexOf("alpha.md");
+  const betaIndex = html.indexOf("beta.md");
+
+  assert.ok(zetaIndex >= 0);
+  assert.ok(alphaIndex >= 0);
+  assert.ok(betaIndex >= 0);
+  assert.ok(zetaIndex < alphaIndex);
+  assert.ok(alphaIndex < betaIndex);
+});
+
 test("SidebarPane renders only checkpoints and keeps a pending checkpoint visible", async () => {
   const html = await renderBundledComponent(
     "sidebar-pane-pending-checkpoint-render",
