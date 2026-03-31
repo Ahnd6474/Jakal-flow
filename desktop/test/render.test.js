@@ -808,7 +808,7 @@ test("RightSidebarPane renders the project chat on the right rail by default", a
   );
 
   assert.match(html, /AI Chat/);
-  assert.match(html, /Chat model/);
+  assert.match(html, /Execution model/);
   assert.match(html, /GPT-5\.4 Mini \/ OpenAI/);
   assert.match(html, /코드 설명해줘/);
   assert.doesNotMatch(html, /20260330101705\.txt/);
@@ -922,8 +922,7 @@ test("RightSidebarPane merges plan generation into the center chat composer", as
   assert.equal(textareaMatches.length, 1);
   assert.match(html, /title="Choose chat mode"/);
   assert.doesNotMatch(html, /Plan generation prompt/);
-  assert.doesNotMatch(html, /Chat model/);
-  assert.match(html, /<span class="chat-center__runtime-label">Model<\/span>/);
+  assert.match(html, /<span class="chat-center__runtime-label">Execution model<\/span>/);
   assert.match(html, /<span class="chat-center__runtime-label">Reasoning<\/span>/);
   assert.match(html, /Default: code review/);
 });
@@ -1045,7 +1044,7 @@ test("RightSidebarPane keeps the icon rail visible when the right panel is colla
 
   assert.match(html, /rsb--collapsed/);
   assert.match(html, /title="AI Chat"/);
-  assert.doesNotMatch(html, /Chat model/);
+  assert.doesNotMatch(html, /Execution model/);
   assert.doesNotMatch(html, /Hello from the right side\./);
 });
 
@@ -1355,7 +1354,7 @@ test("CenterWorkspace and RightSidebarPane inspector keep the same live step vis
   assert.doesNotMatch(sidebarHtml, /Do not use the stale draft/);
 });
 
-test("RightSidebarPane keeps chat model choices independent from the project runtime provider", async () => {
+test("RightSidebarPane limits chat model choices to the project runtime provider", async () => {
   const html = await renderBundledComponent(
     "right-sidebar-chat-custom-model-render",
     "./src/components/layout/RightSidebarPane.jsx",
@@ -1415,9 +1414,79 @@ test("RightSidebarPane keeps chat model choices independent from the project run
     },
   );
 
-  assert.match(html, /Chat model/);
-  assert.match(html, /Gemini 2\.5 Pro/);
+  assert.match(html, /Execution model/);
+  assert.doesNotMatch(html, /Gemini 2\.5 Pro/);
   assert.match(html, /GPT-5\.4 Mini/);
+});
+
+test("RightSidebarPane keeps a provider-matched chat model selected instead of forcing the project execution model", async () => {
+  const html = await renderBundledComponent(
+    "right-sidebar-chat-selected-model-render",
+    "./src/components/layout/RightSidebarPane.jsx",
+    "RightSidebarPane",
+    {
+      activeTab: "chat",
+      detail: {
+        project: {
+          current_status: "plan_ready",
+        },
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          execution_model: "gpt-5.4",
+          model_slug_input: "gpt-5.4",
+          effort: "medium",
+        },
+      },
+      planDraft: {
+        steps: [],
+      },
+      selectedStepId: "",
+      modelPresets: [],
+      modelCatalog: [
+        {
+          model: "gpt-5.4",
+          display_name: "GPT-5.4",
+          hidden: false,
+          provider: "openai",
+        },
+        {
+          model: "gpt-5.4-mini",
+          display_name: "GPT-5.4 Mini",
+          hidden: false,
+          provider: "openai",
+        },
+      ],
+      form: {
+        runtime: {
+          generate_word_report: false,
+        },
+      },
+      activeJob: null,
+      busy: false,
+      chat: {
+        sessions: [],
+        active_session_id: "",
+        messages: [],
+        summary_file: "",
+      },
+      chatSettings: {
+        chat_model_provider: "openai",
+        chat_model: "gpt-5.4-mini",
+        chat_effort: "high",
+      },
+      selectedChatSessionId: "",
+      chatDraftSession: true,
+      onChangeForm: noop,
+      onSelectChatSession: noop,
+      onStartNewChatSession: noop,
+      onSendChatMessage: noop,
+      onChangeChatModelSelection: noop,
+    },
+  );
+
+  assert.match(html, /<option value="openai::::gpt-5\.4-mini" selected="">GPT-5\.4 Mini \/ OpenAI<\/option>/);
+  assert.doesNotMatch(html, /<option value="openai::::gpt-5\.4" selected="">GPT-5\.4 \/ OpenAI<\/option>/);
 });
 
 test("RightSidebarPane can exclude the AI chat tab from the right rail", async () => {
@@ -1453,7 +1522,7 @@ test("RightSidebarPane can exclude the AI chat tab from the right rail", async (
   assert.match(html, /Flow/);
   assert.match(html, /run-flow-area/);
   assert.doesNotMatch(html, /title="AI Chat"/);
-  assert.doesNotMatch(html, /Chat model/);
+  assert.doesNotMatch(html, /Execution model/);
 });
 
 test("RightSidebarPane renders assistant replies with safe markdown while keeping user text plain", async () => {

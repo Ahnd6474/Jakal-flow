@@ -2072,6 +2072,7 @@ export function useDesktopController() {
         ...basePayload,
         runtime: {
           ...(basePayload.runtime || {}),
+          ...nextRuntime,
           chat_model_provider: String(allowedChatEntry?.provider || "").trim().toLowerCase(),
           chat_local_model_provider: String(allowedChatEntry?.local_provider || "").trim().toLowerCase(),
           chat_model: String(allowedChatEntry?.model || "").trim().toLowerCase(),

@@ -6,6 +6,7 @@ import {
   defaultModelForRuntime,
   formatChatSessionTitle,
   formatDurationCompact,
+  filterModelCatalogByProvider,
   normalizedLocalModelProvider,
   normalizedModelProvider,
   reasoningEffortLabel,
@@ -469,11 +470,11 @@ const ProjectChatPane = memo(function ProjectChatPane({
     [currentLocalProvider, currentProvider, projectRuntime],
   );
   const availableChatModels = useMemo(
-    () => (modelCatalog || []).filter((item) => {
+    () => filterModelCatalogByProvider(modelCatalog, projectDefaultRuntime).filter((item) => {
       const model = String(item?.model || "").trim();
       return Boolean(model) && !item?.hidden;
     }),
-    [modelCatalog],
+    [modelCatalog, projectDefaultRuntime],
   );
   const selectedChatKey = useMemo(
     () => (selectedChatModel ? [selectedChatProvider, selectedChatLocalProvider, selectedChatModel].join("::") : ""),
@@ -510,7 +511,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
     () => (availableChatEfforts.includes(selectedChatEffort) ? selectedChatEffort : ""),
     [availableChatEfforts, selectedChatEffort],
   );
-  const projectDefaultLabel = language === "ko" ? "프로젝트 기본값" : "Project default";
+  const projectDefaultLabel = language === "ko" ? "프로젝트 실행 모델" : "Project execution model";
   const chatTargetSummary = useMemo(
     () => (
       selectedChatEntry
@@ -829,7 +830,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
         <>
           <div className="sidebar-chat-config" style={{ margin: "8px 10px 0" }}>
             <div className="sidebar-chat-config__header">
-              <strong>{language === "ko" ? "Chat model" : "Chat model"}</strong>
+              <strong>{language === "ko" ? "실행 모델" : "Execution model"}</strong>
               <span>{chatTargetSummary}</span>
             </div>
             {chatModelSelect}
@@ -1002,9 +1003,9 @@ const ProjectChatPane = memo(function ProjectChatPane({
         </div>
 
         {centerMode ? (
-          <div className="chat-center__runtime-row">
-            <div className="chat-center__runtime-field">
-              <span className="chat-center__runtime-label">{language === "ko" ? "Model" : "Model"}</span>
+        <div className="chat-center__runtime-row">
+          <div className="chat-center__runtime-field">
+              <span className="chat-center__runtime-label">{language === "ko" ? "실행 모델" : "Execution model"}</span>
               {chatModelSelect}
             </div>
             <div className="chat-center__runtime-field">

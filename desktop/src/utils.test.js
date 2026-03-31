@@ -10,6 +10,7 @@ import {
   failureReasonCode,
   failureReasonLabel,
   isDuplicateProjectJobError,
+  filterModelCatalogByProvider,
   jobHasNewerActiveReplacement,
   mergeModelCatalogs,
   projectFormFromDetail,
@@ -151,6 +152,23 @@ test("defaultModelForRuntime skips auto catalog entries for openai providers", (
   ];
 
   assert.equal(defaultModelForRuntime(modelCatalog, { model_provider: "openai" }), "gpt-5.4");
+});
+
+test("filterModelCatalogByProvider limits chat model choices to the selected provider", () => {
+  const modelCatalog = [
+    { model: "gpt-5.4", display_name: "GPT-5.4", provider: "openai", hidden: false },
+    { model: "gpt-5.4-mini", display_name: "GPT-5.4 Mini", provider: "openai", hidden: false },
+    { model: "claude-sonnet-4-6", display_name: "Claude Sonnet 4.6", provider: "claude", hidden: false },
+  ];
+
+  assert.deepEqual(
+    filterModelCatalogByProvider(modelCatalog, { model_provider: "openai" }).map((item) => item.model),
+    ["gpt-5.4", "gpt-5.4-mini"],
+  );
+  assert.deepEqual(
+    filterModelCatalogByProvider(modelCatalog, { model_provider: "claude" }).map((item) => item.model),
+    ["claude-sonnet-4-6"],
+  );
 });
 
 test("mergeModelCatalogs preserves both global and detail model catalogs without duplicating entries", () => {

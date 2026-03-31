@@ -15,6 +15,8 @@ const PROJECT_DETAIL_SECTION_KEYS = ["reports", "workspace", "checkpoints", "his
 const PROJECT_RUNTIME_OVERRIDE_KEYS = [
   "model_provider",
   "local_model_provider",
+  "chat_model_provider",
+  "chat_local_model_provider",
   "provider_base_url",
   "provider_api_key_env",
   "billing_mode",
@@ -23,6 +25,8 @@ const PROJECT_RUNTIME_OVERRIDE_KEYS = [
   "ensemble_claude_model",
   "model",
   "execution_model",
+  "chat_model",
+  "chat_effort",
   "model_preset",
   "model_selection_mode",
   "model_slug_input",
@@ -183,6 +187,44 @@ function preserveProjectRuntimeOverrides(currentForm = null, nextForm = null, pr
   return {
     ...next,
     runtime: nextRuntime,
+  };
+}
+
+function preserveProjectChatSelection(currentForm = null, nextForm = null) {
+  const current = currentForm && typeof currentForm === "object" ? currentForm : {};
+  const next = nextForm && typeof nextForm === "object" ? nextForm : {};
+  const currentRuntime = current.runtime && typeof current.runtime === "object" ? current.runtime : {};
+  const nextRuntime = next.runtime && typeof next.runtime === "object" ? { ...next.runtime } : {};
+  const currentChatProvider = String(currentRuntime.chat_model_provider || "").trim().toLowerCase();
+  const currentChatLocalProvider = String(currentRuntime.chat_local_model_provider || "").trim().toLowerCase();
+  const currentChatModel = String(currentRuntime.chat_model || "").trim().toLowerCase();
+  const currentChatEffort = String(currentRuntime.chat_effort || "").trim().toLowerCase();
+  const nextProvider = String(nextRuntime.model_provider || "").trim().toLowerCase();
+  const nextLocalProvider = String(nextRuntime.local_model_provider || "").trim().toLowerCase();
+  const nextChatProvider = String(nextRuntime.chat_model_provider || "").trim().toLowerCase();
+  const nextChatLocalProvider = String(nextRuntime.chat_local_model_provider || "").trim().toLowerCase();
+  const nextChatModel = String(nextRuntime.chat_model || "").trim().toLowerCase();
+  const nextChatEffort = String(nextRuntime.chat_effort || "").trim().toLowerCase();
+
+  if (!currentChatProvider || !currentChatModel) {
+    return nextForm;
+  }
+  if (currentChatProvider !== nextProvider || currentChatLocalProvider !== nextLocalProvider) {
+    return nextForm;
+  }
+  if (nextChatProvider || nextChatLocalProvider || nextChatModel || nextChatEffort) {
+    return nextForm;
+  }
+
+  return {
+    ...next,
+    runtime: {
+      ...nextRuntime,
+      chat_model_provider: currentChatProvider,
+      chat_local_model_provider: currentChatLocalProvider,
+      chat_model: currentChatModel,
+      chat_effort: currentChatEffort,
+    },
   };
 }
 
@@ -656,10 +698,14 @@ export function applyProjectDetailState({
         state.projectDetail,
         sameProject,
       );
+      const nextProjectFormWithChat = preserveProjectChatSelection(
+        current,
+        nextProjectForm,
+      );
       if (sameProject) {
-        return nextProjectForm;
+        return nextProjectFormWithChat;
       }
-      return enforceProgramModelDefaults(nextProjectForm, state.defaultRuntime);
+      return enforceProgramModelDefaults(nextProjectFormWithChat, state.defaultRuntime);
     });
     if (!preserveDirtyPlan) {
       setters.setPlanDraft(cloneValue(normalizedDetail.plan));

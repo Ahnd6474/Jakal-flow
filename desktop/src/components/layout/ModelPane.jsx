@@ -65,7 +65,7 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
         style={{ margin: "-8px -8px 0", padding: "0 6px", borderBottom: "1px solid var(--border)" }}
       >
         <div className="tool-tabs">
-          <span className="tool-tab active">Model</span>
+          <span className="tool-tab active">{t("field.model")}</span>
         </div>
         {onHide ? (
           <div className="tool-window__header-actions">
@@ -105,7 +105,7 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
 
           {providerHasCatalog && visibleModels.length > 0 ? (
             <div className="model-pane__section">
-              <label className="model-pane__label">Model</label>
+            <label className="model-pane__label">{t("field.model")}</label>
               <select
                 value={selectedModel}
                 onChange={(e) => applyModelChange(e.target.value)}

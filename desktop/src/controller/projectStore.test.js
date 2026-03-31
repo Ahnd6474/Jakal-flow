@@ -422,6 +422,179 @@ test("applyProjectDetailState preserves local model and reasoning overrides on s
   assert.equal(capturedProjectForm.runtime.planning_effort, "high");
 });
 
+test("applyProjectDetailState preserves chat model overrides on same-project refresh", () => {
+  let capturedProjectForm = {
+    project_dir: "C:/repo",
+    display_name: "Existing Repo",
+    branch: "main",
+    origin_url: "https://example.com/repo.git",
+    github_mode: "manual",
+    runtime: {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      execution_model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      effort: "medium",
+      planning_effort: "medium",
+      chat_model_provider: "openai",
+      chat_local_model_provider: "",
+      chat_model: "gpt-5.4-mini",
+      chat_effort: "high",
+    },
+  };
+
+  applyProjectDetailState({
+    detail: {
+      project: {
+        repo_id: "repo-1",
+        repo_path: "C:/repo",
+        display_name: "Existing Repo",
+        branch: "main",
+        origin_url: "https://example.com/repo.git",
+      },
+      runtime: {
+        model_provider: "openai",
+        model: "gpt-5.4",
+        execution_model: "gpt-5.4",
+        model_slug_input: "gpt-5.4",
+        effort: "medium",
+        planning_effort: "medium",
+      },
+      plan: {
+        steps: [],
+      },
+      codex_status: {
+        model_catalog: [],
+      },
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: { current: "" },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "repo-1",
+        },
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          execution_model: "gpt-5.4",
+          model_slug_input: "gpt-5.4",
+          effort: "medium",
+          planning_effort: "medium",
+        },
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model_provider: "openai",
+      },
+      planDirty: false,
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: () => {},
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: (updater) => {
+        capturedProjectForm = typeof updater === "function" ? updater(capturedProjectForm) : updater;
+      },
+      setPlanDraft: () => {},
+      setSelectedStepId: () => {},
+      setPlanDirty: () => {},
+    },
+  });
+
+  assert.equal(capturedProjectForm.runtime.chat_model_provider, "openai");
+  assert.equal(capturedProjectForm.runtime.chat_model, "gpt-5.4-mini");
+  assert.equal(capturedProjectForm.runtime.chat_effort, "high");
+});
+
+test("applyProjectDetailState preserves chat model overrides when switching projects within the same provider", () => {
+  let capturedProjectForm = {
+    project_dir: "C:/repo-1",
+    display_name: "Existing Repo",
+    branch: "main",
+    origin_url: "https://example.com/repo.git",
+    github_mode: "manual",
+    runtime: {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      execution_model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      effort: "medium",
+      planning_effort: "medium",
+      chat_model_provider: "openai",
+      chat_local_model_provider: "",
+      chat_model: "gpt-5.4-mini",
+      chat_effort: "high",
+    },
+  };
+
+  applyProjectDetailState({
+    detail: {
+      project: {
+        repo_id: "repo-2",
+        repo_path: "C:/repo-2",
+        display_name: "Another Repo",
+        branch: "main",
+        origin_url: "https://example.com/another.git",
+      },
+      runtime: {
+        model_provider: "openai",
+        model: "gpt-5.4",
+        execution_model: "gpt-5.4",
+        model_slug_input: "gpt-5.4",
+        effort: "medium",
+        planning_effort: "medium",
+      },
+      plan: {
+        steps: [],
+      },
+      codex_status: {
+        model_catalog: [],
+      },
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: { current: "" },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "repo-1",
+        },
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model_provider: "openai",
+        model: "gpt-5.4",
+      },
+      planDirty: false,
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: () => {},
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: (updater) => {
+        capturedProjectForm = typeof updater === "function" ? updater(capturedProjectForm) : updater;
+      },
+      setPlanDraft: () => {},
+      setSelectedStepId: () => {},
+      setPlanDirty: () => {},
+    },
+  });
+
+  assert.equal(capturedProjectForm.runtime.model_provider, "openai");
+  assert.equal(capturedProjectForm.runtime.execution_model, "gpt-5.4");
+  assert.equal(capturedProjectForm.runtime.chat_model_provider, "openai");
+  assert.equal(capturedProjectForm.runtime.chat_model, "gpt-5.4-mini");
+  assert.equal(capturedProjectForm.runtime.chat_effort, "high");
+});
+
 test("applyProjectDetailState preserves a manually cleared step selection on same-project refresh", () => {
   let capturedSelectedStepId = "__unset__";
 
