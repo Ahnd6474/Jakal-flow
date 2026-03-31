@@ -205,8 +205,8 @@ export const ConfigEditorView = memo(function ConfigEditorView({
     <div className="subsection">
       <SectionHeader
         icon={<ExecutionIcon />}
-        title={language === "ko" ? "AI 紐⑤뜽" : "AI Model"}
-        description={language === "ko" ? "紐⑤뜽怨?異붾줎 ?ㅼ젙" : "Model and reasoning used by this project"}
+        title={language === "ko" ? "AI 모델" : "AI Model"}
+        description={language === "ko" ? "이 프로젝트에서 사용할 모델과 추론 수준을 설정합니다." : "Model and reasoning used by this project"}
       />
 
       <div style={{ marginTop: "10px" }}>
@@ -381,7 +381,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
       ) : null}
 
       <label className="field field--wide">
-        <span>{language === "ko" ? "AI 異붾줎" : "AI Reasoning"}</span>
+        <span>{language === "ko" ? "AI 추론" : "AI Reasoning"}</span>
         <select
           value={selectedReasoning}
           onChange={(event) =>
@@ -429,7 +429,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
         </select>
         <small className="field-hint">
           {language === "ko"
-            ? "?④쑵???筌띾슢諭??????貫留??됰뗀以????쎈뻬?????怨쀪퐨 ?怨뺣뮉 筌뤴뫀???낅빍??"
+            ? "계획 후 저장된 블록을 실행할 때 사용하는 기본 모델입니다."
             : "Used when running saved blocks after planning."}
         </small>
       </label>
@@ -471,7 +471,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
             type="button"
             disabled={busy || !form.project_dir?.trim() || isRunning}
             style={{ color: isRunning ? "var(--text-dim)" : "var(--danger)" }}
-            title={isRunning ? (language === "ko" ? "?ㅽ뻾 以묒씤 ?꾨줈?앺듃????젣?????놁뒿?덈떎." : "Cannot delete a running project.") : undefined}
+            title={isRunning ? (language === "ko" ? "실행 중인 프로젝트는 삭제할 수 없습니다." : "Cannot delete a running project.") : undefined}
           >
             {t("action.deleteProject")}
           </button>
@@ -546,44 +546,12 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               description="Step limits, parallel workers and optimization"
             />
 
-            {false && (
-            <label className="field field--wide" style={{ marginTop: "8px" }}>
-              <span>{language === "ko" ? "釉붾줉 ?ㅽ뻾 紐⑤뜽" : "Block execution model"}</span>
-              <select
-                value={selectedExecutionModel}
-                onChange={(event) =>
-                  onChangeForm((current) => ({
-                    ...current,
-                    runtime: { ...current.runtime, execution_model: event.target.value },
-                  }))
-                }
-                disabled={busy}
-              >
-                {!selectedExecutionModelVisible && selectedExecutionModel ? (
-                  <option value={selectedExecutionModel}>
-                    {modelDisplayName(modelCatalog, selectedExecutionModel) || selectedExecutionModel}
-                  </option>
-                ) : null}
-                {executionModelOptions.map((item) => (
-                  <option key={item.model} value={item.model}>
-                    {item.display_name || item.model}
-                  </option>
-                ))}
-              </select>
-              <small className="field-hint">
-                {language === "ko"
-                  ? "怨꾪쉷??留뚮뱺 ????λ맂 釉붾줉???ㅽ뻾?????곗꽑 ?곕뒗 紐⑤뜽?낅땲??"
-                  : "Used when running saved blocks after planning."}
-              </small>
-            </label>
-            )}
-
             {liveRuntimeEditable ? (
               <div className="info-callout" style={{ marginTop: "8px" }}>
                 <InfoIcon />
                 <span>
                   {language === "ko"
-                    ? "?ㅽ뻾 以묒뿉??泥댄겕?ъ씤?몃굹 蹂닿퀬??媛숈? ?덉쟾???ㅼ젙留???λ릺怨? ?섎㉧吏???ㅼ쓬 ?④퀎遺??諛섏쁺?⑸땲??"
+                    ? "실행 중에도 체크포인트와 보고서 출력 같은 안전한 설정은 저장할 수 있습니다."
                     : "Safe runtime settings like checkpoints and report output can still be saved while a run is active."}
                 </span>
               </div>
@@ -780,7 +748,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 label={t("option.useFastMode")}
                 hint={
                   language === "ko"
-                    ? "怨꾪쉷 ?앹꽦 ?쒓컙??以꾩씠湲??꾪빐 Planner Agent A瑜?嫄대꼫?곌퀬 鍮좊Ⅸ 怨꾪쉷 寃쎈줈瑜??ъ슜?⑸땲??"
+                    ? "계획 생성 시간을 줄이기 위해 Planner Agent A를 건너뛰고 더 빠른 계획 경로를 사용합니다."
                     : "Reduce plan generation time by skipping Planner Agent A and using the faster planning path."
                 }
                 disabled={busy}

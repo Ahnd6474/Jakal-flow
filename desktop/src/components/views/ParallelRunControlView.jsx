@@ -804,7 +804,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                   }}
                   disabled={!editableStep}
                 >
-                  <option value="">{language === "ko" ? `실행 모델 사용 (${selectedStepExecutionModelLabel})` : `Use execution model (${selectedStepExecutionModelLabel})`}</option>
+                  <option value="">{language === "ko" ? `기본 실행 모델 사용 (${selectedStepExecutionModelLabel})` : `Use execution model (${selectedStepExecutionModelLabel})`}</option>
                   {!selectedStepModelVisible && selectedStepModel ? (
                     <option value={selectedStepModel}>
                       {modelDisplayName(modelCatalog, selectedStepModel) || selectedStepModel}

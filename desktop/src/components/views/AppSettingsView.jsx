@@ -199,12 +199,12 @@ export const AppSettingsView = memo(function AppSettingsView({
   const [localDirty, setLocalDirty] = useState(false);
   const lastIncomingSettingsRef = useRef(cloneSettings(settings));
   const lastOutgoingSettingsRef = useRef(cloneSettings(settings));
-  const planningReasoningLabel = language === "ko" ? "怨꾪쉷 異붾줎" : "Planning Reasoning";
+  const planningReasoningLabel = language === "ko" ? "계획 추론" : "Planning Reasoning";
   const settingsTabs = [
-    { key: "app", label: language === "ko" ? "?좏뵆由ъ??댁뀡" : "Application" },
-    { key: "execution", label: language === "ko" ? "?ㅽ뻾 ?ㅼ젙" : "Execution" },
+    { key: "app", label: language === "ko" ? "애플리케이션" : "Application" },
+    { key: "execution", label: language === "ko" ? "실행 설정" : "Execution" },
     { key: "dashboard", label: "Dashboard" },
-    { key: "share", label: language === "ko" ? "怨듭쑀" : "Share" },
+    { key: "share", label: language === "ko" ? "공유" : "Share" },
   ];
   const activeShare = shareDetail?.active_session || shareDetail?.project_active_session || null;
   const shareServer = shareDetail?.server || null;
@@ -314,7 +314,7 @@ export const AppSettingsView = memo(function AppSettingsView({
             <SectionHeader
               icon={<AppIcon />}
               title={t("settings.application")}
-              description={language === "ko" ? "?몄뼱, ?뚮쭏, 媛쒕컻??紐⑤뱶" : "Language, theme and developer options"}
+              description={language === "ko" ? "언어, 테마, 개발자 옵션" : "Language, theme and developer options"}
             />
 
             <label className="field" style={{ marginTop: "4px" }}>
@@ -338,8 +338,8 @@ export const AppSettingsView = memo(function AppSettingsView({
             <ToggleRow
               checked={Boolean(draftSettings.compact_mode)}
               onChange={(event) => updateDraftSettings((current) => ({ ...current, compact_mode: event.target.checked }))}
-              label={language === "ko" ? "而댄뙥??紐⑤뱶" : "Compact Mode"}
-              hint={language === "ko" ? "?⑤꼸 ?ш린? ?щ갚??以꾩뿬 ?뺣낫 諛??利앷?" : "Reduce panel sizes and padding for higher information density"}
+              label={language === "ko" ? "컴팩트 모드" : "Compact Mode"}
+              hint={language === "ko" ? "패널 크기와 여백을 줄여 더 많은 정보를 보여줍니다." : "Reduce panel sizes and padding for higher information density"}
             />
 
             <ToggleRow
@@ -501,7 +501,7 @@ export const AppSettingsView = memo(function AppSettingsView({
             {/* Parallel workers */}
             <div style={{ borderTop: "1px solid var(--border)", paddingTop: "12px", marginTop: "4px" }}>
               <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "0 0 10px" }}>
-                {language === "ko" ? "蹂묐젹 ?ㅽ뻾 ?ㅼ젙" : "Parallel execution settings"}
+                {language === "ko" ? "병렬 실행 설정" : "Parallel execution settings"}
               </p>
 
               <ToggleRow
@@ -614,7 +614,7 @@ export const AppSettingsView = memo(function AppSettingsView({
             <SectionHeader
               icon={<ShareIcon />}
               title={t("run.remoteMonitor")}
-              description={language === "ko" ? "?먭꺽?먯꽌 ?ㅽ뻾 ?곹깭瑜?紐⑤땲?곕쭅?섎뒗 怨듭쑀 留곹겕" : "Share a link to monitor your run from anywhere"}
+              description={language === "ko" ? "어디서든 실행 상태를 모니터링할 수 있는 공유 링크" : "Share a link to monitor your run from anywhere"}
               badge={
                 <span className={`status-badge status-badge--${shareServer?.running ? "success" : "neutral"}`}>
                   {shareServer?.running ? t("common.on") : t("common.off")}
