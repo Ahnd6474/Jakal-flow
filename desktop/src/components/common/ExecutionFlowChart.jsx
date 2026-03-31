@@ -1,6 +1,6 @@
 import { memo, useId, useMemo } from "react";
 import { displayStatus } from "../../locale";
-import { effectiveStepStatus, failureReasonLabel, isDebuggingStatus, statusTone } from "../../utils";
+import { deriveExecutionUiState, effectiveStepStatus, failureReasonLabel, isDebuggingStatus, statusTone } from "../../utils";
 
 const FONT_FAMILY = '"Segoe UI", "Malgun Gothic", sans-serif';
 const BOX_WIDTH = 220;
@@ -386,6 +386,9 @@ function effectiveChartStepStatus(step = null, projectStatus = "", activeLineage
     && Boolean(stepLineageId)
     && stepLineageId === activeLineage
     && (checkpointState?.hasActiveCheckpoint
+      || checkpointFamily === "checkpoint"
+      || checkpointFamily === "failed"
+      || checkpointFamily === "completed"
       || normalizedProjectStatus.startsWith("running:")
       || normalizedProjectStatus === "running"
       || normalizedProjectStatus.startsWith("queued:")
@@ -446,11 +449,24 @@ function buildChartData(steps = [], projectStatus = "", language = "en", activeL
   };
 }
 
-function ExecutionFlowChartComponent({ steps = [], projectStatus = "", language = "en", selectedStepId = "", activeLineageId = "", checkpointState = null, checkpointFamily = "", onSelectStep = null }) {
+function ExecutionFlowChartComponent({ steps = [], detail = null, activeJob = null, language = "en", selectedStepId = "", onSelectStep = null }) {
   const arrowId = useId().replace(/:/g, "-");
+  const executionState = useMemo(() => deriveExecutionUiState(detail, null, activeJob), [detail, activeJob]);
+  const activeLineageId = String(
+    executionState.checkpointExecutionState?.currentCheckpointLineageId
+    || executionState.checkpointPending?.lineage_id
+    || "",
+  ).trim();
   const chart = useMemo(
-    () => buildChartData(steps, projectStatus, language, activeLineageId, checkpointState, checkpointFamily),
-    [steps, projectStatus, language, activeLineageId, checkpointState, checkpointFamily],
+    () => buildChartData(
+      steps,
+      executionState.displayStatusValue,
+      language,
+      activeLineageId,
+      executionState.checkpointExecutionState,
+      executionState.checkpointFamily,
+    ),
+    [steps, executionState.displayStatusValue, language, activeLineageId, executionState.checkpointExecutionState, executionState.checkpointFamily],
   );
 
   if (!steps.length) {
