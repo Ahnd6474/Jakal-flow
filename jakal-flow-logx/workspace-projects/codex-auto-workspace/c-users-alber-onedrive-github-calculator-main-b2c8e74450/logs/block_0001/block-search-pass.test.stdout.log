@@ -1,8 +1,0 @@
-============================= test session starts =============================
-platform win32 -- Python 3.12.4, pytest-9.0.2, pluggy-1.6.0
-rootdir: C:\Users\alber\OneDrive\문서\GitHub\calculator
-collected 3 items
-
-tests\test_scaffold.py ...                                               [100%]
-
-============================== 3 passed in 3.53s ==============================
