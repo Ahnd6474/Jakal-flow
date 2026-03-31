@@ -144,6 +144,7 @@ export function useDesktopController() {
   const planDirtyRef = useRef(false);
   const jobsRef = useRef([]);
   const projectsRef = useRef([]);
+  const refreshProjectsRef = useRef(null);
   const projectDetailRequestDeduperRef = useRef(createRequestDeduper());
   const historyDetailRequestDeduperRef = useRef(createRequestDeduper());
   const projectSupplementRequestDeduperRef = useRef(createRequestDeduper());
@@ -296,6 +297,27 @@ export function useDesktopController() {
   useEffect(() => {
     jobsRef.current = jobs;
   }, [jobs]);
+
+  useEffect(() => {
+    refreshProjectsRef.current = refreshProjects;
+  }, [refreshProjects]);
+
+  useEffect(() => {
+    if (!workspaceRoot) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (pendingAction || bridgeRefreshInFlightRef.current) {
+        return;
+      }
+      void refreshProjectsRef.current?.();
+    }, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [pendingAction, workspaceRoot]);
 
   useEffect(() => {
     let cancelled = false;

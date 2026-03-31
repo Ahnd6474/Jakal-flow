@@ -259,6 +259,7 @@ function centerWorkspacePropsEqual(previousProps, nextProps) {
         && previousProps.modelPresets === nextProps.modelPresets
         && previousProps.modelCatalog === nextProps.modelCatalog
         && previousProps.detail?.codex_status === nextProps.detail?.codex_status
+        && previousProps.detail?.project?.current_status === nextProps.detail?.project?.current_status
         && previousProps.busy === nextProps.busy
         && previousProps.activeJob === nextProps.activeJob
       );
@@ -266,6 +267,7 @@ function centerWorkspacePropsEqual(previousProps, nextProps) {
       return (
         previousProps.programSettings === nextProps.programSettings
         && previousProps.detail?.codex_status === nextProps.detail?.codex_status
+        && previousProps.detail?.project?.current_status === nextProps.detail?.project?.current_status
         && previousProps.shareSettings === nextProps.shareSettings
         && previousProps.workspaceShareDetail === nextProps.workspaceShareDetail
         && previousProps.busy === nextProps.busy

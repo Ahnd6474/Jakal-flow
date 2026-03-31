@@ -466,9 +466,9 @@ export const ConfigEditorView = memo(function ConfigEditorView({
             className="toolbar-button"
             onClick={onDeleteProject}
             type="button"
-            disabled={busy || !form.project_dir?.trim() || isRunning}
-            style={{ color: isRunning ? "var(--text-dim)" : "var(--danger)" }}
-            title={isRunning ? (language === "ko" ? "실행 중인 프로젝트는 삭제할 수 없습니다." : "Cannot delete a running project.") : undefined}
+            disabled={busy || !form.project_dir?.trim() || executionLocked}
+            style={{ color: executionLocked ? "var(--text-dim)" : "var(--danger)" }}
+            title={executionLocked ? (language === "ko" ? "실행 중인 프로젝트는 삭제할 수 없습니다." : "Cannot delete a running project.") : undefined}
           >
             {t("action.deleteProject")}
           </button>

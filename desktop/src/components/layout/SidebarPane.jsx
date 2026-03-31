@@ -1228,6 +1228,62 @@ export const SidebarPane = memo(function SidebarPane({
                 <strong>{t("sidebar.explorer")}</strong>
               </div>
 
+              <div className="sidebar-panel__header" style={{ marginTop: "8px" }}>
+                <strong>{t("common.project")}</strong>
+              </div>
+
+              {planPrompt ? (
+                <div className="sidebar-prompt-card">
+                  <span className="sidebar-prompt-card__label">
+                    {language === "ko" ? "?꾨줈?앺듃" : "Prompt"}
+                  </span>
+                  <p className="sidebar-prompt-card__text">
+                    {planPrompt.length > 120 ? `${planPrompt.slice(0, 120)}\u2026` : planPrompt}
+                  </p>
+                </div>
+              ) : null}
+
+              <SearchInput
+                value={projectFilter}
+                onChange={onProjectFilterChange}
+                placeholder={t("sidebar.searchProjects")}
+              />
+
+              <button className="sidebar-add-btn" onClick={onNewProject} type="button">
+                <PlusIcon />
+                <span>{t("action.new")}</span>
+              </button>
+
+              <div className="sidebar-list" style={{ marginBottom: "12px" }}>
+                {projects.length ? (
+                  projects.map((project) => {
+                    const tone = statusTone(project?.status);
+                    return (
+                      <button
+                        key={project.repo_id || project.display_name}
+                        className={`sidebar-project sidebar-project--${tone} ${project.repo_id === selectedProjectId ? "selected" : ""}`.trim()}
+                        onClick={() => onSelectProject(project.repo_id)}
+                        type="button"
+                      >
+                        <div className="sidebar-project__fill" />
+                        <div className="sidebar-project__title">
+                          <strong>{project.display_name || project.slug || t("common.unknown")}</strong>
+                          <span className={`status-badge status-badge--${tone} sidebar-project__status`}>
+                            {displayStatus(project.status, language)}
+                          </span>
+                        </div>
+                        {project.detail ? <span className="sidebar-project__detail" title={project.detail}>{project.detail}</span> : null}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="empty-block">
+                    <EmptyProjectsIcon />
+                    <span>{t("sidebar.emptyProjects")}</span>
+                  </div>
+                )}
+              </div>
+
               <SearchInput
                 value={workspaceFilter}
                 onChange={onWorkspaceFilterChange}
