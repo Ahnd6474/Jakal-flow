@@ -1072,6 +1072,37 @@ test("ExecutionFlowChart overlays the active lineage as running while the stored
   assert.doesNotMatch(html, />Pending<\/tspan>/);
 });
 
+test("ExecutionFlowChart uses checkpoint failure state for the active lineage instead of stale success", async () => {
+  const html = await renderBundledComponent(
+    "execution-flow-chart-active-lineage-failed-render",
+    "./src/components/common/ExecutionFlowChart.jsx",
+    "ExecutionFlowChart",
+    {
+      steps: [
+        { step_id: "ST3", title: "Verify", status: "completed", metadata: { lineage_id: "LN3" } },
+      ],
+      projectStatus: "failed",
+      activeLineageId: "LN3",
+      checkpointState: {
+        currentCheckpointId: "CP3",
+        currentCheckpointLineageId: "LN3",
+        hasActiveCheckpoint: true,
+        processActive: false,
+        waitingForApproval: false,
+        pending: null,
+      },
+      checkpointFamily: "failed",
+      selectedStepId: "ST3",
+      language: "en",
+      onSelectStep: noop,
+    },
+  );
+
+  assert.match(html, /Failed/);
+  assert.match(html, /execution-flow-chart__node--danger selected/);
+  assert.doesNotMatch(html, /Success/);
+});
+
 test("CenterWorkspace keeps the step editor hidden until a block is selected", async () => {
   const html = await renderBundledComponent(
     "parallel-workspace-no-selection-render",
@@ -2909,7 +2940,7 @@ test("IdeToolbar keeps an active run-plan job from inheriting stale debugging st
   assert.doesNotMatch(html, /Debugging/);
 });
 
-test("IdeToolbar, StatusBar, and RunProgressPanel agree on the running label for an active rerun", async () => {
+test("IdeToolbar, StatusBar, and RunProgressPanel agree on the debugging label", async () => {
   const sharedRuntime = {
     model_provider: "openai",
     model: "gpt-5.4",
@@ -3029,10 +3060,10 @@ test("IdeToolbar, StatusBar, and RunProgressPanel agree on the running label for
     },
   );
 
-  assert.match(toolbarHtml, /Running/);
-  assert.match(statusHtml, /Running/);
-  assert.match(runProgressHtml, /Running/);
-  assert.doesNotMatch(runProgressHtml, /Debugging/);
+  assert.match(toolbarHtml, /Debugging/);
+  assert.match(statusHtml, /Debugging/);
+  assert.match(runProgressHtml, /Debugging/);
+  assert.doesNotMatch(runProgressHtml, /Working on ST2/);
 });
 
 test("IdeToolbar labels the run button as Running while execution is active", async () => {

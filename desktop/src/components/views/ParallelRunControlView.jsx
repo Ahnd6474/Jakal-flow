@@ -685,6 +685,8 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
             language={language}
             selectedStepId={selectedStepId}
             activeLineageId={activeCheckpointLineageId}
+            checkpointState={executionState.checkpointExecutionState}
+            checkpointFamily={executionState.checkpointFamily}
             onSelectStep={onSelectStep}
           />
         ) : (
