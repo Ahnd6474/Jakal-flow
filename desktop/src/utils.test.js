@@ -7,6 +7,7 @@ import {
   applyProjectModelSelection,
   canEditStep,
   canEditProjectConfig,
+  canEditStepModel,
   defaultModelForRuntime,
   failureReasonCode,
   failureReasonLabel,
@@ -93,8 +94,45 @@ test("canEditStep still blocks failed steps while a run is active", () => {
 
 test("canEditProjectConfig allows edits while paused but blocks active runs", () => {
   assert.equal(canEditProjectConfig("paused", ""), true);
+  assert.equal(canEditProjectConfig("paused", "running"), true);
   assert.equal(canEditProjectConfig("ready", "running"), false);
   assert.equal(canEditProjectConfig("running", ""), false);
+});
+
+test("canEditStepModel allows model edits on paused steps while preserving normal locks", () => {
+  assert.equal(
+    canEditStepModel(
+      {
+        step_id: "ST1",
+        status: "running",
+      },
+      true,
+      "paused",
+    ),
+    true,
+  );
+  assert.equal(
+    canEditStepModel(
+      {
+        step_id: "ST2",
+        status: "completed",
+      },
+      false,
+      "paused",
+    ),
+    false,
+  );
+  assert.equal(
+    canEditStepModel(
+      {
+        step_id: "ST3",
+        status: "running",
+      },
+      true,
+      "running",
+    ),
+    false,
+  );
 });
 
 test("failureReasonLabel maps step metadata reason codes to readable labels", () => {

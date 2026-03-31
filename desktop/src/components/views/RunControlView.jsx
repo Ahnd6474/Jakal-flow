@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import {
   canEditStep,
+  canEditStepModel,
   CLAUDE_DEFAULT_MODEL,
   DEEPSEEK_DEFAULT_MODEL,
   effectiveStepStatus,
@@ -213,6 +214,7 @@ export function RunControlView({
   const costEstimate = runtimeInsights?.cost || {};
   const selectedStepEstimate = (executionEstimate.step_estimates || []).find((item) => item.step_id === selectedStepId) || null;
   const editableStep = canEditStep(selectedStep, busy);
+  const editableStepModel = canEditStepModel(selectedStep, busy, projectStatus);
   const completedCount = steps.filter((step) => step.status === "completed").length;
   const executionMode = "parallel";
   const flowColumns = 3;
@@ -443,7 +445,7 @@ export function RunControlView({
                 </label>
                 <label className="field">
                   <span>{t("field.modelProvider")}</span>
-                  <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStep}>
+                <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStepModel}>
                     <option value="">{autoProviderLabel(language)}</option>
                     {providerOptions.map(([value, label]) => (
                       <option
@@ -468,7 +470,7 @@ export function RunControlView({
                     const nextModel = String(event.target.value || "").trim();
                     onUpdateStepField(stepModelSelectionPatch(modelCatalog, detail?.runtime || {}, nextModel));
                   }}
-                  disabled={!editableStep}
+                  disabled={!editableStepModel}
                 >
                   <option value="">{language === "ko" ? `실행 모델 사용 (${selectedStepExecutionModelLabel})` : `Use execution model (${selectedStepExecutionModelLabel})`}</option>
                   {!selectedStepModelVisible && selectedStepModel ? (

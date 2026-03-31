@@ -206,6 +206,12 @@ export function isActiveExecutionStatus(status = "") {
     || normalized.startsWith("queued:");
 }
 
+export function isPausedExecutionStatus(status = "") {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "paused"
+    || normalized.startsWith("paused:");
+}
+
 export function projectStatusWithJob(status = "", activeJob = null) {
   const job = visibleExecutionJob(activeJob);
   const currentStatus = String(status || "").trim();
@@ -2912,7 +2918,24 @@ export function canEditStep(step, busy) {
 }
 
 export function canEditProjectConfig(projectStatus = "", activeJobStatus = "") {
+  if (isPausedExecutionStatus(projectStatus)) {
+    return true;
+  }
   return !isActiveExecutionStatus(projectStatus) && !isActiveExecutionStatus(activeJobStatus);
+}
+
+export function canEditStepModel(step = null, busy = false, projectStatus = "") {
+  if (!step) {
+    return false;
+  }
+  if (canEditStep(step, busy)) {
+    return true;
+  }
+  if (!isPausedExecutionStatus(projectStatus)) {
+    return false;
+  }
+  const normalizedStatus = String(step?.status || "").trim().toLowerCase();
+  return ["running", "integrating", "paused", "failed", "pending"].includes(normalizedStatus);
 }
 
 export function toolbarProgressCaption(plan) {

@@ -6,6 +6,7 @@ import {
   applyConfigRuntimeModelSelection,
   basename,
   canEditStep,
+  canEditStepModel,
   CLAUDE_DEFAULT_MODEL,
   CLOSEOUT_STEP_ID,
   DEEPSEEK_DEFAULT_MODEL,
@@ -539,6 +540,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
     [executionEstimate.step_estimates, selectedStepId],
   );
   const editableStep = canEditStep(selectedStep, busy);
+  const editableStepModel = canEditStepModel(selectedStep, busy, projectStatus);
   const completedCount = useMemo(
     () => steps.filter((step) => step.status === "completed").length,
     [steps],
@@ -803,7 +805,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
               </label>
 
               <label className="field"><span>{t("field.modelProvider")}</span>
-                <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStep}>
+                  <select value={selectedStep.model_provider || ""} onChange={(event) => onUpdateStepField("model_provider", event.target.value)} disabled={!editableStepModel}>
                   <option value="">{autoProviderLabel(language)}</option>
                   {providerOptions.map(([value, label]) => (<option key={value} value={value} disabled={!providerAvailable(value, codexStatus)} title={providerStatusReason(value, codexStatus)}>{label}</option>))}
                 </select>
@@ -819,7 +821,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                     const nextModel = String(event.target.value || "").trim();
                     onUpdateStepField(stepModelSelectionPatch(modelCatalog, detail?.runtime || {}, nextModel));
                   }}
-                  disabled={!editableStep}
+                  disabled={!editableStepModel}
                 >
                   <option value="">{language === "ko" ? `Use execution model (${selectedStepExecutionModelLabel})` : `Use execution model (${selectedStepExecutionModelLabel})`}</option>
                   {!selectedStepModelVisible && selectedStepModel ? (
