@@ -26,6 +26,7 @@ import jakal_flow.share as share_module
 import jakal_flow.ui_bridge as ui_bridge
 import jakal_flow.ui_bridge_payloads as ui_bridge_payloads
 from jakal_flow.ui_bridge_commands.read_models import build_read_model_handlers
+from jakal_flow.ui_bridge_commands.runs import _effective_parallel_worker_count
 import jakal_flow.workspace as workspace_module
 from jakal_flow.models import ExecutionPlanState, ExecutionStep, LoopState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions
 from jakal_flow.share import share_server_status_payload
@@ -596,6 +597,12 @@ class UIBridgeTests(unittest.TestCase):
         )
 
         self.assertEqual(caption, "Completed 1/3 steps, running: ST3; integrating: ST2")
+
+    def test_effective_parallel_worker_count_uses_multiple_workers_for_multi_step_batches(self) -> None:
+        self.assertEqual(_effective_parallel_worker_count(1, 1), 1)
+        self.assertEqual(_effective_parallel_worker_count(1, 2), 2)
+        self.assertEqual(_effective_parallel_worker_count(3, 2), 2)
+        self.assertEqual(_effective_parallel_worker_count(4, 5), 4)
 
     def test_effective_project_status_prefers_parallel_plan_status_when_steps_are_running(self) -> None:
         status = effective_project_status(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 import tempfile
 import unittest
 import shutil
@@ -581,6 +582,32 @@ class GitOpsTests(unittest.TestCase):
                 ["worktree", "add", str(worktree_dir), "feature"],
             ],
         )
+
+    def test_add_worktree_repairs_stale_registered_worktree_path(self) -> None:
+        fd, git_file_path = tempfile.mkstemp()
+        os.close(fd)
+        git_file = Path(git_file_path)
+        repo_dir = Path("C:/Users/ahnd6/OneDrive/문서/GitHub/lit")
+        worktree_dir = Path("C:/Users/ahnd6/OneDrive/문서/GitHub/lit/worktree")
+        git = GitOps()
+        expected_gitdir = repo_dir.resolve() / ".git" / "worktrees" / worktree_dir.name
+        stale_gitdir = Path("C:/Users/ahnd6/OneDrive/문서/GitHub/lit/.git/worktrees/repo")
+        git_file.write_text(f"gitdir: {stale_gitdir.as_posix()}\n", encoding="utf-8")
+
+        try:
+            with mock.patch.object(git, "_worktree_git_file", return_value=git_file), mock.patch.object(
+                Path,
+                "mkdir",
+                return_value=None,
+            ), mock.patch.object(git, "run", side_effect=AssertionError("git subprocess should not run")):
+                git.add_worktree(repo_dir, worktree_dir, "feature", "main")
+
+            self.assertEqual(
+                git_file.read_text(encoding="utf-8"),
+                f"gitdir: {expected_gitdir.as_posix()}\n",
+            )
+        finally:
+            git_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

@@ -262,6 +262,47 @@ class GitOps:
             git_dir = (repo_dir / git_dir).resolve(strict=False)
         return git_dir
 
+    def _worktree_git_file(self, worktree_dir: Path) -> Path:
+        return worktree_dir / ".git"
+
+    def _read_worktree_gitdir(self, worktree_dir: Path) -> Path | None:
+        git_file = self._worktree_git_file(worktree_dir)
+        if not git_file.is_file():
+            return None
+        try:
+            contents = git_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        prefix = "gitdir:"
+        if not contents.lower().startswith(prefix):
+            return None
+        gitdir_text = contents[len(prefix) :].strip()
+        if not gitdir_text:
+            return None
+        gitdir = Path(gitdir_text)
+        if not gitdir.is_absolute():
+            gitdir = (worktree_dir / gitdir).resolve(strict=False)
+        return gitdir
+
+    def _expected_worktree_gitdir(self, repo_dir: Path, worktree_dir: Path) -> Path:
+        return (repo_dir.resolve() / ".git" / "worktrees" / worktree_dir.name).resolve(strict=False)
+
+    def repair_worktree_registration(self, repo_dir: Path, worktree_dir: Path) -> bool:
+        current_gitdir = self._read_worktree_gitdir(worktree_dir)
+        if current_gitdir is None:
+            return False
+        expected_gitdir = self._expected_worktree_gitdir(repo_dir, worktree_dir)
+        if current_gitdir == expected_gitdir:
+            return False
+        try:
+            self._worktree_git_file(worktree_dir).write_text(
+                f"gitdir: {expected_gitdir.as_posix()}\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            return False
+        return True
+
     def _current_branch_from_head(self, repo_dir: Path) -> str:
         git_dir = self._git_dir_for_repo(repo_dir)
         if git_dir is None:
@@ -546,6 +587,10 @@ class GitOps:
 
     def add_worktree(self, repo_dir: Path, worktree_dir: Path, branch_name: str, start_point: str) -> None:
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+        if self.repair_worktree_registration(repo_dir, worktree_dir):
+            return
+        if self._read_worktree_gitdir(worktree_dir) is not None:
+            return
         add_args = ["worktree", "add", "-b", branch_name, str(worktree_dir), start_point]
         try:
             self.run(add_args, cwd=repo_dir)
@@ -560,6 +605,10 @@ class GitOps:
 
     def attach_worktree(self, repo_dir: Path, worktree_dir: Path, branch_name: str) -> None:
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+        if self.repair_worktree_registration(repo_dir, worktree_dir):
+            return
+        if self._read_worktree_gitdir(worktree_dir) is not None:
+            return
         add_args = ["worktree", "add", str(worktree_dir), branch_name]
         try:
             self.run(add_args, cwd=repo_dir)

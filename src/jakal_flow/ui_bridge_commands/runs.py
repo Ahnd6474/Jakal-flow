@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..chat_sessions import (
     chat_payload,
     execute_conversation_turn,
@@ -12,6 +14,13 @@ from ..errors import HANDLED_OPERATION_EXCEPTIONS
 from ..parallel_resources import build_parallel_resource_plan
 from ..utils import normalize_workflow_mode, read_json
 from .context import BridgeCommandContext, BridgeCommandHandler
+
+
+def _effective_parallel_worker_count(recommended_workers: int, batch_size: int) -> int:
+    normalized = max(1, int(recommended_workers or 0))
+    if batch_size <= 1:
+        return normalized
+    return min(batch_size, max(2, normalized))
 
 
 def build_run_command_handlers(
@@ -297,6 +306,11 @@ def build_run_command_handlers(
                     continue
                 if hybrid_lineages:
                     step_ids = [item.step_id for item in batch]
+                    effective_parallel_workers = _effective_parallel_worker_count(
+                        parallel_plan.recommended_workers,
+                        len(batch),
+                    )
+                    batch_runtime = replace(runtime, parallel_workers=effective_parallel_workers)
                     pending_started_steps = [
                         {
                             "step_id": step.step_id,
@@ -309,7 +323,7 @@ def build_run_command_handlers(
                     pending_batch_details = {
                         "step_ids": step_ids,
                         "execution_mode": "parallel",
-                        "parallel_workers": parallel_plan.recommended_workers,
+                        "parallel_workers": effective_parallel_workers,
                         "parallel_worker_mode": parallel_plan.worker_mode,
                         "hybrid_lineages": True,
                     }
@@ -321,7 +335,7 @@ def build_run_command_handlers(
                             {
                                 "step_ids": step_ids,
                                 "execution_mode": "parallel",
-                                "parallel_workers": parallel_plan.recommended_workers,
+                                "parallel_workers": effective_parallel_workers,
                                 "parallel_worker_mode": parallel_plan.worker_mode,
                                 "hybrid_lineages": True,
                             },
@@ -335,7 +349,7 @@ def build_run_command_handlers(
                         )
                     project, saved, result_steps = ctx.orchestrator.run_parallel_execution_batch(
                         project_dir=project_dir,
-                        runtime=runtime,
+                        runtime=batch_runtime,
                         step_ids=step_ids,
                         branch=branch,
                         origin_url=origin_url,
@@ -371,9 +385,13 @@ def build_run_command_handlers(
                 if (
                     len(batch) > 1
                     and str(current_plan.execution_mode).strip().lower() == "parallel"
-                    and parallel_plan.recommended_workers > 1
                 ):
                     step_ids = [item.step_id for item in batch]
+                    effective_parallel_workers = _effective_parallel_worker_count(
+                        parallel_plan.recommended_workers,
+                        len(batch),
+                    )
+                    batch_runtime = replace(runtime, parallel_workers=effective_parallel_workers)
                     pending_started_steps = [
                         {
                             "step_id": step.step_id,
@@ -385,7 +403,7 @@ def build_run_command_handlers(
                     pending_batch_details = {
                         "step_ids": step_ids,
                         "execution_mode": "parallel",
-                        "parallel_workers": parallel_plan.recommended_workers,
+                        "parallel_workers": effective_parallel_workers,
                         "parallel_worker_mode": parallel_plan.worker_mode,
                     }
                     append_ui_event(
@@ -395,7 +413,7 @@ def build_run_command_handlers(
                         {
                             "step_ids": step_ids,
                             "execution_mode": "parallel",
-                            "parallel_workers": parallel_plan.recommended_workers,
+                            "parallel_workers": effective_parallel_workers,
                             "parallel_worker_mode": parallel_plan.worker_mode,
                         },
                     )
@@ -408,7 +426,7 @@ def build_run_command_handlers(
                         )
                     project, saved, result_steps = ctx.orchestrator.run_parallel_execution_batch(
                         project_dir=project_dir,
-                        runtime=runtime,
+                        runtime=batch_runtime,
                         step_ids=step_ids,
                         branch=branch,
                         origin_url=origin_url,
