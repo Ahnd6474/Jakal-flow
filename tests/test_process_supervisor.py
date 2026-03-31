@@ -18,11 +18,12 @@ class ProcessSupervisorTests(unittest.TestCase):
         _wait_mock: mock.Mock,
     ) -> None:
         terminate_process(2468)
+        sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
 
         kill_mock.assert_has_calls(
             [
                 mock.call(2468, signal.SIGTERM),
-                mock.call(2468, signal.SIGKILL),
+                mock.call(2468, sigkill),
             ]
         )
 

@@ -110,8 +110,9 @@ def terminate_process(pid: int) -> None:
                 return
             if wait_for_condition(lambda: _process_is_gone(pid), timeout_seconds=0.3, interval_seconds=0.05):
                 return
+            sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
             try:
-                os.kill(pid, signal.SIGKILL)
+                os.kill(pid, sigkill)
             except OSError:
                 pass
     except OSError:
