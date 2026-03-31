@@ -45,7 +45,7 @@ import {
   deriveExecutionUiState,
 } from "../../utils";
 
-/* ?Ä?Ä Metric card icons ?Ä?Ä */
+/* ?¬Ä?¬Ä Metric card icons ?¬Ä?¬Ä */
 function StatusMetricIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none">
@@ -128,7 +128,7 @@ function MetricCard({ tone, icon, iconTone, label, value, sub }) {
   );
 }
 
-/* ?Ä?Ä Button icons ?Ä?Ä */
+/* ?¬Ä?¬Ä Button icons ?¬Ä?¬Ä */
 function GenerateIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none">
@@ -169,7 +169,7 @@ function ResetIcon() {
   );
 }
 
-/* ?Ä?Ä Report format icons ?Ä?Ä */
+/* ?¬Ä?¬Ä Report format icons ?¬Ä?¬Ä */
 function WordIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none">
@@ -197,15 +197,15 @@ function WebpageIcon() {
   );
 }
 
-/* ?Ä?Ä Effort labels ?Ä?Ä */
+/* ?¬Ä?¬Ä Effort labels ?¬Ä?¬Ä */
 function effortShortLabel(value, language) {
   const ko = language === "ko";
   switch (String(value || "").toLowerCase()) {
-    case "auto": return ko ? "?êÎèô" : "Auto";
-    case "low": return ko ? "??ùå" : "Low";
-    case "medium": return ko ? "Ï§ëÍ∞Ñ" : "Med";
-    case "high": return ko ? "?íÏùå" : "High";
-    case "xhigh": return ko ? "ÏµúÍ≥†" : "Max";
+    case "auto": return ko ? "Auto" : "Auto";
+    case "low": return ko ? "Low" : "Low";
+    case "medium": return ko ? "Med" : "Med";
+    case "high": return ko ? "High" : "High";
+    case "xhigh": return ko ? "Max" : "Max";
     default: return value;
   }
 }
@@ -213,16 +213,16 @@ function effortShortLabel(value, language) {
 function effortDescription(value, language) {
   const ko = language === "ko";
   switch (String(value || "").toLowerCase()) {
-    case "auto": return ko ? "?ôÏ†Å?ºÎ°ú Ï°∞Ï†à" : "Dynamic adjustment";
-    case "low": return ko ? "Í∞Ä??Îπ†Î¶Ñ" : "Fastest";
+    case "auto": return ko ? "ÏûêÎèô Ï°∞Ï†ï" : "Dynamic adjustment";
+    case "low": return ko ? "Í∞ÄÏû• Îπ†Î¶Ñ" : "Fastest";
     case "medium": return ko ? "Í∑†Ìòï" : "Balanced";
-    case "high": return ko ? "???ïÎ?" : "More thorough";
-    case "xhigh": return ko ? "ÏµúÍ≥† ?òÏ?" : "Maximum depth";
+    case "high": return ko ? "Îçî Ï≤†Ï†ÄÌï®" : "More thorough";
+    case "xhigh": return ko ? "ÏµúÎåÄ ÍπäÏù¥" : "Maximum depth";
     default: return "";
   }
 }
 
-/* ?Ä?Ä Model chip label helpers ?Ä?Ä */
+/* ?¬Ä?¬Ä Model chip label helpers ?¬Ä?¬Ä */
 const PROVIDER_SHORT = {
   openai: "Codex", claude: "Claude", gemini: "Gemini", ensemble: "Ensemble",
   ollama: "Ollama", deepseek: "DeepSeek", qwen_code: "Qwen", kimi: "Kimi", minimax: "MiniMax",
@@ -293,7 +293,7 @@ function modelChipLabel(form, detail) {
   return PROVIDER_SHORT[provider] || provider;
 }
 
-/* ?Ä?Ä ModelEffortChip: single button + popover ?Ä?Ä */
+/* ?¬Ä?¬Ä ModelEffortChip: single button + popover ?¬Ä?¬Ä */
 function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCatalog = [] }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -320,10 +320,10 @@ function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCata
         className={`mec-chip${open ? " mec-chip--open" : ""}`}
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
-        title={language === "ko" ? "Î™®Îç∏ Î∞?Ï∂îÎ°† Í∞ïÎèÑ ?§Ï†ï" : "Model & reasoning settings"}
+        title={language === "ko" ? "Model and reasoning settings" : "Model & reasoning settings"}
       >
         <span className="mec-chip__model">{chipModel}</span>
-        <span className="mec-chip__sep">¬∑</span>
+        <span className="mec-chip__sep">-</span>
         <span className="mec-chip__effort">{effortShortLabel(currentEffort, language)}</span>
         <svg className="mec-chip__chevron" viewBox="0 0 12 12" fill="none" aria-hidden="true">
           <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -333,12 +333,12 @@ function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCata
       {open ? (
         <div className="mec-popover">
           <div className="mec-popover__model-row">
-            <span className="mec-popover__label">{language === "ko" ? "Î™®Îç∏" : "Model"}</span>
+            <span className="mec-popover__label">{language === "ko" ? "Model" : "Model"}</span>
             <span className="mec-popover__model-name">{chipModel}</span>
           </div>
           <div className="mec-popover__divider" />
           <div className="mec-popover__section">
-            <span className="mec-popover__label">{language === "ko" ? "Ï∂îÎ°† Í∞ïÎèÑ" : "Reasoning"}</span>
+            <span className="mec-popover__label">{language === "ko" ? "Reasoning" : "Reasoning"}</span>
             <div className="mec-effort-list">
               {reasoningOptions.map((opt) => (
                 <button
@@ -371,20 +371,20 @@ function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCata
   );
 }
 
-/* ?Ä?Ä Helpers ?Ä?Ä */
+/* ?¬Ä?¬Ä Helpers ?¬Ä?¬Ä */
 function autoProviderLabel(language) {
-  return language === "ko" ? "?êÎèô (AGENTS.md ?†Ìò∏)" : "Auto (AGENTS.md preference)";
+  return language === "ko" ? "Auto (AGENTS.md preference)" : "Auto (AGENTS.md preference)";
 }
 
 function stepAutoModelHint(language, runtime) {
   const provider = String(runtime?.model_provider || "openai").trim().toLowerCase();
   if (provider === "ensemble") {
     return language === "ko"
-      ? "ÎπÑÏõå?êÎ©¥ ensemble ?ºÏö∞?ÖÏùÑ ?∞Î¶Ö?àÎã§. Í≥ÑÌöçÍ≥??ºÎ∞ò Íµ¨ÌòÑ?Ä Codex CLIÎ•??∞Í≥†, UI/?ÑÎ°†?∏Ïóî???®Í≥Ñ??Claude CodeÎ•??∞ÏÑ† ?¨Ïö©?òÎ©∞ ClaudeÍ∞Ä ?ÜÏúºÎ©?Gemini CLIÎ°??ÄÏ≤¥Ìï©?àÎã§."
+      ? "ÎπÑÏõåÎëêÎ©¥ ensemble ÎùºÏö∞ÌåÖÏùÑ Îî∞Î¶ÖÎãàÎã§. Í≥ÑÌöçÍ≥º ÏùºÎ∞ò Íµ¨ÌòÑÏùÄ Codex CLIÎ•º Ïì∞Í≥†, UI/frontendÎäî Claude CodeÎ•º Ïö∞ÏÑ† ÏÇ¨Ïö©ÌïòÎ©∞ ClaudeÍ∞Ä ÏóÜÏúºÎ©¥ Gemini CLIÎ°ú ÎåÄÏ≤¥Ìï©ÎãàÎã§."
       : "Leave blank to follow ensemble routing: planning and general steps use Codex CLI, UI/frontend steps prefer Claude Code with Gemini CLI as fallback.";
   }
   return language === "ko"
-    ? "ÎπÑÏõå?êÎ©¥ AGENTS.md Í∑úÏπô???∞Îùº UI ?®Í≥Ñ??Gemini CLI, Í∑????®Í≥Ñ??Codex CLIÎ•??êÎèô ?†ÌÉù?©Îãà??"
+    ? "ÎπÑÏõåÎëêÎ©¥ AGENTS.md Í∑úÏπôÏóê Îî∞Îùº UI Îã®Í≥ÑÎäî Gemini CLI, Í∑∏ Ïô∏ Îã®Í≥ÑÎäî Codex CLIÎ•º ÏûêÎèô ÏÑ†ÌÉùÌï©ÎãàÎã§."
     : "Leave blank to follow AGENTS.md: UI steps prefer Gemini CLI, other steps prefer Codex CLI.";
 }
 
@@ -447,7 +447,7 @@ function reservationProjectLabel(job, fallbackLabel) {
   return String(job?.display_name || "").trim() || basename(job?.project_dir || "") || String(job?.repo_id || "").trim() || fallbackLabel;
 }
 
-/* ?Ä?Ä Main view ?Ä?Ä */
+/* ?¬Ä?¬Ä Main view ?¬Ä?¬Ä */
 export const ParallelRunControlView = memo(function ParallelRunControlView({
   detail,
   codexStatus,
@@ -491,6 +491,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
   );
   const livePlan = executionState.livePlan;
   const promptValue = livePlan?.project_prompt || "";
+  const [promptExpanded, setPromptExpanded] = useState(false);
   const [failureDismissed, setFailureDismissed] = useState(false);
   const steps = useMemo(
     () =>
@@ -568,15 +569,19 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
         || failureArtifacts.length
       ),
   );
-  const manualDebuggerLabel = language === "ko" ? "?îÎ≤ÑÍ±??∏Ï∂ú" : "Run Debugger";
-  const manualMergerLabel = language === "ko" ? "Î®∏Ï? ?∏Ï∂ú" : "Run Merger";
+  const manualDebuggerLabel = language === "ko" ? "Run Debugger" : "Run Debugger";
+  const manualMergerLabel = language === "ko" ? "Run Merger" : "Run Merger";
   const manualRecoveryHint = language === "ko"
-    ? "?êÎèô Î≥µÍµ¨Í∞Ä ?§Ìå®?àÏùÑ ??ÏµúÍ∑º ?§Ìå® Î°úÍ∑∏Î°?debuggerÎ•??§Ïãú ?§Ìñâ?òÍ±∞?? ?ÑÏû¨ git Ï∂©Îèå ?ÅÌÉúÎ•?merger???òÍ∏∏ ???àÏäµ?àÎã§."
+    ? "If automatic recovery fails, rerun the debugger against the latest failure logs or hand the current git conflict to the merger."
     : "When automatic recovery falls short, rerun the debugger against the latest failure logs or hand the current git conflict to the merger.";
 
   useEffect(() => {
     setFailureDismissed(false);
   }, [latestFailure?.summary, latestFailure?.report_markdown_file, latestFailure?.report_json_file]);
+
+  useEffect(() => {
+    setPromptExpanded(false);
+  }, [promptValue]);
 
   // Auto-resize textarea based on content
   useEffect(() => {
@@ -595,7 +600,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
 
   return (
     <section className="workspace-view run-view">
-      {/* ?Ä?Ä Compact metric ribbon ?Ä?Ä */}
+      {/* ?¬Ä?¬Ä Compact metric ribbon ?¬Ä?¬Ä */}
       <div className="run-ribbon">
         <div className="run-ribbon__metrics">
           <span className={`run-ribbon__chip run-ribbon__chip--${statusTone(projectStatus)}`}>{displayStatus(projectStatus || "idle", language)}</span>
@@ -633,19 +638,13 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
         </div>
       </div>
 
-      {/* ?Ä?Ä Failure card ?Ä?Ä */}
+      {/* ?¬Ä?¬Ä Failure card ?¬Ä?¬Ä */}
       {showFailureCard && !failureDismissed ? (
         <div className="content-card" style={{ borderColor: "rgba(200,93,97,0.4)" }}>
           <div className="content-card__header">
             <strong style={{ color: "var(--danger)" }}>{t("test.failed")}</strong>
             <span className={`status-badge status-badge--${statusTone("failed")}`}>{displayStatus("failed", language)}</span>
-            <button
-              className="step-editor-close"
-              onClick={() => setFailureDismissed(true)}
-              type="button"
-              title={language === "ko" ? "?´Í∏∞" : "Dismiss"}
-              aria-label={language === "ko" ? "?´Í∏∞" : "Dismiss"}
-            >??/button>
+            <button className="step-editor-close" onClick={() => setFailureDismissed(true)} type="button" title="Dismiss" aria-label="Dismiss">x</button>
           </div>
           <div className="step-editor-grid">
             {latestFailure?.summary ? <div className="field field--wide"><span>{t("common.status")}</span><p>{latestFailure.summary}</p></div> : null}
@@ -665,7 +664,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
         </div>
       ) : null}
 
-      {/* ?Ä?Ä Flow chart (main area) ?Ä?Ä */}
+      {/* ?¬Ä?¬Ä Flow chart (main area) ?¬Ä?¬Ä */}
       <div className="run-flow-area">
         {steps.length ? (
           <ExecutionFlowChart steps={steps} projectStatus={projectStatus} language={language} selectedStepId={selectedStepId} onSelectStep={onSelectStep} />
@@ -677,13 +676,13 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
             </svg>
             <span>{t("run.noSteps")}</span>
             <span style={{ fontSize: "12px", color: "var(--text-dim)" }}>
-              {language === "ko" ? "?åÎûú???ùÏÑ±?òÎ©¥ ?®Í≥ÑÍ∞Ä ?úÏãú?©Îãà??" : "Generate a plan to see execution steps here."}
+              {language === "ko" ? "Generate a plan to see execution steps here." : "Generate a plan to see execution steps here."}
             </span>
           </div>
         )}
       </div>
 
-      {/* ?Ä?Ä Queue (inline if any) ?Ä?Ä */}
+      {/* ?¬Ä?¬Ä Queue (inline if any) ?¬Ä?¬Ä */}
       {queuedJobs.length ? (
         <div className="run-queue-strip">
           <strong>{t("run.reservations")} ({queuedJobs.length})</strong>
@@ -699,7 +698,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
         </div>
       ) : null}
 
-      {/* ?Ä?Ä Step editor (below flow) ?Ä?Ä */}
+      {/* ?¬Ä?¬Ä Step editor (below flow) ?¬Ä?¬Ä */}
       {selectedStep ? (
         <div className="run-step-editor">
           <div className="run-step-editor__header">
@@ -710,23 +709,17 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
             <span className={`status-badge status-badge--${statusTone(selectedStepStatus)}`}>
               {displayStatus(selectedStepStatus, language)}
             </span>
-            <button
-              className="step-editor-close"
-              onClick={() => onSelectStep?.(null)}
-              type="button"
-              title={language === "ko" ? "?´Í∏∞ (Esc)" : "Close (Esc)"}
-              aria-label={language === "ko" ? "?´Í∏∞" : "Close"}
-            >??/button>
+            <button className="step-editor-close" onClick={() => onSelectStep?.(null)} type="button" title="Close (Esc)" aria-label="Close">x</button>
           </div>
 
           {selectedSystemStep ? (
             <div className="step-editor-grid">
               <div className="field field--wide"><span>{t("field.description")}</span><p>{selectedStep.display_description || t("run.noSummary")}</p></div>
-              {selectedStep.deadline_at ? <div className="field field--wide"><span>{language === "ko" ? "ÎßàÍ∞ê" : "Deadline"}</span><p>{selectedStep.deadline_at}</p></div> : null}
+              {selectedStep.deadline_at ? <div className="field field--wide"><span>{language === "ko" ? "Deadline" : "Deadline"}</span><p>{selectedStep.deadline_at}</p></div> : null}
               <div className="field field--wide"><span>{t("field.dependsOn")}</span><p>{(selectedStep.depends_on || []).join(", ") || t("common.none")}</p></div>
               {String(selectedStepStatus || "").trim().toLowerCase().includes("failed") && selectedStepFailureReason ? (
                 <div className="field field--wide">
-                  <span>{language === "ko" ? "?§Ìå® ?¨Ïú†" : "Failure Reason"}</span>
+                  <span>{language === "ko" ? "Failure Reason" : "Failure Reason"}</span>
                   <p>{selectedStepFailureReason}</p>
                   {selectedStepFailureCode ? <small className="field-hint"><code>{selectedStepFailureCode}</code></small> : null}
                 </div>
@@ -734,7 +727,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
               {selectedStep.notes ? <div className="field field--wide"><span>{stepNoteLabel}</span><p>{selectedStep.notes}</p></div> : null}
               {selectedStep.step_id === CLOSEOUT_STEP_ID ? (
                 <div className="field field--wide">
-                  <span>{language === "ko" ? "Î≥¥Í≥†???ïÏãù" : "Report Formats"}</span>
+                  <span>{language === "ko" ? "Report Formats" : "Report Formats"}</span>
                   <div className="report-format-row">
                     <span className="report-format-chip report-format-chip--word"><WordIcon />Word</span>
                     <span className="report-format-chip report-format-chip--ppt"><PptIcon />PowerPoint</span>
@@ -748,7 +741,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
               {selectedStepEstimate ? (
                 <div className="field field--wide">
                   <div style={{ display: "flex", gap: "16px", padding: "6px 10px", background: "var(--bg-panel-alt)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", fontSize: "11px" }}>
-                    <div><span style={{ color: "var(--text-dim)" }}>{language === "ko" ? "?àÏÉÅ" : "Est."}</span> <strong>{formatDurationCompact(selectedStepEstimate?.estimated_duration_seconds ?? 0, language)}</strong></div>
+                    <div><span style={{ color: "var(--text-dim)" }}>{language === "ko" ? "Est." : "Est."}</span> <strong>{formatDurationCompact(selectedStepEstimate?.estimated_duration_seconds ?? 0, language)}</strong></div>
                     <div><span style={{ color: "var(--text-dim)" }}>{t("run.currentRemaining")}</span> <strong>{formatDurationCompact(selectedStepEstimate?.remaining_seconds ?? 0, language)}</strong></div>
                   </div>
                 </div>
@@ -757,12 +750,12 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
               <label className="field field--wide"><span>{t("field.title")}</span><input value={selectedStep.title || ""} onChange={(event) => onUpdateStepField("title", event.target.value)} disabled={!editableStep} /></label>
 
               <label className="field">
-                <span>{language === "ko" ? "ÎßàÍ∞ê" : "Deadline"}</span>
+                <span>{language === "ko" ? "Deadline" : "Deadline"}</span>
                 <input
                   value={selectedStep.deadline_at || ""}
                   onChange={(event) => onUpdateStepField("deadline_at", event.target.value)}
                   disabled={!editableStep}
-                  placeholder={language === "ko" ? "?? 2026-04-05 18:00" : "Example: 2026-04-05 18:00"}
+                  placeholder={language === "ko" ? "Example: 2026-04-05 18:00" : "Example: 2026-04-05 18:00"}
                 />
               </label>
 
@@ -791,7 +784,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                   }}
                   disabled={!editableStep}
                 >
-                  <option value="">{language === "ko" ? `Í∏∞Î≥∏ ?§Ìñâ Î™®Îç∏ ?¨Ïö© (${selectedStepExecutionModelLabel})` : `Use execution model (${selectedStepExecutionModelLabel})`}</option>
+                  <option value="">{language === "ko" ? `Use execution model (${selectedStepExecutionModelLabel})` : `Use execution model (${selectedStepExecutionModelLabel})`}</option>
                   {!selectedStepModelVisible && selectedStepModel ? (
                     <option value={selectedStepModel}>
                       {modelDisplayName(modelCatalog, selectedStepModel) || selectedStepModel}
@@ -805,20 +798,20 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                 </select>
                 <small className="field-hint">
                   {language === "ko"
-                    ? "Í∏∞Î≥∏?Ä ?§Ìñâ Î™®Îç∏???∞Î•¥Í≥? ?§Î•∏ Î™®Îç∏??Í≥†Î•¥Î©???Î∏îÎ°ù?êÎßå ??ñ¥?ÅÎãà??"
+                    ? "Leave this synced with the execution model, or pick another model to override this block."
                     : "Leave this synced with the execution model, or pick another model to override this block."}
                 </small>
               </label>
 
               <label className="field field--wide"><span>{t("field.dependsOn")}</span><input value={(selectedStep.depends_on || []).join(", ")} onChange={(event) => onUpdateStepField("depends_on", normalizeListText(event.target.value))} disabled={!editableStep} placeholder="step_id1, step_id2" /></label>
-              <label className="field field--wide"><span>{t("field.ownedPaths")}</span><textarea value={(selectedStep.owned_paths || []).join("\n")} onChange={(event) => onUpdateStepField("owned_paths", normalizeListText(event.target.value))} disabled={!editableStep} placeholder={language === "ko" ? "??Ï§ÑÏóê ?òÎÇò???åÏùº Í≤ΩÎ°ú" : "One file path per line"} style={{ minHeight: "48px" }} /></label>
+              <label className="field field--wide"><span>{t("field.ownedPaths")}</span><textarea value={(selectedStep.owned_paths || []).join("\n")} onChange={(event) => onUpdateStepField("owned_paths", normalizeListText(event.target.value))} disabled={!editableStep} placeholder={language === "ko" ? "One file path per line" : "One file path per line"} style={{ minHeight: "48px" }} /></label>
               <label className="field field--wide"><span>{t("field.description")}</span><textarea value={selectedStep.display_description || ""} onChange={(event) => onUpdateStepField("display_description", event.target.value)} disabled={!editableStep} style={{ minHeight: "56px" }} /></label>
               <label className="field field--wide"><span>{t("field.codexInstruction")}</span><textarea value={selectedStep.codex_description || ""} onChange={(event) => onUpdateStepField("codex_description", event.target.value)} disabled={!editableStep} style={{ minHeight: "56px" }} /></label>
               <label className="field field--wide"><span>{t("field.successCriteria")}</span><textarea value={selectedStep.success_criteria || ""} onChange={(event) => onUpdateStepField("success_criteria", event.target.value)} disabled={!editableStep} style={{ minHeight: "48px" }} /></label>
 
               {String(selectedStepStatus || "").trim().toLowerCase().includes("failed") && selectedStepFailureReason ? (
                 <div className="field field--wide">
-                  <span>{language === "ko" ? "?§Ìå® ?¨Ïú†" : "Failure Reason"}</span>
+                  <span>{language === "ko" ? "Failure Reason" : "Failure Reason"}</span>
                   <p>{selectedStepFailureReason}</p>
                   {selectedStepFailureCode ? <small className="field-hint"><code>{selectedStepFailureCode}</code></small> : null}
                 </div>
@@ -834,27 +827,61 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
           )}
         </div>
       ) : null}
-      {/* ?Ä?Ä Prompt strip (bottom) ??hidden when prompt lives in chat pane ?Ä?Ä */}
-      {hidePromptStrip ? null : <div className="run-prompt-strip run-prompt-strip--bottom run-prompt-strip--fixed">
-        <div className="run-prompt-strip__inner">
-          <div className="run-prompt-strip__toolbar">
-            <span className="run-prompt-strip__count">{promptValue.length} {language === "ko" ? "¿⁄" : "chars"}</span>
-            <span className="status-badge status-badge--info" style={{ fontSize: "10px" }}>
-              {language === "ko" ? "∞Ì¡§" : "Read only"}
-            </span>
-            <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={detail?.codex_status?.model_catalog || []} />
-          </div>
-          <textarea
-            ref={promptRef}
-            className="run-prompt-strip__input"
-            value={promptValue}
-            readOnly
-            aria-readonly="true"
-            tabIndex={-1}
-            placeholder={language === "ko" ? "«¡∑Œ¡ß∆Æ «¡∑“«¡∆Æ∞° æ¯Ω¿¥œ¥Ÿ." : "No project prompt."}
-          />
+      {/* ?¬Ä?¬Ä Prompt strip (bottom) ??hidden when prompt lives in chat pane ?¬Ä?¬Ä */}
+      {hidePromptStrip ? null : (
+        <div className={`run-prompt-strip run-prompt-strip--bottom run-prompt-strip--fixed${promptExpanded ? "" : " run-prompt-strip--collapsed"}`}>
+          {promptExpanded ? (
+            <div className="run-prompt-strip__inner">
+              <div className="run-prompt-strip__toolbar">
+                <span className="run-prompt-strip__count">{promptValue.length} {language === "ko" ? "chars" : "chars"}</span>
+                <span className="status-badge status-badge--info" style={{ fontSize: "10px" }}>
+                  {language === "ko" ? "Read only" : "Read only"}
+                </span>
+                <button
+                  type="button"
+                  className="run-prompt-strip__collapse-btn"
+                  onClick={() => setPromptExpanded(false)}
+                >
+                  {language === "ko" ? "Collapse" : "Collapse"}
+                </button>
+                <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={detail?.codex_status?.model_catalog || []} />
+              </div>
+              <textarea
+                ref={promptRef}
+                className="run-prompt-strip__input"
+                value={promptValue}
+                readOnly
+                aria-readonly="true"
+                tabIndex={-1}
+                placeholder={language === "ko" ? "No project prompt." : "No project prompt."}
+              />
+            </div>
+          ) : (
+            <div className="run-prompt-collapsed">
+              <svg className="run-prompt-collapsed__icon" viewBox="0 0 16 16" fill="none" width="14" height="14">
+                <path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <span className="run-prompt-collapsed__text">
+                {promptValue
+                  ? (promptValue.length > 72 ? `${promptValue.slice(0, 72)}\u2026` : promptValue)
+                  : (language === "ko" ? "No prompt" : "No prompt")}
+              </span>
+              <button
+                type="button"
+                className="run-prompt-collapsed__open"
+                onClick={() => setPromptExpanded(true)}
+              >
+                {language === "ko" ? "Open" : "Open"}
+              </button>
+              <span className="status-badge status-badge--info" style={{ fontSize: "10px" }}>
+                {language === "ko" ? "Read only" : "Read only"}
+              </span>
+              <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={detail?.codex_status?.model_catalog || []} />
+            </div>
+          )}
         </div>
-      </div>}
+      )}
     </section>
   );
 }, parallelRunControlViewPropsEqual);
+

@@ -294,7 +294,7 @@ test("ParallelRunControlView shows the auto-run toggle as off by default", async
   assert.doesNotMatch(html, /checked=""/);  // checkbox should be unchecked
 });
 
-test("ParallelRunControlView renders the bottom prompt as read only", async () => {
+test("ParallelRunControlView renders the bottom prompt collapsed by default", async () => {
   const html = await renderBundledComponent(
     "parallel-run-control-prompt-readonly-render",
     "./src/components/views/ParallelRunControlView.jsx",
@@ -334,9 +334,9 @@ test("ParallelRunControlView renders the bottom prompt as read only", async () =
     },
   );
 
+  assert.match(html, /run-prompt-collapsed__open/);
   assert.match(html, /Read only/);
-  assert.match(html, /readonly/);
-  assert.doesNotMatch(html, /run-prompt-collapsed__edit/);
+  assert.doesNotMatch(html, /run-prompt-strip__input/);
   assert.doesNotMatch(html, /onChange=/);
 });
 
