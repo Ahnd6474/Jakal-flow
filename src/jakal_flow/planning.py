@@ -1213,6 +1213,12 @@ def parse_execution_plan_response(
             metadata = {}
         else:
             metadata = dict(metadata)
+        normalized_metadata_kind = str(metadata.get("step_kind", "")).strip().lower()
+        if normalized_metadata_kind == "join" and len(depends_on) < 2:
+            metadata.pop("step_kind", None)
+            metadata.pop("merge_from", None)
+            metadata.pop("join_policy", None)
+            metadata.pop("join_reason", None)
         step = ExecutionStep(
             step_id=str(item.get("step_id", item.get("node_id", ""))).strip() or f"ST{len(steps) + 1}",
             title=title,

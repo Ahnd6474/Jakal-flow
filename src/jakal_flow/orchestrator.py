@@ -1208,6 +1208,14 @@ class Orchestrator(
             step_kind = self._step_kind(step)
             metadata = step.metadata if isinstance(step.metadata, dict) else {}
             step_label = self._step_trace_label(step)
+            if step_kind == "join" and len(step.depends_on) < 2:
+                # Recover gracefully from malformed planner output where a join is declared
+                # with a single dependency. Treat it as a regular task and clear join-only metadata.
+                step_kind = "task"
+                metadata.pop("merge_from", None)
+                metadata.pop("join_policy", None)
+                metadata.pop("step_kind", None)
+                step.metadata = metadata
             if step_kind in {"join", "barrier"} and step.parallel_group.strip():
                 raise ValueError(f"{step_label} cannot use parallel_group because {step_kind} steps run alone.")
             if step_kind == "join":
