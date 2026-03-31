@@ -15,6 +15,7 @@ import {
   mergeModelCatalogs,
   projectFormFromDetail,
   resolveChatRuntimeSelection,
+  resolveRuntimeModelSelectionState,
   selectedConfigReasoning,
   stepModelSelectionPatch,
 } from "./utils.js";
@@ -267,6 +268,42 @@ test("applyProjectModelSelection updates model reasoning without touching execut
   assert.equal(nextRuntime.execution_model, "gpt-4.1");
   assert.equal(nextRuntime.effort, "high");
   assert.equal(nextRuntime.planning_effort, "medium");
+});
+
+test("resolveRuntimeModelSelectionState centralizes project model and reasoning selection", () => {
+  const modelCatalog = [
+    {
+      model: "gpt-5.4",
+      display_name: "GPT-5.4",
+      provider: "openai",
+      hidden: false,
+      default_reasoning_effort: "medium",
+      supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+    },
+  ];
+
+  const state = resolveRuntimeModelSelectionState(
+    {
+      model_provider: "openai",
+      model: "gpt-4.1",
+      execution_model: "gpt-4.1",
+      model_slug_input: "gpt-4.1",
+      effort: "low",
+      planning_effort: "low",
+      model_selection_mode: "codex",
+    },
+    modelCatalog,
+    "gpt-5.4",
+    "high",
+  );
+
+  assert.equal(state.model, "gpt-5.4");
+  assert.equal(state.selectedModel, "gpt-5.4");
+  assert.equal(state.selectedReasoning, "high");
+  assert.equal(state.visibleModels[0].model, "gpt-5.4");
+  assert.equal(state.selectedExecutionModel, "gpt-4.1");
+  assert.equal(state.selectedExecutionModelVisible, false);
+  assert.equal(state.runtime.model_selection_mode, "codex");
 });
 
 test("applyChatRuntimeSelectionToProject maps a chat selection into project model settings", () => {
