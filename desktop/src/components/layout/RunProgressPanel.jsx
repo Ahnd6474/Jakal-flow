@@ -4,7 +4,7 @@ import { displayStatus } from "../../locale";
 import { arePropsEqualExceptFunctions } from "../../shallowProps";
 import {
   commandLabel,
-  deriveExecutionProgress,
+  deriveExecutionUiState,
   executionProgressCaptionDisplay,
   formatDurationCompact,
   formatUsd,
@@ -73,16 +73,17 @@ const ElapsedRuntimeChip = memo(function ElapsedRuntimeChip({ runningSteps = [],
 
 export const RunProgressPanel = memo(function RunProgressPanel({ detail, planDraft, activeJob }) {
   const { language, t } = useI18n();
-  const progress = useMemo(
-    () => deriveExecutionProgress(detail, planDraft, activeJob),
+  const executionState = useMemo(
+    () => deriveExecutionUiState(detail, planDraft, activeJob),
     [activeJob, detail, planDraft],
   );
+  const progress = executionState.progress;
   const runtimeInsights = detail?.runtime_insights || {};
   const executionEstimate = runtimeInsights?.execution || {};
   const costEstimate = runtimeInsights?.cost || {};
   const showEstimatedCost = shouldShowEstimatedCost(detail?.runtime || {}, costEstimate);
 
-  if (!progress.isActive) return null;
+  if (!progress.isActive || !executionState.consistent) return null;
 
   let currentWork = commandLabel(progress.command, language);
   if (progress.phase === "planning") {

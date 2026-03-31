@@ -25,6 +25,7 @@ import jakal_flow.orchestrator as orchestrator_module
 import jakal_flow.share as share_module
 import jakal_flow.ui_bridge as ui_bridge
 import jakal_flow.ui_bridge_payloads as ui_bridge_payloads
+from jakal_flow.ui_bridge_commands.read_models import build_read_model_handlers
 import jakal_flow.workspace as workspace_module
 from jakal_flow.models import ExecutionPlanState, ExecutionStep, LoopState, ProjectContext, ProjectPaths, RepoMetadata, RuntimeOptions
 from jakal_flow.share import share_server_status_payload
@@ -268,6 +269,84 @@ class UIBridgeTests(unittest.TestCase):
                 workspace.save_project(context)
 
             self.assertEqual(events, [])
+
+    def test_project_detail_payload_can_bypass_detail_cache_for_manual_refresh(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            project = build_test_project_context(temp_dir)
+            base_payload = {"project": {"repo_id": project.metadata.repo_id}, "detail_level": "core"}
+            captured_kwargs: dict[str, object] = {}
+
+            def fake_cached_project_detail_base_payload(
+                orchestrator,
+                project_arg,
+                normalized_detail_level,
+                load_run_control,
+                *,
+                bypass_cache=False,
+            ):
+                captured_kwargs["bypass_cache"] = bypass_cache
+                captured_kwargs["detail_level"] = normalized_detail_level
+                captured_kwargs["project_repo_id"] = project_arg.metadata.repo_id
+                return base_payload, "sig-123", False, {"detail_level": normalized_detail_level}
+
+            with mock.patch.object(
+                ui_bridge_payloads,
+                "_cached_project_detail_base_payload",
+                side_effect=fake_cached_project_detail_base_payload,
+            ), mock.patch.object(
+                ui_bridge_payloads,
+                "_finalize_project_detail_payload",
+                side_effect=lambda payload, **_kwargs: payload,
+            ):
+                result = ui_bridge_payloads.project_detail_payload(
+                    mock.Mock(),
+                    project,
+                    load_run_control=lambda _project: {},
+                    refresh_codex_status=False,
+                    detail_level="core",
+                    bypass_detail_cache=True,
+                )
+
+            self.assertEqual(result, base_payload)
+            self.assertEqual(captured_kwargs["bypass_cache"], True)
+            self.assertEqual(captured_kwargs["detail_level"], "core")
+            self.assertEqual(captured_kwargs["project_repo_id"], project.metadata.repo_id)
+
+    def test_load_visible_project_state_passes_bypass_detail_cache_to_detail_payload(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            project = build_test_project_context(temp_dir)
+            captured_kwargs: dict[str, object] = {}
+
+            def fake_detail_payload(_project, **kwargs):
+                captured_kwargs.update(kwargs)
+                return {"project": {"repo_id": project.metadata.repo_id}}
+
+            handlers = build_read_model_handlers(
+                bootstrap_payload=lambda _workspace_root: {"workspace_root": str(temp_dir / "workspace")},
+                resolve_project=lambda _orchestrator, _payload: project,
+                resolve_history_project=lambda _orchestrator, _payload: project,
+                coerce_bool=lambda value, default=False: bool(value) if value is not None else default,
+                codex_snapshot_service=mock.Mock(invalidate=mock.Mock()),
+            )
+            ctx = mock.Mock(
+                orchestrator=mock.Mock(),
+                payload={
+                    "repo_id": project.metadata.repo_id,
+                    "refresh_codex_status": False,
+                    "detail_level": "core",
+                    "include_listing": False,
+                    "bypass_detail_cache": True,
+                },
+                detail_payload=fake_detail_payload,
+                workspace_root=project.paths.workspace_root,
+            )
+
+            result = handlers["load-visible-project-state"](ctx)
+
+            self.assertEqual(result["detail"]["project"]["repo_id"], project.metadata.repo_id)
+            self.assertTrue(captured_kwargs["bypass_detail_cache"])
+            self.assertEqual(captured_kwargs["detail_level"], "core")
+            self.assertFalse(captured_kwargs["refresh_codex_status"])
 
     def test_local_project_logs_are_written_under_repo_root_folder(self) -> None:
         with TemporaryTestDir() as temp_dir:

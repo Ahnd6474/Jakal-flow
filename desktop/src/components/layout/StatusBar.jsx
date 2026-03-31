@@ -1,13 +1,13 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
 import {
   commandLabel,
+  deriveExecutionUiState,
   formatUsd,
   runtimeSummary,
   shouldShowEstimatedCost,
   statusTone,
-  visibleExecutionJob,
 } from "../../utils";
 
 function BranchIcon() {
@@ -98,12 +98,16 @@ export const StatusBar = memo(function StatusBar({
   bottomCollapsed,
 }) {
   const { language, t } = useI18n();
-  const executionJob = visibleExecutionJob(activeJob);
+  const executionState = useMemo(
+    () => deriveExecutionUiState(detail, null, activeJob),
+    [activeJob, detail],
+  );
+  const executionJob = executionState.executionJob;
   const project = detail?.project || {};
   const runtime = detail?.runtime || {};
   const costEstimate = detail?.runtime_insights?.cost || {};
   const showCost = shouldShowEstimatedCost(runtime, costEstimate);
-  const tone = statusTone(project.current_status || "idle");
+  const tone = statusTone(executionState.displayStatusValue);
   const jobStatus = String(executionJob?.status || "").trim().toLowerCase();
   const jobLabel =
     jobStatus === "running"
@@ -122,7 +126,7 @@ export const StatusBar = memo(function StatusBar({
 
         <div className={`status-bar__widget status-bar__widget--${tone}`}>
           <span className={`chip-dot chip-dot--${tone}`} />
-          <span>{displayStatus(project.current_status || "idle", language)}</span>
+          <span>{displayStatus(executionState.displayStatusValue || project.current_status || "idle", language)}</span>
         </div>
 
         {jobLabel ? (

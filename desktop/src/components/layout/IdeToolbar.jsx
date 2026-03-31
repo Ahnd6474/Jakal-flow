@@ -1,7 +1,7 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { displayStatus } from "../../locale";
-import { formatCheckpointDisplayId, isActiveExecutionStatus, isDebuggingStatus, isPlanningProgressRunning, projectStatusWithJob, statusTone, toolbarProgressCaptionDisplay, visibleExecutionJob } from "../../utils";
+import { deriveExecutionUiState, formatCheckpointDisplayId, isActiveExecutionStatus, isPlanningProgressRunning, statusTone, toolbarProgressCaptionDisplay } from "../../utils";
 
 function RefreshIcon() {
   return (
@@ -373,34 +373,28 @@ export const IdeToolbar = memo(function IdeToolbar({
   onOpenVsCode,
   onOpenGithub,
 }) {
-  const executionJob = visibleExecutionJob(activeJob);
-  const planningRunning = isPlanningProgressRunning(projectDetail?.planning_progress);
-  const projectStatusWithActiveJob = projectStatusWithJob(projectDetail?.project?.current_status || "idle", executionJob) || "idle";
-  const projectStatus =
-    String(executionJob?.status || "").trim().toLowerCase() === "running" || !planningRunning
-      ? projectStatusWithActiveJob
-      : "running:generate-plan";
-
-  const livePlan = String(executionJob?.status || "").trim().toLowerCase() === "running" && projectDetail?.plan ? projectDetail.plan : planDraft;
+  const executionState = useMemo(
+    () => deriveExecutionUiState(projectDetail, planDraft, activeJob),
+    [activeJob, planDraft, projectDetail],
+  );
+  const executionJob = executionState.executionJob;
+  const livePlan = executionState.livePlan;
   const { language, t } = useI18n();
-  const normalizedProjectStatus = String(projectStatus || "").trim().toLowerCase();
-  const statusLabel =
-    String(executionJob?.status || "").trim().toLowerCase() === "running"
-    && !isDebuggingStatus(projectDetail?.project?.current_status || "")
-    && normalizedProjectStatus !== "running:merging"
-      ? displayStatus("running", language)
-      : planningRunning && !isDebuggingStatus(projectDetail?.project?.current_status || "") && normalizedProjectStatus !== "running:merging"
-        ? displayStatus("running:generate-plan", language)
-        : displayStatus(projectStatus, language);
+  const statusLabel = displayStatus(executionState.displayStatusValue, language);
 
   const planStatusLabel = toolbarProgressCaptionDisplay(livePlan, language, {
     activeJob: executionJob,
     planningProgress: projectDetail?.planning_progress,
   });
 
-  const tone = statusTone(projectStatus);
-  const runActionRunning = isActiveExecutionStatus(projectStatus) || planningRunning;
-  const runActionDisabled = busy || runActionRunning;
+  const tone = statusTone(executionState.displayStatusValue);
+  const runActionRunning = isActiveExecutionStatus(executionState.displayStatusValue);
+  const runActionDisabled =
+    busy
+    || !executionState.consistent
+    || runActionRunning
+    || isPlanningProgressRunning(projectDetail?.planning_progress)
+    || executionState.checkpointFamily === "checkpoint";
   const runActionLabel = runActionRunning ? displayStatus("running", language) : t("action.run");
   const repoPath = String(projectPath || "").trim();
   const remoteUrl = String(githubUrl || "").trim();

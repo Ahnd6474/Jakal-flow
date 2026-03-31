@@ -35,16 +35,14 @@ import {
   providerStatusReason,
   isActiveExecutionStatus,
   isPlanningProgressRunning,
-  projectStatusWithJob,
   QWEN_CODE_DEFAULT_MODEL,
   REASONING_OPTIONS,
   configReasoningOptions,
   reasoningEffortLabel,
-  resolveExecutionDisplayPlan,
   selectedConfigReasoning,
   shouldShowEstimatedCost,
   statusTone,
-  visibleExecutionJob,
+  deriveExecutionUiState,
 } from "../../utils";
 
 /* ── Metric card icons ── */
@@ -487,10 +485,11 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
     [t],
   );
 
-  const livePlan = useMemo(
-    () => resolveExecutionDisplayPlan(detail, planDraft, activeJob),
+  const executionState = useMemo(
+    () => deriveExecutionUiState(detail, planDraft, activeJob),
     [detail, planDraft, activeJob],
   );
+  const livePlan = executionState.livePlan;
   const promptValue = livePlan?.project_prompt || "";
   const [promptDraft, setPromptDraft] = useState(promptValue);
   const [failureDismissed, setFailureDismissed] = useState(false);
@@ -537,10 +536,15 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
   const parallelLimitValue = parallelWorkerLabel(parallelInsight.recommended_workers ?? 1, language);
   const parallelLimitDetails = parallelLimitDescription(parallelInsight, language);
   const parallelLimitCardTone = parallelLimitTone(parallelInsight);
-  const executionJob = visibleExecutionJob(activeJob);
-  const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", executionJob);
+  const executionJob = executionState.executionJob;
+  const projectStatus = executionState.displayStatusValue;
   const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
-  const runActionDisabled = busy || isActiveExecutionStatus(projectStatus) || isPlanningProgressRunning(detail?.planning_progress);
+  const runActionDisabled =
+    busy
+    || !executionState.consistent
+    || isActiveExecutionStatus(projectStatus)
+    || isPlanningProgressRunning(detail?.planning_progress)
+    || executionState.checkpointFamily === "checkpoint";
   const selectedStepStatus = effectiveStepStatus(selectedStep, projectStatus);
   const selectedStepFailureReason = failureReasonLabel(selectedStep, language);
   const selectedStepFailureCode = failureReasonCode(selectedStep);

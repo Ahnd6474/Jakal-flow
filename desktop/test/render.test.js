@@ -1058,6 +1058,156 @@ test("RightSidebarPane shows the project default model name in the center chat s
   assert.match(html, /GPT-5\.4 \/ OpenAI/);
 });
 
+test("StatusBar falls back to syncing when execution surfaces diverge", async () => {
+  const html = await renderBundledComponent(
+    "status-bar-syncing-render",
+    "./src/components/layout/StatusBar.jsx",
+    "StatusBar",
+    {
+      detail: {
+        project: {
+          branch: "main",
+          current_status: "running:run-plan",
+        },
+        runtime: {
+          model_provider: "openai",
+          model: "gpt-5.4",
+          effort: "medium",
+        },
+        runtime_insights: {
+          cost: {
+            estimated_total_cost_usd: 0,
+          },
+        },
+        plan: {
+          execution_mode: "parallel",
+          closeout_status: "not_started",
+          steps: [
+            {
+              step_id: "ST1",
+              title: "Build",
+              status: "running",
+            },
+          ],
+        },
+        checkpoints: {
+          pending: {
+            checkpoint_id: "CP1",
+            status: "awaiting_review",
+            title: "Review build",
+          },
+          items: [
+            {
+              checkpoint_id: "CP1",
+              status: "awaiting_review",
+              title: "Review build",
+            },
+          ],
+        },
+      },
+      activeJob: {
+        id: "job-run",
+        status: "running",
+        command: "run-plan",
+      },
+      queuedJobs: [],
+      modelPresets: [],
+      bottomCollapsed: true,
+      onToggleBottom: noop,
+    },
+  );
+
+  assert.match(html, /Syncing/);
+});
+
+test("IdeToolbar falls back to syncing when execution surfaces diverge", async () => {
+  const html = await renderBundledComponent(
+    "ide-toolbar-syncing-render",
+    "./src/components/layout/IdeToolbar.jsx",
+    "IdeToolbar",
+    {
+      projects: [],
+      selectedProjectId: "",
+      onSelectProject: noop,
+      onNewProject: noop,
+      onDeleteSelectedProject: noop,
+      onDeleteProject: noop,
+      projectDetail: {
+        project: {
+          current_status: "running:run-plan",
+        },
+        plan: {
+          execution_mode: "parallel",
+          closeout_status: "not_started",
+          steps: [
+            {
+              step_id: "ST1",
+              title: "Build",
+              status: "running",
+            },
+          ],
+        },
+        checkpoints: {
+          pending: {
+            checkpoint_id: "CP1",
+            status: "awaiting_review",
+            title: "Review build",
+          },
+          items: [
+            {
+              checkpoint_id: "CP1",
+              status: "awaiting_review",
+              title: "Review build",
+            },
+          ],
+        },
+        planning_progress: {
+          currentStageStatus: "running",
+          currentStageIndex: 1,
+          stageCount: 4,
+        },
+      },
+      planDraft: {
+        execution_mode: "parallel",
+        closeout_status: "not_started",
+        steps: [
+          {
+            step_id: "ST1",
+            title: "Build",
+            status: "running",
+          },
+        ],
+      },
+      pendingCheckpoint: {
+        checkpoint_id: "CP1",
+        status: "awaiting_review",
+        title: "Review build",
+      },
+      busy: false,
+      activeJob: {
+        id: "job-run",
+        status: "running",
+        command: "run-plan",
+      },
+      activeCenterTab: "run",
+      projectPath: "C:/work/repo",
+      githubUrl: "",
+      shareUrl: "",
+      shareBusy: false,
+      onRefresh: noop,
+      onOpenSettings: noop,
+      onRunPlan: noop,
+      onApproveCheckpoint: noop,
+      onSmartShareLink: noop,
+      onOpenFolder: noop,
+      onOpenVsCode: noop,
+      onOpenGithub: noop,
+    },
+  );
+
+  assert.match(html, /Syncing/);
+});
+
 test("RightSidebarPane keeps the icon rail visible when the right panel is collapsed", async () => {
   const html = await renderBundledComponent(
     "right-sidebar-collapsed-rail-render",

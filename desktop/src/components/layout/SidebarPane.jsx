@@ -4,14 +4,12 @@ import { usePersistentState } from "../../hooks/usePersistentState";
 import { displayStatus } from "../../locale";
 import { arePropsEqualExceptFunctions } from "../../shallowProps";
 import {
+  deriveExecutionUiState,
   effectiveStepStatus,
   formatCheckpointDisplayId,
   formatChatSessionTitle,
   planStepsWithCloseout,
-  projectStatusWithJob,
-  resolveExecutionDisplayPlan,
   statusTone,
-  visibleExecutionJob,
 } from "../../utils";
 
 /* ── Rail icons ── */
@@ -1029,10 +1027,11 @@ export const SidebarPane = memo(function SidebarPane({
     if (items.some((item) => item?.checkpoint_id === pending.checkpoint_id)) return items;
     return [pending, ...items];
   }, [activeTab, checkpoints]);
-  const executionPlan = useMemo(
-    () => resolveExecutionDisplayPlan(detail, planDraft, activeJob),
+  const executionState = useMemo(
+    () => deriveExecutionUiState(detail, planDraft, activeJob),
     [detail, planDraft, activeJob],
   );
+  const executionPlan = executionState.livePlan;
   const flowSteps = useMemo(
     () => planStepsWithCloseout(executionPlan, {
       title: t("run.closeout"),
@@ -1041,7 +1040,7 @@ export const SidebarPane = memo(function SidebarPane({
     }),
     [executionPlan, t],
   );
-  const projectStatus = projectStatusWithJob(detail?.project?.current_status || "", visibleExecutionJob(activeJob));
+  const projectStatus = executionState.displayStatusValue;
 
   useEffect(() => {
     workspaceFilterCacheRef.current.clear();

@@ -25,6 +25,7 @@ import {
   defaultCodexPath,
   planStepsWithCloseout,
   deriveExecutionProgress,
+  deriveExecutionUiState,
   reasoningEffortLabel,
   deriveIdleProjectStatus,
   deriveGithubMode,
@@ -75,6 +76,7 @@ import {
   toolbarProgressCaptionDisplay,
   visibleExecutionJob,
   workspaceStatsFromProjects,
+  executionConsistencyReport,
 } from "../src/utils.js";
 
 test("cloneValue deep-clones plain data and preserves nullish values", () => {
@@ -196,6 +198,140 @@ test("chat jobs do not affect execution status or progress", () => {
 
   assert.equal(progress.isActive, false);
   assert.equal(progress.command, "");
+});
+
+test("deriveExecutionUiState keeps toolbar, flow, and process aligned for a live run", () => {
+  const plan = {
+    execution_mode: "parallel",
+    closeout_status: "not_started",
+    steps: [
+      {
+        step_id: "ST1",
+        title: "Build",
+        status: "running",
+      },
+    ],
+  };
+  const state = deriveExecutionUiState(
+    {
+      project: {
+        current_status: "running:run-plan",
+      },
+      plan,
+      checkpoints: {
+        items: [],
+      },
+    },
+    plan,
+    {
+      id: "job-run",
+      status: "running",
+      command: "run-plan",
+    },
+  );
+
+  assert.equal(state.consistent, true);
+  assert.equal(state.displayFamily, "running");
+  assert.equal(state.toolbarFamily, "running");
+  assert.equal(state.flowFamily, "running");
+  assert.equal(state.processFamily, "running");
+  assert.equal(state.checkpointFamily, "idle");
+  assert.match(executionConsistencyReport(
+    {
+      project: {
+        current_status: "running:run-plan",
+      },
+      plan,
+      checkpoints: {
+        items: [],
+      },
+    },
+    plan,
+    {
+      id: "job-run",
+      status: "running",
+      command: "run-plan",
+    },
+  ), /consistent: yes/);
+});
+
+test("execution consistency reports surface mismatches when checkpoint state diverges", () => {
+  const plan = {
+    execution_mode: "parallel",
+    closeout_status: "not_started",
+    steps: [
+      {
+        step_id: "ST1",
+        title: "Build",
+        status: "running",
+      },
+    ],
+  };
+  const state = deriveExecutionUiState(
+    {
+      project: {
+        current_status: "running:run-plan",
+      },
+      plan,
+      checkpoints: {
+        pending: {
+          checkpoint_id: "CP1",
+          status: "awaiting_review",
+          title: "Review build",
+        },
+        items: [
+          {
+            checkpoint_id: "CP1",
+            status: "awaiting_review",
+            title: "Review build",
+          },
+        ],
+      },
+    },
+    plan,
+    {
+      id: "job-run",
+      status: "running",
+      command: "run-plan",
+    },
+  );
+  const report = executionConsistencyReport(
+    {
+      project: {
+        current_status: "running:run-plan",
+      },
+      plan,
+      checkpoints: {
+        pending: {
+          checkpoint_id: "CP1",
+          status: "awaiting_review",
+          title: "Review build",
+        },
+        items: [
+          {
+            checkpoint_id: "CP1",
+            status: "awaiting_review",
+            title: "Review build",
+          },
+        ],
+      },
+    },
+    plan,
+    {
+      id: "job-run",
+      status: "running",
+      command: "run-plan",
+    },
+  );
+
+  assert.equal(state.consistent, false);
+  assert.equal(state.displayFamily, "syncing");
+  assert.match(report, /toolbar: checkpoint/);
+  assert.match(report, /flow: checkpoint/);
+  assert.match(report, /checkpoint: checkpoint/);
+  assert.match(report, /process: running/);
+  assert.match(report, /display: syncing/);
+  assert.match(report, /diff:/);
 });
 
 test("chat command helpers keep send-chat-message jobs out of execution widgets", () => {

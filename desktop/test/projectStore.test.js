@@ -7,6 +7,7 @@ import {
   mergeProjectDetailSupplement,
   preserveProjectDetailSupplement,
 } from "../src/controller/projectStore.js";
+import { detailApplySignature } from "../src/utils.js";
 
 test("applyProjectDetailListingState merges refreshed detail into the existing project row", () => {
   let nextProjects = null;
@@ -329,6 +330,95 @@ test("applyProjectDetailState preserves an unsaved plan draft and selected step 
   assert.equal(nextPlanDraft.project_prompt, "Unsaved prompt");
   assert.equal(nextSelectedStepId, "ST2");
   assert.equal(nextPlanDirty, true);
+});
+
+test("applyProjectDetailState force reapplies the same detail signature on a manual refresh", () => {
+  let nextProjectDetail = null;
+  let nextProjectForm = {
+    project_dir: "/repo",
+    display_name: "Demo",
+    branch: "main",
+    origin_url: "",
+    github_mode: "existing",
+    runtime: {
+      model: "gpt-5.4-mini",
+      effort: "high",
+      test_cmd: "npm test",
+    },
+  };
+  const detail = {
+    project: {
+      repo_id: "demo",
+      repo_path: "/repo",
+      display_name: "Demo",
+      slug: "demo",
+      branch: "main",
+      origin_url: "",
+    },
+    runtime: {
+      model: "gpt-5.4-mini",
+      effort: "high",
+      test_cmd: "npm test",
+    },
+    plan: {
+      execution_mode: "parallel",
+      closeout_status: "not_started",
+      steps: [
+        { step_id: "ST1", title: "Plan", status: "completed" },
+        { step_id: "ST2", title: "Build", status: "running" },
+      ],
+    },
+    codex_status: {
+      model_catalog: [],
+    },
+  };
+
+  const applied = applyProjectDetailState({
+    detail,
+    options: {
+      force: true,
+    },
+    refs: {
+      lastAppliedDetailSignatureRef: {
+        current: detailApplySignature(detail, null),
+      },
+    },
+    state: {
+      projectDetail: {
+        project: {
+          repo_id: "demo",
+        },
+        codex_status: {},
+      },
+      modelCatalog: [],
+      activeJob: null,
+      defaultRuntime: {
+        model: "gpt-5.4-mini",
+        effort: "high",
+        test_cmd: "npm test",
+      },
+      planDirty: false,
+    },
+    setters: {
+      transition: (callback) => callback(),
+      setProjectDetail: (value) => {
+        nextProjectDetail = value;
+      },
+      setModelCatalog: () => {},
+      setShareSettings: () => {},
+      setLoadingProjectId: () => {},
+      setProjectForm: (value) => {
+        nextProjectForm = typeof value === "function" ? value(nextProjectForm) : value;
+      },
+      setPlanDraft: () => {},
+      setSelectedStepId: () => {},
+      setPlanDirty: () => {},
+    },
+  });
+
+  assert.equal(applied.project.repo_id, "demo");
+  assert.equal(nextProjectDetail.project.repo_id, "demo");
+  assert.equal(nextProjectForm.project_dir, "/repo");
 });
 
 test("applyProjectDetailState clears a stale selected step when the refreshed plan is already complete", () => {

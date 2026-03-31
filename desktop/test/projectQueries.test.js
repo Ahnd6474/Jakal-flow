@@ -42,6 +42,7 @@ test("refreshVisibleProjectState loads listing and selected project detail with 
         refresh_codex_status: false,
         detail_level: "core",
         include_listing: true,
+        bypass_detail_cache: false,
       },
       workspaceRoot: "/workspace",
     },
@@ -69,6 +70,7 @@ test("refreshVisibleProjectState skips detail loading when no project is selecte
         refresh_codex_status: false,
         detail_level: "core",
         include_listing: true,
+        bypass_detail_cache: false,
       },
       workspaceRoot: "/workspace",
     },
@@ -102,6 +104,44 @@ test("refreshVisibleProjectState can skip listing when only selected detail need
         refresh_codex_status: false,
         detail_level: "full",
         include_listing: false,
+        bypass_detail_cache: false,
+      },
+      workspaceRoot: "/workspace",
+    },
+  ]);
+});
+
+test("refreshVisibleProjectState can bypass cached detail when manually refreshing an open project", async () => {
+  const calls = [];
+  const bridgeRequest = async (command, payload, workspaceRoot) => {
+    calls.push({ command, payload, workspaceRoot });
+    if (command === "load-visible-project-state") {
+      return {
+        listing: { projects: [{ repo_id: "demo" }] },
+        detail: { project: { repo_id: "demo" }, detail_level: "core" },
+      };
+    }
+    throw new Error(`Unexpected command: ${command}`);
+  };
+
+  const result = await refreshVisibleProjectState(bridgeRequest, "/workspace", "demo", {
+    detailLevel: "core",
+    bypassDetailCache: true,
+  });
+
+  assert.deepEqual(result, {
+    listing: { projects: [{ repo_id: "demo" }] },
+    detail: { project: { repo_id: "demo" }, detail_level: "core" },
+  });
+  assert.deepEqual(calls, [
+    {
+      command: "load-visible-project-state",
+      payload: {
+        repo_id: "demo",
+        refresh_codex_status: false,
+        detail_level: "core",
+        include_listing: true,
+        bypass_detail_cache: true,
       },
       workspaceRoot: "/workspace",
     },

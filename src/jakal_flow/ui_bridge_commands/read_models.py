@@ -50,6 +50,7 @@ def build_read_model_handlers(
     def load_visible_project_state(ctx: BridgeCommandContext) -> dict[str, Any]:
         refresh_codex_status = coerce_bool(ctx.payload.get("refresh_codex_status", False), False)
         include_listing = coerce_bool(ctx.payload.get("include_listing", True), True)
+        bypass_detail_cache = coerce_bool(ctx.payload.get("bypass_detail_cache", False), False)
         detail_level = str(ctx.payload.get("detail_level", "core")).strip().lower() or "core"
         detail: dict[str, Any] | None = None
         has_project_selector = bool(str(ctx.payload.get("repo_id", "")).strip() or str(ctx.payload.get("project_dir", "")).strip())
@@ -64,6 +65,7 @@ def build_read_model_handlers(
                 project,
                 refresh_codex_status=refresh_codex_status,
                 detail_level=detail_level,
+                bypass_detail_cache=bypass_detail_cache,
             )
 
         def build_listing() -> dict[str, Any] | None:

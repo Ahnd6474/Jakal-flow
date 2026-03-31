@@ -1200,6 +1200,7 @@ export function useDesktopController() {
               refreshCodexStatus,
               detailLevel: wantsExpandedDetail ? "full" : "core",
               refreshListing,
+              bypassDetailCache: true,
             },
           )
         : loadProjectListing(bridgeRequest, workspaceRoot);
@@ -1225,11 +1226,11 @@ export function useDesktopController() {
             setHistoryProjects((current) => reuseProjectListingItems(current, listing?.history || []));
             projectsRef.current = nextProjects;
             if (detail) {
-              applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob });
+              applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob, force: true });
             }
           });
         } else if (detail) {
-          applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob });
+          applyProjectDetail(detail, { preserveSelectedStep: true, runningJob: selectedJob, force: true });
         }
       } else {
         const listing = refreshedState;

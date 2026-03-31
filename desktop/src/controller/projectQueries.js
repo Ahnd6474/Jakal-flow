@@ -96,6 +96,7 @@ export async function refreshVisibleProjectState(bridgeRequest, workspaceRoot, r
       refresh_codex_status: options.refreshCodexStatus ?? false,
       detail_level: options.detailLevel ?? "core",
       include_listing: options.refreshListing ?? true,
+      bypass_detail_cache: options.bypassDetailCache ?? false,
     },
     workspaceRoot || null,
   );

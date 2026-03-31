@@ -1605,6 +1605,8 @@ def _cached_project_detail_base_payload(
     project: ProjectContext,
     normalized_detail_level: str,
     load_run_control: Callable[[ProjectContext], dict[str, Any]],
+    *,
+    bypass_cache: bool = False,
 ) -> tuple[dict[str, Any], str, bool, dict[str, Any]]:
     timings: dict[str, Any] = {
         "detail_level": normalized_detail_level,
@@ -1615,7 +1617,7 @@ def _cached_project_detail_base_payload(
     cache_file = _detail_cache_file(project, normalized_detail_level)
     memory_cache_key = f"{project.paths.project_root.resolve()}|{normalized_detail_level}"
     memory_cached = _DETAIL_BASE_PAYLOAD_MEMORY_CACHE.get(memory_cache_key)
-    if (
+    if not bypass_cache and (
         cache_file.exists()
         and
         memory_cached is not None
@@ -1629,7 +1631,7 @@ def _cached_project_detail_base_payload(
         return _clone_cached_detail_payload(memory_cached[2]), content_signature, True, timings
     cache_lookup_started_at = perf_counter()
     cached = read_json(cache_file, default=None)
-    if isinstance(cached, dict):
+    if not bypass_cache and isinstance(cached, dict):
         cached_signature = str(cached.get("content_signature", "")).strip()
         cached_payload = cached.get("payload")
         if (
@@ -1721,6 +1723,7 @@ def project_detail_payload(
     fetch_codex_status: Callable[[str], Any] = fetch_codex_backend_snapshot,
     refresh_codex_status: bool = True,
     detail_level: str = "full",
+    bypass_detail_cache: bool = False,
 ) -> dict[str, Any]:
     normalized_detail_level = "core" if str(detail_level).strip().lower() == "core" else "full"
     detail_started_at = perf_counter()
@@ -1729,6 +1732,7 @@ def project_detail_payload(
         project,
         normalized_detail_level,
         load_run_control,
+        bypass_cache=bypass_detail_cache,
     )
     codex_started_at = perf_counter()
     codex_status = (

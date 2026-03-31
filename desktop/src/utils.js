@@ -1169,6 +1169,9 @@ export function effectiveStepStatus(step = null, projectStatus = "") {
   if (!rawStepStatus) {
     return "";
   }
+  if (String(projectStatus || "").trim().toLowerCase() === "syncing") {
+    return "syncing";
+  }
   if (isDebuggingStatus(projectStatus) && rawStepStatus === "running") {
     return "running:debugging";
   }
@@ -1396,6 +1399,236 @@ export function deriveExecutionProgress(detail = null, planDraft = null, activeJ
     visualPercent,
     indeterminate,
   };
+}
+
+function normalizeExecutionFamilyToken(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return "idle";
+  }
+  if (normalized === "syncing" || normalized === "inconsistent" || normalized === "stale") {
+    return "syncing";
+  }
+  if (normalized === "debugging" || normalized === "running:debugging" || normalized === "running:parallel-debugging") {
+    return "debugging";
+  }
+  if (normalized === "running:merging") {
+    return "merging";
+  }
+  if (normalized === "running:closeout") {
+    return "closeout";
+  }
+  if (normalized === "running:generate-plan") {
+    return "planning";
+  }
+  if (normalized === "queued" || normalized.startsWith("queued:")) {
+    return "queued";
+  }
+  if (normalized === "awaiting_review" || normalized === "awaiting_checkpoint_approval" || normalized === "checkpoint") {
+    return "checkpoint";
+  }
+  if (normalized === "completed" || normalized === "closed_out" || normalized === "plan_completed") {
+    return "completed";
+  }
+  if (normalized.includes("failed")) {
+    return "failed";
+  }
+  if (normalized === "running" || normalized.startsWith("running:")) {
+    return "running";
+  }
+  if (normalized === "ready" || normalized === "plan_ready" || normalized === "setup_ready" || normalized === "idle") {
+    return "idle";
+  }
+  return normalized;
+}
+
+function executionFamilyFromCommand(command = "") {
+  const normalized = String(command || "").trim().toLowerCase();
+  if (!normalized) {
+    return "idle";
+  }
+  if (normalized === "generate-plan") {
+    return "planning";
+  }
+  if (normalized === "run-closeout") {
+    return "closeout";
+  }
+  if (normalized === "run-manual-debugger") {
+    return "debugging";
+  }
+  if (normalized === "run-manual-merger") {
+    return "merging";
+  }
+  if (normalized === "run-plan") {
+    return "running";
+  }
+  if (normalized === "send-chat-message") {
+    return "idle";
+  }
+  return "running";
+}
+
+function executionFamilyFromJob(job = null) {
+  const status = String(job?.status || "").trim().toLowerCase();
+  const commandFamily = executionFamilyFromCommand(job?.command);
+  if (!status) {
+    return "idle";
+  }
+  if (status === "queued") {
+    return commandFamily === "idle" ? "queued" : commandFamily;
+  }
+  if (status === "running") {
+    return commandFamily === "idle" ? "running" : commandFamily;
+  }
+  return normalizeExecutionFamilyToken(status) || commandFamily || "idle";
+}
+
+function checkpointFamilyFromDetail(detail = null) {
+  const checkpoints = detail?.checkpoints && typeof detail.checkpoints === "object" ? detail.checkpoints : null;
+  const pending = checkpoints?.pending && typeof checkpoints.pending === "object" ? checkpoints.pending : null;
+  const items = Array.isArray(checkpoints?.items) ? checkpoints.items.filter((item) => item && typeof item === "object") : [];
+  if (pending || items.some((item) => ["awaiting_review", "pending"].includes(String(item?.status || "").trim().toLowerCase()))) {
+    return "checkpoint";
+  }
+  if (items.length && items.every((item) => ["approved", "completed"].includes(String(item?.status || "").trim().toLowerCase()))) {
+    return "completed";
+  }
+  if (items.some((item) => String(item?.status || "").trim().toLowerCase().includes("failed"))) {
+    return "failed";
+  }
+  return "idle";
+}
+
+function normalizeExecutionSurfaceStatus(signal = "") {
+  return normalizeExecutionFamilyToken(signal);
+}
+
+function formatExecutionConsistencyLine(name, signal, raw = "") {
+  const normalized = normalizeExecutionSurfaceStatus(signal);
+  const rawText = String(raw || "").trim();
+  return `${name}: ${normalized}${rawText && rawText !== normalized ? ` (${rawText})` : ""}`;
+}
+
+export function deriveExecutionUiState(detail = null, planDraft = null, activeJob = null) {
+  const executionJob = visibleExecutionJob(activeJob);
+  const livePlan = resolveExecutionDisplayPlan(detail, planDraft, activeJob);
+  const progress = deriveExecutionProgress(detail, planDraft, activeJob);
+  const checkpointState = detail?.checkpoints && typeof detail.checkpoints === "object" ? detail.checkpoints : {};
+  const checkpointPending = checkpointState?.pending && typeof checkpointState.pending === "object" ? checkpointState.pending : null;
+  const checkpointFamily = checkpointFamilyFromDetail(detail);
+  const projectStatus = String(detail?.project?.current_status || "").trim();
+  const rawProjectFamily = normalizeExecutionSurfaceStatus(projectStatus);
+  const processFamily = rawProjectFamily === "debugging" ? "debugging" : executionFamilyFromJob(executionJob);
+  const planningRunning = isPlanningProgressRunning(detail?.planning_progress);
+
+  let flowFamily = "idle";
+  if (checkpointFamily === "checkpoint") {
+    flowFamily = "checkpoint";
+  } else if (progress.phase === "planning" || planningRunning) {
+    flowFamily = "planning";
+  } else if (progress.phase === "closeout" || progress.closeoutRunning) {
+    flowFamily = "closeout";
+  } else if (progress.phase === "debugging" || isDebuggingStatus(progress.status)) {
+    flowFamily = "debugging";
+  } else if (progress.status === "running:merging") {
+    flowFamily = "merging";
+  } else if (progress.isActive) {
+    flowFamily = normalizeExecutionSurfaceStatus(progress.status) || "running";
+  } else if (rawProjectFamily !== "idle") {
+    flowFamily = rawProjectFamily;
+  }
+
+  let toolbarFamily = rawProjectFamily;
+  if (checkpointFamily === "checkpoint") {
+    toolbarFamily = "checkpoint";
+  } else if (planningRunning) {
+    toolbarFamily = "planning";
+  } else if (progress.phase === "planning") {
+    toolbarFamily = "planning";
+  } else if (progress.phase === "closeout" || progress.closeoutRunning) {
+    toolbarFamily = "closeout";
+  } else if (progress.phase === "debugging" || isDebuggingStatus(projectStatus)) {
+    toolbarFamily = "debugging";
+  } else if (processFamily !== "idle") {
+    toolbarFamily = processFamily;
+  } else if (flowFamily !== "idle") {
+    toolbarFamily = flowFamily;
+  }
+
+  const surfaces = {
+    toolbar: toolbarFamily,
+    flow: flowFamily,
+    checkpoint: checkpointFamily,
+    process: processFamily,
+  };
+  const activeFamilies = Object.entries(surfaces)
+    .filter(([, family]) => family !== "idle")
+    .map(([, family]) => normalizeExecutionSurfaceStatus(family));
+  const uniqueFamilies = [...new Set(activeFamilies)];
+  const consistent = uniqueFamilies.length <= 1;
+  const displayFamily = consistent ? (uniqueFamilies[0] || "idle") : "syncing";
+  let displayStatusValue = "idle";
+  if (!consistent) {
+    displayStatusValue = "syncing";
+  } else if (checkpointFamily === "checkpoint") {
+    displayStatusValue = String(checkpointPending?.status || "awaiting_checkpoint_approval").trim().toLowerCase() || "awaiting_checkpoint_approval";
+  } else if (planningRunning || progress.phase === "planning") {
+    displayStatusValue = "running:generate-plan";
+  } else if (progress.phase === "closeout" || progress.closeoutRunning) {
+    displayStatusValue = "running:closeout";
+  } else if (progress.phase === "debugging" || isDebuggingStatus(progress.status)) {
+    displayStatusValue = "running:debugging";
+  } else if (projectStatus.toLowerCase().startsWith("running:") || projectStatus.toLowerCase().startsWith("queued:")) {
+    displayStatusValue = projectStatus.toLowerCase();
+  } else if (processFamily === "queued") {
+    const queuedCommand = String(executionJob?.command || "").trim().toLowerCase();
+    displayStatusValue = queuedCommand ? `queued:${queuedCommand}` : "queued";
+  } else if (processFamily === "merging") {
+    displayStatusValue = "running:merging";
+  } else if (processFamily === "running") {
+    const runningCommand = String(executionJob?.command || "").trim().toLowerCase();
+    displayStatusValue = runningCommand ? `running:${runningCommand}` : "running";
+  } else if (projectStatus) {
+    displayStatusValue = String(projectStatus).trim().toLowerCase();
+  }
+  const mismatchEntries = Object.entries(surfaces)
+    .filter(([, family]) => family !== "idle")
+    .map(([name, family]) => formatExecutionConsistencyLine(name, family));
+
+  return {
+    executionJob,
+    livePlan,
+    progress,
+    checkpointPending,
+    checkpointFamily,
+    processFamily,
+    flowFamily,
+    toolbarFamily,
+    projectStatus,
+    displayFamily,
+    displayStatusValue,
+    consistent,
+    activeFamilies: uniqueFamilies,
+    surfaces,
+    mismatchSummary: consistent ? "" : mismatchEntries.join(" | "),
+    reportLines: [
+      formatExecutionConsistencyLine("toolbar", toolbarFamily, projectStatus),
+      formatExecutionConsistencyLine("flow", flowFamily, progress.phase || progress.status),
+      formatExecutionConsistencyLine("checkpoint", checkpointFamily, checkpointPending?.status || ""),
+      formatExecutionConsistencyLine("process", processFamily, `${String(executionJob?.status || "").trim()} ${String(executionJob?.command || "").trim()}`.trim()),
+    ],
+  };
+}
+
+export function executionConsistencyReport(detail = null, planDraft = null, activeJob = null) {
+  const snapshot = deriveExecutionUiState(detail, planDraft, activeJob);
+  const lines = snapshot.reportLines.slice();
+  lines.push(`display: ${snapshot.displayFamily}`);
+  lines.push(`consistent: ${snapshot.consistent ? "yes" : "no"}`);
+  if (snapshot.mismatchSummary) {
+    lines.push(`diff: ${snapshot.mismatchSummary}`);
+  }
+  return lines.join("\n");
 }
 
 export function workspaceStatsFromProjects(projects = []) {
@@ -2603,6 +2836,9 @@ export function commandLabel(command, language = "en") {
 export function statusTone(status) {
   const normalized = String(status || "").trim().toLowerCase();
   if (isDebuggingStatus(status)) {
+    return "warning";
+  }
+  if (normalized === "syncing" || normalized === "inconsistent") {
     return "warning";
   }
   if (normalized === "awaiting_review" || normalized === "awaiting_checkpoint_approval") {
