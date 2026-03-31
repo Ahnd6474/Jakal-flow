@@ -1,0 +1,14 @@
+{
+  "allow_push": false,
+  "approval_mode": "never",
+  "codex_path": "codex.cmd",
+  "empty_cycle_limit": 3,
+  "git_user_email": "codex-auto@example.invalid",
+  "git_user_name": "codex-auto-bot",
+  "max_blocks": 1,
+  "model": "gpt-5",
+  "no_progress_limit": 3,
+  "regression_limit": 3,
+  "sandbox_mode": "workspace-write",
+  "test_cmd": "python -m compileall src main.py"
+}

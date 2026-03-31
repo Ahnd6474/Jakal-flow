@@ -1,0 +1,16 @@
+{
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "attempt": 1,
+      "duration_seconds": 194.844,
+      "last_message_excerpt": "{\n  \"title\": \"jakal-flow Local Runtime Bootstrap\",\n  \"summary\": \"First freeze one shared environment contract so every launcher resolves the same managed checkout, virtualenv, and desktop path. Then normalize the upstream Jakal-flow source into a stable local checkout, fan out into parallel backend and desktop setup tracks with disjoint wrapper ownership, and finally reconverge for one verification and operator-docs checkpoint so the environment is repeatable and handoff-ready.\",\n  \"tasks\": [...",
+      "returncode": 0,
+      "stderr_excerpt": "",
+      "stdout_excerpt": "{\"type\":\"thread.started\",\"thread_id\":\"019d33b6-072a-7bb2-ad79-6864efc725a0\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"\uc694\uccad\uc740 Agent A \uc0b0\ucd9c\ubb3c\uc744 \ubc14\ud0d5\uc73c\ub85c \ucd5c\uc885 \uc2e4\ud589 DAG\ub97c \ub9cc\ub4dc\ub294 \uc77c\uc785\ub2c8\ub2e4. \uba3c\uc800 \uc800\uc7a5\uc18c\uc758 \uc2e4\uc81c \uad6c\uc870\uc640 \ubb38\uc11c\ub97c \ube60\ub974\uac8c \ud655\uc778\ud574\uc11c, Agent A\uc758 \ubd84\ud574\ub97c \ud604\uc7ac \uc6cc\ud06c\ud2b8\ub9ac\uc5d0 \ub9de\uac8c \uc881\ud788\uaca0\uc2b5\ub2c8\ub2e4.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"\\\"C:\\\\\\\\Windows\\\\\\\\System32\\\\\\\\WindowsPowerShell\\\\\\\\v1.0\\\\\\\\powershell.exe\\\" -Command 'Get-ChildItem -Force'\",\"aggregated_outpu...",
+      "unexpected_token_detected": false
+    }
+  ],
+  "recovered_after_retry": false,
+  "unexpected_token_detected": false
+}

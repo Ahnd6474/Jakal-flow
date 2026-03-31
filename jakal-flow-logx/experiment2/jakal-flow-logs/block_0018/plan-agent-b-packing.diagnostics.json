@@ -1,0 +1,16 @@
+{
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "attempt": 1,
+      "duration_seconds": 99.297,
+      "last_message_excerpt": "{\"title\":\"jakal-flow environment harness\",\"summary\":\"Freeze the multi-surface harness contract first so the repository has one authoritative profile and normalization shape for the Jakal-flow Python CLI and React+Tauri desktop environment. Once that boundary is fixed, implement the source-side prerequisite/bootstrap path and the target-side materialize/verification path in parallel on disjoint script/test ownership, then finish with operator-facing setup documentation that reflects the landed...",
+      "returncode": 0,
+      "stderr_excerpt": "",
+      "stdout_excerpt": "{\"type\":\"thread.started\",\"thread_id\":\"019d382b-0cd1-71f0-a2bf-848027a09178\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"\uc694\uccad\uc744 execution DAG\ub85c \uc815\ub9ac\ud558\uae30 \uc704\ud574 \uba3c\uc800 \uc800\uc7a5\uc18c \uad6c\uc870\uc640 Planner Agent A \uc0b0\ucd9c\ubb3c\uc744 \ub300\uc870\ud558\uaca0\uc2b5\ub2c8\ub2e4. AGENTS.md \uc720\ubb34\uc640 \uad00\ub828 \ubb38\uc11c, \ud604\uc7ac \ud558\ub2c8\uc2a4 \uc2a4\ud06c\ub9bd\ud2b8 \ud45c\uba74\uc744 \ud655\uc778\ud55c \ub4a4 3-5\uac1c \ub178\ub4dc\uc758 \ubcd1\ub82c \uac00\ub2a5\ud55c DAG\ub85c \uc555\ucd95\ud558\uaca0\uc2b5\ub2c8\ub2e4.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"\\\"C:\\\\\\\\Windows\\\\\\\\System32\\\\\\\\WindowsPowerShell\\\\\\\\v1.0\\\\\\\\powershell.exe\\\" -Command 'Get-...",
+      "unexpected_token_detected": false
+    }
+  ],
+  "recovered_after_retry": false,
+  "unexpected_token_detected": false
+}

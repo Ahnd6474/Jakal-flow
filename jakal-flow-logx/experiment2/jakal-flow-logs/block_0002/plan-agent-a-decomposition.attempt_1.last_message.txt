@@ -1,0 +1,131 @@
+{
+  "title": "jakal-flow local runtime bootstrap",
+  "strategy_summary": "The local repository is effectively empty except for a temporary upstream snapshot, while the host already has Python, Node, Rust, and Codex CLI installed. The main risk is not missing tooling but environment drift: the current global Python resolves `jakal_flow` from a different checkout, so the first move should freeze one shared path-and-venv contract. After that, normalize the upstream checkout into a stable managed location, then fan out into parallel backend and desktop setup tracks, and finish with one verification surface plus concise operator documentation.",
+  "shared_contracts": [
+    "Use one stable repo-relative managed checkout path for `Ahnd6474/Jakal-flow` and stop hardcoding `_tmp_jakal_flow_remote` outside the shared bootstrap layer.",
+    "All Python install, test, CLI, and bridge commands must run through the project-local `.venv\\\\Scripts\\\\python.exe`, and wrappers must clear inherited `PYTHONPATH` so imports never resolve to another `jakal_flow` checkout.",
+    "Desktop wrappers must derive `JAKAL_FLOW_PYTHON`, the managed checkout path, and the desktop working directory from the same shared config used by backend setup.",
+    "Expose a small fixed operator surface early: `sync`, `setup-backend`, `setup-desktop`, `run-cli`, `run-ui`, and `verify`."
+  ],
+  "skeleton_step": {
+    "block_id": "SK1",
+    "needed": true,
+    "task_title": "Freeze Environment Contract",
+    "purpose": "A tiny shared bootstrap layer prevents backend, desktop, verification, and docs work from hardcoding different source paths or accidentally using the globally installed `jakal_flow` package.",
+    "contract_docstring": "\"\"\"Centralize the local Jakal-flow environment contract. Resolve the managed upstream checkout, branch, project virtualenv, desktop path, and launcher commands from this layer so every setup, run, and verification script targets the same source tree and never falls back to a globally installed `jakal_flow` package.\"\"\"",
+    "candidate_owned_paths": [
+      "config/jakal-flow.paths.psd1",
+      "scripts/common.ps1"
+    ],
+    "success_criteria": "Later scripts can import one shared contract for repo URL, branch, checkout directory, venv path, and desktop path without re-deriving or duplicating those values."
+  },
+  "candidate_blocks": [
+    {
+      "block_id": "B1",
+      "goal": "Materialize or normalize the upstream Jakal-flow checkout into one managed local path.",
+      "work_items": [
+        "Add an idempotent sync script that clones the upstream repo when missing and updates it when present.",
+        "Adopt the existing `_tmp_jakal_flow_remote` snapshot as a seed only if it can be normalized into the managed path cleanly.",
+        "Record the upstream repo URL and branch in the shared contract instead of scattering them across scripts.",
+        "Update ignore rules only as needed so temporary runtime artifacts do not pollute the host repo."
+      ],
+      "implementation_notes": "This block should create the stable source location that every other block depends on, but it should avoid changing upstream application code. Prefer a clone-or-update workflow over committing a huge vendor snapshot unless the repository already intends to vendor upstream. If an existing temporary snapshot is reused, the end state still needs one official managed path so later automation does not depend on a `_tmp_` directory name.",
+      "testable_boundary": "Running the sync command leaves a stable checkout that contains `README.md`, `pyproject.toml`, and `desktop/package.json` in the configured managed path.",
+      "candidate_owned_paths": [
+        "scripts/sync-jakal-flow.ps1",
+        ".gitignore"
+      ],
+      "parallelizable_after": [
+        "SK1"
+      ],
+      "parallel_notes": "This is a narrow serial prerequisite because both backend and desktop setup need the same checkout root. Keep it focused on path normalization and sync behavior, not runtime setup."
+    },
+    {
+      "block_id": "B2",
+      "goal": "Provision an isolated Python backend environment and stable CLI or bridge launchers.",
+      "work_items": [
+        "Create or refresh the local `.venv` with the configured interpreter.",
+        "Install the managed checkout in editable mode into that venv and add any explicitly needed dev tooling such as `pytest`.",
+        "Add launcher wrappers for `python -m jakal_flow` and `python -m jakal_flow.ui_bridge` that always use the venv interpreter.",
+        "Ensure backend wrappers sanitize inherited environment variables that could leak another checkout onto the import path."
+      ],
+      "implementation_notes": "The current host Python imports `jakal_flow` from a different repository, so this block must make the local venv the only supported execution path. Keep the wrapper logic outside the upstream codebase unless a real bootstrap bug inside the upstream package blocks local execution. The launcher surface should stay thin and just resolve paths from the shared contract before invoking the upstream module entrypoints.",
+      "testable_boundary": "A backend setup command produces a usable `.venv`, and the wrapper can run `-m jakal_flow --help` and report an import path inside the managed checkout.",
+      "candidate_owned_paths": [
+        "scripts/setup-backend.ps1",
+        "scripts/run-jakal-flow-cli.ps1",
+        "scripts/run-jakal-flow-bridge.ps1"
+      ],
+      "parallelizable_after": [
+        "B1"
+      ],
+      "parallel_notes": "This can proceed in parallel with desktop dependency setup after the checkout exists. Avoid touching desktop scripts or `README.md` here."
+    },
+    {
+      "block_id": "B3",
+      "goal": "Provision desktop dependencies and a reliable Tauri development launcher against the same backend environment.",
+      "work_items": [
+        "Add a desktop setup script that installs frontend dependencies in the managed checkout with `npm.cmd`.",
+        "Add a desktop run wrapper that sets `JAKAL_FLOW_PYTHON` from the shared backend contract before invoking `tauri:dev`.",
+        "Support a lightweight desktop test path such as `npm.cmd run test` from the managed checkout.",
+        "Keep Windows-specific command selection explicit so the wrapper is predictable on this host."
+      ],
+      "implementation_notes": "The desktop shell must preserve the upstream React plus Tauri entrypoint and Python bridge rather than inventing a replacement launcher. This block should share the same resolved checkout path as B2 and should not duplicate path resolution logic. It can install frontend dependencies independently, but end-to-end desktop launch smoke should wait until the backend venv contract from B2 is present.",
+      "testable_boundary": "A desktop setup or run command can install frontend packages and invoke either `npm.cmd run test` or `npm.cmd run tauri:dev` with `JAKAL_FLOW_PYTHON` pointing at the local venv.",
+      "candidate_owned_paths": [
+        "scripts/setup-desktop.ps1",
+        "scripts/run-jakal-flow-ui.ps1"
+      ],
+      "parallelizable_after": [
+        "B1"
+      ],
+      "parallel_notes": "This is a good parallel track next to B2 because it should stay out of backend wrapper files. The only shared root is the bootstrap config, which should already be frozen by SK1."
+    },
+    {
+      "block_id": "B4",
+      "goal": "Add one verification surface that proves the local environment is wired correctly and distinguishes environment errors from upstream baseline failures.",
+      "work_items": [
+        "Create a verify script that reuses the backend and desktop wrappers instead of rebuilding commands inline.",
+        "Check that the resolved Python import path points into the managed checkout rather than another installed package.",
+        "Run backend smoke commands and any feasible isolated test commands from the venv.",
+        "Run desktop smoke commands after dependency installation and summarize which failures are true upstream issues versus local wiring mistakes."
+      ],
+      "implementation_notes": "This block should be the only place that decides what 'environment ready' means for this local repo. Because the current plain `pytest` run is contaminated by another installed checkout, verification must first prove path isolation before interpreting test failures. If the isolated upstream suite is still red, record that as an upstream baseline caveat rather than hiding it as a successful local setup.",
+      "testable_boundary": "One verify command can tell a local operator whether backend CLI import routing, editable install, desktop dependency wiring, and basic smoke commands are working from the managed environment.",
+      "candidate_owned_paths": [
+        "scripts/verify-jakal-flow.ps1"
+      ],
+      "parallelizable_after": [
+        "B2",
+        "B3"
+      ],
+      "parallel_notes": "This should wait for both setup tracks because it depends on their wrappers. Keep it out of `README.md` so the documentation block can land separately."
+    },
+    {
+      "block_id": "B5",
+      "goal": "Document the local operator workflow for syncing, setting up, running, and troubleshooting the Jakal-flow environment.",
+      "work_items": [
+        "Replace the placeholder root README with environment-specific setup and run instructions.",
+        "Document prerequisites, the managed checkout layout, and the exact wrapper commands.",
+        "Call out the import-shadowing hazard from global Python and why the local `.venv` is mandatory.",
+        "Document any known upstream verification caveats discovered by the verify script."
+      ],
+      "implementation_notes": "This README should explain how to operate the local environment repo, not duplicate the entire upstream project manual. Keep the flow short and concrete: sync, backend setup, desktop setup, run, verify, troubleshoot. Accuracy matters more than breadth, so this block should land after the launcher and verification surfaces are settled.",
+      "testable_boundary": "A new operator can follow the root README to sync the upstream repo, create the venv, launch the CLI or desktop shell, and interpret verification output without opening other files first.",
+      "candidate_owned_paths": [
+        "README.md"
+      ],
+      "parallelizable_after": [
+        "B4"
+      ],
+      "parallel_notes": "This is a single-file shared root and should stay in the last wave to avoid churn while scripts are still changing."
+    }
+  ],
+  "packing_notes": [
+    "Use `SK1 -> B1` as the thin serial spine; it freezes path resolution and produces the managed checkout that every other block needs.",
+    "The main parallel wave is `B2` and `B3`; keep both away from `README.md` and away from further edits to the shared bootstrap files.",
+    "Hold `B4` until both setup tracks complete so verification reuses the real wrappers and can classify failures accurately.",
+    "Hold `B5` for the final wave because `README.md` is a broad shared root and the documentation must reflect the final launcher names and verification semantics.",
+    "Avoid broad edits inside the upstream application tree by default; only patch upstream source if a confirmed environment blocker cannot be solved in wrapper scripts or local bootstrap logic."
+  ]
+}

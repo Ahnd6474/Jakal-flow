@@ -1,0 +1,7 @@
+Implemented the Windows long-path hardening in [scripts/bootstrap.ps1](C:\Users\alber\OneDrive\문서\GitHub\experiment2\scripts\bootstrap.ps1) and [scripts/materialize-target.ps1](C:\Users\alber\OneDrive\문서\GitHub\experiment2\scripts\materialize-target.ps1). Both scripts now route Git through an explicit `core.longpaths=true` strategy, and clone paths also persist `core.longpaths=true` into the cloned repo before checkout.
+
+Added the dedicated offline regression in [tests/test_jakal_flow_longpaths.py](C:\Users\alber\OneDrive\문서\GitHub\experiment2\tests\test_jakal_flow_longpaths.py). It builds a synthetic deep-path bare repo with `git fast-import`, uses repo-root-relative `.local/...` paths, and verifies both `.local/upstream` and `.local/targets` materialize a tracked path longer than 260 characters without checkout drift.
+
+`python -m pytest` passed: `22 passed in 126.16s`. I also appended a trace note to `C:\Users\alber\.jakal-flow-workspace\projects\c-users-alber-onedrive-github-experiment2-main-cfffe43b21\docs\RESEARCH_NOTES.md`.
+
+Local commit: `198b1cf` (`Harden Windows materialization paths`). `git push origin main` was rejected because `origin/main` has unrelated history and no merge base with this managed repo branch, so I did not force-push or merge outside scope.

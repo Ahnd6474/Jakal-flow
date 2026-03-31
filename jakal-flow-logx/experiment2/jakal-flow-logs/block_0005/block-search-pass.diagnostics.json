@@ -1,0 +1,16 @@
+{
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "attempt": 1,
+      "duration_seconds": 580.766,
+      "last_message_excerpt": "Restored the scoped harness contract bundle from `origin/main` and tightened the shared profile surface. [`scripts/profile-common.ps1`](C:/Users/alber/OneDrive/\ubb38\uc11c/GitHub/experiment2/scripts/profile-common.ps1#L149) now validates both remote and fixture profiles and normalizes them into one stable object, including fixture seed roots and optional materializer metadata; [`config/profiles/sample-local.json`](C:/Users/alber/OneDrive/\ubb38\uc11c/GitHub/experiment2/config/profiles/sample-local.json#L1) now...",
+      "returncode": 0,
+      "stderr_excerpt": "",
+      "stdout_excerpt": "{\"type\":\"thread.started\",\"thread_id\":\"019d3404-c52c-7892-84a9-4dc6bee7f2e7\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019m scoping the harness-contract task against the repository state first. I\u2019ll read `AGENTS.md`, inspect the owned files, and compare them with `origin/main` so the change set stays limited to this block.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"\\\"C:\\\\\\\\Windows\\\\\\\\System32...",
+      "unexpected_token_detected": false
+    }
+  ],
+  "recovered_after_retry": false,
+  "unexpected_token_detected": false
+}

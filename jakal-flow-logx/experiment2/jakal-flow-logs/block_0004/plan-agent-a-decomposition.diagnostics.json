@@ -1,0 +1,16 @@
+{
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "attempt": 1,
+      "duration_seconds": 367.687,
+      "last_message_excerpt": "{\n  \"title\": \"experiment harness environment\",\n  \"strategy_summary\": \"Use `origin/main` as the restore source for the existing harness implementation instead of redesigning it from scratch. Freeze the shared config/profile/helper contract first, then fan out in parallel across the remote-bootstrap lifecycle and the sample-fixture track, and finish with the still-missing generic orchestration entrypoints that the config already declares but the current upstream implementation does not yet prov...",
+      "returncode": 0,
+      "stderr_excerpt": "",
+      "stdout_excerpt": "{\"type\":\"thread.started\",\"thread_id\":\"019d33f6-b7f4-7231-af98-2c3e82a72e1c\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"\uc694\uccad\uc740 \ub85c\uceec `experiment2`\uc5d0\uc11c \uc6d0\uaca9 `Ahnd6474/experiment` \uc2e4\ud589 \ud658\uacbd \uad6c\ucd95 \uc791\uc5c5\uc744 \uc704\ud55c \ubd84\ud574 \uc0b0\ucd9c\ubb3c\uc744 \ub9cc\ub4dc\ub294 \uc77c\uc785\ub2c8\ub2e4. \uba3c\uc800 \ud604\uc7ac \uc800\uc7a5\uc18c \uad6c\uc870\uc640 \uc6d0\uaca9 \uc800\uc7a5\uc18c\uc758 \uc2e4\uc81c \uc2e4\ud589 \uc2a4\ud0dd\uc744 \ud655\uc778\ud574\uc11c, \ubcd1\ub82c\ud654 \uac00\ub2a5\ud55c \ube14\ub85d\uc778\uc9c0 \uc544\ub2c8\uba74 \uc120\ud589 \uacc4\uc57d \uace0\uc815\uc774 \ud544\uc694\ud55c\uc9c0 \ud310\ub2e8\ud558\uaca0\uc2b5\ub2c8\ub2e4.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"\\\"C:\\\\\\\\Windows\\\\\\\\System32\\\\\\\\WindowsPowerShell\\\\\\\\v1.0\\\\\\\\powershell....",
+      "unexpected_token_detected": false
+    }
+  ],
+  "recovered_after_retry": false,
+  "unexpected_token_detected": false
+}

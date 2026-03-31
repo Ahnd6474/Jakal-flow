@@ -1,0 +1,20 @@
+{
+  "sessions": [
+    {
+      "created_at": "2026-03-26T23:45:13+00:00",
+      "created_by": "tauri-react-ui",
+      "expires_at": "2026-03-27T00:45:13+00:00",
+      "revoked_at": "2026-03-27T00:02:55+00:00",
+      "session_id": "c5b8a9513785f0e6848c8689580868f0",
+      "viewer_token": "f2OORLWpuVB9K-yYcZYQ-V0sckZhLVm8"
+    },
+    {
+      "created_at": "2026-03-27T00:02:55+00:00",
+      "created_by": "tauri-react-ui",
+      "expires_at": "2026-03-27T01:02:55+00:00",
+      "revoked_at": null,
+      "session_id": "1f128ef535face59be37a25c716965ec",
+      "viewer_token": "ieBM_uml6g4eblQS9rf2MbxUm-4laN-I"
+    }
+  ]
+}

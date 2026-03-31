@@ -1,0 +1,120 @@
+{
+  "title": "Jakal-flow Local Harness",
+  "summary": "First remove the real Windows blocker by making bootstrap and target materialization long-path-safe within the fixed `.local/` layout. Once that contract is stable, fan out into a runtime verification task that turns `jakal-flow-local` into a clean materialize-install-smoke flow and a documentation task that publishes the same shipped operator contract so the harness is both runnable and handoff-ready.",
+  "tasks": [
+    {
+      "step_id": "ST1",
+      "task_title": "Harden Windows Materialization",
+      "display_description": "Make bootstrap and target cloning long-path-safe under `.local/`.",
+      "codex_description": "Update the harness Git calls in `scripts/bootstrap.ps1` and `scripts/materialize-target.ps1` so source refresh and target materialization succeed on Windows long paths without changing the `.local/` contract, then add a dedicated offline regression that reproduces the failure with a synthetic deep-path repository.",
+      "model_provider": "openai",
+      "model": "gpt-5.4",
+      "reasoning_effort": "high",
+      "depends_on": [],
+      "owned_paths": [
+        "scripts/bootstrap.ps1",
+        "scripts/materialize-target.ps1",
+        "tests/test_jakal_flow_longpaths.py"
+      ],
+      "success_criteria": "Bootstrap and remote target materialization both use an explicit long-path-safe Git strategy, and a dedicated offline regression proves a deeply nested synthetic repository can populate `.local/upstream` and `.local/targets` from the current repo root without `Filename too long` checkout failure.",
+      "metadata": {
+        "step_kind": "task",
+        "merge_from": [],
+        "join_policy": "",
+        "join_reason": "",
+        "candidate_block_id": "B1",
+        "parallelizable_after": [],
+        "implementation_notes": "Real runs against upstream failed in both the source checkout and target clone paths with `Filename too long`. Fix the scripts rather than moving state outside `.local/`, and keep the regression isolated in its own test module so later profile and verification work can proceed independently.",
+        "is_skeleton_contract": false,
+        "skeleton_contract_docstring": "",
+        "candidate_owned_paths": [
+          "scripts/bootstrap.ps1",
+          "scripts/materialize-target.ps1",
+          "tests/test_jakal_flow_longpaths.py"
+        ]
+      }
+    },
+    {
+      "step_id": "ST2",
+      "task_title": "Ship Self-Contained Verification Flow",
+      "display_description": "Turn `jakal-flow-local` into a clean materialize-install-smoke verification contract.",
+      "codex_description": "Refit the default profile and orchestration helpers so `jakal-flow-local` runs from a clean harness checkout: direct command phases resolve repo-relative executables, the shared prerequisite catalog and profile overlays cover the Python CLI, UI bridge, and desktop JS smoke requirements, and verification phases materialize the target, install it into the repo-local venv, then run CLI, UI bridge, and desktop validation without gating on upstream full pytest.",
+      "model_provider": "openai",
+      "model": "gpt-5.4",
+      "reasoning_effort": "high",
+      "depends_on": [
+        "ST1"
+      ],
+      "owned_paths": [
+        "scripts/profile-common.ps1",
+        "scripts/check-prereqs.ps1",
+        "scripts/invoke-verification.ps1",
+        "config/experiment.example.json",
+        "config/profiles/jakal-flow-local.json",
+        "tests/test_harness_contract.py",
+        "tests/test_orchestration_scripts.py"
+      ],
+      "success_criteria": "The normalized `jakal-flow-local` profile encodes materialize-before-target-command ordering and repo-local executable paths that resolve correctly, prerequisite handling knows about the added tool requirements, and the harness regressions define readiness as target install plus CLI smoke, UI bridge smoke, and desktop JS verification while treating upstream full `python -m pytest` as non-gating.",
+      "metadata": {
+        "step_kind": "task",
+        "merge_from": [],
+        "join_policy": "",
+        "join_reason": "",
+        "candidate_block_id": "B2",
+        "parallelizable_after": [
+          "B1",
+          "materialize-before-verify contract",
+          "repo-local executable verification contract"
+        ],
+        "implementation_notes": "The checked-in profile currently bootstraps and then runs target-scoped `python -m pytest`. Replace that with the clean materialize plus target-install plus CLI/UI/desktop smoke flow, resolve repo-relative direct command paths, and rely on `.local/venv/Scripts/python.exe`, `.local/venv/Scripts/jakal-flow.exe`, and `.local/venv/Scripts/jakal-flow-ui-bridge.exe` instead of global installs.",
+        "is_skeleton_contract": false,
+        "skeleton_contract_docstring": "",
+        "candidate_owned_paths": [
+          "scripts/profile-common.ps1",
+          "scripts/check-prereqs.ps1",
+          "scripts/invoke-verification.ps1",
+          "config/experiment.example.json",
+          "config/profiles/jakal-flow-local.json",
+          "tests/test_harness_contract.py",
+          "tests/test_orchestration_scripts.py"
+        ]
+      }
+    },
+    {
+      "step_id": "ST3",
+      "task_title": "Align Operator Docs",
+      "display_description": "Document the shipped harness flow and prerequisites for local setup.",
+      "codex_description": "Update the tracked operator-facing docs to match the frozen harness contract from Agent A: `.local/` remains the only generated root, bootstrap and materialization are Windows-safe, `jakal-flow-local` materializes before verification, repo-local venv executables are used for CLI and UI smoke, desktop JS verification is part of readiness, and upstream full `python -m pytest` is a documented non-gating caveat for this environment setup.",
+      "model_provider": "openai",
+      "model": "gpt-5.4",
+      "reasoning_effort": "medium",
+      "depends_on": [
+        "ST1"
+      ],
+      "owned_paths": [
+        "README.md",
+        "docs/ARCHITECTURE.md"
+      ],
+      "success_criteria": "The tracked docs tell an operator how the harness now bootstraps, materializes, verifies, and what prerequisites or caveats apply, without contradicting the checked-in `.local/` layout or the intended `jakal-flow-local` readiness contract.",
+      "metadata": {
+        "step_kind": "task",
+        "merge_from": [],
+        "join_policy": "",
+        "join_reason": "",
+        "candidate_block_id": "B3",
+        "parallelizable_after": [
+          "B1",
+          "materialize-before-verify contract",
+          "non-gating upstream pytest policy"
+        ],
+        "implementation_notes": "Lock the operator guidance to the delivered behavior so a fresh user can follow the harness without assuming global Python package installs or a green upstream `main` pytest run. Keep the docs grounded in the fixed `.local/` contract and the actual smoke-based readiness definition.",
+        "is_skeleton_contract": false,
+        "skeleton_contract_docstring": "",
+        "candidate_owned_paths": [
+          "README.md",
+          "docs/ARCHITECTURE.md"
+        ]
+      }
+    }
+  ]
+}

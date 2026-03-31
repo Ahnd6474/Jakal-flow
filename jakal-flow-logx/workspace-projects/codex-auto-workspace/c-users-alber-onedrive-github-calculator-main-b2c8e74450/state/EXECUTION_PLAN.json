@@ -1,0 +1,318 @@
+{
+  "closeout_commit_hash": "cc4cee441bf41d4aab9e29e9a9fe129e2f85345e",
+  "closeout_completed_at": "2026-03-27T03:25:31+00:00",
+  "closeout_notes": "python -m pytest exited with 0",
+  "closeout_started_at": "2026-03-27T03:16:12+00:00",
+  "closeout_status": "completed",
+  "default_test_command": "python -m pytest",
+  "execution_mode": "parallel",
+  "last_updated_at": "2026-03-27T03:25:31+00:00",
+  "plan_title": "precision-scientific-calculator",
+  "project_prompt": "Build a serious high-precision engineering/scientific calculator application focused on fast, accurate numerical computation, advanced math capability, usable product-quality UI, and configurable precision.\n\nThis is NOT a toy calculator and NOT a firmware emulator.\nIt should feel like a real computational tool for demanding technical users.\n\nThe product goal is:\n- very fast and accurate numerical computation\n- practical advanced scientific/engineering features\n- configurable precision and numerical tolerance\n- polished, usable UI\n- coherent internal architecture\n- meaningful automated tests\n\nThis is a 5-day-class software project, so prioritize depth and numerical quality over excessive feature count.\n\n## Product direction\n\nThink of this as a \u201chigh-performance scientific computation calculator\u201d rather than a basic graphing calculator.\n\nIt should support advanced expression evaluation, matrix and linear algebra operations, numerical solving, controlled precision, and good UX.\n\nFeature count may be reduced slightly in order to preserve:\n- strong numerical correctness\n- efficient algorithms where practical\n- clean architecture\n- product-level usability\n\n---\n\n## Core feature set\n\n### 1. Advanced calculation mode\n\nImplement a real expression parser and evaluator.\n\nSupport:\n- `+`, `-`, `*`, `/`, `^`\n- parentheses\n- unary minus\n- scientific notation like `1.2e-12`\n- constants:\n  - `pi`\n  - `e`\n- scientific functions:\n  - `sin`, `cos`, `tan`\n  - `asin`, `acos`, `atan`\n  - `sinh`, `cosh`, `tanh`\n  - `exp`, `log`, `ln`, `log10`\n  - `sqrt`, `cbrt`\n  - `abs`, `floor`, `ceil`, `round`\n- optional but preferred if cleanly implemented:\n  - gamma\n  - erf\n  - Bessel-related support or at least a structured extension path\n\nRequirements:\n- full expression input must work\n- examples:\n  - `sin(pi/3)^2 + cos(pi/3)^2`\n  - `exp(-25) * cos(1000)`\n  - `sqrt(2)^2 - 2`\n- do NOT use unsafe raw eval as the main engine\n- parser, AST, validation, and evaluation should be clearly separated\n\n---\n\n### 2. Precision, tolerance, and numerical settings\n\nThis is a core requirement.\n\nSupport user-configurable settings for:\n- displayed precision\n- internal precision mode\n- solver tolerance\n- max iterations for iterative algorithms\n- angle mode: degree / radian\n- display mode:\n  - normal\n  - scientific\n  - engineering notation if practical\n\nRequirements:\n- user must be able to choose precision / tolerance from the UI\n- internal numerical settings must actually affect computation where relevant\n- precision settings must persist across restarts\n\nStrong preference:\n- support at least two computation backends or modes, for example:\n  - standard floating-point mode\n  - high-precision decimal mode\nor an equivalent clean precision strategy\n\n---\n\n### 3. Linear algebra / matrix mode\n\nImplement a strong matrix mode, because advanced scientific users need it more than superficial extra modes.\n\nSupport:\n- matrix input UI\n- at least 2x2 through 6x6 practical support\n- addition\n- subtraction\n- multiplication\n- transpose\n- determinant\n- inverse\n- solve linear system `Ax=b`\n\nStrong preference:\n- include one or more of:\n  - LU decomposition\n  - Gaussian elimination with partial pivoting\n  - QR decomposition if practical\n  - condition-related diagnostics where practical\n\nRequirements:\n- prioritize numerical stability\n- dimension validation and singular-matrix handling must be clear\n- matrix engine must be separate from the general parser/evaluator\n\n---\n\n### 4. Numerical solver mode\n\nImplement one-variable and preferably small-system numerical solving.\n\nMinimum required:\n- one-variable root finding\n- support:\n  - Newton-Raphson\n  - bisection\n- allow:\n  - initial guess\n  - interval bounds where appropriate\n- show convergence result or failure clearly\n\nPreferred additions if practical:\n- secant method\n- finite-difference derivative fallback\n- simple nonlinear system solving for 2 variables\n\nRequirements:\n- tolerance and max iteration settings must be respected\n- poor convergence and invalid intervals must be handled clearly\n- solver engine must be separate from UI code\n\nExamples:\n- `x^3 - x - 2 = 0`\n- `cos(x) - x = 0`\n- difficult cases should not silently fail\n\n---\n\n### 5. Numerical analysis utilities\n\nInclude a small but serious set of numerical-analysis tools.\n\nChoose a focused subset that you can implement well.\n\nRequired:\n- numerical differentiation at a point\n- numerical integration on an interval\n\nPreferred methods:\n- differentiation:\n  - central difference\n  - adaptive or improved finite difference if practical\n- integration:\n  - trapezoidal\n  - Simpson\u2019s rule\n  - adaptive Simpson if practical\n\nRequirements:\n- expose method choice where relevant\n- respect precision / tolerance settings\n- show warnings when results may be unreliable\n\n---\n\n### 6. Expression history, memory, and reusable workspace\n\nSupport:\n- `MC`, `MR`, `M+`, `M-`, `MS`\n- persistent calculation history\n- each history record should include:\n  - expression\n  - result\n  - timestamp\n  - mode used if relevant\n- ability to reuse prior expressions\n\nPreferred:\n- named variables such as:\n  - `a = 3.14`\n  - `b = sqrt(2)`\n  - later use `a*b`\nif this can be implemented cleanly\n\nRequirements:\n- history and memory must persist across restarts\n- state restoration must be reliable\n\n---\n\n## Optional feature with limited scope\n\nOnly include graphing if it is lightweight and does not harm core numerical quality.\n\nIf included, keep it narrow:\n- single-function or few-function plotting\n- zoom and trace only\n- no need for a huge graphing subsystem\n\nGraphing is secondary.\nNumerical quality, matrix/solver capability, and precision control are primary.\n\n---\n\n## UI / UX requirements\n\nThe UI must feel like a real product.\n\nRequirements:\n- clean tabbed or mode-based layout\n- likely modes:\n  - Calculate\n  - Matrix\n  - Solver\n  - Numerical Tools\n  - History / Settings\n- keyboard input must work well\n- settings must be easy to discover\n- error messages must be understandable\n- result display must support:\n  - configurable precision\n  - scientific formatting\n  - engineering formatting if implemented\n- matrix input and solver input must be reasonably usable\n- app should feel polished, not like a raw developer tool\n\nDo not waste effort replicating physical calculator hardware aesthetics.\nPrefer a clean technical desktop/web app.\n\n---\n\n## Performance and algorithm quality requirements\n\nThis is central to the project.\n\nUse efficient and numerically sensible algorithms where practical.\n\nExamples of acceptable focus:\n- partial pivoting in elimination\n- stable root-finding choices\n- method selection based on problem type\n- avoiding unnecessary recomputation\n- structured caching where safe and useful\n- separating parse/compile/evaluate steps so repeated calculations can be faster\n\nDo not add fake \u201coptimization\u201d complexity just for show.\nPrefer real, practical algorithmic quality.\n\nThe application should explicitly aim for:\n- fast repeated evaluation\n- accurate results\n- robust handling of numerically awkward inputs\n- clarity about limitations\n\n---\n\n## Architecture requirements\n\nSeparate concerns properly.\n\nAt minimum:\n- parser / tokenizer / AST\n- evaluator / numerical backend\n- matrix / linear algebra engine\n- solver engine\n- numerical-analysis engine\n- persistence layer\n- UI state and components\n\nAvoid a giant monolithic file.\nThe structure should be maintainable and extensible.\n\n---\n\n## Testing requirements\n\nAdd meaningful automated tests.\n\nAt minimum include tests for:\n- parser correctness\n- expression evaluation correctness\n- angle mode behavior\n- precision / tolerance behavior\n- matrix operations\n- linear system solving\n- root finding success and failure cases\n- numerical integration / differentiation\n- persistence logic where practical\n\nInclude some tests with numerically sensitive cases:\n- near-cancellation\n- very small / very large values\n- singular or ill-conditioned matrix cases where practical\n- non-convergent solver scenarios\n\nThe tests should verify real numerical behavior, not only smoke checks.\n\n---\n\n## README requirements\n\nProvide a clear README that includes:\n- product overview\n- setup instructions\n- run instructions\n- test instructions\n- feature summary\n- architecture summary\n- numerical methods used\n- precision model and limitations\n- non-goals\n\n---\n\n## Explicit non-goals\n\nDo NOT implement:\n- full Casio firmware emulation\n- exam mode\n- USB/file transfer workflows\n- add-in/plugin system\n- symbolic CAS\n- a huge graphing platform\n- every advanced special function in mathematics\n- massive spreadsheet/statistics subsystems\n\nThis project should be a strong, focused, high-precision computational calculator product.\n\n---\n\n## Quality bar\n\nThe final result must be:\n- runnable\n- coherent\n- numerically serious\n- reasonably fast\n- product-like in UX\n- backed by meaningful tests\n\nPrioritize:\n1. correctness\n2. numerical robustness\n3. precision configurability\n4. performance\n5. usability\n\nIf tradeoffs are necessary, cut peripheral features before sacrificing core numerical quality.",
+  "steps": [
+    {
+      "codex_description": "Scaffold the React + Tauri + TypeScript + Vitest application, establish the folder layout, and write the shared skeleton code with the provided docstring in the contract layer so all later steps implement against fixed service, settings, result, and persistence boundaries instead of redefining them. Write the skeleton code with this contract docstring in the appropriate module, class, or function: \"\"\"Shared computation contracts for the calculator. All feature UIs talk only to typed service interfaces defined here. Expression, matrix, solver, and numerical-analysis engines must remain pure modules with no React, persistence, or Tauri imports. Persisted settings and workspace state flow only through versioned schemas. New feature code may depend on settings, numeric backend, and result envelopes, but must not reach into sibling engine internals.\"\"\"",
+      "commit_hash": "70377dc106c1a6e2e5e1a94e54fed3ff338859a8",
+      "completed_at": "2026-03-27T01:47:25+00:00",
+      "depends_on": [],
+      "display_description": "Create the project skeleton and freeze shared contracts before feature work starts.",
+      "metadata": {
+        "candidate_block_id": "SK1",
+        "candidate_owned_paths": [
+          "package.json",
+          "tsconfig.json",
+          "vite.config.ts",
+          "vitest.config.ts",
+          "src-tauri",
+          "src/app",
+          "src/core/contracts",
+          "src/persistence/schema.ts"
+        ],
+        "implementation_notes": "A narrow bootstrap step reduces merge risk by fixing the package layout, shared contracts, persistence schema, and feature folder boundaries before parallel implementation begins.",
+        "is_skeleton_contract": true,
+        "parallelizable_after": [],
+        "skeleton_contract_docstring": "Shared computation contracts for the calculator. All feature UIs talk only to typed service interfaces defined here. Expression, matrix, solver, and numerical-analysis engines must remain pure modules with no React, persistence, or Tauri imports. Persisted settings and workspace state flow only through versioned schemas. New feature code may depend on settings, numeric backend, and result envelopes, but must not reach into sibling engine internals."
+      },
+      "notes": "python -m pytest exited with 0",
+      "owned_paths": [
+        "package.json",
+        "tsconfig.json",
+        "vite.config.ts",
+        "vitest.config.ts",
+        "src-tauri",
+        "src/app",
+        "src/core/contracts",
+        "src/persistence/schema.ts"
+      ],
+      "parallel_group": "",
+      "reasoning_effort": "high",
+      "started_at": "2026-03-27T00:44:20+00:00",
+      "status": "completed",
+      "step_id": "ST1",
+      "success_criteria": "The project boots into a minimal Tauri/React shell, shared computation and persistence contract modules compile, versioned settings/workspace schemas exist, and stub interfaces for calculate, matrix, solver, and numerical tools are present without cross-layer leaks.",
+      "test_command": "python -m pytest",
+      "title": "Scaffold contracts and app skeleton"
+    },
+    {
+      "codex_description": "Build the mode-based UI shell with tabs and shared result/diagnostic presentation, then implement versioned persistence for calculator settings, history, memory registers, and restored workspace state so product navigation and state management are complete without depending on engine internals.",
+      "commit_hash": "d593d757c2ab5cc5029898c92a5dccbb8b887d5b",
+      "completed_at": "2026-03-27T02:31:07+00:00",
+      "depends_on": [
+        "ST1"
+      ],
+      "display_description": "Implement the product shell and persistent settings, history, memory, and workspace state.",
+      "metadata": {
+        "candidate_block_id": "B1",
+        "candidate_owned_paths": [
+          "src/app",
+          "src/features/settings",
+          "src/features/history",
+          "src/features/memory",
+          "src/persistence"
+        ],
+        "implementation_notes": "Own the application frame and persistence-facing state management, keep the UI product-oriented rather than keypad-emulation oriented, and call engine services only through frozen contracts.",
+        "is_skeleton_contract": false,
+        "parallelizable_after": [
+          "SK1",
+          "CalculatorSettings schema",
+          "ComputationResult envelope",
+          "persistence schemas"
+        ],
+        "skeleton_contract_docstring": ""
+      },
+      "notes": "python -m pytest exited with 0",
+      "owned_paths": [
+        "src/app",
+        "src/features/settings",
+        "src/features/history",
+        "src/features/memory",
+        "src/persistence",
+        "src/components/results",
+        "tests/persistence"
+      ],
+      "parallel_group": "",
+      "reasoning_effort": "high",
+      "started_at": "2026-03-27T01:47:26+00:00",
+      "status": "completed",
+      "step_id": "ST2",
+      "success_criteria": "Tab navigation works, settings for precision/tolerance/angle/display modes persist across restart, memory and history survive restart with timestamps and mode metadata, workspace restoration is reliable, and persistence logic has focused automated coverage.",
+      "test_command": "python -m pytest",
+      "title": "Build shell, settings, and persistence workspace"
+    },
+    {
+      "codex_description": "Implement the tokenizer, AST parser, validation diagnostics, compiled evaluator, function library, and at least two numeric modes through the shared backend interface, then expose calculation-mode service/UI pieces and tests for correctness, angle handling, formatting, and numerically sensitive cases.",
+      "commit_hash": "f0d001e7adbf88d7f328b235130afe2b3a01fb7a",
+      "completed_at": "2026-03-27T02:31:07+00:00",
+      "depends_on": [
+        "ST1"
+      ],
+      "display_description": "Build the parser, evaluator, and configurable numeric backends for calculation mode.",
+      "metadata": {
+        "candidate_block_id": "B2",
+        "candidate_owned_paths": [
+          "src/core/expression",
+          "src/core/precision",
+          "src/features/calculate",
+          "tests/expression",
+          "tests/precision"
+        ],
+        "implementation_notes": "Keep parser, AST, validation, and evaluation separate so compiled expressions can be reused, and make the backend abstraction cover arithmetic, elementary functions, comparisons, and formatting with explicit behavior for high-precision limitations.",
+        "is_skeleton_contract": false,
+        "parallelizable_after": [
+          "SK1",
+          "NumericBackend interface",
+          "expression pipeline contract"
+        ],
+        "skeleton_contract_docstring": ""
+      },
+      "notes": "python -m pytest exited with 0",
+      "owned_paths": [
+        "src/core/expression",
+        "src/core/precision",
+        "src/services/calculate",
+        "src/features/calculate",
+        "tests/expression",
+        "tests/precision"
+      ],
+      "parallel_group": "",
+      "reasoning_effort": "high",
+      "started_at": "2026-03-27T01:47:26+00:00",
+      "status": "completed",
+      "step_id": "ST3",
+      "success_criteria": "Complex expressions evaluate correctly under both precision modes, invalid expressions return structured diagnostics, display formatting honors settings, angle mode changes trig behavior correctly, and automated tests cover parser/evaluator correctness plus small/large and near-cancellation cases.",
+      "test_command": "python -m pytest",
+      "title": "Implement expression engine and precision modes"
+    },
+    {
+      "codex_description": "Implement a separate matrix engine and matrix-mode UI for practical 2x2 through 6x6 work, including core operations, determinant, inverse, and linear solve using a numerically sensible elimination strategy with clear dimension and singularity diagnostics.",
+      "commit_hash": "00f2b7386b2929e8a03978ff77b5e06677dc7793",
+      "completed_at": "2026-03-27T02:31:07+00:00",
+      "depends_on": [
+        "ST1"
+      ],
+      "display_description": "Add stable matrix operations and a dedicated matrix workflow.",
+      "metadata": {
+        "candidate_block_id": "B3",
+        "candidate_owned_paths": [
+          "src/core/matrix",
+          "src/features/matrix",
+          "tests/matrix"
+        ],
+        "implementation_notes": "Keep the matrix engine separate from the expression parser, use the shared numeric backend where feasible, and favor Gaussian elimination with partial pivoting or a clean equivalent as the minimum stable path.",
+        "is_skeleton_contract": false,
+        "parallelizable_after": [
+          "SK1",
+          "NumericBackend interface",
+          "ComputationResult envelope"
+        ],
+        "skeleton_contract_docstring": ""
+      },
+      "notes": "python -m pytest exited with 0",
+      "owned_paths": [
+        "src/core/matrix",
+        "src/services/matrix",
+        "src/features/matrix",
+        "tests/matrix"
+      ],
+      "parallel_group": "",
+      "reasoning_effort": "high",
+      "started_at": "2026-03-27T01:47:26+00:00",
+      "status": "completed",
+      "step_id": "ST4",
+      "success_criteria": "Matrix mode supports input and operations for practical matrix sizes, linear solve uses partial pivoting or an equivalent stable method, singular or dimension errors are explicit, and tests verify determinant, inverse, solve, and edge-case behavior.",
+      "test_command": "python -m pytest",
+      "title": "Implement matrix engine and matrix mode"
+    },
+    {
+      "codex_description": "Build a pure solver engine for one-variable root finding with Newton-Raphson and bisection, wire it into a dedicated solver mode UI, and ensure tolerance, iteration limits, convergence metadata, and failure diagnostics all flow through the shared result envelope.",
+      "commit_hash": "63a5ee640e795662ebc08bf5fbbd93bac286d9b8",
+      "completed_at": "2026-03-27T03:02:26+00:00",
+      "depends_on": [
+        "ST2",
+        "ST3"
+      ],
+      "display_description": "Implement root-finding services and solver UI on top of the shared expression pipeline.",
+      "metadata": {
+        "candidate_block_id": "B4",
+        "candidate_owned_paths": [
+          "src/core/solver",
+          "src/features/solver",
+          "tests/solver"
+        ],
+        "implementation_notes": "Build solver services on compiled expressions rather than UI state, prefer stable method selection between bisection and Newton, and make convergence behavior explicit rather than silent.",
+        "is_skeleton_contract": false,
+        "parallelizable_after": [
+          "B2",
+          "CalculatorSettings schema",
+          "expression pipeline contract",
+          "ComputationResult envelope"
+        ],
+        "skeleton_contract_docstring": ""
+      },
+      "notes": "python -m pytest exited with 0",
+      "owned_paths": [
+        "src/core/solver",
+        "src/services/solver",
+        "src/features/solver",
+        "tests/solver"
+      ],
+      "parallel_group": "",
+      "reasoning_effort": "medium",
+      "started_at": "2026-03-27T02:31:12+00:00",
+      "status": "completed",
+      "step_id": "ST5",
+      "success_criteria": "Users can solve one-variable equations with initial guesses and interval bounds where appropriate, tolerance and max iterations are respected, invalid intervals and poor convergence are reported clearly, and tests cover success, failure, and non-convergent scenarios.",
+      "test_command": "python -m pytest",
+      "title": "Add numerical solver mode"
+    },
+    {
+      "codex_description": "Build a pure numerical-analysis engine and focused UI for point differentiation and interval integration, expose method selection such as central difference and trapezoidal or Simpson variants, and route tolerance-aware warnings and formatted outputs through the shared service boundary.",
+      "commit_hash": "16e063edc3b8be759b302048a2a81847442703fd",
+      "completed_at": "2026-03-27T03:02:26+00:00",
+      "depends_on": [
+        "ST2",
+        "ST3"
+      ],
+      "display_description": "Implement differentiation and integration utilities with method choice and reliability warnings.",
+      "metadata": {
+        "candidate_block_id": "B5",
+        "candidate_owned_paths": [
+          "src/core/numerical",
+          "src/features/numerical-tools",
+          "tests/numerical"
+        ],
+        "implementation_notes": "Use the compiled expression service and shared backend settings, keep the feature set focused, and prefer a small set of serious methods over broad but shallow tooling.",
+        "is_skeleton_contract": false,
+        "parallelizable_after": [
+          "B2",
+          "CalculatorSettings schema",
+          "ComputationResult envelope"
+        ],
+        "skeleton_contract_docstring": ""
+      },
+      "notes": "python -m pytest exited with 0",
+      "owned_paths": [
+        "src/core/numerical",
+        "src/services/numerical",
+        "src/features/numerical-tools",
+        "tests/numerical"
+      ],
+      "parallel_group": "",
+      "reasoning_effort": "medium",
+      "started_at": "2026-03-27T02:31:12+00:00",
+      "status": "completed",
+      "step_id": "ST6",
+      "success_criteria": "Numerical tools support differentiation and integration with selectable methods, respect relevant settings and tolerances, surface warnings when estimates may be unreliable, and tests cover representative accurate and failure-prone numerical cases.",
+      "test_command": "python -m pytest",
+      "title": "Add numerical analysis tools"
+    },
+    {
+      "codex_description": "Integrate the completed feature modules into the shared shell, finish any cross-feature wiring needed for a runnable maintainable prototype, and write the README so setup, run/test commands, architecture, numerical methods, precision model, limitations, and non-goals are explicit.",
+      "commit_hash": "d79960248c91c256e66c4fc2bbcd84509de96a9a",
+      "completed_at": "2026-03-27T03:16:11+00:00",
+      "depends_on": [
+        "ST2",
+        "ST3",
+        "ST4",
+        "ST5",
+        "ST6"
+      ],
+      "display_description": "Wire all feature slices into one runnable app and document how it works.",
+      "metadata": {
+        "candidate_block_id": "B6",
+        "candidate_owned_paths": [
+          "README.md",
+          "src/app/App.tsx",
+          "tests/integration"
+        ],
+        "implementation_notes": "Finish the runnable prototype by wiring feature slices together without breaking the frozen service boundaries, and capture the numerical and product decisions clearly in documentation.",
+        "is_skeleton_contract": false,
+        "parallelizable_after": [
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "B5"
+        ],
+        "skeleton_contract_docstring": ""
+      },
+      "notes": "python -m pytest exited with 0",
+      "owned_paths": [
+        "README.md",
+        "src/app/App.tsx",
+        "src/app/providers",
+        "tests/integration"
+      ],
+      "parallel_group": "",
+      "reasoning_effort": "medium",
+      "started_at": "2026-03-27T03:02:29+00:00",
+      "status": "completed",
+      "step_id": "ST7",
+      "success_criteria": "The app presents all planned modes in one coherent flow, shared settings and result presentation work consistently across features, any required integration tests or smoke validations are in place, and the README fully documents usage, architecture, numerical methods, precision limits, and non-goals.",
+      "test_command": "python -m pytest",
+      "title": "Integrate product flow and project docs"
+    }
+  ],
+  "summary": "Start by scaffolding a React + Tauri + TypeScript calculator shell and freezing the shared computation, settings, and persistence contracts so feature work can proceed safely in parallel. Then build three independent slices in parallel: the product shell with persisted settings/history/memory, the expression and precision engine for calculation mode, and the matrix engine with its own UI. Once the expression core and shell exist, add the solver and numerical tools as separate feature slices, then finish by wiring all slices into one runnable app and documenting the architecture, numerical methods, and precision model.",
+  "workflow_mode": "standard"
+}
