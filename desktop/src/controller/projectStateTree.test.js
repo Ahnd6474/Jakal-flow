@@ -135,7 +135,7 @@ test("buildProjectStateTree branches execution, detail, listing, and ui from one
   assert.equal(tree.execution.chatJob?.id, "job-chat");
   assert.deepEqual(tree.execution.queuedJobs.map((job) => job.id), ["job-other", "job-run"]);
   assert.equal(tree.ui.busy, true);
-  assert.equal(tree.ui.canRequestStop, false);
+  assert.equal(tree.ui.canRequestStop, true);
   assert.equal(tree.ui.canCancelReservation, true);
   assert.equal(tree.detail.normalized.project.current_status, "queued:run-plan");
   assert.equal(tree.detail.normalized.snapshot.project.current_status, "queued:run-plan");

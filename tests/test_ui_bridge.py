@@ -5636,6 +5636,52 @@ class UIBridgeTests(unittest.TestCase):
             self.assertTrue(detail["workspace_tree"])
             self.assertTrue(detail["activity"])
 
+    def test_save_project_setup_persists_runtime_fields_from_desktop_payload(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Runtime Persistence Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": {
+                    "model": "gpt-5.4",
+                    "execution_model": "gpt-5.4-mini",
+                    "allow_background_queue": False,
+                    "require_checkpoint_approval": False,
+                    "checkpoint_interval_blocks": 3,
+                    "parallel_worker_mode": "manual",
+                    "parallel_workers": 2,
+                    "parallel_memory_per_worker_gib": 4.5,
+                    "local_model_provider": "lmstudio",
+                    "chat_model_provider": "oss",
+                    "chat_local_model_provider": "ollama",
+                    "chat_model": "llama3.2",
+                    "generate_word_report": True,
+                },
+            }
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"), mock.patch(
+                "jakal_flow.ui_bridge.fetch_codex_backend_snapshot",
+                side_effect=lambda *args, **kwargs: fake_codex_snapshot(),
+            ):
+                detail = run_command("save-project-setup", workspace_root, payload)
+
+            self.assertEqual(detail["runtime"]["execution_model"], "gpt-5.4-mini")
+            self.assertFalse(detail["runtime"]["allow_background_queue"])
+            self.assertFalse(detail["runtime"]["require_checkpoint_approval"])
+            self.assertEqual(detail["runtime"]["checkpoint_interval_blocks"], 3)
+            self.assertEqual(detail["runtime"]["parallel_worker_mode"], "manual")
+            self.assertEqual(detail["runtime"]["parallel_workers"], 2)
+            self.assertAlmostEqual(detail["runtime"]["parallel_memory_per_worker_gib"], 4.5)
+            self.assertEqual(detail["runtime"]["chat_model_provider"], "oss")
+            self.assertEqual(detail["runtime"]["chat_local_model_provider"], "ollama")
+            self.assertEqual(detail["runtime"]["chat_model"], "llama3.2")
+            self.assertTrue(detail["runtime"]["generate_word_report"])
+
     def test_load_project_exposes_structured_planning_progress(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

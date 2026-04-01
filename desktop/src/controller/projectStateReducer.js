@@ -38,5 +38,9 @@ export function reduceSelectedProjectState(input = {}) {
     busy: ui.busy,
     canRequestStop: ui.canRequestStop,
     canCancelReservation: ui.canCancelReservation,
+    hasRunnablePlan: ui.hasRunnablePlan,
+    runActionDisabled: ui.runActionDisabled,
+    runActionRunning: ui.runActionRunning,
+    canRunPlan: ui.canRunPlan,
   };
 }

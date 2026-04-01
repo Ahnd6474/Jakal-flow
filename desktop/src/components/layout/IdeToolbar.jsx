@@ -359,6 +359,8 @@ export const IdeToolbar = memo(function IdeToolbar({
   pendingCheckpoint,
   busy,
   activeJob,
+  runActionDisabled,
+  runActionRunning,
   activeCenterTab,
   projectPath,
   githubUrl,
@@ -388,14 +390,18 @@ export const IdeToolbar = memo(function IdeToolbar({
   });
 
   const tone = statusTone(executionState.displayStatusValue);
-  const runActionRunning = isActiveExecutionStatus(executionState.displayStatusValue);
-  const runActionDisabled =
+  const resolvedRunActionRunning = typeof runActionRunning === "boolean"
+    ? runActionRunning
+    : isActiveExecutionStatus(executionState.displayStatusValue);
+  const resolvedRunActionDisabled = typeof runActionDisabled === "boolean"
+    ? runActionDisabled
+    :
     busy
     || !executionState.consistent
-    || runActionRunning
+    || resolvedRunActionRunning
     || isPlanningProgressRunning(projectDetail?.planning_progress)
     || executionState.checkpointFamily === "checkpoint";
-  const runActionLabel = runActionRunning ? displayStatus("running", language) : t("action.run");
+  const runActionLabel = resolvedRunActionRunning ? displayStatus("running", language) : t("action.run");
   const repoPath = String(projectPath || "").trim();
   const remoteUrl = String(githubUrl || "").trim();
 
@@ -505,7 +511,7 @@ export const IdeToolbar = memo(function IdeToolbar({
           className="toolbar-btn toolbar-btn--accent"
           onClick={onRunPlan}
           type="button"
-          disabled={runActionDisabled}
+          disabled={resolvedRunActionDisabled}
           title={runActionLabel}
         >
           <RunIcon />

@@ -994,6 +994,7 @@ export const SidebarPane = memo(function SidebarPane({
   queuedJobs = [],
   onCancelQueuedJob,
   onRunPlan = () => {},
+  canRunPlan = false,
   chat = {},
   selectedChatSessionId = "",
   chatDraftSession = false,
@@ -1311,7 +1312,7 @@ export const SidebarPane = memo(function SidebarPane({
               queuedJobs={queuedJobs}
               onCancelQueuedJob={onCancelQueuedJob}
               onAddReservationRun={onRunPlan}
-              canAddReservationRun={Boolean(detail?.project?.repo_path) && !busy}
+              canAddReservationRun={canRunPlan}
               language={language}
               t={t}
             />

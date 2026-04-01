@@ -17,6 +17,7 @@ import {
   jobHasNewerActiveReplacement,
   mergeModelCatalogs,
   modelCatalogOptionValue,
+  providerHasRemainingUsage,
   projectDetailStatus,
   projectScopedJobFromJobs,
   projectFormFromDetail,
@@ -249,6 +250,36 @@ test("groupedModelCatalogOptions filters unusable providers and keeps local mode
 
   assert.deepEqual(tree.entries.map((item) => item.model), ["gpt-5.4", "llama3.2"]);
   assert.deepEqual(tree.groups.map((group) => group.label), ["OpenAI/Codex", "Local Runtime / Ollama"]);
+});
+
+test("groupedModelCatalogOptions hides exhausted Codex providers when quota data is present", () => {
+  const codexStatus = {
+    rate_limits: {
+      default_limit_id: "codex",
+      items: [
+        {
+          limit_id: "codex",
+          limit_name: "Codex",
+          primary: { remaining_percent: 0 },
+          secondary: { remaining_percent: 0 },
+        },
+      ],
+    },
+  };
+
+  assert.equal(providerHasRemainingUsage("openai", codexStatus), false);
+
+  const tree = groupedModelCatalogOptions(
+    [
+      { model: "gpt-5.4", display_name: "GPT-5.4", provider: "openai", hidden: false },
+      { model: "claude-sonnet-4-6", display_name: "Claude Sonnet 4.6", provider: "claude", hidden: false },
+    ],
+    { model_provider: "openai" },
+    codexStatus,
+    { scope: "all" },
+  );
+
+  assert.deepEqual(tree.entries.map((item) => item.model), ["claude-sonnet-4-6"]);
 });
 
 test("mergeModelCatalogs preserves both global and detail model catalogs without duplicating entries", () => {

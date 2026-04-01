@@ -13,12 +13,15 @@ const SPLIT_GAP = 44;
 const MERGE_GAP = 38;
 
 const PALETTE = {
-  neutral: { fill: "#1f2937", stroke: "#475569", text: "#e5e7eb", meta: "#94a3b8" },
-  info: { fill: "#172554", stroke: "#3b82f6", text: "#dbeafe", meta: "#93c5fd" },
-  success: { fill: "#052e2b", stroke: "#14b8a6", text: "#ccfbf1", meta: "#5eead4" },
-  warning: { fill: "#422006", stroke: "#f59e0b", text: "#fef3c7", meta: "#fcd34d" },
-  danger: { fill: "#450a0a", stroke: "#ef4444", text: "#fee2e2", meta: "#fca5a5" },
+  neutral: { fill: "#f8fafc", stroke: "#94a3b8", text: "#0f172a", meta: "#475569" },
+  info: { fill: "#e0f2fe", stroke: "#0284c7", text: "#082f49", meta: "#0369a1" },
+  success: { fill: "#dcfce7", stroke: "#16a34a", text: "#14532d", meta: "#15803d" },
+  warning: { fill: "#fef3c7", stroke: "#d97706", text: "#78350f", meta: "#b45309" },
+  danger: { fill: "#fee2e2", stroke: "#dc2626", text: "#7f1d1d", meta: "#b91c1c" },
 };
+const EDGE_STROKE = "#94a3b8";
+const EDGE_FILL = "#ffffff";
+const SELECTED_STROKE = "#0f172a";
 const TOPOLOGY_CACHE_LIMIT = 24;
 const chartTopologyCache = new Map();
 
@@ -578,18 +581,18 @@ function ExecutionFlowChartComponent({ steps = [], detail = null, activeJob = nu
               orient="auto"
               markerUnits="strokeWidth"
             >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+              <path d="M 0 0 L 10 5 L 0 10 z" fill={EDGE_STROKE} />
             </marker>
           </defs>
 
           {chart.nodeToSplitSegments.map((segment) => (
-            <path key={segment.key} d={segment.d} stroke="#64748b" strokeWidth="3" fill="none" strokeLinecap="round" />
+            <path key={segment.key} d={segment.d} stroke={EDGE_STROKE} strokeWidth="3" fill="none" strokeLinecap="round" />
           ))}
           {chart.edgeSegments.map((segment) => (
             <path
               key={segment.key}
               d={segment.d}
-              stroke="#64748b"
+              stroke={EDGE_STROKE}
               strokeWidth="3"
               fill="none"
               strokeLinecap="round"
@@ -598,13 +601,13 @@ function ExecutionFlowChartComponent({ steps = [], detail = null, activeJob = nu
             />
           ))}
           {chart.mergeBusSegments.map((segment) => (
-            <path key={segment.key} d={segment.d} stroke="#64748b" strokeWidth="3" fill="none" strokeLinecap="round" />
+            <path key={segment.key} d={segment.d} stroke={EDGE_STROKE} strokeWidth="3" fill="none" strokeLinecap="round" />
           ))}
           {chart.mergeToNodeSegments.map((segment) => (
             <path
               key={segment.key}
               d={segment.d}
-              stroke="#64748b"
+              stroke={EDGE_STROKE}
               strokeWidth="3"
               fill="none"
               strokeLinecap="round"
@@ -612,16 +615,16 @@ function ExecutionFlowChartComponent({ steps = [], detail = null, activeJob = nu
             />
           ))}
           {chart.splitJunctions.map((junction, index) => (
-            <circle key={`split-${index}`} cx={junction.x} cy={junction.y} r="5" fill="#0f172a" stroke="#64748b" strokeWidth="2" />
+            <circle key={`split-${index}`} cx={junction.x} cy={junction.y} r="5" fill={EDGE_FILL} stroke={EDGE_STROKE} strokeWidth="2" />
           ))}
           {chart.mergeJunctions.map((junction, index) => (
-            <circle key={`merge-${index}`} cx={junction.x} cy={junction.y} r="5" fill="#0f172a" stroke="#64748b" strokeWidth="2" />
+            <circle key={`merge-${index}`} cx={junction.x} cy={junction.y} r="5" fill={EDGE_FILL} stroke={EDGE_STROKE} strokeWidth="2" />
           ))}
 
           {chart.nodes.map((node) => {
             const selected = node.step.step_id === selectedStepId;
-            const stroke = selected ? "#f8fafc" : node.palette.stroke;
-            const strokeWidth = selected ? 3 : 2;
+            const stroke = selected ? SELECTED_STROKE : node.palette.stroke;
+            const strokeWidth = selected ? 3.25 : 2;
             return (
               <g
                 key={node.step.step_id}

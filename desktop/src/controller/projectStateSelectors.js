@@ -22,6 +22,10 @@ const EMPTY_UI = Object.freeze({
   busy: false,
   canRequestStop: false,
   canCancelReservation: false,
+  hasRunnablePlan: false,
+  runActionDisabled: true,
+  runActionRunning: false,
+  canRunPlan: false,
 });
 
 const EMPTY_WORKSPACE_STATS = Object.freeze({

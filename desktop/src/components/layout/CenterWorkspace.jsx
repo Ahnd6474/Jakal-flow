@@ -210,6 +210,7 @@ function centerWorkspacePropsEqual(previousProps, nextProps) {
         && previousProps.selectedStepId === nextProps.selectedStepId
         && previousProps.form === nextProps.form
         && previousProps.busy === nextProps.busy
+        && previousProps.runActionDisabled === nextProps.runActionDisabled
         && previousProps.canRequestStop === nextProps.canRequestStop
         && previousProps.canCancelReservation === nextProps.canCancelReservation
         && sameQueuedJobs(previousProps.queuedJobs, nextProps.queuedJobs)
@@ -275,6 +276,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
   modelPresets,
   modelCatalog,
   busy,
+  runActionDisabled,
   canRequestStop,
   canCancelReservation,
   shareBusy,
@@ -437,6 +439,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
             autoRunAfterPlan={autoRunAfterPlan}
             selectedStepId={selectedStepId}
             busy={busy}
+            runActionDisabled={runActionDisabled}
             canRequestStop={canRequestStop}
             canCancelReservation={canCancelReservation}
             queuedJobs={queuedJobs}

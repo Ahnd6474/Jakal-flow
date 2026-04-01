@@ -2045,6 +2045,37 @@ test("buildProjectPayload keeps a manually entered origin URL", () => {
   assert.equal(payload.origin_url, "https://github.com/openai/demo-app.git");
 });
 
+test("buildProjectPayload preserves runtime fields that must reach the backend bridge", () => {
+  const payload = buildProjectPayload({
+    project_dir: "demo",
+    display_name: "demo",
+    branch: "main",
+    origin_url: "",
+    github_mode: "existing",
+    runtime: {
+      execution_model: "gpt-5.4-mini",
+      allow_background_queue: false,
+      require_checkpoint_approval: false,
+      checkpoint_interval_blocks: 3,
+      parallel_memory_per_worker_gib: 4.5,
+      local_model_provider: "lmstudio",
+      chat_model_provider: "oss",
+      generate_word_report: true,
+    },
+  });
+
+  assert.deepEqual(payload.runtime, {
+    execution_model: "gpt-5.4-mini",
+    allow_background_queue: false,
+    require_checkpoint_approval: false,
+    checkpoint_interval_blocks: 3,
+    parallel_memory_per_worker_gib: 4.5,
+    local_model_provider: "lmstudio",
+    chat_model_provider: "oss",
+    generate_word_report: true,
+  });
+});
+
 test("buildRunPlanPayloadFromDetail reuses the generated plan and persisted runtime", () => {
   const detail = {
     project: {

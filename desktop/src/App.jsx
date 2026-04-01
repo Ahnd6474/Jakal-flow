@@ -297,6 +297,8 @@ export default function App() {
         pendingCheckpoint={detail?.checkpoints?.pending || null}
         busy={controller.busy}
         activeJob={controller.activeJob}
+        runActionDisabled={controller.runActionDisabled}
+        runActionRunning={controller.runActionRunning}
         activeCenterTab={controller.centerTab}
         projectPath={detail?.project?.repo_path || controller.projectForm?.project_dir || ""}
         githubUrl={detail?.github?.origin_url || detail?.github?.repo_url || controller.projectForm?.origin_url || ""}
@@ -364,6 +366,7 @@ export default function App() {
               github={deferredDetail?.github}
               planPrompt={controller.planDraft?.project_prompt || ""}
               onRunPlan={controller.runPlan}
+              canRunPlan={controller.canRunPlan}
               onOpenFolder={controller.openRepoInFolder}
               onOpenVsCode={controller.openRepoInVsCode}
               onOpenGithub={controller.openRepoOnGithub}
@@ -397,6 +400,7 @@ export default function App() {
                 modelPresets={controller.modelPresets}
                 modelCatalog={controller.modelCatalog}
                 busy={controller.busy}
+                runActionDisabled={controller.runActionDisabled}
                 canRequestStop={controller.canRequestStop}
                 canCancelReservation={controller.canCancelReservation}
                 shareBusy={controller.shareBusy}
@@ -487,6 +491,7 @@ export default function App() {
                   activeJob={controller.activeJob}
                   chatJob={controller.chatJob}
                   busy={controller.busy}
+                  runActionDisabled={controller.runActionDisabled}
                   autoRunAfterPlan={controller.autoRunAfterPlan}
                   canRequestStop={controller.canRequestStop}
                   canCancelReservation={controller.canCancelReservation}

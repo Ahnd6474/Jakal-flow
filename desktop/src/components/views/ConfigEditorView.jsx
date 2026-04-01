@@ -332,7 +332,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
       ) : null}
       {visibleModels.length ? (
         <label className="field field--wide" style={{ marginTop: "4px" }}>
-          <span>{t("field.model")}</span>
+          <span>{language === "ko" ? "프로젝트 모델" : "Project model"}</span>
           <select
             value={selectedModel}
             onChange={(event) =>
@@ -364,6 +364,11 @@ export const ConfigEditorView = memo(function ConfigEditorView({
               </optgroup>
             ))}
           </select>
+          <small className="field-hint">
+            {language === "ko"
+              ? "계획 생성, 프로젝트 기본 추론, 별도 지정이 없는 기본 동작에 사용됩니다."
+              : "Used for planning, project-level reasoning, and the default runtime path when no block override is set."}
+          </small>
         </label>
       ) : programSettingsAllowsModelSlugInput(selectedProvider) ? (
         <label className="field field--wide" style={{ marginTop: "4px" }}>
@@ -413,7 +418,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
         </select>
       </label>
       <label className="field field--wide" style={{ marginTop: "4px" }}>
-        <span>{language === "ko" ? "실행 모델" : "Block execution model"}</span>
+        <span>{language === "ko" ? "블록 실행 모델" : "Block execution model"}</span>
         <select
           value={selectedExecutionModel}
           onChange={(event) =>
@@ -441,8 +446,8 @@ export const ConfigEditorView = memo(function ConfigEditorView({
         </select>
         <small className="field-hint">
           {language === "ko"
-            ? "계획 후 저장된 블록을 실행할 때 사용하는 기본 모델입니다."
-            : "Used when running saved blocks after planning."}
+            ? "계획이 만들어진 뒤 각 블록이 실제 실행될 때 쓰는 기본 모델입니다. 블록별 모델 지정이 있으면 그 설정이 우선합니다."
+            : "Default model used when executing saved blocks after planning. Per-block model overrides take precedence."}
         </small>
       </label>
     </div>

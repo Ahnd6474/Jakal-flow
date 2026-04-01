@@ -2382,7 +2382,13 @@ function shouldKeepModelCatalogEntry(item = {}, runtime = {}, codexStatus = {}, 
   if (scope === "provider" && providerSupportsCatalog(provider) && !providerUsable(provider, codexStatus)) {
     return false;
   }
+  if (scope === "provider" && providerSupportsCatalog(provider) && !providerHasRemainingUsage(provider, codexStatus)) {
+    return false;
+  }
   if (scope === "all" && !providerUsable(modelEntryStatusProvider(item), codexStatus)) {
+    return false;
+  }
+  if (scope === "all" && !providerHasRemainingUsage(modelEntryStatusProvider(item), codexStatus)) {
     return false;
   }
   if (scope === "all" && respectLocalProvider && catalogEntryProvider(item) === "oss") {
@@ -2745,14 +2751,50 @@ function findRateLimitItem(rateLimits = [], matcher) {
   );
 }
 
+function defaultRateLimitItem(codexStatus = {}) {
+  const rateLimits = Array.isArray(codexStatus?.rate_limits?.items) ? codexStatus.rate_limits.items : [];
+  const defaultLimitId = String(codexStatus?.rate_limits?.default_limit_id || "").trim().toLowerCase();
+  return (
+    findRateLimitItem(rateLimits, (_haystack, item) => String(item?.limit_id || "").trim().toLowerCase() === defaultLimitId)
+    || findRateLimitItem(rateLimits, (haystack) => haystack.includes("codex"))
+    || rateLimits[0]
+    || null
+  );
+}
+
+function quotaWindowHasRemaining(window = null) {
+  if (!window || typeof window !== "object") {
+    return false;
+  }
+  return (Number.parseInt(String(window?.remaining_percent ?? 0), 10) || 0) > 0;
+}
+
+export function providerHasRemainingUsage(provider = "openai", codexStatus = {}) {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const status = providerStatusMap(codexStatus)[normalizedProvider];
+  if (typeof status?.quota_available === "boolean") {
+    return status.quota_available;
+  }
+  if (normalizedProvider !== "openai") {
+    return true;
+  }
+  const defaultItem = defaultRateLimitItem(codexStatus);
+  if (!defaultItem || typeof defaultItem !== "object") {
+    return true;
+  }
+  if (quotaWindowHasRemaining(defaultItem.primary) || quotaWindowHasRemaining(defaultItem.secondary)) {
+    return true;
+  }
+  const credits = defaultItem.credits;
+  if (credits && typeof credits === "object") {
+    return Boolean(credits.unlimited || credits.has_credits);
+  }
+  return false;
+}
+
 export function codexUsageBuckets(codexStatus = {}, language = "en") {
   const rateLimits = codexStatus?.rate_limits?.items || [];
-  const defaultLimitId = String(codexStatus?.rate_limits?.default_limit_id || "").trim().toLowerCase();
-  const defaultItem =
-    findRateLimitItem(rateLimits, (_haystack, item) => String(item?.limit_id || "").trim().toLowerCase() === defaultLimitId) ||
-    findRateLimitItem(rateLimits, (haystack) => haystack.includes("codex")) ||
-    rateLimits[0] ||
-    null;
+  const defaultItem = defaultRateLimitItem(codexStatus);
   const sparkItem = findRateLimitItem(rateLimits, (haystack) => haystack.includes("spark"));
   return [
     {

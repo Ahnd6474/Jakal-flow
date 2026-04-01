@@ -5,6 +5,9 @@ import {
   visibleExecutionJob,
 } from "../domain/projectExecution.js";
 import {
+  deriveExecutionUiState,
+  isActiveExecutionStatus,
+  isPlanningProgressRunning,
   sanitizeProjectDetailForJobState,
   sanitizeProjectListForJobState,
   workspaceStatsFromProjects,
@@ -19,6 +22,10 @@ function normalizedStatus(value = "") {
 }
 
 function normalizedProject(value = null) {
+  return value && typeof value === "object" ? value : {};
+}
+
+function normalizedPlan(value = null) {
   return value && typeof value === "object" ? value : {};
 }
 
@@ -105,14 +112,40 @@ export function buildProjectExecutionBranch(input = {}) {
 
 export function buildProjectUiBranch(input = {}) {
   const execution = input.execution || buildProjectExecutionBranch(input);
+  const detail = input.detail ?? input.projectDetail ?? null;
+  const planDraft = normalizedPlan(input.planDraft);
+  const executionState = deriveExecutionUiState(detail, planDraft, execution.activeJob);
+  const displayStatus = normalizedStatus(executionState.displayStatusValue);
+  const hasProjectTarget = Boolean(
+    normalizedText(input.identity?.project_dir || detail?.project?.repo_path || input.projectForm?.project_dir),
+  );
+  const hasRunnablePlan = Array.isArray(executionState.livePlan?.steps) && executionState.livePlan.steps.length > 0;
+  const runActionRunning = displayStatus === "running" || displayStatus.startsWith("running:");
+  const runActionDisabled = Boolean(
+    input.pendingAction
+    || input.startingJobCount > 0
+    || !hasProjectTarget
+    || !hasRunnablePlan
+    || !executionState.consistent
+    || isActiveExecutionStatus(displayStatus)
+    || isPlanningProgressRunning(detail?.planning_progress)
+    || executionState.checkpointFamily === "checkpoint",
+  );
   return {
     busy: Boolean(
       input.pendingAction
       || input.startingJobCount > 0
       || ["queued", "running"].includes(normalizedStatus(execution.activeJob?.status))
     ),
-    canRequestStop: normalizedStatus(execution.stoppableJob?.status) === "running",
+    canRequestStop:
+      runActionRunning
+      || normalizedStatus(execution.chatJob?.status) === "running"
+      || normalizedStatus(execution.stoppableJob?.status) === "running",
     canCancelReservation: normalizedStatus(execution.activeJob?.status) === "queued",
+    hasRunnablePlan,
+    runActionDisabled,
+    runActionRunning,
+    canRunPlan: !runActionDisabled,
   };
 }
 

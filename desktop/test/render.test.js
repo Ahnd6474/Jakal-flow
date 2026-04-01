@@ -4258,6 +4258,7 @@ test("SidebarPane reservations tab exposes an add queued run action", async () =
       onSelectHistory: noop,
       onNewProject: noop,
       onRunPlan: noop,
+      canRunPlan: true,
       workspaceTree: [],
       checkpoints: { items: [] },
       detail: {
@@ -4283,6 +4284,45 @@ test("SidebarPane reservations tab exposes an add queued run action", async () =
   assert.match(html, /Add Queued Run/);
   assert.match(html, /Demo/);
   assert.match(html, /sidebar-count-badge">1</);
+});
+
+test("SidebarPane reservations tab disables the queued run action when centralized run controls block execution", async () => {
+  const html = await renderBundledComponent(
+    "sidebar-pane-reservations-disabled-render",
+    "./src/components/layout/SidebarPane.jsx",
+    "SidebarPane",
+    {
+      activeTab: "reservations",
+      onChangeTab: noop,
+      projects: [],
+      historyProjects: [],
+      selectedProjectId: "demo",
+      selectedHistoryId: "",
+      loadingProjectId: "",
+      projectFilter: "",
+      workspaceFilter: "",
+      onProjectFilterChange: noop,
+      onWorkspaceFilterChange: noop,
+      onSelectProject: noop,
+      onSelectHistory: noop,
+      onNewProject: noop,
+      onRunPlan: noop,
+      canRunPlan: false,
+      workspaceTree: [],
+      checkpoints: { items: [] },
+      detail: {
+        project: {
+          repo_path: "C:/demo",
+        },
+      },
+      queuedJobs: [],
+      onCancelQueuedJob: noop,
+      busy: false,
+    },
+  );
+
+  assert.match(html, /Add Queued Run/);
+  assert.match(html, /disabled/);
 });
 
 test("SidebarPane hides the content panel when no sidebar icon is active", async () => {

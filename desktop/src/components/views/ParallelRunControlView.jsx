@@ -446,6 +446,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
   selectedStepId,
   form,
   busy,
+  runActionDisabled,
   canRequestStop = false,
   canCancelReservation = false,
   queuedJobs = [],
@@ -557,7 +558,9 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
     || "",
   ).trim();
   const activeJobStatus = String(executionJob?.status || "").trim().toLowerCase();
-  const runActionDisabled =
+  const resolvedRunActionDisabled = typeof runActionDisabled === "boolean"
+    ? runActionDisabled
+    :
     busy
     || !executionState.consistent
     || isActiveExecutionStatus(projectStatus)
@@ -642,7 +645,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
           <button className="toolbar-btn" onClick={onSavePlan} type="button" disabled={busy}><SaveIcon /><span>{t("action.save")}</span></button>
           <button className="toolbar-btn" onClick={onResetPlan} type="button"><ResetIcon /><span>{t("action.reset")}</span></button>
           <div className="toolbar-divider" />
-          <button className="toolbar-btn toolbar-btn--accent" onClick={onRunPlan} type="button" disabled={runActionDisabled}><RunIcon /><span>{t("action.run")}</span></button>
+          <button className="toolbar-btn toolbar-btn--accent" onClick={onRunPlan} type="button" disabled={resolvedRunActionDisabled}><RunIcon /><span>{t("action.run")}</span></button>
           {canCancelReservation ? (
             <button className="toolbar-btn" onClick={() => onCancelQueuedJob?.(activeJob?.id)} type="button">{t("action.cancelReservation")}</button>
           ) : null}

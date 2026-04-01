@@ -98,6 +98,7 @@ test("project state reducer centralizes selected project execution flags", () =>
     selectedProjectId: "repo-1",
     projectDetail: detail,
     projectForm: { project_dir: "C:/repo" },
+    planDraft: detail.plan,
     jobs,
   });
 
@@ -106,8 +107,39 @@ test("project state reducer centralizes selected project execution flags", () =>
   assert.equal(selectedState.chatJob?.id, "job-chat");
   assert.equal(selectedState.queuedJobs[0]?.id, "job-run");
   assert.equal(selectedState.busy, true);
-  assert.equal(selectedState.canRequestStop, false);
+  assert.equal(selectedState.canRequestStop, true);
   assert.equal(selectedState.canCancelReservation, true);
+  assert.equal(selectedState.hasRunnablePlan, true);
+  assert.equal(selectedState.runActionDisabled, true);
+  assert.equal(selectedState.canRunPlan, false);
+});
+
+test("project state reducer keeps emergency stop available from project status when job snapshots lag behind", () => {
+  const detail = {
+    project: {
+      repo_id: "repo-1",
+      repo_path: "C:/repo",
+      current_status: "running:run-plan",
+    },
+    plan: {
+      steps: [{ step_id: "ST1", title: "Run", status: "running" }],
+      closeout_status: "not_started",
+    },
+    planning_progress: null,
+  };
+
+  const selectedState = reduceSelectedProjectState({
+    selectedProjectId: "repo-1",
+    projectDetail: detail,
+    projectForm: { project_dir: "C:/repo" },
+    planDraft: detail.plan,
+    jobs: [],
+  });
+
+  assert.equal(selectedState.canRequestStop, true);
+  assert.equal(selectedState.runActionRunning, true);
+  assert.equal(selectedState.runActionDisabled, true);
+  assert.equal(selectedState.canRunPlan, false);
 });
 
 test("project reducers and selectors preserve the queued status invariant", () => {

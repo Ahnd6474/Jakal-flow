@@ -234,6 +234,7 @@ function rightSidebarPanePropsEqual(previousProps, nextProps) {
         && previousProps.autoRunAfterPlan === nextProps.autoRunAfterPlan
         && previousProps.selectedStepId === nextProps.selectedStepId
         && previousProps.busy === nextProps.busy
+        && previousProps.runActionDisabled === nextProps.runActionDisabled
         && previousProps.canRequestStop === nextProps.canRequestStop
         && previousProps.canCancelReservation === nextProps.canCancelReservation
         && sameQueuedJobs(previousProps.queuedJobs, nextProps.queuedJobs)
@@ -1057,6 +1058,7 @@ export const RightSidebarPane = memo(function RightSidebarPane({
   activeJob,
   chatJob,
   busy,
+  runActionDisabled,
   autoRunAfterPlan = false,
   canRequestStop = false,
   canCancelReservation = false,
@@ -1217,6 +1219,7 @@ export const RightSidebarPane = memo(function RightSidebarPane({
               autoRunAfterPlan={autoRunAfterPlan}
               selectedStepId={selectedStepId}
               busy={busy}
+              runActionDisabled={runActionDisabled}
               canRequestStop={canRequestStop}
               canCancelReservation={canCancelReservation}
               queuedJobs={queuedJobs}

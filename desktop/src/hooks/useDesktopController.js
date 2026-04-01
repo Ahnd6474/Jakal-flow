@@ -173,6 +173,7 @@ export function useDesktopController() {
       selectedProjectId,
       projectDetail,
       projectForm,
+      planDraft,
       jobs,
       pendingAction,
       startingJobCount,
@@ -180,6 +181,7 @@ export function useDesktopController() {
     [
       jobs,
       pendingAction,
+      planDraft,
       projectDetail,
       projectForm,
       selectedProjectId,
@@ -189,12 +191,14 @@ export function useDesktopController() {
   const projectJob = selectedProjectState.projectJob;
   const activeJob = selectedProjectState.activeJob;
   const chatJob = selectedProjectState.chatJob;
-  const stoppableJob = selectedProjectState.stoppableJob;
   const activeJobId = activeJob?.id || "";
   const queuedJobs = selectedProjectState.queuedJobs;
   const busy = selectedProjectState.busy;
   const canRequestStop = selectedProjectState.canRequestStop;
   const canCancelReservation = selectedProjectState.canCancelReservation;
+  const runActionDisabled = selectedProjectState.runActionDisabled;
+  const runActionRunning = selectedProjectState.runActionRunning;
+  const canRunPlan = selectedProjectState.canRunPlan;
   const shareBusy = pendingAction === "create_share_session" || pendingAction === "revoke_share_session";
   const savedProgramSettings = useMemo(
     () => programSettingsFromRuntime(storedProgramSettings),
@@ -384,6 +388,7 @@ export function useDesktopController() {
       selectedProjectId,
       projectDetail,
       projectForm,
+      planDraft,
       jobs: nextJobs,
     });
     jobsRef.current = nextJobs;
@@ -529,6 +534,7 @@ export function useDesktopController() {
       selectedProjectId,
       projectDetail,
       projectForm,
+      planDraft,
       jobs: jobItems,
     }).projectJob;
   }
@@ -2246,14 +2252,13 @@ export function useDesktopController() {
 
   async function requestStop() {
     const effectiveProjectDir = resolveProjectDirectory(projectForm, projectDetail);
-    const runningProjectJob = String(stoppableJob?.status || "").trim().toLowerCase() === "running";
     const repoId = String(projectDetail?.project?.repo_id || selectedProjectId || "").trim();
     const executionProcessPids = Array.isArray(projectDetail?.execution_processes)
       ? projectDetail.execution_processes
           .map((entry) => Number.parseInt(String(entry?.pid || 0), 10))
           .filter((pid) => Number.isInteger(pid) && pid > 0)
       : [];
-    if (!effectiveProjectDir || !runningProjectJob) {
+    if (!effectiveProjectDir || !canRequestStop) {
       return;
     }
     await withPending("request-stop", async () => {
@@ -2758,6 +2763,9 @@ export function useDesktopController() {
     queuedJobs,
     canRequestStop,
     canCancelReservation,
+    runActionDisabled,
+    runActionRunning,
+    canRunPlan,
     message,
     shareSettings,
     autoRunAfterPlan,

@@ -10,6 +10,7 @@ export function FlowWorkspaceView(props) {
     autoRunAfterPlan,
     selectedStepId,
     busy,
+    runActionDisabled,
     canRequestStop = false,
     canCancelReservation = false,
     queuedJobs = [],
@@ -43,6 +44,7 @@ export function FlowWorkspaceView(props) {
       selectedStepId={selectedStepId}
       form={form}
       busy={busy}
+      runActionDisabled={runActionDisabled}
       canRequestStop={canRequestStop}
       canCancelReservation={canCancelReservation}
       queuedJobs={queuedJobs}
