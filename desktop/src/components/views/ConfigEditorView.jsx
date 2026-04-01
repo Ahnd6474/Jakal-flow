@@ -1,9 +1,8 @@
 ﻿import { memo } from "react";
 import { useI18n } from "../../i18n";
 import {
-  applyExecutionModelSelection,
+  applyConfigRuntimeModelSelection,
   applyProviderDefaults,
-  applyProjectModelSelection,
   canEditProjectConfig,
   defaultProviderApiKeyEnv,
   defaultProviderBaseUrl,
@@ -184,12 +183,9 @@ export const ConfigEditorView = memo(function ConfigEditorView({
   const selectionState = resolveRuntimeModelSelectionState(runtime, modelCatalog, "", null, codexStatus);
   const visibleModels = selectionState.visibleModels;
   const visibleModelGroups = selectionState.visibleModelGroups;
-  const selectedModel = selectionState.selectedModel;
   const selectedReasoning = selectionState.selectedReasoning;
   const reasoningOptions = selectionState.reasoningOptions;
-  const executionModel = selectionState.selectedExecutionModel;
-  const executionModelOptions = visibleModels;
-  const selectedExecutionModel = executionModel || "";
+  const selectedExecutionModel = selectionState.selectedExecutionModel || "";
   const selectedExecutionModelVisible = selectionState.selectedExecutionModelVisible;
   const activeCategory = PROVIDER_CATEGORIES.find((category) => (
     category.providers.some((provider) => provider.value === selectedProvider)
@@ -332,13 +328,13 @@ export const ConfigEditorView = memo(function ConfigEditorView({
       ) : null}
       {visibleModels.length ? (
         <label className="field field--wide" style={{ marginTop: "4px" }}>
-          <span>{language === "ko" ? "프로젝트 모델" : "Project model"}</span>
+          <span>{language === "ko" ? "실행 모델" : "Execution model"}</span>
           <select
-            value={selectedModel}
+            value={selectedExecutionModel}
             onChange={(event) =>
               onChangeForm((current) => ({
                 ...current,
-                runtime: applyProjectModelSelection(
+                runtime: applyConfigRuntimeModelSelection(
                   current.runtime || {},
                   modelCatalog,
                   event.target.value,
@@ -349,9 +345,9 @@ export const ConfigEditorView = memo(function ConfigEditorView({
             }
             disabled={executionLocked}
           >
-            {selectedModel && !visibleModels.some((item) => String(item.model || "").trim().toLowerCase() === selectedModel.toLowerCase()) ? (
-              <option value={selectedModel}>
-                {modelDisplayName(modelCatalog, selectedModel) || selectedModel}
+            {selectedExecutionModel && !selectedExecutionModelVisible ? (
+              <option value={selectedExecutionModel}>
+                {modelDisplayName(modelCatalog, selectedExecutionModel) || selectedExecutionModel}
               </option>
             ) : null}
             {visibleModelGroups.map((group) => (
@@ -366,19 +362,19 @@ export const ConfigEditorView = memo(function ConfigEditorView({
           </select>
           <small className="field-hint">
             {language === "ko"
-              ? "계획 생성, 프로젝트 기본 추론, 별도 지정이 없는 기본 동작에 사용됩니다."
-              : "Used for planning, project-level reasoning, and the default runtime path when no block override is set."}
+              ? "계획 생성과 실제 블록 실행 모두 이 모델을 기본으로 사용합니다. 블록별 모델 지정이 있으면 그 설정이 우선합니다."
+              : "Used as the default model for both planning and block execution. Per-block model overrides still take precedence."}
           </small>
         </label>
       ) : programSettingsAllowsModelSlugInput(selectedProvider) ? (
         <label className="field field--wide" style={{ marginTop: "4px" }}>
           <span>{t("field.customModelSlug")}</span>
           <input
-            value={selectedModel}
+            value={selectedExecutionModel}
             onChange={(event) =>
               onChangeForm((current) => ({
                 ...current,
-                runtime: applyProjectModelSelection(
+                runtime: applyConfigRuntimeModelSelection(
                   current.runtime || {},
                   modelCatalog,
                   event.target.value,
@@ -392,17 +388,17 @@ export const ConfigEditorView = memo(function ConfigEditorView({
         </label>
       ) : null}
 
-      <label className="field field--wide">
+      <label className="field field--wide" style={{ marginTop: "4px" }}>
         <span>{language === "ko" ? "AI 추론" : "AI Reasoning"}</span>
         <select
           value={selectedReasoning}
           onChange={(event) =>
             onChangeForm((current) => ({
               ...current,
-              runtime: applyProjectModelSelection(
+              runtime: applyConfigRuntimeModelSelection(
                 current.runtime || {},
                 modelCatalog,
-                selectedModel,
+                selectedExecutionModel,
                 event.target.value,
                 codexStatus,
               ),
@@ -416,39 +412,6 @@ export const ConfigEditorView = memo(function ConfigEditorView({
             </option>
           ))}
         </select>
-      </label>
-      <label className="field field--wide" style={{ marginTop: "4px" }}>
-        <span>{language === "ko" ? "블록 실행 모델" : "Block execution model"}</span>
-        <select
-          value={selectedExecutionModel}
-          onChange={(event) =>
-            onChangeForm((current) => ({
-              ...current,
-              runtime: applyExecutionModelSelection(current.runtime || {}, event.target.value),
-            }))
-          }
-          disabled={executionLocked}
-        >
-          {selectedExecutionModel && !selectedExecutionModelVisible ? (
-            <option value={selectedExecutionModel}>
-              {modelDisplayName(modelCatalog, selectedExecutionModel) || selectedExecutionModel}
-            </option>
-          ) : null}
-          {visibleModelGroups.map((group) => (
-            <optgroup key={group.key} label={group.label}>
-              {group.options.map((item) => (
-                <option key={item.value} value={item.model}>
-                  {item.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        <small className="field-hint">
-          {language === "ko"
-            ? "계획이 만들어진 뒤 각 블록이 실제 실행될 때 쓰는 기본 모델입니다. 블록별 모델 지정이 있으면 그 설정이 우선합니다."
-            : "Default model used when executing saved blocks after planning. Per-block model overrides take precedence."}
-        </small>
       </label>
     </div>
   );

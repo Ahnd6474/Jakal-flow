@@ -669,6 +669,7 @@ def project_summary(
         provider_summary = f"{preset.display_name}/{local_provider or 'oss'}"
     else:
         provider_summary = preset.display_name
+    runtime_model = str(getattr(project.runtime, "execution_model", "") or getattr(project.runtime, "model", "") or "").strip()
     lines = [
         f"Name: {project.metadata.display_name or project.metadata.slug}",
         f"Directory: {project.metadata.repo_path}",
@@ -676,14 +677,11 @@ def project_summary(
         f"Branch: {project.metadata.branch}",
         f"Status: {current_status or project.metadata.current_status}",
         f"Workflow: {normalize_workflow_mode(getattr(plan, 'workflow_mode', '') or getattr(project.runtime, 'workflow_mode', 'standard'))}",
-        f"Model: {project.runtime.model}  ({project.runtime.effort}) [{provider_summary}]",
+        f"Model: {runtime_model}  ({project.runtime.effort}) [{provider_summary}]",
         f"Verification: {plan.default_test_command or project.runtime.test_cmd}",
         f"Remaining Steps: {', '.join(remaining) if remaining else 'None'}",
         f"Closeout: {plan.closeout_status}",
     ]
-    execution_model = str(getattr(project.runtime, "execution_model", "") or "").strip()
-    if execution_model and execution_model != str(project.runtime.model or "").strip():
-        lines.append(f"Block Execution Model: {execution_model}")
     if plan.plan_title.strip():
         lines.append(f"Plan Title: {plan.plan_title.strip()}")
     if project.metadata.archived_at:

@@ -390,6 +390,7 @@ export function applyProgramSettingsToForm(form, programSettings) {
 
 export function syncProgramSettingsModel(programSettings = {}, runtime = {}) {
   const base = programSettingsFromRuntime(cloneValue(programSettings) || {});
+  const syncedModel = String(runtime?.execution_model || runtime?.model || runtime?.model_slug_input || "").trim();
   return {
     ...base,
     model_provider: runtime?.model_provider ?? programSettings?.model_provider ?? base.model_provider,
@@ -397,11 +398,11 @@ export function syncProgramSettingsModel(programSettings = {}, runtime = {}) {
     ensemble_openai_model: runtime?.ensemble_openai_model ?? programSettings?.ensemble_openai_model ?? base.ensemble_openai_model,
     ensemble_gemini_model: runtime?.ensemble_gemini_model ?? programSettings?.ensemble_gemini_model ?? base.ensemble_gemini_model,
     ensemble_claude_model: runtime?.ensemble_claude_model ?? programSettings?.ensemble_claude_model ?? base.ensemble_claude_model,
-    model: runtime?.model ?? programSettings?.model ?? base.model,
-    execution_model: runtime?.execution_model ?? programSettings?.execution_model ?? base.execution_model,
+    model: syncedModel || programSettings?.model || base.model,
+    execution_model: syncedModel || programSettings?.execution_model || base.execution_model,
     model_preset: runtime?.model_preset ?? programSettings?.model_preset ?? base.model_preset,
     model_selection_mode: runtime?.model_selection_mode ?? programSettings?.model_selection_mode ?? base.model_selection_mode,
-    model_slug_input: runtime?.model_slug_input ?? programSettings?.model_slug_input ?? base.model_slug_input,
+    model_slug_input: syncedModel || programSettings?.model_slug_input || base.model_slug_input,
   };
 }
 
@@ -570,6 +571,7 @@ export function applyProviderDefaults(runtime = {}, nextProvider = "openai", nex
         ? String(runtime?.billing_mode || "").trim() || defaultBillingMode(provider)
         : defaultBillingMode(provider),
     model: nextModel,
+    execution_model: nextModel,
     model_preset: nextModel === "auto" && supportsAuto ? String(runtime?.model_preset || "auto").trim().toLowerCase() || "auto" : "",
     model_selection_mode: "slug",
     model_slug_input: nextModel,
@@ -601,10 +603,10 @@ export function blankProjectForm(defaultRuntime) {
     github_mode: "existing",
     runtime: {
       ...runtimeDefaults,
-      model: defaultModel,
+      model: defaultExecutionModel,
       execution_model: defaultExecutionModel,
       model_preset: defaultModelPreset,
-      model_slug_input: defaultModelSlugInput,
+      model_slug_input: defaultExecutionModel || defaultModelSlugInput,
       generate_word_report: runtimeDefaults.generate_word_report ?? true,
       max_blocks: runtimeDefaults.max_blocks || 5,
       optimization_mode: runtimeDefaults.optimization_mode || "light",
@@ -636,6 +638,10 @@ export function projectFormFromDetail(detail, defaultRuntime) {
     ?? mergedRuntime.model
     ?? "",
   ).trim().toLowerCase() || mergedRuntime.model || "";
+  if (mergedRuntime.execution_model) {
+    mergedRuntime.model = mergedRuntime.execution_model;
+    mergedRuntime.model_slug_input = mergedRuntime.execution_model;
+  }
   return {
     project_dir: detail?.project?.repo_path || "",
     display_name: detail?.project?.display_name || detail?.project?.slug || "",
@@ -2028,12 +2034,19 @@ export function sanitizeProjectDetailForJobState(detail, activeJob = null, optio
 }
 
 export function buildProjectPayload(form, plan = null) {
+  const runtime = cloneValue(form.runtime) || {};
+  const selectedModel = String(runtime.execution_model || runtime.model_slug_input || runtime.model || "").trim().toLowerCase();
+  if (selectedModel) {
+    runtime.execution_model = selectedModel;
+    runtime.model = selectedModel;
+    runtime.model_slug_input = selectedModel;
+  }
   const payload = {
     project_dir: form.project_dir.trim(),
     display_name: form.display_name.trim(),
     branch: form.branch.trim() || "main",
     origin_url: form.github_mode === "manual" ? form.origin_url.trim() : "",
-    runtime: cloneValue(form.runtime) || {},
+    runtime,
   };
   if (plan) {
     const nextPlan = cloneValue(plan) || {};
@@ -2579,6 +2592,7 @@ export function resolveRuntimeModelSelectionState(currentRuntime = {}, modelCata
     scope: "provider",
   });
   const model = String(nextModel || "").trim()
+    || String(currentRuntime?.execution_model || currentRuntime?.model_slug_input || currentRuntime?.model || "").trim()
     || defaultModelForRuntime(modelCatalog, currentRuntime, codexStatus)
     || defaultModelForProvider(currentRuntime?.model_provider || "openai", currentRuntime)
     || "";
@@ -2589,21 +2603,17 @@ export function resolveRuntimeModelSelectionState(currentRuntime = {}, modelCata
   const effort = selection === AUTO_REASONING_OPTION ? defaultReasoningOption(modelCatalog, model, currentRuntime?.effort || "medium") : selection;
   const planningEffort = clampReasoningEffort(modelCatalog, model, currentRuntime?.planning_effort || effort, effort);
   const visibleModels = visibleModelTree.entries;
-  const executionModel = String(
-    currentRuntime?.execution_model
-      || currentRuntime?.model_slug_input
-      || currentRuntime?.model
-      || "",
-  ).trim();
+  const executionModel = String(model).trim();
   const runtime = {
     ...currentRuntime,
     model,
+    execution_model: executionModel,
     effort,
     planning_effort: planningEffort,
     effort_selection_mode: selection === AUTO_REASONING_OPTION ? AUTO_REASONING_OPTION : "explicit",
     model_preset: normalizedModel === "auto" ? (selection === AUTO_REASONING_OPTION ? "auto" : selection) : "",
     model_selection_mode: normalizeModelSelectionMode(currentRuntime?.model_selection_mode),
-    model_slug_input: model,
+    model_slug_input: executionModel,
   };
   return {
     runtime,
@@ -2622,22 +2632,11 @@ export function resolveRuntimeModelSelectionState(currentRuntime = {}, modelCata
 }
 
 export function applyConfigRuntimeModelSelection(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null, codexStatus = {}) {
-  const selectionState = resolveRuntimeModelSelectionState(currentRuntime, modelCatalog, nextModel, nextEffort, codexStatus);
-  return {
-    ...selectionState.runtime,
-    execution_model: selectionState.model,
-  };
+  return resolveRuntimeModelSelectionState(currentRuntime, modelCatalog, nextModel, nextEffort, codexStatus).runtime;
 }
 
 export function applyProjectModelSelection(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null, codexStatus = {}) {
   return resolveRuntimeModelSelectionState(currentRuntime, modelCatalog, nextModel, nextEffort, codexStatus).runtime;
-}
-
-export function applyExecutionModelSelection(currentRuntime = {}, nextModel = "") {
-  return {
-    ...(cloneValue(currentRuntime) || {}),
-    execution_model: String(nextModel || "").trim(),
-  };
 }
 
 export function applyChatRuntimeSelectionToProject(currentRuntime = {}, modelCatalog = [], selection = {}, nextEffort = null, codexStatus = {}) {
@@ -3089,8 +3088,7 @@ export function resolveExecutionDisplayPlan(detail = null, planDraft = null, act
 export function runtimeSummary(runtime, modelPresets = [], language = "en", modelCatalog = []) {
   const provider = normalizedModelProvider(runtime);
   const providerPrefix = providerDisplayName(provider, normalizedLocalModelProvider(runtime));
-  const selectedModel = String(runtime?.model || runtime?.model_slug_input || "").trim();
-  const executionModel = String(runtime?.execution_model || "").trim();
+  const selectedModel = String(runtime?.execution_model || runtime?.model || runtime?.model_slug_input || "").trim();
   const compactPlanningSuffix = runtime?.use_fast_mode ? ` | ${translate(language, "runtime.compactPlanning")}` : "";
   const workflowSuffix =
     String(runtime?.workflow_mode || "standard").trim().toLowerCase() === "ml"
@@ -3107,10 +3105,10 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
   }
   if (selectedModel) {
     const label = modelDisplayName(modelCatalog, selectedModel);
-    const executionModelLabel = executionModel && executionModel !== selectedModel ? modelDisplayName(modelCatalog, executionModel) : "";
-    const executionModelSuffix = executionModelLabel
+    /*
       ? (normalizeLanguage(language) === "ko" ? ` | 블록 ${executionModelLabel}` : ` | blocks ${executionModelLabel}`)
       : "";
+    */
     const effortLabel =
       String(runtime?.effort_selection_mode || "").trim().toLowerCase() === AUTO_REASONING_OPTION
         ? reasoningEffortLabel(AUTO_REASONING_OPTION, language)
@@ -3120,10 +3118,10 @@ export function runtimeSummary(runtime, modelPresets = [], language = "en", mode
         model: `${providerPrefix}${workflowSuffix} | ${label}`,
         effort: effortLabel,
       });
-      const nextSummary = `${summary}${executionModelSuffix}${executionSuffix}`;
+      const nextSummary = `${summary}${executionSuffix}`;
       return `${nextSummary}${compactPlanningSuffix}`;
     }
-    const summary = `${providerPrefix}${workflowSuffix} | ${label} | reasoning ${effortLabel}${executionModelSuffix}${executionSuffix}`;
+    const summary = `${providerPrefix}${workflowSuffix} | ${label} | reasoning ${effortLabel}${executionSuffix}`;
     return `${summary}${compactPlanningSuffix}`;
   }
   return translate(language, "runtime.noModelSelected");

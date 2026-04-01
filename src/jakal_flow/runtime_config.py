@@ -109,6 +109,7 @@ def desktop_runtime_defaults() -> dict[str, Any]:
         workflow_mode="standard",
         ml_max_cycles=3,
         model="gpt-5.4",
+        execution_model="gpt-5.4",
         model_preset="",
         model_slug_input="gpt-5.4",
         ensemble_openai_model="gpt-5.4",
@@ -352,6 +353,11 @@ def normalize_runtime_payload(
     merged["execution_model"] = str(merged.get("execution_model", "")).strip().lower()
     if not merged["execution_model"]:
         merged["execution_model"] = merged["model"] or merged["model_slug_input"] or ""
+    if merged["execution_model"]:
+        if not str(source.get("model", "")).strip():
+            merged["model"] = merged["execution_model"]
+        if not str(source.get("model_slug_input", "")).strip():
+            merged["model_slug_input"] = merged["execution_model"]
     if merged["chat_model_provider"] and not provider_supports_auto_model(merged["chat_model_provider"]) and merged["chat_model"] == AUTO_MODEL_SLUG:
         merged["chat_model"] = ""
     return merged

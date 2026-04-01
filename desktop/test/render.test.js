@@ -5083,7 +5083,7 @@ test("ConfigEditorView renders the moved AI settings in project configuration", 
   assert.match(html, /OpenRouter/);
   assert.match(html, /Provider Base URL/);
   assert.match(html, /Provider API Key Env/);
-  assert.match(html, /Block execution model/);
+  assert.match(html, /Execution model/);
   assert.match(html, /AI Reasoning/);
 });
 

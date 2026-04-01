@@ -26,7 +26,6 @@ const PROJECT_RUNTIME_OVERRIDE_KEYS = [
   "ensemble_openai_model",
   "ensemble_gemini_model",
   "ensemble_claude_model",
-  "model",
   "execution_model",
   "chat_model",
   "chat_effort",
@@ -43,6 +42,10 @@ function enforceProgramModelDefaults(form = null, defaultRuntime = null) {
   const nextRuntime = nextForm.runtime && typeof nextForm.runtime === "object" ? cloneValue(nextForm.runtime) : {};
   if (!String(nextRuntime.execution_model || "").trim()) {
     nextRuntime.execution_model = String(nextRuntime.model || defaultRuntime?.model || "").trim();
+  }
+  if (String(nextRuntime.execution_model || "").trim()) {
+    nextRuntime.model = String(nextRuntime.execution_model || "").trim();
+    nextRuntime.model_slug_input = String(nextRuntime.execution_model || "").trim();
   }
   return {
     ...nextForm,

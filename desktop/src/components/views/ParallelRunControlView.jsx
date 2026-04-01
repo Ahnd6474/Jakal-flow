@@ -284,7 +284,14 @@ function parallelRunControlViewPropsEqual(previousProps, nextProps) {
 }
 
 function modelChipLabel(form, detail) {
-  const model = String(form?.runtime?.model || form?.runtime?.model_slug_input || detail?.runtime?.model || "").trim();
+  const model = String(
+    form?.runtime?.execution_model
+      || form?.runtime?.model_slug_input
+      || form?.runtime?.model
+      || detail?.runtime?.execution_model
+      || detail?.runtime?.model
+      || "",
+  ).trim();
   const provider = String(form?.runtime?.model_provider || detail?.runtime?.model_provider || "openai").trim().toLowerCase();
   if (model && model !== "auto") {
     return model.length > 16 ? `${model.slice(0, 15)}\u2026` : model;
@@ -297,7 +304,7 @@ function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCata
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const runtime = form?.runtime || detail?.runtime || {};
-  const selectedModel = String(runtime?.model || runtime?.model_slug_input || "").trim();
+  const selectedModel = String(runtime?.execution_model || runtime?.model_slug_input || runtime?.model || "").trim();
   const reasoningOptions = MODEL_REASONING_OPTIONS;
   const currentEffort = String(runtime?.effort_selection_mode || "").trim().toLowerCase() === AUTO_REASONING_OPTION
     ? AUTO_REASONING_OPTION
@@ -398,7 +405,7 @@ function stepModelPlaceholder(step, runtime) {
   if (provider === "minimax") return MINIMAX_DEFAULT_MODEL;
   if (provider === "glm") return GLM_DEFAULT_MODEL;
   if (provider === "openai" || provider === "ensemble") {
-    return String(runtime?.model || runtime?.model_slug_input || "gpt-5.4").trim() || "gpt-5.4";
+    return String(runtime?.execution_model || runtime?.model_slug_input || runtime?.model || "gpt-5.4").trim() || "gpt-5.4";
   }
   return "";
 }

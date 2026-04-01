@@ -354,7 +354,7 @@ test("applyConfigRuntimeModelSelection keeps a concrete model while supporting a
   assert.equal(selectedConfigReasoning(modelCatalog, nextRuntime), "auto");
 });
 
-test("applyProjectModelSelection updates model reasoning without touching execution_model", () => {
+test("applyProjectModelSelection keeps the runtime model fields synchronized", () => {
   const modelCatalog = [
     {
       model: "gpt-5.4",
@@ -382,12 +382,12 @@ test("applyProjectModelSelection updates model reasoning without touching execut
 
   assert.equal(nextRuntime.model, "gpt-5.4");
   assert.equal(nextRuntime.model_slug_input, "gpt-5.4");
-  assert.equal(nextRuntime.execution_model, "gpt-4.1");
+  assert.equal(nextRuntime.execution_model, "gpt-5.4");
   assert.equal(nextRuntime.effort, "high");
   assert.equal(nextRuntime.planning_effort, "medium");
 });
 
-test("resolveRuntimeModelSelectionState centralizes project model and reasoning selection", () => {
+test("resolveRuntimeModelSelectionState centralizes execution model and reasoning selection", () => {
   const modelCatalog = [
     {
       model: "gpt-5.4",
@@ -418,8 +418,8 @@ test("resolveRuntimeModelSelectionState centralizes project model and reasoning 
   assert.equal(state.selectedModel, "gpt-5.4");
   assert.equal(state.selectedReasoning, "high");
   assert.equal(state.visibleModels[0].model, "gpt-5.4");
-  assert.equal(state.selectedExecutionModel, "gpt-4.1");
-  assert.equal(state.selectedExecutionModelVisible, false);
+  assert.equal(state.selectedExecutionModel, "gpt-5.4");
+  assert.equal(state.selectedExecutionModelVisible, true);
   assert.equal(state.runtime.model_selection_mode, "codex");
 });
 
