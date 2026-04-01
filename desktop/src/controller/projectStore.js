@@ -1,8 +1,8 @@
 import { defaultShareSettings, emptyPlanDraft, shareSettingsFromDetail } from "../controllerHelpers.js";
+import { detailApplySignature } from "../domain/projectExecution.js";
 import {
   blankProjectForm,
   cloneValue,
-  detailApplySignature,
   CLOSEOUT_STEP_ID,
   mergeProjectDetailCodexStatus,
   mergeModelCatalogs,

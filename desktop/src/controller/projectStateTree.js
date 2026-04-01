@@ -2,9 +2,11 @@ import {
   isChatJob,
   projectChatJobFromJobs,
   projectJobFromJobs,
+  visibleExecutionJob,
+} from "../domain/projectExecution.js";
+import {
   sanitizeProjectDetailForJobState,
   sanitizeProjectListForJobState,
-  visibleExecutionJob,
   workspaceStatsFromProjects,
 } from "../utils.js";
 

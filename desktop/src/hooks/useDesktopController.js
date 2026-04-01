@@ -32,7 +32,6 @@ import { useI18n } from "../i18n";
 import { translate } from "../locale";
 import {
   applyProgramSettings,
-  backgroundJobProjectKey,
   applyProgramSettingsToForm,
   applyChatRuntimeSelectionToProject,
   basename,
@@ -42,13 +41,8 @@ import {
   cloneValue,
   commandLabel,
   inheritProjectIdentityForm,
-  isActiveExecutionStatus,
-  isChatJob,
-  isDuplicateProjectJobError,
   isPlanningProgressRunning,
   mergeModelCatalogs,
-  jobLaneForRequest,
-  jobHasNewerActiveReplacement,
   planDependencyValidationMessage,
   CLOSEOUT_STEP_ID,
   programSettingsEqual,
@@ -57,6 +51,13 @@ import {
   resolveProjectDirectory,
   shouldReplaceVisibleProject,
 } from "../utils";
+import {
+  backgroundJobProjectKey,
+  isActiveExecutionStatus,
+  isDuplicateProjectJobError,
+  jobHasNewerActiveReplacement,
+  jobLaneForRequest,
+} from "../domain/projectExecution.js";
 import {
   fetchHistoryDetail,
   fetchProjectChat,
