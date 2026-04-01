@@ -254,6 +254,33 @@ function chartPaletteForTone(tone) {
   return PALETTE[tone] || PALETTE.warning;
 }
 
+function chartPaletteStatus(persistedStatus = "", displayStatus = "") {
+  const normalizedPersisted = String(persistedStatus || "").trim().toLowerCase();
+  const normalizedDisplay = String(displayStatus || "").trim().toLowerCase();
+  if (!normalizedDisplay) {
+    return normalizedPersisted;
+  }
+  if (
+    normalizedDisplay === "completed"
+    || normalizedDisplay.includes("failed")
+    || normalizedDisplay === "awaiting_review"
+    || normalizedDisplay === "syncing"
+    || isDebuggingStatus(normalizedDisplay)
+  ) {
+    return normalizedDisplay;
+  }
+  if (
+    normalizedDisplay === "integrating"
+    || normalizedDisplay === "running"
+    || normalizedDisplay.startsWith("running:")
+    || normalizedDisplay === "queued"
+    || normalizedDisplay.startsWith("queued:")
+  ) {
+    return normalizedPersisted || "pending";
+  }
+  return normalizedDisplay;
+}
+
 function buildChartTopology(steps = []) {
   const levels = orderChartLevels(buildChartLevels(steps));
   const positions = new Map();
@@ -554,7 +581,8 @@ function buildChartData(steps = [], projectStatus = "", language = "en", activeL
         || "";
       const renderedStep = liveStatus ? { ...node.step, status: liveStatus } : node.step;
       const stepStatus = effectiveChartStepStatus(renderedStep, projectStatus, activeLineageId, checkpointLookup, checkpointFamily);
-      const tone = chartStatusTone(stepStatus);
+      const persistedStatus = String(node.step?.status || "").trim().toLowerCase() || "pending";
+      const tone = chartStatusTone(chartPaletteStatus(persistedStatus, stepStatus));
       const palette = chartPaletteForTone(tone);
       const failureReason = failureReasonLabel(renderedStep, language);
       return {

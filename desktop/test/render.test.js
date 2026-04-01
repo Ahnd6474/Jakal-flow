@@ -1216,7 +1216,7 @@ test("ExecutionFlowChart overlays the active lineage as running while the stored
   );
 
   assert.match(html, /Running/);
-  assert.match(html, /execution-flow-chart__node--info selected/);
+  assert.match(html, /execution-flow-chart__node--neutral selected/);
   assert.doesNotMatch(html, />Pending<\/tspan>/);
 });
 

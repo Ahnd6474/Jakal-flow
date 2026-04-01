@@ -797,7 +797,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
               </label>
 
               <label className="field"><span>{t("field.gptReasoning")}</span>
-                <select value={selectedStep.reasoning_effort || detail?.runtime?.effort || "high"} onChange={(event) => onUpdateStepField("reasoning_effort", event.target.value)} disabled={!editableStep}>
+                <select value={selectedStep.reasoning_effort || detail?.runtime?.effort || "high"} onChange={(event) => onUpdateStepField("reasoning_effort", event.target.value)} disabled={!editableStepModel}>
                   {REASONING_OPTIONS.map((effort) => (<option key={effort} value={effort}>{reasoningEffortLabel(effort, language)}</option>))}
                 </select>
               </label>

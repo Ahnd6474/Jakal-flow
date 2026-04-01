@@ -140,6 +140,36 @@ test("canEditStepModel allows model edits on paused steps while preserving norma
     ),
     false,
   );
+  assert.equal(
+    canEditStepModel(
+      {
+        step_id: "CO1",
+        status: "completed",
+        metadata: {
+          system_step: true,
+          system_step_kind: "closeout",
+        },
+      },
+      false,
+      "ready",
+    ),
+    true,
+  );
+  assert.equal(
+    canEditStepModel(
+      {
+        step_id: "CO1",
+        status: "completed",
+        metadata: {
+          system_step: true,
+          system_step_kind: "closeout",
+        },
+      },
+      false,
+      "running",
+    ),
+    false,
+  );
 });
 
 test("failureReasonLabel maps step metadata reason codes to readable labels", () => {

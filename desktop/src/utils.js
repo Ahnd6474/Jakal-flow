@@ -3226,6 +3226,9 @@ export function canEditStepModel(step = null, busy = false, projectStatus = "") 
   if (!step) {
     return false;
   }
+  if (isCloseoutStep(step)) {
+    return !busy && !isActiveExecutionStatus(projectStatus);
+  }
   if (canEditStep(step, busy)) {
     return true;
   }
