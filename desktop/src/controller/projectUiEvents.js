@@ -1,8 +1,8 @@
 import {
   resolveCheckpointExecutionState,
-  sanitizeProjectDetailForJobState,
   visibleExecutionJob,
 } from "../utils.js";
+import { buildProjectStateTree } from "./projectStateTree.js";
 
 const DEFAULT_PLANNING_STAGE_LABELS = Object.freeze({
   context_scan: "Scan repository context",
@@ -482,18 +482,22 @@ export function applyProjectUiEvent(detail, eventPayload, options = {}) {
       }
     : detail.snapshot;
 
-  return sanitizeProjectDetailForJobState({
-    ...detail,
-    project: nextProject,
-    loop_state: nextLoopState,
-    checkpoints: nextCheckpoints,
-    activity: nextActivity,
-    history: nextHistory,
-    bottom_panels: nextBottomPanels,
-    snapshot: nextSnapshot,
-    plan: nextPlan,
-    planning_progress: updatePlanningProgress(detail.planning_progress, record),
-  }, activeExecutionJob, {
-    nowMs: options?.nowMs,
-  });
+  return buildProjectStateTree({
+    detail: {
+      ...detail,
+      project: nextProject,
+      loop_state: nextLoopState,
+      checkpoints: nextCheckpoints,
+      activity: nextActivity,
+      history: nextHistory,
+      bottom_panels: nextBottomPanels,
+      snapshot: nextSnapshot,
+      plan: nextPlan,
+      planning_progress: updatePlanningProgress(detail.planning_progress, record),
+    },
+    activeJob: activeExecutionJob,
+    detailOptions: {
+      nowMs: options?.nowMs,
+    },
+  }).detail.normalized;
 }

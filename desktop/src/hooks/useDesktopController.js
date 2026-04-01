@@ -15,6 +15,7 @@ import {
   shouldRefreshSelectedProject,
 } from "../controller/projectRefresh";
 import { applyProjectUiEvent, shouldRefreshProjectDetailForUiEvent } from "../controller/projectUiEvents";
+import { buildProjectStateTree } from "../controller/projectStateTree";
 import {
   carryProjectPromptDraft,
   defaultShareSettings,
@@ -49,17 +50,11 @@ import {
   jobHasNewerActiveReplacement,
   planDependencyValidationMessage,
   CLOSEOUT_STEP_ID,
-  projectChatJobFromJobs,
-  projectJobFromJobs,
   programSettingsEqual,
   programSettingsFromRuntime,
   resolveChatRuntimeSelection,
   resolveProjectDirectory,
-  sanitizeProjectDetailForJobState,
-  sanitizeProjectListForJobState,
   shouldReplaceVisibleProject,
-  visibleExecutionJob,
-  workspaceStatsFromProjects,
 } from "../utils";
 import {
   fetchHistoryDetail,
@@ -170,47 +165,33 @@ export function useDesktopController() {
     () => needsExpandedProjectDetail({ centerTab, sidebarTab, bottomCollapsed, bottomTab }),
     [bottomCollapsed, bottomTab, centerTab, sidebarTab],
   );
-  const projectJob = useMemo(
-    () =>
-      projectJobFromJobs(jobs, {
-        repo_id: selectedProjectId,
-        project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
-        current_status: projectDetail?.project?.current_status || "",
-        last_run_at: projectDetail?.project?.last_run_at || "",
-      }),
-    [jobs, projectDetail?.project?.current_status, projectDetail?.project?.last_run_at, projectDetail?.project?.repo_path, projectForm?.project_dir, selectedProjectId],
+  const selectedProjectStateTree = useMemo(
+    () => buildProjectStateTree({
+      selectedProjectId,
+      projectDetail,
+      projectForm,
+      jobs,
+      pendingAction,
+      startingJobCount,
+    }),
+    [
+      jobs,
+      pendingAction,
+      projectDetail,
+      projectForm,
+      selectedProjectId,
+      startingJobCount,
+    ],
   );
-  const activeJob = useMemo(() => visibleExecutionJob(projectJob), [projectJob]);
-  const chatJob = useMemo(
-    () =>
-      projectChatJobFromJobs(jobs, {
-        repo_id: selectedProjectId,
-        project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
-        current_status: projectDetail?.project?.current_status || "",
-        last_run_at: projectDetail?.project?.last_run_at || "",
-      }),
-    [jobs, projectDetail?.project?.current_status, projectDetail?.project?.last_run_at, projectDetail?.project?.repo_path, projectForm?.project_dir, selectedProjectId],
-  );
-  const stoppableJob = activeJob || chatJob || null;
+  const projectJob = selectedProjectStateTree.execution.selectedJob;
+  const activeJob = selectedProjectStateTree.execution.activeJob;
+  const chatJob = selectedProjectStateTree.execution.chatJob;
+  const stoppableJob = selectedProjectStateTree.execution.stoppableJob;
   const activeJobId = activeJob?.id || "";
-  const queuedJobs = useMemo(
-    () =>
-      [...jobs]
-        .filter((job) => String(job?.status || "").trim().toLowerCase() === "queued" && !isChatJob(job))
-        .sort((left, right) => {
-          const leftPosition = Number.parseInt(String(left?.queue_position || 0), 10) || Number.MAX_SAFE_INTEGER;
-          const rightPosition = Number.parseInt(String(right?.queue_position || 0), 10) || Number.MAX_SAFE_INTEGER;
-          if (leftPosition !== rightPosition) {
-            return leftPosition - rightPosition;
-          }
-          return (Number(left?.updated_at_ms || 0) || 0) - (Number(right?.updated_at_ms || 0) || 0);
-        }),
-    [jobs],
-  );
-
-  const busy = Boolean(pendingAction || startingJobCount > 0 || ["queued", "running"].includes(String(activeJob?.status || "").trim().toLowerCase()));
-  const canRequestStop = String(stoppableJob?.status || "").trim().toLowerCase() === "running";
-  const canCancelReservation = String(activeJob?.status || "").trim().toLowerCase() === "queued";
+  const queuedJobs = selectedProjectStateTree.execution.queuedJobs;
+  const busy = selectedProjectStateTree.ui.busy;
+  const canRequestStop = selectedProjectStateTree.ui.canRequestStop;
+  const canCancelReservation = selectedProjectStateTree.ui.canCancelReservation;
   const shareBusy = pendingAction === "create_share_session" || pendingAction === "revoke_share_session";
   const savedProgramSettings = useMemo(
     () => programSettingsFromRuntime(storedProgramSettings),
@@ -385,25 +366,32 @@ export function useDesktopController() {
   ]);
 
   function reapplyProjectJobState(jobItems = jobsRef.current) {
-    const nextProjects = sanitizeProjectListForJobState(projectsRef.current, jobItems);
-    setProjects(nextProjects);
-    setWorkspaceStats(workspaceStatsFromProjects(nextProjects));
-    projectsRef.current = nextProjects;
+    const listingTree = buildProjectStateTree({
+      projects: projectsRef.current,
+      jobs: jobItems,
+    });
+    setProjects(listingTree.listing.normalized);
+    setWorkspaceStats(listingTree.listing.workspaceStats);
+    projectsRef.current = listingTree.listing.normalized;
   }
 
   function syncJobs(jobItems = []) {
     const nextJobs = Array.isArray(jobItems) ? jobItems.filter(Boolean) : [];
+    const nextStateTree = buildProjectStateTree({
+      selectedProjectId,
+      projectDetail,
+      projectForm,
+      jobs: nextJobs,
+    });
     jobsRef.current = nextJobs;
     setJobs(nextJobs);
-    const nextActiveJob = projectJobFromJobs(nextJobs, {
-      repo_id: selectedProjectId,
-      project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
-      current_status: projectDetail?.project?.current_status || "",
-      last_run_at: projectDetail?.project?.last_run_at || "",
-    });
-    activeJobRef.current = visibleExecutionJob(nextActiveJob);
+    const nextActiveJob = nextStateTree.execution.selectedJob;
+    activeJobRef.current = nextStateTree.execution.activeJob;
     startTransition(() => {
-      setProjectDetail((current) => sanitizeProjectDetailForJobState(current, nextJobs));
+      setProjectDetail((current) => buildProjectStateTree({
+        detail: current,
+        jobs: nextJobs,
+      }).detail.normalized);
     });
     return nextActiveJob;
   }
@@ -523,10 +511,32 @@ export function useDesktopController() {
     startTransition(() => {
       setProjectDetail((current) => {
         const patched = applyProjectEventDetailState(current, projectLike) || current;
-        return sanitizeProjectDetailForJobState(patched, jobsRef.current);
+        return buildProjectStateTree({
+          detail: patched,
+          jobs: jobsRef.current,
+        }).detail.normalized;
       });
     });
     return true;
+  }
+
+  function selectedProjectExecutionJob(jobItems = jobsRef.current) {
+    return buildProjectStateTree({
+      selectedProjectId,
+      projectDetail,
+      projectForm,
+      jobs: jobItems,
+    }).execution.selectedJob;
+  }
+
+  function projectLaneJob(jobItems = jobsRef.current, projectLike = null, lane = "execution") {
+    const projectStateTree = buildProjectStateTree({
+      project: projectLike,
+      jobs: jobItems,
+    });
+    return lane === "chat"
+      ? projectStateTree.execution.chatJob
+      : projectStateTree.execution.selectedJob;
   }
 
   function fetchProjectDetailOnce(repoId, options = {}) {
@@ -884,12 +894,7 @@ export function useDesktopController() {
       pendingBridgeRefreshListingRef.current = false;
       pendingBridgeRefreshDetailRef.current = false;
       try {
-        const selectedJob = projectJobFromJobs(jobsRef.current, {
-          repo_id: selectedProjectId,
-          project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
-          current_status: projectDetail?.project?.current_status || "",
-          last_run_at: projectDetail?.project?.last_run_at || "",
-        });
+        const selectedJob = selectedProjectExecutionJob(jobsRef.current);
         const shouldLoadDetail = refreshDetail && shouldRefreshSelectedProject(selectedProjectId, pendingRepoId);
         const { listing, detail } = await refreshVisibleProjectState(
           bridgeRequest,
@@ -1239,12 +1244,7 @@ export function useDesktopController() {
       );
       const [jobSnapshot, refreshedState] = await Promise.all([jobSnapshotPromise, projectStatePromise]);
       applyCurrentJobSnapshot(jobSnapshot);
-      const selectedJob = projectJobFromJobs(jobsRef.current, {
-        repo_id: selectedProjectId,
-        project_dir: projectDetail?.project?.repo_path || projectForm?.project_dir || "",
-        current_status: projectDetail?.project?.current_status || "",
-        last_run_at: projectDetail?.project?.last_run_at || "",
-      });
+      const selectedJob = selectedProjectExecutionJob(jobsRef.current);
       if (selectedProjectId) {
         const { listing, detail } = refreshedState || {};
         if (listing) {
@@ -1318,12 +1318,7 @@ export function useDesktopController() {
       applyProjectDetail(
         detail,
         {
-          runningJob: projectJobFromJobs(jobsRef.current, {
-            repo_id: repoId,
-            project_dir: detail?.project?.repo_path || "",
-            current_status: detail?.project?.current_status || "",
-            last_run_at: detail?.project?.last_run_at || "",
-          }),
+          runningJob: projectLaneJob(jobsRef.current, detail?.project || { repo_id: repoId }, "execution"),
         },
       );
       return detail;
@@ -1558,12 +1553,7 @@ export function useDesktopController() {
       applyProjectDetail(detail, {
         force: true,
         preserveDirtyPlan: false,
-        runningJob: projectJobFromJobs(jobSnapshot?.jobs || [], {
-          repo_id: detail?.project?.repo_id || "",
-          project_dir: detail?.project?.repo_path || "",
-          current_status: detail?.project?.current_status || "",
-          last_run_at: detail?.project?.last_run_at || "",
-        }),
+        runningJob: projectLaneJob(jobSnapshot?.jobs || [], detail?.project, "execution"),
       });
       if (preserveLocalPlan) {
         setPlanDraft(cloneValue(planDraft));
@@ -1866,9 +1856,7 @@ export function useDesktopController() {
     };
     const requestedLane = jobLaneForRequest(command, payload);
     const currentProjectJob = () => (
-      requestedLane === "chat"
-        ? projectChatJobFromJobs(jobsRef.current, targetProject)
-        : projectJobFromJobs(jobsRef.current, targetProject)
+      projectLaneJob(jobsRef.current, targetProject, requestedLane)
     );
     const baseProjectJobKey = backgroundJobProjectKey(payload, workspaceRoot || "");
     const projectJobKey = baseProjectJobKey ? `${baseProjectJobKey}|${requestedLane}` : "";
@@ -1935,11 +1923,7 @@ export function useDesktopController() {
           const jobSnapshot = await syncRunningJobSnapshot(blockingJobRef.current?.id || "");
           applyCurrentJobSnapshot(jobSnapshot);
           reapplyProjectJobState(jobSnapshot?.jobs || []);
-          const recoveredJob = (
-            requestedLane === "chat"
-              ? projectChatJobFromJobs(jobSnapshot?.jobs || [], targetProject)
-              : projectJobFromJobs(jobSnapshot?.jobs || [], targetProject)
-          );
+          const recoveredJob = projectLaneJob(jobSnapshot?.jobs || [], targetProject, requestedLane);
           if (["queued", "running"].includes(String(recoveredJob?.status || "").trim().toLowerCase())) {
             return recoveredJob;
           }

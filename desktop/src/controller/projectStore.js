@@ -9,12 +9,10 @@ import {
   normalizedLocalModelProvider,
   normalizedModelProvider,
   projectFormFromDetail,
-  sanitizeProjectDetailForJobState,
-  sanitizeProjectListForJobState,
   visibleExecutionJob,
   shouldKeepUnsavedPlan,
-  workspaceStatsFromProjects,
 } from "../utils.js";
+import { buildProjectStateTree } from "./projectStateTree.js";
 
 const PROJECT_DETAIL_SECTION_KEYS = ["reports", "workspace", "checkpoints", "history", "config", "chat"];
 const PROJECT_RUNTIME_OVERRIDE_KEYS = [
@@ -823,10 +821,13 @@ export function reuseProjectListingItems(previousItems = [], nextItems = []) {
 }
 
 export function applyListingState({ listing, runningJob = null, setProjects, setWorkspaceStats }) {
-  const nextProjects = sanitizeProjectListForJobState(listing?.projects || [], runningJob);
-  setProjects(nextProjects);
-  setWorkspaceStats(workspaceStatsFromProjects(nextProjects));
-  return nextProjects;
+  const listingTree = buildProjectStateTree({
+    projects: listing?.projects || [],
+    runningJob,
+  });
+  setProjects(listingTree.listing.normalized);
+  setWorkspaceStats(listingTree.listing.workspaceStats);
+  return listingTree.listing.normalized;
 }
 
 function projectListItemFromDetail(detail, fallbackProject = null) {
@@ -871,10 +872,13 @@ export function applyProjectDetailListingState({
     return projectListItemFromDetail(detail, project);
   });
   const mergedProjects = matched ? nextProjects : [projectListItemFromDetail(detail), ...(projects || [])];
-  const sanitizedProjects = sanitizeProjectListForJobState(mergedProjects, runningJob);
-  setProjects(sanitizedProjects);
-  setWorkspaceStats(workspaceStatsFromProjects(sanitizedProjects));
-  return sanitizedProjects;
+  const listingTree = buildProjectStateTree({
+    projects: mergedProjects,
+    runningJob,
+  });
+  setProjects(listingTree.listing.normalized);
+  setWorkspaceStats(listingTree.listing.workspaceStats);
+  return listingTree.listing.normalized;
 }
 
 export function applyProjectEventListingState({
@@ -912,10 +916,13 @@ export function applyProjectEventListingState({
     return null;
   }
 
-  const sanitizedProjects = sanitizeProjectListForJobState(nextProjects, runningJob);
-  setProjects(sanitizedProjects);
-  setWorkspaceStats(workspaceStatsFromProjects(sanitizedProjects));
-  return sanitizedProjects;
+  const listingTree = buildProjectStateTree({
+    projects: nextProjects,
+    runningJob,
+  });
+  setProjects(listingTree.listing.normalized);
+  setWorkspaceStats(listingTree.listing.workspaceStats);
+  return listingTree.listing.normalized;
 }
 
 export function applyProjectEventDetailState(detail, project) {
@@ -981,7 +988,11 @@ export function applyProjectDetailState({
   const preservedDetail = preserveProjectDetailSupplement(detail, state.projectDetail);
   const mergedDetail = mergeProjectDetailCodexStatus(preservedDetail, state.projectDetail?.codex_status, state.modelCatalog);
   const activeJob = options.runningJob ?? state.activeJob;
-  const normalizedDetail = sanitizeProjectDetailForJobState(mergedDetail, activeJob);
+  const detailTree = buildProjectStateTree({
+    detail: mergedDetail,
+    runningJob: activeJob,
+  });
+  const normalizedDetail = detailTree.detail.normalized;
   const applySignature = detailApplySignature(normalizedDetail, options.runningJob ?? state.activeJob);
   if (
     !options.force &&
