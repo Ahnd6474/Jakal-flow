@@ -285,24 +285,24 @@ class GitOps:
             gitdir = (worktree_dir / gitdir).resolve(strict=False)
         return gitdir
 
-    def _expected_worktree_gitdir(self, repo_dir: Path, worktree_dir: Path) -> Path:
-        return (repo_dir.resolve() / ".git" / "worktrees" / worktree_dir.name).resolve(strict=False)
-
-    def repair_worktree_registration(self, repo_dir: Path, worktree_dir: Path) -> bool:
+    def _has_live_worktree_registration(self, repo_dir: Path, worktree_dir: Path) -> bool:
         current_gitdir = self._read_worktree_gitdir(worktree_dir)
         if current_gitdir is None:
             return False
-        expected_gitdir = self._expected_worktree_gitdir(repo_dir, worktree_dir)
-        if current_gitdir == expected_gitdir:
-            return False
+        if current_gitdir.exists():
+            return True
+        self._clear_stale_worktree_registration(repo_dir, worktree_dir)
+        return False
+
+    def _clear_stale_worktree_registration(self, repo_dir: Path, worktree_dir: Path) -> None:
         try:
-            self._worktree_git_file(worktree_dir).write_text(
-                f"gitdir: {expected_gitdir.as_posix()}\n",
-                encoding="utf-8",
-            )
+            self.remove_worktree(repo_dir, worktree_dir, force=True)
         except OSError:
-            return False
-        return True
+            remove_tree(worktree_dir, ignore_errors=True)
+        try:
+            self.prune_worktrees(repo_dir)
+        except OSError:
+            pass
 
     def _current_branch_from_head(self, repo_dir: Path) -> str:
         git_dir = self._git_dir_for_repo(repo_dir)
@@ -582,15 +582,9 @@ class GitOps:
     def prune_worktrees(self, repo_dir: Path) -> None:
         self.run(["worktree", "prune"], cwd=repo_dir, check=False)
 
-    def _clear_stale_worktree_registration(self, repo_dir: Path, worktree_dir: Path) -> None:
-        self.remove_worktree(repo_dir, worktree_dir, force=True)
-        self.prune_worktrees(repo_dir)
-
     def add_worktree(self, repo_dir: Path, worktree_dir: Path, branch_name: str, start_point: str) -> None:
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
-        if self.repair_worktree_registration(repo_dir, worktree_dir):
-            return
-        if self._read_worktree_gitdir(worktree_dir) is not None:
+        if self._has_live_worktree_registration(repo_dir, worktree_dir):
             return
         add_args = ["worktree", "add", "-b", branch_name, str(worktree_dir), start_point]
         try:
@@ -606,9 +600,7 @@ class GitOps:
 
     def attach_worktree(self, repo_dir: Path, worktree_dir: Path, branch_name: str) -> None:
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
-        if self.repair_worktree_registration(repo_dir, worktree_dir):
-            return
-        if self._read_worktree_gitdir(worktree_dir) is not None:
+        if self._has_live_worktree_registration(repo_dir, worktree_dir):
             return
         add_args = ["worktree", "add", str(worktree_dir), branch_name]
         try:
