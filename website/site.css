@@ -297,6 +297,34 @@ h1 {
   font-size: 0.9rem;
 }
 
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.stat-grid article {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.stat-grid span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.stat-grid strong {
+  display: block;
+  line-height: 1.5;
+}
+
 .stage-window {
   overflow: hidden;
   border-radius: var(--radius-xl);
@@ -581,6 +609,24 @@ h1 {
   min-height: 100%;
 }
 
+.command-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.command-list code {
+  display: block;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: #d8e3f3;
+  background: rgba(8, 10, 14, 0.55);
+  font-family: "Space Grotesk", "SUIT", sans-serif;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
 .release-grid {
   display: grid;
   grid-template-columns: 1.25fr 1fr 1fr;
@@ -717,7 +763,8 @@ h1 {
   .release-grid,
   .privacy-grid,
   .block-strip,
-  .ops-grid {
+  .ops-grid,
+  .stat-grid {
     grid-template-columns: 1fr;
   }
 
