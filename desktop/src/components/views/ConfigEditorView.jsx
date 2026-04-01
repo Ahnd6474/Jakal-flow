@@ -1,6 +1,7 @@
 ﻿import { memo } from "react";
 import { useI18n } from "../../i18n";
 import {
+  applyExecutionModelSelection,
   applyProviderDefaults,
   applyProjectModelSelection,
   canEditProjectConfig,
@@ -180,8 +181,9 @@ export const ConfigEditorView = memo(function ConfigEditorView({
   const allowSafeRuntimeEdits = isActiveExecutionStatus(projectStatus) || isActiveExecutionStatus(activeJob?.status || "");
   const autoParallelWorkers = String(runtime.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
   const selectedProvider = normalizedModelProvider(runtime);
-  const selectionState = resolveRuntimeModelSelectionState(runtime, modelCatalog);
+  const selectionState = resolveRuntimeModelSelectionState(runtime, modelCatalog, "", null, codexStatus);
   const visibleModels = selectionState.visibleModels;
+  const visibleModelGroups = selectionState.visibleModelGroups;
   const selectedModel = selectionState.selectedModel;
   const selectedReasoning = selectionState.selectedReasoning;
   const reasoningOptions = selectionState.reasoningOptions;
@@ -341,6 +343,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                   modelCatalog,
                   event.target.value,
                   null,
+                  codexStatus,
                 ),
               }))
             }
@@ -351,10 +354,14 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 {modelDisplayName(modelCatalog, selectedModel) || selectedModel}
               </option>
             ) : null}
-            {visibleModels.map((item) => (
-              <option key={item.model} value={item.model}>
-                {item.display_name || item.model}
-              </option>
+            {visibleModelGroups.map((group) => (
+              <optgroup key={group.key} label={group.label}>
+                {group.options.map((item) => (
+                  <option key={item.value} value={item.model}>
+                    {item.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </label>
@@ -371,6 +378,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                   modelCatalog,
                   event.target.value,
                   null,
+                  codexStatus,
                 ),
               }))
             }
@@ -391,6 +399,7 @@ export const ConfigEditorView = memo(function ConfigEditorView({
                 modelCatalog,
                 selectedModel,
                 event.target.value,
+                codexStatus,
               ),
             }))
           }
@@ -410,20 +419,24 @@ export const ConfigEditorView = memo(function ConfigEditorView({
           onChange={(event) =>
             onChangeForm((current) => ({
               ...current,
-              runtime: { ...current.runtime, execution_model: event.target.value },
+              runtime: applyExecutionModelSelection(current.runtime || {}, event.target.value),
             }))
           }
           disabled={executionLocked}
-          >
+        >
           {selectedExecutionModel && !selectedExecutionModelVisible ? (
             <option value={selectedExecutionModel}>
               {modelDisplayName(modelCatalog, selectedExecutionModel) || selectedExecutionModel}
             </option>
           ) : null}
-          {executionModelOptions.map((item) => (
-            <option key={item.model} value={item.model}>
-              {item.display_name || item.model}
-            </option>
+          {visibleModelGroups.map((group) => (
+            <optgroup key={group.key} label={group.label}>
+              {group.options.map((item) => (
+                <option key={item.value} value={item.model}>
+                  {item.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
         <small className="field-hint">

@@ -13,8 +13,10 @@ import {
   failureReasonLabel,
   isDuplicateProjectJobError,
   filterModelCatalogByProvider,
+  groupedModelCatalogOptions,
   jobHasNewerActiveReplacement,
   mergeModelCatalogs,
+  modelCatalogOptionValue,
   projectDetailStatus,
   projectScopedJobFromJobs,
   projectFormFromDetail,
@@ -222,6 +224,33 @@ test("filterModelCatalogByProvider limits chat model choices to the selected pro
   );
 });
 
+test("groupedModelCatalogOptions filters unusable providers and keeps local models in a separate group", () => {
+  const modelCatalog = [
+    { model: "gpt-5.4", display_name: "GPT-5.4", provider: "openai", hidden: false },
+    { model: "claude-sonnet-4-6", display_name: "Claude Sonnet 4.6", provider: "claude", hidden: false },
+    { model: "llama3.2", display_name: "Llama 3.2", provider: "oss", local_provider: "ollama", hidden: false },
+    { model: "mistral-nemo", display_name: "Mistral Nemo", provider: "oss", local_provider: "lmstudio", hidden: false },
+  ];
+  const codexStatus = {
+    provider_statuses: {
+      openai: { usable: true },
+      claude: { usable: false },
+      oss: { usable: true },
+      ollama: { usable: true },
+    },
+  };
+
+  const tree = groupedModelCatalogOptions(
+    modelCatalog,
+    { local_model_provider: "ollama" },
+    codexStatus,
+    { scope: "all" },
+  );
+
+  assert.deepEqual(tree.entries.map((item) => item.model), ["gpt-5.4", "llama3.2"]);
+  assert.deepEqual(tree.groups.map((group) => group.label), ["OpenAI/Codex", "Local Runtime / Ollama"]);
+});
+
 test("mergeModelCatalogs preserves both global and detail model catalogs without duplicating entries", () => {
   const merged = mergeModelCatalogs(
     [
@@ -256,6 +285,14 @@ test("stepModelSelectionPatch clears overrides when returning to the execution m
   );
   assert.deepEqual(
     stepModelSelectionPatch(modelCatalog, { execution_model: "gpt-5.4" }, "claude-sonnet-4-6"),
+    { model_provider: "claude", model: "claude-sonnet-4-6" },
+  );
+  assert.deepEqual(
+    stepModelSelectionPatch(
+      modelCatalog,
+      { execution_model: "gpt-5.4" },
+      modelCatalogOptionValue({ model: "claude-sonnet-4-6", provider: "claude" }),
+    ),
     { model_provider: "claude", model: "claude-sonnet-4-6" },
   );
 });
@@ -353,6 +390,41 @@ test("resolveRuntimeModelSelectionState centralizes project model and reasoning 
   assert.equal(state.selectedExecutionModel, "gpt-4.1");
   assert.equal(state.selectedExecutionModelVisible, false);
   assert.equal(state.runtime.model_selection_mode, "codex");
+});
+
+test("resolveRuntimeModelSelectionState hides unusable provider catalog entries", () => {
+  const modelCatalog = [
+    {
+      model: "gpt-5.4",
+      display_name: "GPT-5.4",
+      provider: "openai",
+      hidden: false,
+      default_reasoning_effort: "medium",
+      supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+    },
+  ];
+  const codexStatus = {
+    provider_statuses: {
+      openai: { usable: false },
+    },
+  };
+
+  const state = resolveRuntimeModelSelectionState(
+    {
+      model_provider: "openai",
+      model: "gpt-5.4",
+      execution_model: "gpt-5.4",
+      model_slug_input: "gpt-5.4",
+      effort: "medium",
+    },
+    modelCatalog,
+    "",
+    null,
+    codexStatus,
+  );
+
+  assert.deepEqual(state.visibleModels, []);
+  assert.deepEqual(state.visibleModelGroups, []);
 });
 
 test("applyChatRuntimeSelectionToProject maps a chat selection into project model settings", () => {

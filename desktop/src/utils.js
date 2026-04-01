@@ -702,17 +702,19 @@ export function mergeModelCatalogs(...catalogs) {
 
 export function stepModelSelectionPatch(modelCatalog = [], runtime = {}, nextModel = "") {
   const selection = String(nextModel || "").trim();
+  const parsedSelection = parseModelCatalogOptionValue(selection);
+  const normalizedSelection = parsedSelection.model || selection.toLowerCase();
   const executionModel = String(runtime?.execution_model || runtime?.model_slug_input || runtime?.model || "").trim().toLowerCase();
-  if (!selection || selection.toLowerCase() === executionModel) {
+  if (!selection || normalizedSelection === executionModel) {
     return {
       model_provider: "",
       model: "",
     };
   }
-  const entry = findModelCatalogEntry(modelCatalog, selection);
+  const entry = resolveModelCatalogEntry(modelCatalog, selection);
   return {
     model_provider: String(entry?.provider || "").trim().toLowerCase(),
-    model: selection,
+    model: String(entry?.model || parsedSelection.model || selection).trim(),
   };
 }
 
@@ -2249,7 +2251,242 @@ export function normalizedLocalModelProvider(runtime = {}) {
   return String(runtime?.local_model_provider || "ollama").trim().toLowerCase() === "lmstudio" ? "lmstudio" : "ollama";
 }
 
-export function filterModelCatalogByProvider(modelCatalog = [], runtime = {}) {
+function catalogEntryProvider(item = {}) {
+  return String(item?.provider || "openai").trim().toLowerCase() || "openai";
+}
+
+function catalogEntryLocalProvider(item = {}) {
+  return String(item?.local_provider || "").trim().toLowerCase();
+}
+
+function catalogEntryModel(item = {}) {
+  return String(item?.model || "").trim();
+}
+
+function modelEntryStatusProvider(item = {}) {
+  const provider = catalogEntryProvider(item);
+  const localProvider = catalogEntryLocalProvider(item);
+  if (provider === "oss" && localProvider === "ollama") {
+    return "ollama";
+  }
+  return provider;
+}
+
+function isLocalCatalogProvider(provider = "", localProvider = "") {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedLocalProvider = String(localProvider || "").trim().toLowerCase();
+  return normalizedProvider === "ollama"
+    || normalizedProvider === "local_openai"
+    || normalizedProvider === "oss"
+    || Boolean(normalizedLocalProvider);
+}
+
+function modelOptionGroupKey(provider = "", localProvider = "") {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedLocalProvider = String(localProvider || "").trim().toLowerCase();
+  if (isLocalCatalogProvider(normalizedProvider, normalizedLocalProvider)) {
+    const localKey =
+      normalizedProvider === "local_openai"
+        ? "openai-compatible"
+        : normalizedLocalProvider || normalizedProvider || "local";
+    return `local::${localKey}`;
+  }
+  return `provider::${normalizedProvider || "openai"}`;
+}
+
+function modelOptionGroupLabel(provider = "", localProvider = "") {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedLocalProvider = String(localProvider || "").trim().toLowerCase();
+  if (normalizedProvider === "local_openai") {
+    return "Local Runtime / OpenAI-Compatible";
+  }
+  if (normalizedProvider === "oss" || normalizedProvider === "ollama" || normalizedLocalProvider) {
+    if (normalizedLocalProvider === "lmstudio") {
+      return "Local Runtime / LM Studio";
+    }
+    return "Local Runtime / Ollama";
+  }
+  return providerDisplayName(normalizedProvider, normalizedLocalProvider);
+}
+
+function modelOptionGroupOrder(provider = "", localProvider = "") {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedLocalProvider = String(localProvider || "").trim().toLowerCase();
+  if (isLocalCatalogProvider(normalizedProvider, normalizedLocalProvider)) {
+    if (normalizedProvider === "local_openai") {
+      return 1010;
+    }
+    return normalizedLocalProvider === "lmstudio" ? 1005 : 1000;
+  }
+  const order = MODEL_PROVIDER_OPTIONS.indexOf(normalizedProvider);
+  return order >= 0 ? order : 500;
+}
+
+function modelOptionLabel(item = {}, includeProvider = false) {
+  const model = String(item?.display_name || item?.model || "").trim();
+  if (!includeProvider) {
+    return model;
+  }
+  const providerLabel = modelOptionGroupLabel(item?.provider, item?.local_provider);
+  return providerLabel ? `${model} / ${providerLabel}` : model;
+}
+
+function modelOptionMatchesScopedProvider(item = {}, provider = "", localProvider = "") {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedLocalProvider = String(localProvider || "").trim().toLowerCase();
+  const itemProvider = catalogEntryProvider(item);
+  if (
+    normalizedProvider === "oss"
+    || normalizedProvider === "ollama"
+    || normalizedProvider === "local_openai"
+  ) {
+    if (normalizedProvider === "local_openai") {
+      return itemProvider === "local_openai";
+    }
+    if (itemProvider !== "oss") {
+      return false;
+    }
+    const itemLocalProvider = catalogEntryLocalProvider(item);
+    if (normalizedProvider === "ollama") {
+      return itemLocalProvider === "ollama";
+    }
+    return !normalizedLocalProvider || !itemLocalProvider || itemLocalProvider === normalizedLocalProvider;
+  }
+  return normalizedProvider === "ensemble"
+    ? itemProvider === "openai"
+    : itemProvider === normalizedProvider;
+}
+
+function shouldKeepModelCatalogEntry(item = {}, runtime = {}, codexStatus = {}, options = {}) {
+  const {
+    scope = "provider",
+    includeHidden = false,
+    includeAuto = false,
+    respectLocalProvider = true,
+  } = options || {};
+  const model = catalogEntryModel(item);
+  if (!model) {
+    return false;
+  }
+  if (!includeHidden && item?.hidden) {
+    return false;
+  }
+  if (!includeAuto && model.toLowerCase() === "auto") {
+    return false;
+  }
+  const provider = normalizedModelProvider(runtime);
+  const localProvider = normalizedLocalModelProvider(runtime);
+  if (scope === "provider" && !modelOptionMatchesScopedProvider(item, provider, localProvider)) {
+    return false;
+  }
+  if (scope === "provider" && providerSupportsCatalog(provider) && !providerUsable(provider, codexStatus)) {
+    return false;
+  }
+  if (scope === "all" && !providerUsable(modelEntryStatusProvider(item), codexStatus)) {
+    return false;
+  }
+  if (scope === "all" && respectLocalProvider && catalogEntryProvider(item) === "oss") {
+    const itemLocalProvider = catalogEntryLocalProvider(item);
+    if (itemLocalProvider && itemLocalProvider !== localProvider) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function buildModelCatalogOptionGroups(entries = [], { includeProviderInLabel = false } = {}) {
+  const grouped = new Map();
+  for (const item of entries) {
+    const provider = catalogEntryProvider(item);
+    const localProvider = catalogEntryLocalProvider(item);
+    const groupKey = modelOptionGroupKey(provider, localProvider);
+    const option = {
+      ...item,
+      value: modelCatalogOptionValue(item),
+      label: modelOptionLabel(item, includeProviderInLabel),
+      provider_label: modelOptionGroupLabel(provider, localProvider),
+      group_key: groupKey,
+      group_label: modelOptionGroupLabel(provider, localProvider),
+      group_order: modelOptionGroupOrder(provider, localProvider),
+    };
+    const existingGroup = grouped.get(groupKey);
+    if (existingGroup) {
+      existingGroup.options.push(option);
+      continue;
+    }
+    grouped.set(groupKey, {
+      key: groupKey,
+      label: option.group_label,
+      order: option.group_order,
+      options: [option],
+    });
+  }
+  return [...grouped.values()]
+    .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label))
+    .map((group) => ({
+      key: group.key,
+      label: group.label,
+      options: group.options.sort((left, right) => left.label.localeCompare(right.label)),
+    }));
+}
+
+function visibleModelCatalogEntries(modelCatalog = [], runtime = {}, codexStatus = {}, options = {}) {
+  if (options?.scope === "provider") {
+    return filterModelCatalogByProvider(modelCatalog, runtime, codexStatus, options);
+  }
+  return (modelCatalog || []).filter((item) => shouldKeepModelCatalogEntry(item, runtime, codexStatus, options));
+}
+
+export function modelCatalogOptionValue(item = {}) {
+  const provider = catalogEntryProvider(item);
+  const localProvider = catalogEntryLocalProvider(item);
+  const model = catalogEntryModel(item).toLowerCase();
+  return model ? [provider, localProvider, model].join("::") : "";
+}
+
+export function parseModelCatalogOptionValue(value = "") {
+  const [provider = "", localProvider = "", model = ""] = String(value || "").split("::");
+  return {
+    provider: String(provider || "").trim().toLowerCase(),
+    localProvider: String(localProvider || "").trim().toLowerCase(),
+    model: String(model || "").trim().toLowerCase(),
+  };
+}
+
+export function resolveModelCatalogEntry(modelCatalog = [], value = "") {
+  const selection = String(value || "").trim();
+  const parsed = parseModelCatalogOptionValue(selection);
+  const selectedModel = parsed.model || selection.toLowerCase();
+  const selectedProvider = parsed.model ? parsed.provider : "";
+  const selectedLocalProvider = parsed.model ? parsed.localProvider : "";
+  return (
+    (modelCatalog || []).find((item) => {
+      const itemModel = catalogEntryModel(item).toLowerCase();
+      if (itemModel !== selectedModel) {
+        return false;
+      }
+      if (selectedProvider && catalogEntryProvider(item) !== selectedProvider) {
+        return false;
+      }
+      if (selectedLocalProvider && catalogEntryLocalProvider(item) !== selectedLocalProvider) {
+        return false;
+      }
+      return true;
+    })
+    || findModelCatalogEntry(modelCatalog, selectedModel)
+    || null
+  );
+}
+
+export function groupedModelCatalogOptions(modelCatalog = [], runtime = {}, codexStatus = {}, options = {}) {
+  const entries = visibleModelCatalogEntries(modelCatalog, runtime, codexStatus, options);
+  return {
+    entries,
+    groups: buildModelCatalogOptionGroups(entries, options),
+  };
+}
+
+export function filterModelCatalogByProvider(modelCatalog = [], runtime = {}, codexStatus = {}, options = {}) {
   const provider = normalizedModelProvider(runtime);
   const localProvider = normalizedLocalModelProvider(runtime);
   if (!providerSupportsCatalog(provider)) {
@@ -2266,35 +2503,34 @@ export function filterModelCatalogByProvider(modelCatalog = [], runtime = {}) {
       },
     ];
   }
+  if (!providerUsable(provider, codexStatus)) {
+    return [];
+  }
   return (modelCatalog || []).filter((item) => {
-    const itemProvider = String(item?.provider || "openai").trim().toLowerCase() || "openai";
-    const matchesProvider =
-      provider === "ensemble"
-        ? itemProvider === "openai"
-        : provider === "ollama"
-          ? itemProvider === "oss"
-          : itemProvider === provider;
-    if (!matchesProvider) {
+    if (!modelOptionMatchesScopedProvider(item, provider, localProvider)) {
       return false;
     }
-    if (provider === "ollama") {
-      return String(item?.local_provider || "").trim().toLowerCase() === "ollama";
-    }
-    if (provider !== "oss") {
-      return true;
-    }
-    const itemLocalProvider = String(item?.local_provider || "").trim().toLowerCase();
-    return !itemLocalProvider || itemLocalProvider === localProvider;
+    return shouldKeepModelCatalogEntry(item, runtime, codexStatus, {
+      ...options,
+      scope: "provider",
+    });
   });
 }
 
-export function defaultModelForRuntime(modelCatalog = [], runtime = {}) {
+export function defaultModelForRuntime(modelCatalog = [], runtime = {}, codexStatus = {}) {
   const provider = normalizedModelProvider(runtime);
   if (!providerSupportsCatalog(provider)) {
     return defaultModelForProvider(provider, runtime);
   }
-  const scopedCatalog = filterModelCatalogByProvider(modelCatalog, runtime);
-  const visible = scopedCatalog.filter((item) => !item?.hidden && String(item?.model || "").trim().toLowerCase() !== "auto");
+  const scopedCatalog = filterModelCatalogByProvider(modelCatalog, runtime, codexStatus, {
+    includeHidden: true,
+    includeAuto: true,
+  });
+  const visible = scopedCatalog.filter((item) => shouldKeepModelCatalogEntry(item, runtime, codexStatus, {
+    scope: "provider",
+    includeHidden: false,
+    includeAuto: false,
+  }));
   const preferred = visible[0] || scopedCatalog[0] || null;
   if (preferred?.model) {
     return preferred.model;
@@ -2332,9 +2568,12 @@ function normalizeModelSelectionMode(value) {
   return normalized === "codex" ? "codex" : "slug";
 }
 
-export function resolveRuntimeModelSelectionState(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null) {
+export function resolveRuntimeModelSelectionState(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null, codexStatus = {}) {
+  const visibleModelTree = groupedModelCatalogOptions(modelCatalog, currentRuntime, codexStatus, {
+    scope: "provider",
+  });
   const model = String(nextModel || "").trim()
-    || defaultModelForRuntime(modelCatalog, currentRuntime)
+    || defaultModelForRuntime(modelCatalog, currentRuntime, codexStatus)
     || defaultModelForProvider(currentRuntime?.model_provider || "openai", currentRuntime)
     || "";
   const normalizedModel = model.toLowerCase();
@@ -2343,9 +2582,7 @@ export function resolveRuntimeModelSelectionState(currentRuntime = {}, modelCata
   const selection = supported.includes(preferred) ? preferred : supported[0] || "medium";
   const effort = selection === AUTO_REASONING_OPTION ? defaultReasoningOption(modelCatalog, model, currentRuntime?.effort || "medium") : selection;
   const planningEffort = clampReasoningEffort(modelCatalog, model, currentRuntime?.planning_effort || effort, effort);
-  const visibleModels = filterModelCatalogByProvider(modelCatalog, currentRuntime).filter(
-    (item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto",
-  );
+  const visibleModels = visibleModelTree.entries;
   const executionModel = String(
     currentRuntime?.execution_model
       || currentRuntime?.model_slug_input
@@ -2369,6 +2606,7 @@ export function resolveRuntimeModelSelectionState(currentRuntime = {}, modelCata
     selectedReasoning: selection,
     reasoningOptions: configReasoningOptions(modelCatalog, model, currentRuntime?.effort || "medium"),
     visibleModels,
+    visibleModelGroups: visibleModelTree.groups,
     executionModel,
     selectedExecutionModel: executionModel,
     selectedExecutionModelVisible: Boolean(executionModel)
@@ -2377,19 +2615,26 @@ export function resolveRuntimeModelSelectionState(currentRuntime = {}, modelCata
   };
 }
 
-export function applyConfigRuntimeModelSelection(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null) {
-  const selectionState = resolveRuntimeModelSelectionState(currentRuntime, modelCatalog, nextModel, nextEffort);
+export function applyConfigRuntimeModelSelection(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null, codexStatus = {}) {
+  const selectionState = resolveRuntimeModelSelectionState(currentRuntime, modelCatalog, nextModel, nextEffort, codexStatus);
   return {
     ...selectionState.runtime,
     execution_model: selectionState.model,
   };
 }
 
-export function applyProjectModelSelection(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null) {
-  return resolveRuntimeModelSelectionState(currentRuntime, modelCatalog, nextModel, nextEffort).runtime;
+export function applyProjectModelSelection(currentRuntime = {}, modelCatalog = [], nextModel = "", nextEffort = null, codexStatus = {}) {
+  return resolveRuntimeModelSelectionState(currentRuntime, modelCatalog, nextModel, nextEffort, codexStatus).runtime;
 }
 
-export function applyChatRuntimeSelectionToProject(currentRuntime = {}, modelCatalog = [], selection = {}, nextEffort = null) {
+export function applyExecutionModelSelection(currentRuntime = {}, nextModel = "") {
+  return {
+    ...(cloneValue(currentRuntime) || {}),
+    execution_model: String(nextModel || "").trim(),
+  };
+}
+
+export function applyChatRuntimeSelectionToProject(currentRuntime = {}, modelCatalog = [], selection = {}, nextEffort = null, codexStatus = {}) {
   const nextRuntime = {
     ...(cloneValue(currentRuntime) || {}),
   };
@@ -2407,6 +2652,7 @@ export function applyChatRuntimeSelectionToProject(currentRuntime = {}, modelCat
     modelCatalog,
     model || nextRuntime.model || nextRuntime.model_slug_input || "",
     nextEffort,
+    codexStatus,
   );
 }
 
@@ -2426,19 +2672,14 @@ function chatRuntimeSelectionKey(selection = {}) {
   return model ? [provider, localProvider, model].join("::") : "";
 }
 
-export function resolveChatRuntimeSelection(currentRuntime = {}, nextRuntime = {}, modelCatalog = []) {
+export function resolveChatRuntimeSelection(currentRuntime = {}, nextRuntime = {}, modelCatalog = [], codexStatus = {}) {
   const current = normalizeChatRuntimeSelection(currentRuntime);
   const next = normalizeChatRuntimeSelection(nextRuntime);
-  const scopedCatalog = filterModelCatalogByProvider(modelCatalog, nextRuntime).filter(
-    (item) => !item?.hidden && Boolean(String(item?.model || "").trim()),
-  );
+  const scopedCatalog = visibleModelCatalogEntries(modelCatalog, nextRuntime, codexStatus, {
+    scope: "all",
+  });
   const allowedKeys = new Set(
-    scopedCatalog.map((item) => {
-      const provider = String(item?.provider || "openai").trim().toLowerCase() || "openai";
-      const localProvider = String(item?.local_provider || "").trim().toLowerCase();
-      const model = String(item?.model || "").trim().toLowerCase();
-      return [provider, localProvider, model].join("::");
-    }),
+    scopedCatalog.map((item) => modelCatalogOptionValue(item)),
   );
   const currentKey = chatRuntimeSelectionKey(current);
   const nextKey = chatRuntimeSelectionKey(next);

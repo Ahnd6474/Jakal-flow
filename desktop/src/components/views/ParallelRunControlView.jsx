@@ -17,13 +17,16 @@ import {
   formatDurationCompact,
   formatUsd,
   GEMINI_DEFAULT_MODEL,
+  groupedModelCatalogOptions,
   GLM_DEFAULT_MODEL,
   isSystemStep,
   KIMI_DEFAULT_MODEL,
+  modelCatalogOptionValue,
   MINIMAX_DEFAULT_MODEL,
   modelDisplayName,
   mergeModelCatalogs,
-  providerDisplayName,
+  normalizedLocalModelProvider,
+  resolveModelCatalogEntry,
   stepModelSelectionPatch,
   parallelLimitDescription,
   parallelLimitTone,
@@ -39,7 +42,6 @@ import {
   reasoningEffortLabel,
   AUTO_REASONING_OPTION,
   MODEL_REASONING_OPTIONS,
-  resolveRuntimeModelSelectionState,
   sameQueuedJobs,
   shouldShowEstimatedCost,
   statusTone,
@@ -291,7 +293,7 @@ function modelChipLabel(form, detail) {
 }
 
 /* ?? ModelEffortChip: single button + popover ?? */
-function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCatalog = [] }) {
+function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCatalog = [], codexStatus = {} }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const runtime = form?.runtime || detail?.runtime || {};
@@ -346,7 +348,7 @@ function ModelEffortChip({ form, detail, busy, onChangeForm, language, modelCata
                   onClick={() => {
                     onChangeForm?.((c) => ({
                       ...c,
-                      runtime: applyConfigRuntimeModelSelection(c.runtime || {}, modelCatalog, selectedModel, opt),
+                      runtime: applyConfigRuntimeModelSelection(c.runtime || {}, modelCatalog, selectedModel, opt, codexStatus),
                     }));
                     setOpen(false);
                   }}
@@ -404,18 +406,6 @@ function stepModelPlaceholder(step, runtime) {
 function executionModelLabel(modelCatalog = [], runtime = {}) {
   const model = String(runtime?.execution_model || runtime?.model_slug_input || runtime?.model || "").trim();
   return modelDisplayName(modelCatalog, model) || model || "gpt-5.4";
-}
-
-function stepModelOptions(modelCatalog = [], runtime = {}, stepProvider = "") {
-  void runtime;
-  void stepProvider;
-  return (modelCatalog || []).filter((item) => item && item.model && !item.hidden && String(item.model).trim().toLowerCase() !== "auto");
-}
-
-function stepModelOptionLabel(item = {}) {
-  const model = item.display_name || item.model || "";
-  const provider = providerDisplayName(item.provider, item.local_provider);
-  return provider ? `${model} / ${provider}` : model;
 }
 
 function normalizeListText(value) {
@@ -526,12 +516,30 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
   );
   const selectedSystemStep = isSystemStep(selectedStep) && selectedStep?.step_id !== CLOSEOUT_STEP_ID;
   const selectedStepIndex = selectedStep ? steps.findIndex((s) => s.step_id === selectedStepId) : -1;
-  const selectedStepSelectionState = resolveRuntimeModelSelectionState(selectedStep || {}, modelCatalog);
-  const selectedStepModel = selectedStepSelectionState.selectedModel;
-  const selectedStepModelProvider = String(selectedStep?.model_provider || detail?.runtime?.model_provider || "").trim();
-  const selectedStepModelOptions = stepModelOptions(modelCatalog, detail?.runtime || {}, selectedStepModelProvider);
-  const selectedStepModelVisible = selectedStepModel
-    ? selectedStepModelOptions.some((item) => String(item.model || "").trim().toLowerCase() === selectedStepModel.toLowerCase())
+  const selectedStepModel = String(selectedStep?.model || "").trim();
+  const selectedStepModelProvider = String(selectedStep?.model_provider || detail?.runtime?.model_provider || "").trim().toLowerCase();
+  const selectedStepModelTree = useMemo(
+    () => groupedModelCatalogOptions(modelCatalog, detail?.runtime || {}, codexStatus, { scope: "all" }),
+    [codexStatus, detail?.runtime, modelCatalog],
+  );
+  const selectedStepModelOptions = selectedStepModelTree.entries;
+  const selectedStepModelGroups = selectedStepModelTree.groups;
+  const selectedStepModelLocalProvider =
+    selectedStepModelProvider === "oss" ? normalizedLocalModelProvider(detail?.runtime || {}) : "";
+  const selectedStepModelValue = selectedStepModel
+    ? modelCatalogOptionValue(
+      resolveModelCatalogEntry(
+        modelCatalog,
+        [selectedStepModelProvider || "openai", selectedStepModelLocalProvider, selectedStepModel.toLowerCase()].join("::"),
+      ) || {
+        provider: selectedStepModelProvider || "openai",
+        local_provider: selectedStepModelLocalProvider,
+        model: selectedStepModel,
+      },
+    )
+    : "";
+  const selectedStepModelVisible = selectedStepModelValue
+    ? selectedStepModelOptions.some((item) => item.value === selectedStepModelValue)
     : false;
   const selectedStepExecutionModelLabel = executionModelLabel(modelCatalog, detail?.runtime || {});
   const selectedStepExecutionModel = String(detail?.runtime?.execution_model || detail?.runtime?.model_slug_input || detail?.runtime?.model || "").trim().toLowerCase();
@@ -796,7 +804,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
 
               <label className="field field--wide"><span>{t("field.model")}</span>
                 <select
-                  value={selectedStepModel}
+                  value={selectedStepModelValue}
                   onChange={(event) => {
                     const nextModel = String(event.target.value || "").trim();
                     onUpdateStepField(stepModelSelectionPatch(modelCatalog, detail?.runtime || {}, nextModel));
@@ -805,14 +813,18 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                 >
                   <option value="">{language === "ko" ? `Use execution model (${selectedStepExecutionModelLabel})` : `Use execution model (${selectedStepExecutionModelLabel})`}</option>
                   {!selectedStepModelVisible && selectedStepModel ? (
-                    <option value={selectedStepModel}>
+                    <option value={selectedStepModelValue}>
                       {modelDisplayName(modelCatalog, selectedStepModel) || selectedStepModel}
                     </option>
                   ) : null}
-                  {selectedStepModelOptions.map((item) => (
-                    <option key={item.model} value={item.model}>
-                      {stepModelOptionLabel(item)}
-                    </option>
+                  {selectedStepModelGroups.map((group) => (
+                    <optgroup key={group.key} label={group.label}>
+                      {group.options.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {`${item.label} / ${item.provider_label}`}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 <small className="field-hint">
@@ -863,7 +875,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                 >
                   {language === "ko" ? "Collapse" : "Collapse"}
                 </button>
-                <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={modelCatalog} />
+                <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={modelCatalog} codexStatus={codexStatus} />
               </div>
               <textarea
                 ref={promptRef}
@@ -895,7 +907,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
               <span className="status-badge status-badge--info" style={{ fontSize: "10px" }}>
                 {language === "ko" ? "Read only" : "Read only"}
               </span>
-              <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={modelCatalog} />
+              <ModelEffortChip form={form} detail={detail} busy={busy} onChangeForm={onChangeForm} language={language} modelCatalog={modelCatalog} codexStatus={codexStatus} />
             </div>
           )}
         </div>

@@ -40,6 +40,7 @@ import {
   buildRunPlanPayloadFromDetail,
   cloneValue,
   commandLabel,
+  groupedModelCatalogOptions,
   inheritProjectIdentityForm,
   isPlanningProgressRunning,
   mergeModelCatalogs,
@@ -469,6 +470,7 @@ export function useDesktopController() {
           current,
           normalizedDetail?.runtime || {},
           nextModelCatalog,
+          normalizedDetail?.codex_status || {},
         ));
       });
       const nextProjects = applyProjectDetailListingState({
@@ -1496,11 +1498,21 @@ export function useDesktopController() {
   }
 
   function setChatModelSelection(selection = null) {
-    const nextSelection = {
+    const requestedSelection = {
       chat_model_provider: String(selection?.provider || "").trim().toLowerCase(),
       chat_local_model_provider: String(selection?.localProvider || "").trim().toLowerCase(),
       chat_model: String(selection?.model || "").trim().toLowerCase(),
     };
+    const nextSelection = resolveChatRuntimeSelection(
+      chatRuntime,
+      {
+        ...(projectForm?.runtime || {}),
+        ...(chatRuntime || {}),
+        ...requestedSelection,
+      },
+      modelCatalog,
+      projectDetail?.codex_status || {},
+    );
     setChatRuntime((current) => ({
       ...(current || {}),
       ...nextSelection,
@@ -1516,15 +1528,28 @@ export function useDesktopController() {
 
   function setChatReasoningEffort(value = "") {
     const nextEffort = String(value || "").trim().toLowerCase();
+    const nextSelection = resolveChatRuntimeSelection(
+      {
+        ...(chatRuntime || {}),
+        chat_effort: nextEffort,
+      },
+      {
+        ...(projectForm?.runtime || {}),
+        ...(chatRuntime || {}),
+        chat_effort: nextEffort,
+      },
+      modelCatalog,
+      projectDetail?.codex_status || {},
+    );
     setChatRuntime((current) => ({
       ...(current || {}),
-      chat_effort: nextEffort,
+      ...nextSelection,
     }));
     setProjectForm((current) => ({
       ...(current || {}),
       runtime: {
         ...(current?.runtime || {}),
-        chat_effort: nextEffort,
+        ...nextSelection,
       },
     }));
   }
@@ -1581,6 +1606,7 @@ export function useDesktopController() {
       current,
       restoredForm.runtime || {},
       modelCatalog,
+      projectDetail?.codex_status || {},
     ));
   }
 
@@ -2169,10 +2195,12 @@ export function useDesktopController() {
       ...chatRuntimeBase,
       ...(chatRuntime || {}),
     };
-    const visibleChatCatalog = (modelCatalog || []).filter((item) => {
-      const model = String(item?.model || "").trim();
-      return Boolean(model) && !item?.hidden;
-    });
+    const visibleChatCatalog = groupedModelCatalogOptions(
+      modelCatalog,
+      projectDetail?.runtime || chatRuntimeSelection,
+      projectDetail?.codex_status || {},
+      { scope: "all" },
+    ).entries;
     const requestedChatProvider = String(chatRuntimeSelection?.chat_model_provider || "").trim().toLowerCase();
     const requestedChatLocalProvider = String(chatRuntimeSelection?.chat_local_model_provider || "").trim().toLowerCase();
     const requestedChatModel = String(chatRuntimeSelection?.chat_model || "").trim().toLowerCase();
@@ -2191,6 +2219,7 @@ export function useDesktopController() {
         model: String(allowedChatEntry?.model || requestedChatModel || "").trim().toLowerCase(),
       },
       chatEffort || null,
+      projectDetail?.codex_status || {},
     );
     if (normalizedMode === "plan") {
       return generatePlan(messageText, { runtimeOverride: nextRuntime });

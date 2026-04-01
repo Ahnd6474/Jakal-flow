@@ -6,7 +6,11 @@ import {
   MODEL_REASONING_OPTIONS,
   formatChatSessionTitle,
   formatDurationCompact,
+  groupedModelCatalogOptions,
+  modelCatalogOptionValue,
+  parseModelCatalogOptionValue,
   reasoningEffortLabel,
+  resolveModelCatalogEntry,
   resolveExecutionDisplayPlan,
   sameQueuedJobs,
   visibleExecutionJob,
@@ -95,22 +99,6 @@ const LazyFilesPanel = lazyNamedExport(() => import("./RightSidebarDetailPanels"
 const LazyContractsPanel = lazyNamedExport(() => import("./RightSidebarDetailPanels"), "ContractsPanel");
 const LazyInspectorPanel = lazyNamedExport(() => import("./RightSidebarDetailPanels"), "InspectorPanel");
 const LazyFlowWorkspaceView = lazyNamedExport(() => import("../views/FlowWorkspaceView"), "FlowWorkspaceView");
-
-function chatModelOptionValue(item = {}) {
-  const provider = String(item?.provider || "openai").trim().toLowerCase() || "openai";
-  const localProvider = String(item?.local_provider || "").trim().toLowerCase();
-  const model = String(item?.model || "").trim().toLowerCase();
-  return model ? [provider, localProvider, model].join("::") : "";
-}
-
-function parseChatModelOptionValue(value = "") {
-  const [provider = "", localProvider = "", model = ""] = String(value || "").split("::");
-  return {
-    provider: String(provider || "").trim().toLowerCase(),
-    localProvider: String(localProvider || "").trim().toLowerCase(),
-    model: String(model || "").trim().toLowerCase(),
-  };
-}
 
 function chatProviderLabel(provider = "", localProvider = "", language = "en") {
   const normalizedProvider = String(provider || "").trim().toLowerCase();
@@ -461,13 +449,12 @@ const ProjectChatPane = memo(function ProjectChatPane({
     const startedAtMs = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
     return Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
   });
-  const availableChatModels = useMemo(
-    () => (modelCatalog || []).filter((item) => {
-      const model = String(item?.model || "").trim();
-      return Boolean(model) && !item?.hidden;
-    }),
-    [modelCatalog],
+  const availableChatModelTree = useMemo(
+    () => groupedModelCatalogOptions(modelCatalog, detail?.runtime || chatSettings || {}, detail?.codex_status || {}, { scope: "all" }),
+    [chatSettings, detail?.codex_status, detail?.runtime, modelCatalog],
   );
+  const availableChatModels = availableChatModelTree.entries;
+  const availableChatModelGroups = availableChatModelTree.groups;
   const selectedChatKey = useMemo(
     () => (selectedChatModel ? [selectedChatProvider, selectedChatLocalProvider, selectedChatModel].join("::") : ""),
     [selectedChatLocalProvider, selectedChatModel, selectedChatProvider],
@@ -477,10 +464,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
     [selectedChatKey],
   );
   const selectedChatEntry = useMemo(
-    () => (
-      (modelCatalog || []).find((item) => chatModelOptionValue(item) === selectedChatValue)
-      || null
-    ),
+    () => resolveModelCatalogEntry(modelCatalog, selectedChatValue) || null,
     [modelCatalog, selectedChatValue],
   );
   const availableChatEfforts = useMemo(
@@ -705,7 +689,7 @@ const ProjectChatPane = memo(function ProjectChatPane({
       onChangeChatModelSelection?.(null);
       return;
     }
-    onChangeChatModelSelection?.(parseChatModelOptionValue(nextValue));
+    onChangeChatModelSelection?.(parseModelCatalogOptionValue(nextValue));
   }
 
   function handleChatEffortChange(event) {
@@ -738,15 +722,19 @@ const ProjectChatPane = memo(function ProjectChatPane({
       onChange={handleChatModelChange}
     >
       <option value="">{projectDefaultOptionLabel}</option>
-      {selectedChatEntry && !availableChatModels.some((item) => chatModelOptionValue(item) === selectedChatValue) ? (
+      {selectedChatEntry && !availableChatModels.some((item) => modelCatalogOptionValue(item) === selectedChatValue) ? (
         <option value={selectedChatValue}>
           {selectedChatEntry.display_name || selectedChatEntry.model} / {chatProviderLabel(selectedChatEntry.provider, selectedChatEntry.local_provider, language)}
         </option>
       ) : null}
-      {availableChatModels.map((item) => (
-        <option key={chatModelOptionValue(item)} value={chatModelOptionValue(item)}>
-          {(item.display_name || item.model) + " / " + chatProviderLabel(item.provider, item.local_provider, language)}
-        </option>
+      {availableChatModelGroups.map((group) => (
+        <optgroup key={group.key} label={group.label}>
+          {group.options.map((item) => (
+            <option key={item.value} value={item.value}>
+              {(item.display_name || item.model) + " / " + chatProviderLabel(item.provider, item.local_provider, language)}
+            </option>
+          ))}
+        </optgroup>
       ))}
     </select>
   );

@@ -40,6 +40,7 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
   const providerHasCatalog = providerSupportsCatalog(selectedProvider);
   const selectionState = resolveRuntimeModelSelectionState(runtime, modelCatalog);
   const visibleModels = selectionState.visibleModels;
+  const visibleModelGroups = selectionState.visibleModelGroups;
   const selectedModel = selectionState.selectedModel;
   const selectedEffort = selectionState.selectedReasoning;
   const reasoningOptions = selectionState.reasoningOptions;
@@ -110,8 +111,12 @@ export function ModelPane({ form, modelPresets, modelCatalog, onChangeForm, onHi
                 {selectedModel && !visibleModels.some((item) => String(item.model || "").trim().toLowerCase() === selectedModel.toLowerCase()) ? (
                   <option value={selectedModel}>{selectedModel}</option>
                 ) : null}
-                {visibleModels.map((item) => (
-                  <option key={item.model} value={item.model}>{item.display_name || item.model}</option>
+                {visibleModelGroups.map((group) => (
+                  <optgroup key={group.key} label={group.label}>
+                    {group.options.map((item) => (
+                      <option key={item.value} value={item.model}>{item.label}</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </div>
