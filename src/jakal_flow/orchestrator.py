@@ -1662,55 +1662,31 @@ class Orchestrator(
                         if not worker_commit:
                             merged_commit_by_step_id[result_step_id] = ""
                             continue
-                        merge_result = self.git.try_cherry_pick(context.paths.repo_dir, worker_commit)
-                        if merge_result.returncode == 0:
-                            merged_commit = self.git.current_revision(context.paths.repo_dir)
-                            merged_commit_hashes.append(merged_commit)
-                            merged_commit_by_step_id[result_step_id] = merged_commit
-                            continue
-                        conflicted_files = self.git.conflicted_files(context.paths.repo_dir)
-                        failure_extra = {"conflict": self._parallel_conflict_details(conflicted_files)}
-                        if conflicted_files and self.git.cherry_pick_in_progress(context.paths.repo_dir):
-                            merge_test_result = self._parallel_merge_conflict_test_result(
+                        merged_commit, _used_merger = self._apply_cherry_pick_with_merger(
+                            context=context,
+                            source_commit=worker_commit,
+                            runner=batch_runner,
+                            reporter=reporter,
+                            block_index=verification_block_index,
+                            candidate=batch_merge_candidate,
+                            execution_step=batch_merge_step,
+                            memory_context=batch_memory_context,
+                            merge_targets=[step.step_id for step in batch_targets],
+                            failing_command="parallel-batch-merge",
+                            conflict_test_result_factory=lambda merge_result, conflicted_files, worker_commit=worker_commit: self._parallel_merge_conflict_test_result(
                                 context=context,
                                 worker_commit=worker_commit,
                                 merge_result=merge_result,
                                 conflicted_files=conflicted_files,
-                            )
-                            merge_pass_name, merge_run_result, merge_success, merge_commit_hash = self._run_merger_pass(
-                                context=context,
-                                runner=batch_runner,
-                                reporter=reporter,
-                                block_index=verification_block_index,
-                                candidate=batch_merge_candidate,
-                                execution_step=batch_merge_step,
-                                memory_context=batch_memory_context,
-                                failing_command="parallel-batch-merge",
-                                failing_summary=merge_test_result.summary,
-                                failing_stdout=read_text(merge_test_result.stdout_file),
-                                failing_stderr=read_text(merge_test_result.stderr_file),
-                                merge_targets=[step.step_id for step in batch_targets],
-                                post_success_strategy="continue_cherry_pick",
-                            )
-                            if merge_run_result.returncode == 0 and merge_success and merge_commit_hash:
-                                self._log_pass_result(
-                                    context=context,
-                                    reporter=reporter,
-                                    block_index=verification_block_index,
-                                    candidate=batch_merge_candidate,
-                                    pass_name=merge_pass_name,
-                                    run_result=merge_run_result,
-                                    test_result=None,
-                                    commit_hash=merge_commit_hash,
-                                    rollback_status="not_needed",
-                                    search_enabled=False,
-                                )
-                                merged_commit_hashes.append(merge_commit_hash)
-                                merged_commit_by_step_id[result_step_id] = merge_commit_hash
-                                continue
-                        raise ParallelMergeConflictError(
-                            f"Parallel merge conflict while cherry-picking {worker_commit}: {', '.join(conflicted_files) or merge_result.stderr.strip() or 'unknown conflict'}"
+                            ),
+                            conflict_message_factory=lambda conflicted_files, merge_result, worker_commit=worker_commit: (
+                                f"Parallel merge conflict while cherry-picking {worker_commit}: "
+                                f"{', '.join(conflicted_files) or str(getattr(merge_result, 'stderr', '')).strip() or 'unknown conflict'}"
+                            ),
+                            post_success_strategy="continue_cherry_pick",
                         )
+                        merged_commit_hashes.append(merged_commit)
+                        merged_commit_by_step_id[result_step_id] = merged_commit
                 except ImmediateStopRequested as exc:
                     self.git.abort_cherry_pick(context.paths.repo_dir)
                     self.git.hard_reset(context.paths.repo_dir, base_revision)
@@ -2151,70 +2127,33 @@ class Orchestrator(
                     source_commit = str(lineage.head_commit or lineage.safe_revision or "").strip()
                     if not source_commit:
                         raise RuntimeError(f"{target_step.step_id} could not find a mergeable commit for lineage {lineage.lineage_id}.")
-                    merge_result = self.git.try_cherry_pick(integration_context.paths.repo_dir, source_commit)
-                    if merge_result.returncode == 0:
-                        integration_head = self.git.current_revision(integration_context.paths.repo_dir)
-                        integration_context.metadata.current_safe_revision = integration_head
-                        integration_context.loop_state.current_safe_revision = integration_head
-                        self.workspace.save_project(integration_context)
-                        continue
-                    if self._is_empty_cherry_pick_result(merge_result):
-                        if self.git.cherry_pick_in_progress(integration_context.paths.repo_dir):
-                            self.git.skip_cherry_pick(integration_context.paths.repo_dir)
-                        integration_head = self.git.current_revision(integration_context.paths.repo_dir)
-                        integration_context.metadata.current_safe_revision = integration_head
-                        integration_context.loop_state.current_safe_revision = integration_head
-                        self.workspace.save_project(integration_context)
-                        continue
-                    conflicted_files = self.git.conflicted_files(integration_context.paths.repo_dir)
-                    merge_test_result = self._merge_conflict_test_result(
+                    _merged_revision, used_merger = self._apply_cherry_pick_with_merger(
                         context=integration_context,
-                        label="integration-merge",
-                        command=f"git cherry-pick {source_commit}",
-                        merge_result=merge_result,
-                        conflicted_files=conflicted_files,
-                    )
-                    if conflicted_files and self.git.cherry_pick_in_progress(integration_context.paths.repo_dir):
-                        merge_pass_name, merge_run_result, merge_success, merge_commit_hash = self._run_merger_pass(
+                        source_commit=source_commit,
+                        runner=integration_runner,
+                        reporter=integration_reporter,
+                        block_index=merge_block_index,
+                        candidate=merge_candidate,
+                        execution_step=merge_step,
+                        memory_context=integration_memory_context,
+                        merge_targets=merge_targets,
+                        failing_command="integration-merge",
+                        conflict_test_result_factory=lambda merge_result, conflicted_files, source_commit=source_commit: self._merge_conflict_test_result(
                             context=integration_context,
-                            runner=integration_runner,
-                            reporter=integration_reporter,
-                            block_index=merge_block_index,
-                            candidate=merge_candidate,
-                            execution_step=merge_step,
-                            memory_context=integration_memory_context,
-                            failing_command="integration-merge",
-                            failing_summary=merge_test_result.summary,
-                            failing_stdout=read_text(merge_test_result.stdout_file),
-                            failing_stderr=read_text(merge_test_result.stderr_file),
-                            merge_targets=merge_targets,
-                        )
-                        if merge_run_result.returncode == 0 and merge_success and merge_commit_hash:
-                            self._log_pass_result(
-                                context=integration_context,
-                                reporter=integration_reporter,
-                                block_index=merge_block_index,
-                                candidate=merge_candidate,
-                                pass_name=merge_pass_name,
-                                run_result=merge_run_result,
-                                test_result=None,
-                                commit_hash=merge_commit_hash,
-                                rollback_status="not_needed",
-                                search_enabled=False,
-                            )
-                            integration_context.metadata.current_safe_revision = merge_commit_hash
-                            integration_context.loop_state.current_safe_revision = merge_commit_hash
-                            self.workspace.save_project(integration_context)
-                            merge_block_index += 1
-                            continue
-                    raise ParallelMergeConflictError(
-                        f"{target_step.step_id} failed while merging {lineage.lineage_id}: "
-                        f"{', '.join(conflicted_files) or merge_result.stderr.strip() or 'unknown conflict'}"
+                            label="integration-merge",
+                            command=f"git cherry-pick {source_commit}",
+                            merge_result=merge_result,
+                            conflicted_files=conflicted_files,
+                        ),
+                        conflict_message_factory=lambda conflicted_files, merge_result, lineage=lineage, target_step=target_step: (
+                            f"{target_step.step_id} failed while merging {lineage.lineage_id}: "
+                            f"{', '.join(conflicted_files) or str(getattr(merge_result, 'stderr', '')).strip() or 'unknown conflict'}"
+                        ),
                     )
+                    if used_merger:
+                        merge_block_index += 1
 
-                integration_context.metadata.current_safe_revision = self.git.current_revision(integration_context.paths.repo_dir)
-                integration_context.loop_state.current_safe_revision = integration_context.metadata.current_safe_revision
-                self.workspace.save_project(integration_context)
+                self._record_context_safe_revision(integration_context)
 
                 _integration_project, _integration_saved, result_step = self._run_saved_execution_step_with_context(
                     context=integration_context,
@@ -2362,6 +2301,76 @@ class Orchestrator(
         saved = self.save_execution_plan_state(context, plan_state)
         self.workspace.save_project(context)
         return context, saved, target_step
+
+    def _record_context_safe_revision(
+        self,
+        context: ProjectContext,
+        revision: str | None = None,
+    ) -> str:
+        resolved_revision = str(revision or self.git.current_revision(context.paths.repo_dir)).strip()
+        context.metadata.current_safe_revision = resolved_revision
+        context.loop_state.current_safe_revision = resolved_revision
+        self.workspace.save_project(context)
+        return resolved_revision
+
+    def _apply_cherry_pick_with_merger(
+        self,
+        *,
+        context: ProjectContext,
+        source_commit: str,
+        runner: CodexRunner,
+        reporter: Reporter,
+        block_index: int,
+        candidate: CandidateTask,
+        execution_step: ExecutionStep,
+        memory_context: str,
+        merge_targets: list[str],
+        failing_command: str,
+        conflict_test_result_factory: Callable[[object, list[str]], TestRunResult],
+        conflict_message_factory: Callable[[list[str], object], str],
+        post_success_strategy: str = "continue_cherry_pick",
+    ) -> tuple[str, bool]:
+        merge_result = self.git.try_cherry_pick(context.paths.repo_dir, source_commit)
+        if merge_result.returncode == 0:
+            return self._record_context_safe_revision(context), False
+        if self._is_empty_cherry_pick_result(merge_result):
+            if self.git.cherry_pick_in_progress(context.paths.repo_dir):
+                self.git.skip_cherry_pick(context.paths.repo_dir)
+            return self._record_context_safe_revision(context), False
+        conflicted_files = self.git.conflicted_files(context.paths.repo_dir)
+        if conflicted_files and self.git.cherry_pick_in_progress(context.paths.repo_dir):
+            merge_test_result = conflict_test_result_factory(merge_result, conflicted_files)
+            merge_pass_name, merge_run_result, merge_success, merge_commit_hash = self._run_merger_pass(
+                context=context,
+                runner=runner,
+                reporter=reporter,
+                block_index=block_index,
+                candidate=candidate,
+                execution_step=execution_step,
+                memory_context=memory_context,
+                failing_command=failing_command,
+                failing_summary=merge_test_result.summary,
+                failing_stdout=read_text(merge_test_result.stdout_file),
+                failing_stderr=read_text(merge_test_result.stderr_file),
+                merge_targets=merge_targets,
+                post_success_strategy=post_success_strategy,
+            )
+            if merge_run_result.returncode == 0 and merge_success and merge_commit_hash:
+                self._log_pass_result(
+                    context=context,
+                    reporter=reporter,
+                    block_index=block_index,
+                    candidate=candidate,
+                    pass_name=merge_pass_name,
+                    run_result=merge_run_result,
+                    test_result=None,
+                    commit_hash=merge_commit_hash,
+                    rollback_status="not_needed",
+                    search_enabled=False,
+                )
+                self._record_context_safe_revision(context, merge_commit_hash)
+                return merge_commit_hash, True
+        raise ParallelMergeConflictError(conflict_message_factory(conflicted_files, merge_result))
 
     def _is_empty_cherry_pick_result(self, result: CommandResult) -> bool:
         combined = f"{result.stdout}\n{result.stderr}".lower()

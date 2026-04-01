@@ -395,16 +395,6 @@ export function useDesktopController() {
     selectedProjectId,
   ]);
 
-  function reapplyProjectJobState(jobItems = jobsRef.current) {
-    const listingState = reduceProjectListingState({
-      projects: projectsRef.current,
-      jobs: jobItems,
-    });
-    setProjects(listingState.projects);
-    setWorkspaceStats(listingState.workspaceStats);
-    projectsRef.current = listingState.projects;
-  }
-
   function syncJobs(jobItems = []) {
     const nextJobs = Array.isArray(jobItems) ? jobItems.filter(Boolean) : [];
     const nextSelectedState = reduceSelectedProjectState({
@@ -414,16 +404,23 @@ export function useDesktopController() {
       planDraft: planDraftRef.current,
       jobs: nextJobs,
     });
+    const nextListingState = reduceProjectListingState({
+      projects: projectsRef.current,
+      jobs: nextJobs,
+    });
     jobsRef.current = nextJobs;
     setJobs(nextJobs);
     const nextActiveJob = nextSelectedState.projectJob;
     activeJobRef.current = nextSelectedState.activeJob;
     startTransition(() => {
+      setProjects(nextListingState.projects);
+      setWorkspaceStats(nextListingState.workspaceStats);
       setProjectDetail((current) => reduceProjectDetailState({
         detail: current,
         jobs: nextJobs,
       }).detail);
     });
+    projectsRef.current = nextListingState.projects;
     return nextActiveJob;
   }
 
@@ -1004,7 +1001,6 @@ export function useDesktopController() {
           return;
         }
         const nextSelectedJob = mergeJobUpdate(job);
-        reapplyProjectJobState(jobsRef.current);
         const jobStatus = String(job.status || "").trim().toLowerCase();
         const normalizedCommand = String(job.command || "").trim().toLowerCase();
         const supersededByActiveJob = jobHasNewerActiveReplacement(job, jobsRef.current);
@@ -1941,7 +1937,6 @@ export function useDesktopController() {
         mergeSelectedProjectSupplement(selectedRepoId, { reports: { latest_failure: {} } });
       }
       mergeJobUpdate(job);
-      reapplyProjectJobState(jobsRef.current);
       if (command === BRIDGE_COMMANDS.SEND_CHAT_MESSAGE) {
         setCenterTab("ai-chat");
       } else if (
@@ -1977,7 +1972,7 @@ export function useDesktopController() {
         try {
           const jobSnapshot = await syncRunningJobSnapshot(blockingJobRef.current?.id || "");
           applyCurrentJobSnapshot(jobSnapshot);
-          reapplyProjectJobState(jobSnapshot?.jobs || []);
+          syncJobs(jobSnapshot?.jobs || []);
           const recoveredJob = projectLaneJob(jobSnapshot?.jobs || [], targetProject, requestedLane);
           if (["queued", "running"].includes(String(recoveredJob?.status || "").trim().toLowerCase())) {
             return recoveredJob;
@@ -2339,7 +2334,6 @@ export function useDesktopController() {
     await withPending("cancel-reservation", async () => {
       const job = await cancelBridgeJob(jobId);
       mergeJobUpdate(job);
-      reapplyProjectJobState(jobsRef.current);
       setMessage(
         messagePayload(
           "info",
