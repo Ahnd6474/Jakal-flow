@@ -155,4 +155,6 @@ npm run tauri:build
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Ahnd6474/Jakal-flow&type=Date)](https://www.star-history.com/#Ahnd6474/Jakal-flow&Date)
+[![GitHub stars](https://img.shields.io/github/stars/Ahnd6474/Jakal-flow?style=social)](https://www.star-history.com/#Ahnd6474/Jakal-flow&Date)
+
+[Live Star History chart](https://www.star-history.com/#Ahnd6474/Jakal-flow&Date)

@@ -44,8 +44,13 @@
           <a href="#advantages" data-i18n="nav_advantages">Advantages</a>
           <a href="#workflow" data-i18n="nav_workflow">Workflow</a>
           <a href="#release" data-i18n="nav_release">Release</a>
+          <a href="#cases" data-i18n="nav_cases">Cases</a>
           <a href="#contact" data-i18n="nav_contact">Contact</a>
         </nav>
+        <a class="nav-github" href="https://github.com/Ahnd6474/Jakal-flow" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fill-rule="evenodd" d="M10 0C4.477 0 0 4.477 0 10c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 10 4.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C17.138 18.163 20 14.418 20 10c0-5.523-4.477-10-10-10z" clip-rule="evenodd"/></svg>
+          GitHub
+        </a>
         <label class="lang-switcher" aria-label="Language switcher">
           <span class="lang-label">Language</span>
           <select class="lang-select" data-language-select></select>
@@ -223,6 +228,246 @@
         </div>
       </section>
 
+      <section class="section inaction reveal" id="inaction">
+        <div class="section-header">
+          <p class="eyebrow" data-i18n="inaction_eyebrow">In Action</p>
+          <h2 data-i18n-html="inaction_title">실제로 돌아가는 데스크톱 앱,<br>지금 바로 볼 수 있습니다.</h2>
+        </div>
+        <div class="app-mockup">
+          <div class="app-chrome">
+            <div class="app-titlebar">
+              <div class="app-title-dots"><span></span><span></span><span></span></div>
+              <div class="app-title-text">jakal-flow Desktop</div>
+              <div class="app-title-crumb">
+                <span data-i18n="app_project_label">프로젝트 선택</span>
+                <span class="crumb-sep">/</span>
+                <span class="crumb-active">lit</span>
+              </div>
+              <div class="app-title-status">
+                <span class="status-dot-run"></span>
+                <span data-i18n="app_run_status">Running: run plan &rsaquo; Completed 3/6 steps</span>
+              </div>
+              <div class="app-title-pill running" data-i18n="app_running_pill">Running</div>
+            </div>
+
+            <div class="app-livebar">
+              <span class="live-label" data-i18n="app_live_label">LIVE RUN</span>
+              <span data-i18n="app_live_task">Working on ST4 – Reconcile Shared Integration Surfaces</span>
+              <div class="app-livebar-right">
+                <span data-i18n="app_live_pct">50% 남은 단계 설정</span>
+              </div>
+              <div class="app-livebar-track"><div class="app-livebar-fill" style="width:50%"></div></div>
+            </div>
+
+            <div class="app-subbar" data-i18n="app_subbar">Completed 3/6 steps, running: ST4</div>
+
+            <div class="app-body">
+              <aside class="app-sidebar">
+                <div class="app-sidebar-group">
+                  <div class="app-sidebar-icon-row">
+                    <div class="app-sidebar-icon" title="Activity">&#9776;</div>
+                    <div class="app-sidebar-icon active" title="Explorer">&#9783;</div>
+                    <div class="app-sidebar-icon" title="History">&#9203;</div>
+                  </div>
+                  <div class="app-sidebar-heading" data-i18n="app_sidebar_heading">Project</div>
+                  <a class="app-project-row" href="https://github.com/Ahnd6474/jakal-work" target="_blank" rel="noopener">
+                    <span class="app-project-name">jakal-work</span>
+                    <span class="app-project-badge queued" data-i18n="badge_queued">Queued: Generate Plan</span>
+                  </a>
+                  <a class="app-project-row" href="https://github.com/Ahnd6474/experiment2" target="_blank" rel="noopener">
+                    <span class="app-project-name">experiment2</span>
+                    <span class="app-project-badge running" data-i18n="badge_running">Running: Generate Plan</span>
+                  </a>
+                  <a class="app-project-row active" href="https://github.com/Ahnd6474/lit" target="_blank" rel="noopener">
+                    <span class="app-project-name">lit</span>
+                    <span class="app-project-badge running" data-i18n="badge_running_st4">Running: St4</span>
+                  </a>
+                  <a class="app-project-row" href="https://github.com/Ahnd6474/backjoon" target="_blank" rel="noopener">
+                    <span class="app-project-name">backjoon</span>
+                    <span class="app-project-badge done" data-i18n="badge_done">Plan Completed</span>
+                  </a>
+                  <a class="app-project-row" href="https://github.com/Ahnd6474/testwebsite" target="_blank" rel="noopener">
+                    <span class="app-project-name">testwebsite</span>
+                    <span class="app-project-badge closed" data-i18n="badge_closed">Closed Out</span>
+                  </a>
+                </div>
+              </aside>
+
+              <div class="app-main">
+                <div class="app-tabs">
+                  <button class="app-tab active" data-i18n="tab_chat">AI Chat</button>
+                  <button class="app-tab" data-i18n="tab_settings">Project Settings</button>
+                  <button class="app-tab" data-i18n="tab_dashboard">Dashboard</button>
+                  <button class="app-tab" data-i18n="tab_history">History</button>
+                  <button class="app-tab" data-i18n="tab_reports">Reports</button>
+                </div>
+                <div class="app-chat-body">
+                  <div class="app-chat-icon">&#9635;</div>
+                  <p data-i18n="app_chat_placeholder">Send a message to continue the session from the saved txt history.</p>
+                </div>
+                <div class="app-chat-footer">
+                  <div class="app-model-row">
+                    <label data-i18n="app_model_label">실행 모델</label>
+                    <div class="app-select-fake" data-i18n="app_model_value">프로젝트 실행 모델</div>
+                    <label data-i18n="app_reasoning_label">REASONING</label>
+                    <div class="app-select-fake" data-i18n="app_reasoning_value">Project default</div>
+                  </div>
+                  <div class="app-input-row">
+                    <div class="app-input-fake" data-i18n="app_input_placeholder">코드나 변경 내용을 입력하세요 (Enter로 전송)</div>
+                    <button class="app-send-btn">&#9658;</button>
+                  </div>
+                </div>
+              </div>
+
+              <aside class="app-right">
+                <div class="app-right-header">
+                  <div class="app-run-chip running-chip" data-i18n="app_right_run">Running: run plan</div>
+                  <div class="app-run-chip neutral-chip" data-i18n="app_right_done">3/6 Done</div>
+                  <div class="app-run-chip neutral-chip" data-i18n="app_right_nodes">1 Ready Nodes</div>
+                  <div class="app-run-chip neutral-chip" data-i18n="app_right_res">1 Reservations</div>
+                </div>
+                <div class="app-right-time">
+                  <span data-i18n="app_est">41분 59초 Est. Remaining</span>
+                  <span data-i18n="app_parallel">2개 워커 Parallel Limit</span>
+                </div>
+                <div class="app-right-controls">
+                  <label class="app-check"><input type="checkbox" disabled> <span data-i18n="app_autorun">Auto-run After Plan</span></label>
+                  <div class="app-gen-btns">
+                    <button class="app-btn-muted" data-i18n="app_btn_generate">Generate</button>
+                    <button class="app-btn-muted" data-i18n="app_btn_save">Save</button>
+                    <button class="app-btn-muted" data-i18n="app_btn_reset">Reset</button>
+                  </div>
+                  <div class="app-run-btns">
+                    <button class="app-btn-run" data-i18n="app_btn_run">Run</button>
+                    <button class="app-btn-stop" data-i18n="app_btn_stop">Stop</button>
+                  </div>
+                </div>
+                <div class="app-flow">
+                  <div class="app-flow-node done-node">
+                    <div class="flow-node-title" data-i18n="flow_st1">ST1</div>
+                    <div class="flow-node-label" data-i18n="flow_st1_label">Process Blueprint</div>
+                  </div>
+                  <div class="flow-arrow">&#8594;</div>
+                  <div class="app-flow-node active-node">
+                    <div class="flow-node-title" data-i18n="flow_st2">ST2</div>
+                    <div class="flow-node-label" data-i18n="flow_st2_label">Extract Workflow Expansion</div>
+                  </div>
+                  <div class="flow-arrow">&#8594;</div>
+                  <div class="app-flow-node pending-node">
+                    <div class="flow-node-title" data-i18n="flow_st4">ST4</div>
+                    <div class="flow-node-label" data-i18n="flow_st4_label">Reconcile Shared Integrations</div>
+                  </div>
+                </div>
+                <div class="app-reservations">
+                  <div class="app-res-header">
+                    <span data-i18n="app_res_title">Reservations (1)</span>
+                    <span class="app-res-proj">jakal-work #1</span>
+                    <button class="app-res-cancel" data-i18n="app_res_cancel">Cancel Reservation</button>
+                  </div>
+                  <div class="app-res-card">
+                    <div class="app-res-name">CO1: Closeout</div>
+                    <div class="app-res-meta"><span>6/6</span><span class="res-badge pending-badge" data-i18n="res_pending">Pending</span></div>
+                    <div class="app-res-field"><label data-i18n="res_title_label">Title</label><span>Closeout</span></div>
+                    <div class="app-res-row">
+                      <div class="app-res-field"><label data-i18n="res_deadline">Deadline</label><span class="muted-val">Example: 2026-04-05</span></div>
+                      <div class="app-res-field"><label data-i18n="res_gpt">GPT Reasoning</label><span class="accent-val" data-i18n="res_high">높음</span></div>
+                    </div>
+                    <div class="app-res-field"><label data-i18n="res_model_provider">Model Provider</label><span data-i18n="res_auto">Auto (AGENTS.md pr…)</span></div>
+                    <div class="app-res-field"><label data-i18n="res_exec_model">Execution Model</label><span data-i18n="res_exec_val">Use execution model (gpt-5.4)</span></div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section cases reveal" id="cases">
+        <div class="section-header">
+          <p class="eyebrow" data-i18n="cases_eyebrow">Success Cases</p>
+          <h2 data-i18n-html="cases_title">jakal-flow로 실제 운영 중인<br>프로젝트 사례들입니다.</h2>
+        </div>
+        <div class="cases-grid">
+          <article class="case-card primary-case">
+            <div class="case-meta">
+              <span class="case-badge done-badge" data-i18n="case_status_done">Plan Completed</span>
+              <a class="case-github-link" href="https://github.com/Ahnd6474/lit" target="_blank" rel="noopener">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M10 0C4.477 0 0 4.477 0 10c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 10 4.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C17.138 18.163 20 14.418 20 10c0-5.523-4.477-10-10-10z" clip-rule="evenodd"/></svg>
+                Ahnd6474/lit
+              </a>
+            </div>
+            <strong class="case-title">lit</strong>
+            <p class="case-desc" data-i18n="case_lit_desc">jakal-flow로 다단계 계획 및 실행을 완료한 프로젝트. 멀티-블록 run plan을 통해 ST1~ST4 단계를 순차 처리했습니다.</p>
+            <div class="case-steps">
+              <div class="case-step done-step">ST1</div>
+              <div class="case-step done-step">ST2</div>
+              <div class="case-step done-step">ST3</div>
+              <div class="case-step done-step">ST4</div>
+            </div>
+          </article>
+
+          <article class="case-card">
+            <div class="case-meta">
+              <span class="case-badge running-badge" data-i18n="case_status_running">Running</span>
+              <a class="case-github-link" href="https://github.com/Ahnd6474/experiment2" target="_blank" rel="noopener">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M10 0C4.477 0 0 4.477 0 10c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 10 4.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C17.138 18.163 20 14.418 20 10c0-5.523-4.477-10-10-10z" clip-rule="evenodd"/></svg>
+                Ahnd6474/experiment2
+              </a>
+            </div>
+            <strong class="case-title">experiment2</strong>
+            <p class="case-desc" data-i18n="case_experiment2_desc">Generate Plan 단계 실행 중. jakal-flow가 계획 단계부터 산출물을 저장소에 분리해 관리합니다.</p>
+            <div class="case-steps">
+              <div class="case-step current-step">Generate Plan</div>
+            </div>
+          </article>
+
+          <article class="case-card">
+            <div class="case-meta">
+              <span class="case-badge queued-badge" data-i18n="case_status_queued">Queued</span>
+              <a class="case-github-link" href="https://github.com/Ahnd6474/jakal-work" target="_blank" rel="noopener">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M10 0C4.477 0 0 4.477 0 10c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 10 4.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C17.138 18.163 20 14.418 20 10c0-5.523-4.477-10-10-10z" clip-rule="evenodd"/></svg>
+                Ahnd6474/jakal-work
+              </a>
+            </div>
+            <strong class="case-title">jakal-work</strong>
+            <p class="case-desc" data-i18n="case_jakalwork_desc">Generate Plan 대기 중. 병렬 워커 제한 내에서 큐에 예약돼 있으며 앞 작업 완료 후 자동 시작됩니다.</p>
+            <div class="case-steps">
+              <div class="case-step queued-step" data-i18n="step_queued">Queued: Generate Plan</div>
+            </div>
+          </article>
+
+          <article class="case-card">
+            <div class="case-meta">
+              <span class="case-badge closed-badge" data-i18n="case_status_closed">Closed Out</span>
+              <a class="case-github-link" href="https://github.com/Ahnd6474/testwebsite" target="_blank" rel="noopener">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M10 0C4.477 0 0 4.477 0 10c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 10 4.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C17.138 18.163 20 14.418 20 10c0-5.523-4.477-10-10-10z" clip-rule="evenodd"/></svg>
+                Ahnd6474/testwebsite
+              </a>
+            </div>
+            <strong class="case-title">testwebsite</strong>
+            <p class="case-desc" data-i18n="case_testwebsite_desc">Closed Out 상태로 전체 라이프사이클 완료. 클로즈아웃 리포트와 이력이 저장소에 보존됩니다.</p>
+            <div class="case-steps">
+              <div class="case-step closed-step" data-i18n="step_closed">Closed Out</div>
+            </div>
+          </article>
+
+          <article class="case-card">
+            <div class="case-meta">
+              <span class="case-badge done-badge" data-i18n="case_status_done">Plan Completed</span>
+              <a class="case-github-link" href="https://github.com/Ahnd6474/backjoon" target="_blank" rel="noopener">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M10 0C4.477 0 0 4.477 0 10c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 10 4.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C17.138 18.163 20 14.418 20 10c0-5.523-4.477-10-10-10z" clip-rule="evenodd"/></svg>
+                Ahnd6474/backjoon
+              </a>
+            </div>
+            <strong class="case-title">backjoon</strong>
+            <p class="case-desc" data-i18n="case_backjoon_desc">알고리즘 풀이 저장소에 대한 계획 완료 사례. jakal-flow가 반복적 코드 작업에도 추적 가능한 운영 루프를 적용합니다.</p>
+            <div class="case-steps">
+              <div class="case-step done-step" data-i18n="step_plan_complete">Plan Completed</div>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section class="section showcase reveal">
         <div class="section-header">
           <p class="eyebrow" data-i18n="showcase_eyebrow">Current Surface</p>
@@ -233,13 +478,13 @@
             <strong data-i18n="showcase_1_title">Operator commands already exist</strong>
             <p data-i18n="showcase_1_text">등록, 재개, 상태 조회, 이력, 리포트, 로그 인덱싱까지 현재 CLI에 연결되어 있습니다.</p>
             <div class="command-list">
-              <code>jakal-flow init-repo</code>
-              <code>jakal-flow run</code>
-              <code>jakal-flow resume</code>
-              <code>jakal-flow list-repos</code>
-              <code>jakal-flow history</code>
-              <code>jakal-flow report</code>
-              <code>jakal-flow logx</code>
+              <div class="cmd-row"><code>jakal-flow init-repo</code><button class="copy-btn" data-copy="jakal-flow init-repo" aria-label="Copy">&#10697;</button></div>
+              <div class="cmd-row"><code>jakal-flow run</code><button class="copy-btn" data-copy="jakal-flow run" aria-label="Copy">&#10697;</button></div>
+              <div class="cmd-row"><code>jakal-flow resume</code><button class="copy-btn" data-copy="jakal-flow resume" aria-label="Copy">&#10697;</button></div>
+              <div class="cmd-row"><code>jakal-flow list-repos</code><button class="copy-btn" data-copy="jakal-flow list-repos" aria-label="Copy">&#10697;</button></div>
+              <div class="cmd-row"><code>jakal-flow history</code><button class="copy-btn" data-copy="jakal-flow history" aria-label="Copy">&#10697;</button></div>
+              <div class="cmd-row"><code>jakal-flow report</code><button class="copy-btn" data-copy="jakal-flow report" aria-label="Copy">&#10697;</button></div>
+              <div class="cmd-row"><code>jakal-flow logx</code><button class="copy-btn" data-copy="jakal-flow logx" aria-label="Copy">&#10697;</button></div>
             </div>
           </article>
           <article class="showcase-card">

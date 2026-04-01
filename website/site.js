@@ -102,6 +102,76 @@ const translations = {
     consent_text: "이 페이지는 방문 통계를 보기 위해 Google Analytics 4를 사용할 수 있습니다.",
     consent_decline: "거절",
     consent_accept: "허용",
+    nav_cases: "사례",
+    inaction_eyebrow: "In Action",
+    inaction_title: "실제로 돌아가는 데스크톱 앱,<br>지금 바로 볼 수 있습니다.",
+    app_project_label: "프로젝트 선택",
+    app_run_status: "Running: run plan › Completed 3/6 steps",
+    app_running_pill: "Running",
+    app_live_label: "LIVE RUN",
+    app_live_task: "Working on ST4 – Reconcile Shared Integration Surfaces",
+    app_live_pct: "50% 남은 단계 설정",
+    app_subbar: "Completed 3/6 steps, running: ST4",
+    app_sidebar_heading: "Project",
+    badge_queued: "Queued: Generate Plan",
+    badge_running: "Running: Generate Plan",
+    badge_running_st4: "Running: St4",
+    badge_done: "Plan Completed",
+    badge_closed: "Closed Out",
+    tab_chat: "AI Chat",
+    tab_settings: "Project Settings",
+    tab_dashboard: "Dashboard",
+    tab_history: "History",
+    tab_reports: "Reports",
+    app_chat_placeholder: "저장된 txt 이력에서 세션을 이어가려면 메시지를 보내세요.",
+    app_model_label: "실행 모델",
+    app_model_value: "프로젝트 실행 모델",
+    app_reasoning_label: "REASONING",
+    app_reasoning_value: "Project default",
+    app_input_placeholder: "코드나 변경 내용을 입력하세요 (Enter로 전송)",
+    app_right_run: "Running: run plan",
+    app_right_done: "3/6 Done",
+    app_right_nodes: "1 Ready Nodes",
+    app_right_res: "1 Reservations",
+    app_est: "41분 59초 Est. Remaining",
+    app_parallel: "2개 워커 Parallel Limit",
+    app_autorun: "Auto-run After Plan",
+    app_btn_generate: "Generate",
+    app_btn_save: "Save",
+    app_btn_reset: "Reset",
+    app_btn_run: "Run",
+    app_btn_stop: "Stop",
+    flow_st1: "ST1",
+    flow_st1_label: "Process Blueprint",
+    flow_st2: "ST2",
+    flow_st2_label: "Extract Workflow Expansion",
+    flow_st4: "ST4",
+    flow_st4_label: "Reconcile Shared Integrations",
+    app_res_title: "Reservations (1)",
+    app_res_cancel: "Cancel Reservation",
+    res_pending: "Pending",
+    res_title_label: "Title",
+    res_deadline: "Deadline",
+    res_gpt: "GPT Reasoning",
+    res_high: "높음",
+    res_model_provider: "Model Provider",
+    res_auto: "Auto (AGENTS.md pr…)",
+    res_exec_model: "Execution Model",
+    res_exec_val: "Use execution model (gpt-5.4)",
+    cases_eyebrow: "Success Cases",
+    cases_title: "jakal-flow로 실제 운영 중인<br>프로젝트 사례들입니다.",
+    case_status_done: "Plan Completed",
+    case_status_running: "Running",
+    case_status_queued: "Queued",
+    case_status_closed: "Closed Out",
+    case_lit_desc: "jakal-flow로 다단계 계획 및 실행을 완료한 프로젝트. 멀티-블록 run plan을 통해 ST1~ST4 단계를 순차 처리했습니다.",
+    case_experiment2_desc: "Generate Plan 단계 실행 중. jakal-flow가 계획 단계부터 산출물을 저장소에 분리해 관리합니다.",
+    case_jakalwork_desc: "Generate Plan 대기 중. 병렬 워커 제한 내에서 큐에 예약돼 있으며 앞 작업 완료 후 자동 시작됩니다.",
+    case_testwebsite_desc: "Closed Out 상태로 전체 라이프사이클 완료. 클로즈아웃 리포트와 이력이 저장소에 보존됩니다.",
+    case_backjoon_desc: "알고리즘 풀이 저장소에 대한 계획 완료 사례. jakal-flow가 반복적 코드 작업에도 추적 가능한 운영 루프를 적용합니다.",
+    step_queued: "Queued: Generate Plan",
+    step_closed: "Closed Out",
+    step_plan_complete: "Plan Completed",
   },
   en: {
     title: "jakal-flow | Traceable Multi-Repo Automation",
@@ -203,6 +273,76 @@ const translations = {
     consent_text: "This page can use Google Analytics 4 to understand visits and traffic.",
     consent_decline: "Decline",
     consent_accept: "Allow",
+    nav_cases: "Cases",
+    inaction_eyebrow: "In Action",
+    inaction_title: "The desktop app is real<br>and running right now.",
+    app_project_label: "Select project",
+    app_run_status: "Running: run plan › Completed 3/6 steps",
+    app_running_pill: "Running",
+    app_live_label: "LIVE RUN",
+    app_live_task: "Working on ST4 – Reconcile Shared Integration Surfaces",
+    app_live_pct: "50% steps remaining",
+    app_subbar: "Completed 3/6 steps, running: ST4",
+    app_sidebar_heading: "Project",
+    badge_queued: "Queued: Generate Plan",
+    badge_running: "Running: Generate Plan",
+    badge_running_st4: "Running: St4",
+    badge_done: "Plan Completed",
+    badge_closed: "Closed Out",
+    tab_chat: "AI Chat",
+    tab_settings: "Project Settings",
+    tab_dashboard: "Dashboard",
+    tab_history: "History",
+    tab_reports: "Reports",
+    app_chat_placeholder: "Send a message to continue the session from the saved txt history.",
+    app_model_label: "Execution model",
+    app_model_value: "Project execution model",
+    app_reasoning_label: "REASONING",
+    app_reasoning_value: "Project default",
+    app_input_placeholder: "Enter code or changes (Enter to send)",
+    app_right_run: "Running: run plan",
+    app_right_done: "3/6 Done",
+    app_right_nodes: "1 Ready Nodes",
+    app_right_res: "1 Reservations",
+    app_est: "41m 59s Est. Remaining",
+    app_parallel: "2 worker Parallel Limit",
+    app_autorun: "Auto-run After Plan",
+    app_btn_generate: "Generate",
+    app_btn_save: "Save",
+    app_btn_reset: "Reset",
+    app_btn_run: "Run",
+    app_btn_stop: "Stop",
+    flow_st1: "ST1",
+    flow_st1_label: "Process Blueprint",
+    flow_st2: "ST2",
+    flow_st2_label: "Extract Workflow Expansion",
+    flow_st4: "ST4",
+    flow_st4_label: "Reconcile Shared Integrations",
+    app_res_title: "Reservations (1)",
+    app_res_cancel: "Cancel Reservation",
+    res_pending: "Pending",
+    res_title_label: "Title",
+    res_deadline: "Deadline",
+    res_gpt: "GPT Reasoning",
+    res_high: "High",
+    res_model_provider: "Model Provider",
+    res_auto: "Auto (AGENTS.md pr…)",
+    res_exec_model: "Execution Model",
+    res_exec_val: "Use execution model (gpt-5.4)",
+    cases_eyebrow: "Success Cases",
+    cases_title: "Real projects currently<br>operated with jakal-flow.",
+    case_status_done: "Plan Completed",
+    case_status_running: "Running",
+    case_status_queued: "Queued",
+    case_status_closed: "Closed Out",
+    case_lit_desc: "Completed multi-stage plan and execution via jakal-flow. Sequential ST1–ST4 blocks processed through a multi-block run plan.",
+    case_experiment2_desc: "Generate Plan stage in progress. jakal-flow isolates artifacts per repository from the planning stage onwards.",
+    case_jakalwork_desc: "Queued for Generate Plan. Reserved within the parallel worker limit, starts automatically after the preceding run completes.",
+    case_testwebsite_desc: "Full lifecycle completed with Closed Out status. Closeout report and attempt history preserved in the repository.",
+    case_backjoon_desc: "Plan-completed case for an algorithm practice repository. jakal-flow applies a traceable operations loop even for repetitive coding tasks.",
+    step_queued: "Queued: Generate Plan",
+    step_closed: "Closed Out",
+    step_plan_complete: "Plan Completed",
   },
 };
 
@@ -396,7 +536,7 @@ function bootstrapScrollEffects() {
   }
 
   const navLinks = document.querySelectorAll(".nav a[href^='#']");
-  const sectionIds = ["product", "advantages", "workflow", "release", "contact"];
+  const sectionIds = ["product", "advantages", "workflow", "inaction", "cases", "release", "contact"];
   const sections = sectionIds
     .map((id) => document.getElementById(id))
     .filter(Boolean);
@@ -440,9 +580,28 @@ function bootstrapMobileMenu() {
   });
 }
 
+function bootstrapCopyButtons() {
+  document.querySelectorAll(".copy-btn[data-copy]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const text = btn.getAttribute("data-copy");
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        btn.classList.add("copied");
+        const prev = btn.innerHTML;
+        btn.innerHTML = "&#10003;";
+        setTimeout(() => {
+          btn.classList.remove("copied");
+          btn.innerHTML = prev;
+        }, 1400);
+      });
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   bootstrapLanguage();
   bootstrapConsent();
   bootstrapScrollEffects();
   bootstrapMobileMenu();
+  bootstrapCopyButtons();
 });
