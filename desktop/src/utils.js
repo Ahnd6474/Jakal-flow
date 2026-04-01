@@ -1769,6 +1769,7 @@ function resolveProjectDetailExecution(detail = null, activeJob = null, options 
   let nextPlan = detail?.plan;
   let nextStats = detail?.stats;
   let nextProgress = detail?.progress;
+  let nextPlanningProgress = detail?.planning_progress;
 
   if (processStatus === "queued") {
     return {
@@ -1778,6 +1779,7 @@ function resolveProjectDetailExecution(detail = null, activeJob = null, options 
       nextPlan,
       nextStats,
       nextProgress,
+      nextPlanningProgress,
       nextStatus: `queued:${processCommand}`,
     };
   }
@@ -1804,6 +1806,7 @@ function resolveProjectDetailExecution(detail = null, activeJob = null, options 
       nextPlan,
       nextStats,
       nextProgress,
+      nextPlanningProgress,
       nextStatus,
     };
   }
@@ -1816,16 +1819,44 @@ function resolveProjectDetailExecution(detail = null, activeJob = null, options 
       nextPlan,
       nextStats,
       nextProgress,
+      nextPlanningProgress,
       nextStatus: "awaiting_checkpoint_approval",
     };
   }
 
+  const planningProgressRunning = isPlanningProgressRunning(detail?.planning_progress);
   if (
-    isPlanningProgressRunning(detail?.planning_progress)
+    planningProgressRunning
     && !normalizedCurrentStatus.startsWith("running:")
     && normalizedCurrentStatus !== "queued"
     && !normalizedCurrentStatus.startsWith("queued:")
   ) {
+    const nowMs = Number.isFinite(options?.nowMs) ? options.nowMs : Date.now();
+    const hasActivitySignals = Array.isArray(detail?.activity) && detail.activity.length > 0;
+    const preservePlanningState =
+      !hasActivitySignals
+      || shouldPreserveRecentRunningState({
+        plan: detail?.plan,
+        activity: detail?.activity,
+        pendingCheckpoint:
+          Boolean(detail?.checkpoints?.pending) ||
+          Boolean(detail?.loop_state?.pending_checkpoint_approval) ||
+          Boolean(detail?.bottom_panels?.git_status?.pending_checkpoint_approval),
+        nowMs,
+      });
+    if (preservePlanningState) {
+      return {
+        executionJob,
+        executionState,
+        checkpointState,
+        nextPlan,
+        nextStats,
+        nextProgress,
+        nextPlanningProgress,
+        nextStatus: "running:generate-plan",
+      };
+    }
+    nextPlanningProgress = null;
     return {
       executionJob,
       executionState,
@@ -1833,7 +1864,8 @@ function resolveProjectDetailExecution(detail = null, activeJob = null, options 
       nextPlan,
       nextStats,
       nextProgress,
-      nextStatus: "running:generate-plan",
+      nextPlanningProgress,
+      nextStatus: currentStatus || deriveIdleProjectStatus(detail?.plan, computePlanStats(detail?.plan || {}), currentStatus),
     };
   }
 
@@ -1865,6 +1897,7 @@ function resolveProjectDetailExecution(detail = null, activeJob = null, options 
         nextPlan,
         nextStats,
         nextProgress,
+        nextPlanningProgress,
         nextStatus: currentStatus || deriveIdleProjectStatus(detail?.plan, computePlanStats(detail?.plan || {}), currentStatus),
       };
     }
@@ -1873,8 +1906,11 @@ function resolveProjectDetailExecution(detail = null, activeJob = null, options 
     nextStats = computePlanStats(nextPlan);
     nextProgress = toolbarProgressCaptionDisplay(nextPlan, options?.language || "en", {
       activeJob: executionJob,
-      planningProgress: detail?.planning_progress,
+      planningProgress: nextPlanningProgress,
     });
+    if (planningProgressRunning) {
+      nextPlanningProgress = null;
+    }
     return {
       executionJob,
       executionState,
@@ -1882,6 +1918,7 @@ function resolveProjectDetailExecution(detail = null, activeJob = null, options 
       nextPlan,
       nextStats,
       nextProgress,
+      nextPlanningProgress,
       nextStatus: deriveIdleProjectStatus(nextPlan, nextStats, currentStatus),
     };
   }
@@ -1893,6 +1930,7 @@ function resolveProjectDetailExecution(detail = null, activeJob = null, options 
     nextPlan,
     nextStats,
     nextProgress,
+    nextPlanningProgress,
     nextStatus: currentStatus || deriveIdleProjectStatus(detail?.plan, computePlanStats(detail?.plan || {}), currentStatus),
   };
 }
@@ -1956,6 +1994,7 @@ export function sanitizeProjectDetailForJobState(detail, activeJob = null, optio
     nextPlan,
     nextStats,
     nextProgress,
+    nextPlanningProgress,
     nextStatus,
   } = resolveProjectDetailExecution(detail, activeJob, options);
   const checkpointItems = Array.isArray(checkpointState.items) ? checkpointState.items : [];
@@ -1987,6 +2026,7 @@ export function sanitizeProjectDetailForJobState(detail, activeJob = null, optio
         }
       : detail.project,
     plan: nextPlan,
+    planning_progress: nextPlanningProgress,
     stats: nextStats ?? detail.stats,
     progress: nextProgress ?? detail.progress,
     checkpoints: detail?.checkpoints

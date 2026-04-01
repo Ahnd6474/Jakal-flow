@@ -1640,6 +1640,35 @@ test("job-aware detail sanitizer marks planning progress as generate-plan when t
   assert.equal(sanitizedDetail.bottom_panels.git_status.current_status, "running:generate-plan");
 });
 
+test("job-aware detail sanitizer clears stale planning progress for reopened projects", () => {
+  const nowMs = Date.parse("2026-04-01T00:00:00Z");
+  const detail = {
+    project: {
+      repo_id: "repo-plan",
+      current_status: "setup_ready",
+    },
+    activity: [
+      "2026-03-27T10:00:05Z | planner-agent-started | Planner Agent A is decomposing the work into implementation blocks.",
+    ],
+    planning_progress: {
+      stage_count: 4,
+      current_stage_index: 2,
+      current_stage_status: "running",
+    },
+    bottom_panels: {
+      git_status: {
+        current_status: "setup_ready",
+      },
+    },
+  };
+
+  const sanitizedDetail = sanitizeProjectDetailForJobState(detail, null, { nowMs });
+
+  assert.equal(sanitizedDetail.project.current_status, "setup_ready");
+  assert.equal(sanitizedDetail.bottom_panels.git_status.current_status, "setup_ready");
+  assert.equal(sanitizedDetail.planning_progress, null);
+});
+
 test("job-aware detail sanitizer preserves a very recent active run signal while the job snapshot catches up", () => {
   const nowMs = Date.parse("2026-03-26T10:00:00Z");
   const runningDetail = {

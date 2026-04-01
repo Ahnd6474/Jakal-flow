@@ -1136,36 +1136,33 @@ test("ExecutionFlowChart centers sparse columns and keeps a fan-out/fan-in DAG v
   assert.equal(mergeBusByKey.get("ST4-merge-bus"), "M 690 140 V 472");
 });
 
-test("ExecutionFlowChart maps statuses to the requested flow colors", async () => {
+test("ExecutionFlowChart resolves statuses to the requested flow colors", async () => {
   const module = await importBundledModule(
     "execution-flow-chart-colors",
     `
       import { __executionFlowChartTestables } from "./src/components/common/ExecutionFlowChart.jsx";
 
-      export function chartStatusTone(status) {
-        return __executionFlowChartTestables.chartStatusTone(status);
-      }
-
-      export function chartPaletteForTone(tone) {
-        return __executionFlowChartTestables.chartPaletteForTone(tone);
+      export function resolveChartNodeVisuals(persistedStatus, displayStatus) {
+        return __executionFlowChartTestables.resolveChartNodeVisuals(persistedStatus, displayStatus);
       }
     `,
   );
 
-  assert.equal(module.chartStatusTone("pending"), "neutral");
-  assert.equal(module.chartStatusTone("queued:st2"), "neutral");
-  assert.equal(module.chartStatusTone("completed"), "success");
-  assert.equal(module.chartStatusTone("running"), "info");
-  assert.equal(module.chartStatusTone("failed"), "danger");
-  assert.equal(module.chartStatusTone("running:debugging"), "warning");
-  assert.equal(module.chartStatusTone("awaiting_review"), "warning");
-  assert.equal(module.chartStatusTone("syncing"), "warning");
+  assert.equal(module.resolveChartNodeVisuals("pending", "").tone, "neutral");
+  assert.equal(module.resolveChartNodeVisuals("queued:st2", "").tone, "neutral");
+  assert.equal(module.resolveChartNodeVisuals("pending", "completed").tone, "success");
+  assert.equal(module.resolveChartNodeVisuals("pending", "running").tone, "neutral");
+  assert.equal(module.resolveChartNodeVisuals("running", "running").tone, "info");
+  assert.equal(module.resolveChartNodeVisuals("pending", "failed").tone, "danger");
+  assert.equal(module.resolveChartNodeVisuals("running", "running:debugging").tone, "warning");
+  assert.equal(module.resolveChartNodeVisuals("pending", "awaiting_review").tone, "warning");
+  assert.equal(module.resolveChartNodeVisuals("pending", "syncing").tone, "warning");
 
-  assert.equal(module.chartPaletteForTone("neutral").fill, "var(--bg-panel-alt)");
-  assert.equal(module.chartPaletteForTone("success").fill, "#dcfce7");
-  assert.equal(module.chartPaletteForTone("info").fill, "#e0f2fe");
-  assert.equal(module.chartPaletteForTone("danger").fill, "#fee2e2");
-  assert.equal(module.chartPaletteForTone("warning").fill, "#fef3c7");
+  assert.equal(module.resolveChartNodeVisuals("pending", "").palette.fill, "var(--bg-panel-alt)");
+  assert.equal(module.resolveChartNodeVisuals("pending", "completed").palette.fill, "#dcfce7");
+  assert.equal(module.resolveChartNodeVisuals("running", "running").palette.fill, "#e0f2fe");
+  assert.equal(module.resolveChartNodeVisuals("pending", "failed").palette.fill, "#fee2e2");
+  assert.equal(module.resolveChartNodeVisuals("pending", "awaiting_review").palette.fill, "#fef3c7");
 });
 
 test("ExecutionFlowChart overlays the active lineage as running while the stored step status is stale", async () => {

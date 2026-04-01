@@ -219,66 +219,64 @@ function chartTopologySignature(steps = []) {
     .join("::");
 }
 
-function chartStatusTone(status) {
-  const normalized = String(status || "").trim().toLowerCase();
-  if (!normalized) {
-    return "neutral";
-  }
-  if (normalized === "completed") {
-    return "success";
-  }
-  if (normalized.includes("failed")) {
-    return "danger";
-  }
-  if (isDebuggingStatus(normalized)) {
-    return "warning";
-  }
-  if (normalized === "integrating" || normalized.includes("running")) {
-    return "info";
-  }
-  if (
-    normalized === "pending"
-    || normalized === "not_started"
-    || normalized === "idle"
-    || normalized === "ready"
-    || normalized === "blocked"
-    || normalized.includes("queued")
-    || normalized.includes("cancelled")
-  ) {
-    return "neutral";
-  }
-  return "warning";
-}
-
-function chartPaletteForTone(tone) {
-  return PALETTE[tone] || PALETTE.warning;
-}
-
-function chartPaletteStatus(persistedStatus = "", displayStatus = "") {
+function resolveChartNodeVisuals(persistedStatus = "", displayStatus = "") {
   const normalizedPersisted = String(persistedStatus || "").trim().toLowerCase();
   const normalizedDisplay = String(displayStatus || "").trim().toLowerCase();
-  if (!normalizedDisplay) {
-    return normalizedPersisted;
+  let resolvedStatus = normalizedPersisted || "pending";
+  if (normalizedDisplay) {
+    if (
+      normalizedDisplay === "completed"
+      || normalizedDisplay.includes("failed")
+      || normalizedDisplay === "awaiting_review"
+      || normalizedDisplay === "syncing"
+      || isDebuggingStatus(normalizedDisplay)
+    ) {
+      resolvedStatus = normalizedDisplay;
+    } else if (
+      normalizedDisplay === "integrating"
+      || normalizedDisplay === "running"
+      || normalizedDisplay.startsWith("running:")
+      || normalizedDisplay === "queued"
+      || normalizedDisplay.startsWith("queued:")
+    ) {
+      resolvedStatus = normalizedPersisted || "pending";
+    } else {
+      resolvedStatus = normalizedDisplay;
+    }
   }
-  if (
-    normalizedDisplay === "completed"
-    || normalizedDisplay.includes("failed")
-    || normalizedDisplay === "awaiting_review"
-    || normalizedDisplay === "syncing"
-    || isDebuggingStatus(normalizedDisplay)
-  ) {
-    return normalizedDisplay;
-  }
-  if (
-    normalizedDisplay === "integrating"
-    || normalizedDisplay === "running"
-    || normalizedDisplay.startsWith("running:")
-    || normalizedDisplay === "queued"
-    || normalizedDisplay.startsWith("queued:")
-  ) {
-    return normalizedPersisted || "pending";
-  }
-  return normalizedDisplay;
+  const tone = (() => {
+    if (!resolvedStatus) {
+      return "neutral";
+    }
+    if (resolvedStatus === "completed") {
+      return "success";
+    }
+    if (resolvedStatus.includes("failed")) {
+      return "danger";
+    }
+    if (isDebuggingStatus(resolvedStatus)) {
+      return "warning";
+    }
+    if (resolvedStatus === "integrating" || resolvedStatus.includes("running")) {
+      return "info";
+    }
+    if (
+      resolvedStatus === "pending"
+      || resolvedStatus === "not_started"
+      || resolvedStatus === "idle"
+      || resolvedStatus === "ready"
+      || resolvedStatus === "blocked"
+      || resolvedStatus.includes("queued")
+      || resolvedStatus.includes("cancelled")
+    ) {
+      return "neutral";
+    }
+    return "warning";
+  })();
+  return {
+    tone,
+    palette: PALETTE[tone] || PALETTE.warning,
+  };
 }
 
 function buildChartTopology(steps = []) {
@@ -582,8 +580,7 @@ function buildChartData(steps = [], projectStatus = "", language = "en", activeL
       const renderedStep = liveStatus ? { ...node.step, status: liveStatus } : node.step;
       const stepStatus = effectiveChartStepStatus(renderedStep, projectStatus, activeLineageId, checkpointLookup, checkpointFamily);
       const persistedStatus = String(node.step?.status || "").trim().toLowerCase() || "pending";
-      const tone = chartStatusTone(chartPaletteStatus(persistedStatus, stepStatus));
-      const palette = chartPaletteForTone(tone);
+      const { tone, palette } = resolveChartNodeVisuals(persistedStatus, stepStatus);
       const failureReason = failureReasonLabel(renderedStep, language);
       return {
         ...node,
@@ -725,6 +722,5 @@ export const __executionFlowChartTestables = {
   buildChartLevels,
   orderChartLevels,
   buildChartTopology,
-  chartStatusTone,
-  chartPaletteForTone,
+  resolveChartNodeVisuals,
 };
