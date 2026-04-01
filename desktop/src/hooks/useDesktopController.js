@@ -50,6 +50,7 @@ import {
   programSettingsFromRuntime,
   resolveChatRuntimeSelection,
   resolveProjectDirectory,
+  shouldAutoSelectProject,
   shouldReplaceVisibleProject,
 } from "../utils";
 import {
@@ -124,6 +125,7 @@ export function useDesktopController() {
   const [message, setMessage] = useState(null);
   const [shareSettings, setShareSettings] = useState(() => defaultShareSettings());
   const [autoRunAfterPlan, setAutoRunAfterPlan] = usePersistentState("jakal-flow:auto-run-after-plan", false);
+  const [creatingProjectDraft, setCreatingProjectDraft] = useState(false);
   const lastAppliedDetailSignatureRef = useRef("");
   const bridgeRefreshInFlightRef = useRef(false);
   const bridgeRefreshTimerRef = useRef(null);
@@ -153,6 +155,7 @@ export function useDesktopController() {
   const canRequestChatStopRef = useRef(false);
   const wantsExpandedDetailRef = useRef(false);
   const languageRef = useRef("en");
+  const creatingProjectDraftRef = useRef(false);
   const refreshProjectsRef = useRef(null);
   const projectDetailRequestDeduperRef = useRef(createRequestDeduper());
   const historyDetailRequestDeduperRef = useRef(createRequestDeduper());
@@ -222,6 +225,7 @@ export function useDesktopController() {
   canRequestChatStopRef.current = canRequestChatStop;
   wantsExpandedDetailRef.current = wantsExpandedDetail;
   languageRef.current = language;
+  creatingProjectDraftRef.current = creatingProjectDraft;
   const shareBusy = pendingAction === "create_share_session" || pendingAction === "revoke_share_session";
   const savedProgramSettings = useMemo(
     () => programSettingsFromRuntime(storedProgramSettings),
@@ -667,9 +671,9 @@ export function useDesktopController() {
         projectsRef.current = nextProjects;
         if (!nextProjects.some((item) => item.repo_id === selectedProjectId)) {
           const nextProjectId = nextProjects[0]?.repo_id || "";
-          if (nextProjectId) {
+          if (nextProjectId && shouldAutoSelectProject(selectedProjectId, creatingProjectDraftRef.current)) {
             setSelectedProjectId(nextProjectId);
-          } else {
+          } else if (!nextProjectId) {
             clearSelectedProjectState(applyProgramSettings(bootstrap.default_runtime, nextProgramSettings), { preserveProjectIdentity: false });
           }
         }
@@ -1024,7 +1028,9 @@ export function useDesktopController() {
           if (
             job?.result?.chat
             && !supersededByActiveJob
-            && shouldReplaceVisibleProject(selectedProjectId, resultProjectId)
+            && shouldReplaceVisibleProject(selectedProjectId, resultProjectId, {
+              allowEmptySelection: !creatingProjectDraftRef.current,
+            })
           ) {
             mergeSelectedProjectSupplement(resultProjectId, {
               chat: job.result.chat,
@@ -1038,7 +1044,9 @@ export function useDesktopController() {
           if (
             job?.result?.detail
             && !supersededByActiveJob
-            && shouldReplaceVisibleProject(selectedProjectId, resultProjectId)
+            && shouldReplaceVisibleProject(selectedProjectId, resultProjectId, {
+              allowEmptySelection: !creatingProjectDraftRef.current,
+            })
           ) {
             applyProjectDetail(job.result.detail, {
               preserveDirtyPlan: false,
@@ -1052,7 +1060,9 @@ export function useDesktopController() {
           if (
             !supersededByActiveJob
             && job.result?.project
-            && shouldReplaceVisibleProject(selectedProjectId, job.result.project.repo_id)
+            && shouldReplaceVisibleProject(selectedProjectId, job.result.project.repo_id, {
+              allowEmptySelection: !creatingProjectDraftRef.current,
+            })
           ) {
             applyProjectDetail(job.result, { preserveDirtyPlan: false, runningJob: nextSelectedJob, force: true });
           }
@@ -1245,7 +1255,7 @@ export function useDesktopController() {
     });
     setHistoryProjects((current) => reuseProjectListingItems(current, listing?.history || []));
     projectsRef.current = nextProjects;
-    if (!selectedProjectId && nextProjects.length) {
+    if (shouldAutoSelectProject(selectedProjectId, creatingProjectDraftRef.current) && nextProjects.length) {
       setSelectedProjectId(nextProjects[0].repo_id);
     } else if (!nextProjects.length) {
       clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: false });
@@ -1311,11 +1321,11 @@ export function useDesktopController() {
           projectsRef.current = nextProjects;
           if (selectedHistoryId && historyDetail) {
             setHistoryDetail(historyDetail);
-        } else if (!selectedHistoryId && nextProjects.length) {
-          setSelectedProjectId(nextProjects[0].repo_id);
-        } else if (!nextProjects.length) {
-          clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: false });
-        }
+          } else if (shouldAutoSelectProject(selectedProjectId, creatingProjectDraftRef.current) && !selectedHistoryId && nextProjects.length) {
+            setSelectedProjectId(nextProjects[0].repo_id);
+          } else if (!nextProjects.length) {
+            clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: false });
+          }
         });
       }
 
@@ -1331,7 +1341,9 @@ export function useDesktopController() {
     }
     const loadToken = beginProjectSelectionLoad(selectedProjectLoadSequenceRef);
     const previousProjectId = selectedProjectId;
+    const previousCreatingProjectDraft = creatingProjectDraftRef.current;
     setLoadingProjectId(repoId);
+    setCreatingProjectDraft(false);
     setSelectedProjectId(repoId);
     try {
       const detail = await fetchProjectDetailOnce(repoId, {
@@ -1354,6 +1366,7 @@ export function useDesktopController() {
         return null;
       }
       setLoadingProjectId("");
+      setCreatingProjectDraft(previousCreatingProjectDraft);
       setSelectedProjectId(previousProjectId);
       setMessage(messagePayload("error", String(error)));
       return null;
@@ -1503,6 +1516,8 @@ export function useDesktopController() {
 
   function startNewProject() {
     setMessage(null);
+    beginProjectSelectionLoad(selectedProjectLoadSequenceRef);
+    setCreatingProjectDraft(true);
     clearSelectedProjectState(defaultRuntime, { preserveProjectIdentity: false });
     setCenterTab("config");
     setSidebarTab("workspace");
@@ -1598,6 +1613,7 @@ export function useDesktopController() {
       );
       const jobSnapshot = await syncRunningJobSnapshot(activeJobId);
       lastAppliedDetailSignatureRef.current = "";
+      setCreatingProjectDraft(false);
       setSelectedProjectId(detail.project.repo_id);
       applyCurrentJobSnapshot(jobSnapshot);
       applyProjectDetail(detail, {

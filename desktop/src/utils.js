@@ -775,13 +775,21 @@ export function shouldKeepUnsavedPlan(currentProjectId, nextProjectId, planDirty
   return Boolean(current) && current === next;
 }
 
-export function shouldReplaceVisibleProject(selectedProjectId, nextProjectId) {
+export function shouldReplaceVisibleProject(selectedProjectId, nextProjectId, options = {}) {
   const selected = String(selectedProjectId || "").trim();
   const next = String(nextProjectId || "").trim();
+  const allowEmptySelection = Boolean(options.allowEmptySelection ?? true);
   if (!next) {
     return false;
   }
-  return !selected || selected === next;
+  if (!selected) {
+    return allowEmptySelection;
+  }
+  return selected === next;
+}
+
+export function shouldAutoSelectProject(selectedProjectId = "", creatingProjectDraft = false) {
+  return !String(selectedProjectId || "").trim() && !Boolean(creatingProjectDraft);
 }
 
 export function computePlanStats(plan = {}) {

@@ -26,6 +26,8 @@ import {
   sanitizeProjectDetailForJobState,
   sameQueuedJobs,
   selectedConfigReasoning,
+  shouldAutoSelectProject,
+  shouldReplaceVisibleProject,
   stepModelSelectionPatch,
 } from "./utils.js";
 
@@ -104,6 +106,14 @@ test("canEditProjectConfig allows edits while paused but blocks active runs", ()
   assert.equal(canEditProjectConfig("paused", "running"), true);
   assert.equal(canEditProjectConfig("ready", "running"), false);
   assert.equal(canEditProjectConfig("running", ""), false);
+});
+
+test("project selection helpers keep new-project drafts from being overwritten", () => {
+  assert.equal(shouldReplaceVisibleProject("", "repo-1"), true);
+  assert.equal(shouldReplaceVisibleProject("", "repo-1", { allowEmptySelection: false }), false);
+  assert.equal(shouldAutoSelectProject("", false), true);
+  assert.equal(shouldAutoSelectProject("", true), false);
+  assert.equal(shouldAutoSelectProject("repo-1", true), false);
 });
 
 test("canEditStepModel allows model edits on paused steps while preserving normal locks", () => {
