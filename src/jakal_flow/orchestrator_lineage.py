@@ -261,6 +261,43 @@ class OrchestratorLineageMixin:
             for dependency in step.depends_on:
                 counts[dependency] = counts.get(dependency, 0) + 1
         return counts
+    def _step_output_revision(self, context: ProjectContext, step: ExecutionStep) -> str:
+        return str(step.commit_hash or "").strip() or str(
+            context.metadata.current_safe_revision
+            or context.loop_state.current_safe_revision
+            or self.git.current_revision(context.paths.repo_dir)
+        ).strip()
+    def _batch_uses_hybrid_lineages(
+        self,
+        plan_state: ExecutionPlanState,
+        batch: list[ExecutionStep],
+        *,
+        lineages: dict[str, LineageState] | None = None,
+    ) -> bool:
+        if not batch:
+            return False
+        if len(batch) > 1:
+            return True
+        step = batch[0]
+        if self._step_kind(step) in {"join", "barrier"}:
+            return True
+        metadata = step.metadata if isinstance(step.metadata, dict) else {}
+        lineage_id = str(metadata.get("lineage_id", "")).strip()
+        if lineage_id:
+            return True
+        step_by_id = {item.step_id: item for item in plan_state.steps}
+        dependencies = [step_by_id[dependency] for dependency in step.depends_on if dependency in step_by_id]
+        if len(dependencies) != 1:
+            return False
+        parent_step = dependencies[0]
+        if self._step_kind(parent_step) in {"join", "barrier"}:
+            return False
+        parent_lineage_id = str((parent_step.metadata or {}).get("lineage_id", "")).strip()
+        if not parent_lineage_id:
+            return False
+        if lineages is None:
+            return True
+        return parent_lineage_id in lineages
     def _create_lineage_state(
         self,
         context: ProjectContext,
@@ -373,22 +410,31 @@ class OrchestratorLineageMixin:
                 )
             else:
                 parent_lineage_id = str((parent_step.metadata or {}).get("lineage_id", "")).strip()
-                if not parent_lineage_id or parent_lineage_id not in lineages:
-                    raise RuntimeError(f"{step.step_id} depends on {parent_step.step_id}, but that lineage is unavailable.")
-                parent_lineage = lineages[parent_lineage_id]
-                parent_head = parent_lineage.head_commit or parent_lineage.safe_revision
-                if child_counts.get(parent_step.step_id, 0) > 1:
-                    parent_lineage.status = "branched"
-                    parent_lineage.updated_at = now_utc_iso()
+                parent_lineage = lineages.get(parent_lineage_id) if parent_lineage_id else None
+                if parent_lineage is None:
                     lineage = self._create_lineage_state(
                         context,
                         lineages,
-                        source_revision=parent_head,
-                        parent_lineage_id=parent_lineage.lineage_id,
+                        source_revision=self._step_output_revision(context, parent_step),
                         source_step_id=parent_step.step_id,
                     )
                 else:
-                    lineage = parent_lineage
+                    parent_head = parent_lineage.head_commit or parent_lineage.safe_revision
+                    if child_counts.get(parent_step.step_id, 0) > 1:
+                        parent_lineage.status = "branched"
+                        parent_lineage.updated_at = now_utc_iso()
+                        lineage = self._create_lineage_state(
+                            context,
+                            lineages,
+                            source_revision=parent_head,
+                            parent_lineage_id=parent_lineage.lineage_id,
+                            source_step_id=parent_step.step_id,
+                        )
+                    else:
+                        lineage = parent_lineage
+                if parent_lineage is not None and child_counts.get(parent_step.step_id, 0) > 1:
+                    parent_lineage.status = "branched"
+                    parent_lineage.updated_at = now_utc_iso()
         metadata["lineage_id"] = lineage.lineage_id
         step.metadata = metadata
         return lineage
