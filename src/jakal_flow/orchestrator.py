@@ -1217,14 +1217,6 @@ class Orchestrator(
             step_kind = self._step_kind(step)
             metadata = step.metadata if isinstance(step.metadata, dict) else {}
             step_label = self._step_trace_label(step)
-            if step_kind == "join" and len(step.depends_on) < 2:
-                # Recover gracefully from malformed planner output where a join is declared
-                # with a single dependency. Treat it as a regular task and clear join-only metadata.
-                step_kind = "task"
-                metadata.pop("merge_from", None)
-                metadata.pop("join_policy", None)
-                metadata.pop("step_kind", None)
-                step.metadata = metadata
             if step_kind in {"join", "barrier"} and step.parallel_group.strip():
                 raise ValueError(f"{step_label} cannot use parallel_group because {step_kind} steps run alone.")
             if step_kind == "join":
@@ -1506,6 +1498,14 @@ class Orchestrator(
                     step_id=ordered_targets[0].step_id,
                     branch=branch,
                     origin_url=origin_url,
+                )
+                return project, saved, [result_step]
+            lineages = self._load_lineage_states(context)
+            if not self._batch_uses_hybrid_lineages(plan_state, ordered_targets, lineages=lineages):
+                project, saved, result_step = self._run_saved_execution_step_with_context(
+                    context=context,
+                    runtime=runtime,
+                    step_id=ordered_targets[0].step_id,
                 )
                 return project, saved, [result_step]
             return self._run_lineage_execution_batch(context, plan_state, runtime, ordered_targets)

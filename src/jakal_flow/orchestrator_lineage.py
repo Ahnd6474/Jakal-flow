@@ -281,6 +281,13 @@ class OrchestratorLineageMixin:
         step = batch[0]
         if self._step_kind(step) in {"join", "barrier"}:
             return True
+        step_id = step.step_id.strip()
+        for candidate in plan_state.steps:
+            if self._step_kind(candidate) not in {"join", "barrier"}:
+                continue
+            merge_refs = self._coerce_string_list((candidate.metadata or {}).get("merge_from", [])) or list(candidate.depends_on)
+            if len(merge_refs) >= 2 and step_id in merge_refs:
+                return True
         metadata = step.metadata if isinstance(step.metadata, dict) else {}
         lineage_id = str(metadata.get("lineage_id", "")).strip()
         if lineage_id:
@@ -432,9 +439,6 @@ class OrchestratorLineageMixin:
                         )
                     else:
                         lineage = parent_lineage
-                if parent_lineage is not None and child_counts.get(parent_step.step_id, 0) > 1:
-                    parent_lineage.status = "branched"
-                    parent_lineage.updated_at = now_utc_iso()
         metadata["lineage_id"] = lineage.lineage_id
         step.metadata = metadata
         return lineage
@@ -1476,12 +1480,6 @@ class OrchestratorLineageMixin:
         for step in steps:
             metadata = deepcopy(step.metadata) if isinstance(step.metadata, dict) else {}
             step_kind = self._normalize_hybrid_step_kind(metadata.get("step_kind", ""))
-            if step_kind == "join" and len(step.depends_on) < 2:
-                # A join node must reconcile at least two prior branches. If only one dependency
-                # is provided, treat the step as a regular task so execution can continue safely.
-                step_kind = "task"
-                metadata.pop("merge_from", None)
-                metadata.pop("join_policy", None)
             if step_kind != "task":
                 metadata["step_kind"] = step_kind
             else:

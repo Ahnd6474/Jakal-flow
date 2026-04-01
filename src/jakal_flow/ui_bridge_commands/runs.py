@@ -314,7 +314,7 @@ def build_run_command_handlers(
                     if result_step.status != "completed":
                         break
                     continue
-                if hybrid_lineages:
+                if hybrid_lineages and ctx.orchestrator._batch_uses_hybrid_lineages(current_plan, batch):
                     step_ids = [item.step_id for item in batch]
                     effective_parallel_workers = _effective_parallel_worker_count(
                         parallel_plan.recommended_workers,

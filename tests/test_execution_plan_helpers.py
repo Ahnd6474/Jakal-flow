@@ -1973,6 +1973,137 @@ class ExecutionPlanHelperTests(unittest.TestCase):
 
         self.assertEqual([lineage.lineage_id for lineage in selected], ["LN4"])
 
+    def test_allocate_lineage_for_step_branches_from_main_backed_parent_commit(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_main_backed_lineage_branch_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest", execution_mode="parallel")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            context.metadata.current_safe_revision = "main-safe"
+            context.loop_state.current_safe_revision = "main-safe"
+            orchestrator.workspace.save_project(context)
+            plan_state = ExecutionPlanState(
+                plan_title="Main backed branch",
+                execution_mode="parallel",
+                default_test_command="python -m pytest",
+                steps=[
+                    ExecutionStep(step_id="ST1", title="Base", status="completed", commit_hash="st1-main"),
+                    ExecutionStep(step_id="ST2", title="Branch A", depends_on=["ST1"]),
+                    ExecutionStep(step_id="ST3", title="Branch B", depends_on=["ST1"]),
+                    ExecutionStep(step_id="ST4", title="Join", depends_on=["ST2", "ST3"], metadata={"step_kind": "join"}),
+                ],
+            )
+            lineages: dict[str, LineageState] = {}
+            child_counts = orchestrator._normal_task_child_counts(plan_state)
+
+            with mock.patch.object(orchestrator.git, "add_worktree") as mocked_add_worktree:
+                lineage = orchestrator._allocate_lineage_for_step(
+                    context,
+                    plan_state,
+                    plan_state.steps[1],
+                    lineages,
+                    child_counts,
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(lineage.source_step_id, "ST1")
+        self.assertEqual(plan_state.steps[1].metadata["lineage_id"], lineage.lineage_id)
+        self.assertEqual(lineage.safe_revision, "st1-main")
+        self.assertEqual(mocked_add_worktree.call_args.args[3], "st1-main")
+
+    def test_batch_uses_hybrid_lineages_for_branch_continuation_but_not_main_root(self) -> None:
+        orchestrator = Orchestrator(Path.cwd() / ".tmp_batch_hybrid_lineage_test")
+        try:
+            plan_state = ExecutionPlanState(
+                plan_title="Batch lineage routing",
+                execution_mode="parallel",
+                default_test_command="python -m pytest",
+                steps=[
+                    ExecutionStep(step_id="ST1", title="Base", status="pending"),
+                    ExecutionStep(step_id="ST2", title="Branch A", status="completed", depends_on=["ST1"], metadata={"lineage_id": "LN2"}),
+                    ExecutionStep(step_id="ST3", title="Branch B", status="pending", depends_on=["ST2"]),
+                    ExecutionStep(step_id="ST4", title="Join", status="pending", depends_on=["ST3"], metadata={"step_kind": "join"}),
+                ],
+            )
+            lineages = {
+                "LN2": LineageState(
+                    lineage_id="LN2",
+                    branch_name="jakal-flow-lineage-ln2",
+                    worktree_dir=Path.cwd() / ".tmp_batch_hybrid_lineage_test" / "ln2" / "repo",
+                    project_root=Path.cwd() / ".tmp_batch_hybrid_lineage_test" / "ln2",
+                    created_at="2026-03-27T00:00:00+00:00",
+                    updated_at="2026-03-27T00:00:00+00:00",
+                    head_commit="ln2-head",
+                    safe_revision="ln2-head",
+                )
+            }
+            self.assertFalse(orchestrator._batch_uses_hybrid_lineages(plan_state, [plan_state.steps[0]], lineages=lineages))
+            self.assertTrue(orchestrator._batch_uses_hybrid_lineages(plan_state, [plan_state.steps[2]], lineages=lineages))
+        finally:
+            shutil.rmtree(Path.cwd() / ".tmp_batch_hybrid_lineage_test", ignore_errors=True)
+
+    def test_run_parallel_execution_batch_uses_main_path_for_main_backed_singleton(self) -> None:
+        temp_root = Path(__file__).resolve().parents[1] / ".tmp_singleton_hybrid_main_path_test"
+        shutil.rmtree(temp_root, ignore_errors=True)
+        workspace_root = temp_root / "workspace"
+        repo_dir = temp_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator = Orchestrator(workspace_root)
+        runtime = RuntimeOptions(model="gpt-5.4", effort="medium", test_cmd="python -m pytest", execution_mode="parallel")
+
+        try:
+            context = orchestrator.workspace.initialize_local_project(project_dir=repo_dir, branch="main", runtime=runtime)
+            orchestrator.save_execution_plan_state(
+                context,
+                ExecutionPlanState(
+                    plan_title="Singleton main path",
+                    execution_mode="parallel",
+                    default_test_command="python -m pytest",
+                    steps=[
+                        ExecutionStep(step_id="ST1", title="Base"),
+                        ExecutionStep(step_id="ST2", title="Branch A", depends_on=["ST1"]),
+                        ExecutionStep(step_id="ST3", title="Branch B", depends_on=["ST1"]),
+                        ExecutionStep(step_id="ST4", title="Join", depends_on=["ST2", "ST3"], metadata={"step_kind": "join"}),
+                    ],
+                ),
+            )
+
+            def fake_run_saved_execution_step_with_context(*, context, runtime, step_id=None, allow_push=True, final_failure_reports=True):
+                current = orchestrator.load_execution_plan_state(context)
+                target = next(step for step in current.steps if step.step_id == step_id)
+                target.status = "completed"
+                target.completed_at = "2026-03-27T01:00:00+00:00"
+                target.commit_hash = "main-st1"
+                saved = orchestrator.save_execution_plan_state(context, current)
+                return context, saved, next(step for step in saved.steps if step.step_id == step_id)
+
+            with mock.patch.object(orchestrator, "setup_local_project", return_value=context), mock.patch.object(
+                orchestrator,
+                "_run_saved_execution_step_with_context",
+                side_effect=fake_run_saved_execution_step_with_context,
+            ) as mocked_serial, mock.patch.object(
+                orchestrator,
+                "_run_lineage_execution_batch",
+            ) as mocked_lineage:
+                _project, _saved, result_steps = orchestrator.run_parallel_execution_batch(
+                    project_dir=repo_dir,
+                    runtime=runtime,
+                    step_ids=["ST1"],
+                )
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+        self.assertEqual(result_steps[0].step_id, "ST1")
+        self.assertEqual(result_steps[0].status, "completed")
+        mocked_serial.assert_called_once()
+        mocked_lineage.assert_not_called()
+
     def test_run_join_execution_step_rolls_back_main_when_selective_merge_fails(self) -> None:
         temp_root = Path(__file__).resolve().parents[1] / ".tmp_join_merge_failure_test"
         shutil.rmtree(temp_root, ignore_errors=True)
