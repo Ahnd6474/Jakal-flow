@@ -234,15 +234,25 @@ function centerWorkspacePropsEqual(previousProps, nextProps) {
         && previousProps.busy === nextProps.busy
       );
     case "config":
+      {
+        const previousConfigCodexStatus = previousProps.detail?.codex_status || previousProps.globalCodexStatus;
+        const nextConfigCodexStatus = nextProps.detail?.codex_status || nextProps.globalCodexStatus;
+        const previousConfigModelCatalog = previousProps.modelCatalog?.length
+          ? previousProps.modelCatalog
+          : (previousConfigCodexStatus?.model_catalog || []);
+        const nextConfigModelCatalog = nextProps.modelCatalog?.length
+          ? nextProps.modelCatalog
+          : (nextConfigCodexStatus?.model_catalog || []);
       return (
         previousProps.form === nextProps.form
         && previousProps.modelPresets === nextProps.modelPresets
-        && previousProps.modelCatalog === nextProps.modelCatalog
-        && previousProps.detail?.codex_status === nextProps.detail?.codex_status
+        && previousConfigModelCatalog === nextConfigModelCatalog
+        && previousConfigCodexStatus === nextConfigCodexStatus
         && previousProps.detail?.project?.current_status === nextProps.detail?.project?.current_status
         && previousProps.busy === nextProps.busy
         && previousProps.activeJob === nextProps.activeJob
       );
+      }
     case "app-settings":
       return (
         previousProps.programSettings === nextProps.programSettings
@@ -490,8 +500,8 @@ export const CenterWorkspace = memo(function CenterWorkspace({
           <ConfigEditorView
             form={form}
             modelPresets={modelPresets}
-            modelCatalog={modelCatalog}
-            codexStatus={detail?.codex_status}
+            modelCatalog={modelCatalog?.length ? modelCatalog : (detail?.codex_status?.model_catalog || globalCodexStatus?.model_catalog || [])}
+            codexStatus={detail?.codex_status || globalCodexStatus}
             busy={busy}
             activeJob={activeJob}
             projectStatus={projectStatus}

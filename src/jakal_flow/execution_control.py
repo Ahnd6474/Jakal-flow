@@ -132,6 +132,10 @@ def execution_scope_id(context: ProjectContext) -> str:
     return str(context.metadata.source_repo_id or context.metadata.repo_id).strip() or str(context.metadata.repo_path)
 
 
+def chat_execution_scope_id(context: ProjectContext) -> str:
+    return f"{execution_scope_id(context)}::chat"
+
+
 def run_subprocess_capture(
     command: str | list[str],
     *,

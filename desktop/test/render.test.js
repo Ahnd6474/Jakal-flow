@@ -5549,6 +5549,8 @@ test("AppSettingsView exposes tooling install cards in the AI tooling tab", asyn
           version: "0.6.0",
           resolved_command: "C:/Ollama/ollama.exe",
           models: ["qwen2.5-coder:0.5b"],
+          recommended_models: ["qwen2.5-coder:0.5b", "qwen2.5-coder:7b"],
+          model_store_path: "C:/demo/third_party/ollama/models",
           reason: "Ollama is connected with 1 installed model(s).",
         },
       },
@@ -5573,8 +5575,75 @@ test("AppSettingsView exposes tooling install cards in the AI tooling tab", asyn
   assert.match(html, />Install<\/button>/);
   assert.match(html, /Gemini CLI/);
   assert.match(html, /Claude Code/);
-  assert.match(html, /Connect &amp; Pull|Connect & Pull/);
-  assert.match(html, /qwen2\.5-coder:0\.5b/);
+  assert.match(html, /Model Manager/);
+  assert.match(html, /C:\/demo\/third_party\/ollama\/models/);
+  assert.doesNotMatch(html, /Connect &amp; Pull|Connect & Pull/);
+  assert.doesNotMatch(html, /Model to pull/);
+});
+
+test("CenterWorkspace passes the global codex status to project config before detail refresh", async () => {
+  const html = await renderBundledComponent(
+    "center-workspace-config-global-codex-render",
+    "./src/components/layout/CenterWorkspace.jsx",
+    "CenterWorkspace",
+    {
+      ...baseWorkspaceProps({
+        activeTab: "config",
+        detail: {
+          project: {
+            current_status: "setup_ready",
+          },
+          runtime: {
+            model_provider: "openai",
+            model: "gpt-5.4",
+            model_slug_input: "gpt-5.4",
+            execution_model: "gpt-5.4",
+            effort: "medium",
+            workflow_mode: "standard",
+          },
+        },
+        form: {
+          project_dir: "C:/demo",
+          display_name: "Demo",
+          branch: "main",
+          github_mode: "existing",
+          origin_url: "",
+          runtime: {
+            model_provider: "openai",
+            model: "gpt-5.4",
+            model_slug_input: "gpt-5.4",
+            execution_model: "gpt-5.4",
+            effort: "medium",
+            workflow_mode: "standard",
+          },
+        },
+        globalCodexStatus: {
+          model_catalog: [
+            {
+              model: "gpt-5.4",
+              display_name: "GPT-5.4",
+              hidden: false,
+              provider: "openai",
+              default_reasoning_effort: "medium",
+              supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+            },
+          ],
+          provider_statuses: {
+            openai: { available: true, usable: true, reason: "Codex CLI is available." },
+          },
+        },
+        modelCatalog: [],
+        onSaveProject: noop,
+        onChooseDirectory: noop,
+        onArchiveProject: noop,
+        onDeleteProject: noop,
+      }),
+    },
+  );
+
+  assert.match(html, /Execution model/);
+  assert.match(html, /<option value="gpt-5\.4" selected="">GPT-5\.4<\/option>/);
+  assert.doesNotMatch(html, /Custom Model Slug/);
 });
 
 test("AppSettingsView shows the npm prerequisite note when CLI installers cannot run yet", async () => {

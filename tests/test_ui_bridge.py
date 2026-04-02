@@ -2860,6 +2860,37 @@ class UIBridgeTests(unittest.TestCase):
             self.assertEqual(request_stop_mock.call_count, 1)
             self.assertEqual(request_stop_mock.call_args.kwargs["process_pids"], [4321, 4322])
 
+    def test_request_chat_stop_targets_chat_scope_only(self) -> None:
+        ui_bridge._bridge_command_handlers_cache = None
+        ui_bridge._bridge_command_handlers_cache_token = None
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+
+            with mock.patch("jakal_flow.orchestrator.ensure_virtualenv", return_value=repo_dir / ".venv"):
+                workspace = WorkspaceManager(workspace_root)
+                project = workspace.initialize_local_project(repo_dir, "main", runtime_from_payload({}), display_name="Chat Demo")
+
+            with mock.patch.object(
+                ui_bridge.EXECUTION_STOP_REGISTRY,
+                "request_stop",
+                wraps=ui_bridge.EXECUTION_STOP_REGISTRY.request_stop,
+            ) as request_stop_mock, mock.patch("jakal_flow.ui_bridge.append_ui_event") as append_ui_event_mock:
+                result = run_command(
+                    "request-chat-stop",
+                    workspace_root,
+                    {
+                        "project_dir": str(repo_dir),
+                        "source": "unit-test",
+                    },
+                )
+
+            self.assertFalse(result["emit_project_changed"])
+            self.assertEqual(result["scope_id"], ui_bridge.chat_execution_scope_id(project))
+            request_stop_mock.assert_called_once_with(ui_bridge.chat_execution_scope_id(project))
+            append_ui_event_mock.assert_called_once()
+
     def test_generate_plan_handles_immediate_stop_during_planning(self) -> None:
         with TemporaryTestDir() as temp_dir:
             workspace_root = temp_dir / "workspace"

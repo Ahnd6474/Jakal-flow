@@ -37,6 +37,15 @@ _CLI_VERSION_TIMEOUT_SECONDS = 12.0
 _INSTALL_TIMEOUT_SECONDS = 900.0
 _OLLAMA_CONNECT_TIMEOUT_SECONDS = 20.0
 _DEFAULT_OLLAMA_MODEL = "qwen2.5-coder:0.5b"
+_OLLAMA_SUGGESTED_MODELS: tuple[str, ...] = (
+    "qwen2.5-coder:0.5b",
+    "qwen2.5-coder:7b",
+    "qwen3:8b",
+    "deepseek-r1:8b",
+    "llama3.2:3b",
+    "gemma3:4b",
+    "mistral-small:24b",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +58,8 @@ class ToolingStatus:
     version: str = ""
     running: bool | None = None
     models: list[str] = field(default_factory=list)
+    recommended_models: list[str] = field(default_factory=list)
+    model_store_path: str = ""
     reason: str = ""
     install_hint: str = ""
 
@@ -62,6 +73,8 @@ class ToolingStatus:
             "version": self.version,
             "running": self.running,
             "models": list(self.models),
+            "recommended_models": list(self.recommended_models),
+            "model_store_path": self.model_store_path,
             "reason": self.reason,
             "install_hint": self.install_hint,
         }
@@ -201,14 +214,19 @@ def _cli_status(tool: str) -> ToolingStatus:
 
 
 def _ollama_status() -> ToolingStatus:
+    model_store_root = _ollama_model_store_root()
     resolved_command = _resolve_command("ollama")
     installed = bool(resolved_command)
     version = _command_version(resolved_command) if installed else ""
-    running, models = _ollama_runtime_status() if installed else (False, [])
+    running, runtime_models = _ollama_runtime_status() if installed else (False, [])
+    vendored_models = _vendored_ollama_models()
+    models = _merge_model_names(runtime_models, vendored_models)
     if not installed:
         reason = "Ollama is not installed."
     elif running and models:
         reason = f"Ollama is connected with {len(models)} installed model(s)."
+    elif models:
+        reason = f"Ollama found {len(models)} model(s) in the managed third_party store."
     elif running:
         reason = "Ollama is running but no models are installed yet."
     else:
@@ -222,6 +240,8 @@ def _ollama_status() -> ToolingStatus:
         version=version,
         running=running,
         models=models,
+        recommended_models=list(_OLLAMA_SUGGESTED_MODELS),
+        model_store_path=str(model_store_root),
         reason=reason,
         install_hint="Install Ollama, then connect and pull a model.",
     )
@@ -292,18 +312,27 @@ def _connect_ollama(model: str) -> dict[str, Any]:
     status = _ollama_status()
     if not status.installed:
         raise RuntimeError("Install Ollama before trying to connect.")
+    model_store_root = _configure_ollama_model_store()
     _ensure_ollama_running()
     selected_model = str(model or "").strip().lower() or _default_ollama_model_name()
     running, current_models = _ollama_runtime_status()
     if not running:
         raise RuntimeError("Ollama is installed but the local API did not come online.")
     if selected_model and selected_model not in {item.lower() for item in current_models}:
-        _ollama_api_request(
-            "/api/pull",
-            payload={"model": selected_model, "stream": False},
+        completed = run_subprocess(
+            [_resolve_command("ollama") or "ollama", "pull", selected_model],
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout_seconds=_INSTALL_TIMEOUT_SECONDS,
+            env=_ollama_runtime_env(model_store_root),
         )
-    running, models = _ollama_runtime_status()
+        if completed.returncode != 0:
+            raise RuntimeError(_subprocess_error_message(completed, f"Failed to pull {selected_model} from Ollama."))
+    running, runtime_models = _ollama_runtime_status()
+    models = _merge_model_names(runtime_models, _vendored_ollama_models())
     return {
         "tool": "ollama",
         "action": "connect",
@@ -316,6 +345,7 @@ def _connect_ollama(model: str) -> dict[str, Any]:
         "model": selected_model,
         "models": models,
         "running": running,
+        "model_store_path": str(model_store_root),
     }
 
 
@@ -363,7 +393,7 @@ def _ensure_ollama_running() -> None:
     else:
         popen_kwargs["start_new_session"] = True
     try:
-        subprocess.Popen([resolved_command, "serve"], **popen_kwargs)
+        subprocess.Popen([resolved_command, "serve"], env=_ollama_runtime_env(_configure_ollama_model_store()), **popen_kwargs)
     except OSError as exc:
         raise RuntimeError(f"Failed to start Ollama: {exc}") from exc
     if not _wait_for_condition(lambda: _ollama_runtime_status()[0], timeout_seconds=_OLLAMA_CONNECT_TIMEOUT_SECONDS):
@@ -424,6 +454,74 @@ def _ollama_api_request(
 def _default_ollama_model_name() -> str:
     detected = default_local_model("ollama", "ollama")
     return str(detected or _DEFAULT_OLLAMA_MODEL).strip().lower()
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _ollama_model_store_root() -> Path:
+    return _repo_root() / "third_party" / "ollama" / "models"
+
+
+def _configure_ollama_model_store() -> Path:
+    root = _ollama_model_store_root()
+    root.mkdir(parents=True, exist_ok=True)
+    os.environ["OLLAMA_MODELS"] = str(root)
+    if os.name == "nt":
+        _persist_windows_ollama_models_env(root)
+    return root
+
+
+def _persist_windows_ollama_models_env(model_store_root: Path) -> None:
+    target = str(model_store_root)
+    try:
+        run_subprocess(
+            ["setx", "OLLAMA_MODELS", target],
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout_seconds=30.0,
+        )
+    except Exception:
+        return
+
+
+def _ollama_runtime_env(model_store_root: Path | None = None) -> dict[str, str]:
+    root = model_store_root or _ollama_model_store_root()
+    root.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["OLLAMA_MODELS"] = str(root)
+    return env
+
+
+def _merge_model_names(*model_groups: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in model_groups:
+        for item in group or []:
+            name = str(item or "").strip()
+            key = name.lower()
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            merged.append(name)
+    return merged
+
+
+def _vendored_ollama_models() -> list[str]:
+    manifest_root = _ollama_model_store_root() / "manifests" / "registry.ollama.ai" / "library"
+    if not manifest_root.exists():
+        return []
+    models: list[str] = []
+    for family_dir in sorted(path for path in manifest_root.iterdir() if path.is_dir()):
+        for tag_path in sorted(path for path in family_dir.iterdir() if path.is_file()):
+            model_name = f"{family_dir.name}:{tag_path.name}"
+            if model_name not in models:
+                models.append(model_name)
+    return models
 
 
 def _command_version(command: str) -> str:

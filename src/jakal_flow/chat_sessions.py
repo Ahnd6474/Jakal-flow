@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from .codex_runner import CodexRunner
 from .errors import JSON_PARSE_EXCEPTIONS
-from .execution_control import ImmediateStopRequested, execution_scope_id, run_subprocess_capture
+from .execution_control import ImmediateStopRequested, chat_execution_scope_id, run_subprocess_capture
 from .models import ExecutionPlanState, ProjectContext
 from .model_providers import normalize_model_provider
 from .platform_defaults import default_codex_path
@@ -957,7 +957,7 @@ def _run_conversation_reply(
 
     child_env = sanitized_subprocess_env(runner._provider_environment(context, backend=backend))
     temp_file = Path(tempfile.gettempdir()) / f"{session_id}-{uuid4().hex[:8]}.txt"
-    scope_id = execution_scope_id(context)
+    scope_id = chat_execution_scope_id(context)
     stdout = ""
     try:
         with runner._execution_layout(context, temp_file) as execution_layout:

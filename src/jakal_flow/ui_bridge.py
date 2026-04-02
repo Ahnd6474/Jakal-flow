@@ -16,7 +16,7 @@ from .codex_app_server import fetch_codex_backend_snapshot
 from .errors import HANDLED_OPERATION_EXCEPTIONS
 from .failure_logs import write_runtime_failure_log
 from .model_constants import AUTO_MODEL_SLUG, DEFAULT_LOCAL_MODEL_PROVIDER, DEFAULT_MODEL_PROVIDER
-from .execution_control import EXECUTION_STOP_REGISTRY, execution_scope_id
+from .execution_control import EXECUTION_STOP_REGISTRY, chat_execution_scope_id, execution_scope_id
 from .model_selection import (
     DEFAULT_MODEL_PRESET_ID,
     MODEL_PRESETS,
@@ -502,6 +502,7 @@ def bridge_command_handlers() -> dict[str, Any]:
             request_stop_immediately=request_stop_immediately,
             stop_requested=stop_requested,
             immediate_stop_requested=immediate_stop_requested,
+            chat_execution_scope_id=chat_execution_scope_id,
             execution_scope_id=execution_scope_id,
             execution_stop_registry=EXECUTION_STOP_REGISTRY,
             coerce_bool=coerce_bool,

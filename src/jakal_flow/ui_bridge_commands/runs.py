@@ -93,6 +93,7 @@ def build_run_command_handlers(
     request_stop_immediately,
     stop_requested,
     immediate_stop_requested,
+    chat_execution_scope_id,
     execution_scope_id,
     execution_stop_registry,
     coerce_bool,
@@ -253,6 +254,22 @@ def build_run_command_handlers(
             "repo_id": project.metadata.repo_id,
             "project_dir": str(project.metadata.repo_path),
             "run_control": control,
+        }
+
+    def request_chat_stop(ctx: BridgeCommandContext) -> dict:
+        project = resolve_project(ctx.orchestrator, ctx.payload)
+        scope_id = chat_execution_scope_id(project)
+        execution_stop_registry.request_stop(scope_id)
+        details = {
+            "scope_id": scope_id,
+            "source": str(ctx.payload.get("source", "desktop-ui")).strip() or "desktop-ui",
+        }
+        append_ui_event(project, "chat-stop-requested", "Requested that the active chat reply stop.", details)
+        return {
+            "repo_id": project.metadata.repo_id,
+            "project_dir": str(project.metadata.repo_path),
+            "scope_id": scope_id,
+            "emit_project_changed": False,
         }
 
     def approve_checkpoint(ctx: BridgeCommandContext) -> dict:
@@ -766,8 +783,7 @@ def build_run_command_handlers(
                     "emit_project_changed": False,
                 }
             finally:
-                execution_stop_registry.clear(execution_scope_id(project))
-                save_run_control(project, default_run_control())
+                execution_stop_registry.clear(chat_execution_scope_id(project))
 
         runtime_payload = ctx.payload.get("runtime", {})
         runtime_payload = runtime_payload if isinstance(runtime_payload, dict) else {}
@@ -845,6 +861,7 @@ def build_run_command_handlers(
 
     return {
         "request-stop": request_stop,
+        "request-chat-stop": request_chat_stop,
         "approve-checkpoint": approve_checkpoint,
         "run-plan": run_plan,
         "run-closeout": run_closeout,

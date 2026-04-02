@@ -536,7 +536,16 @@ def _vendored_ollama_models(third_party_root: Path | None = None) -> list[str]:
     if not root.exists():
         return []
     models: list[str] = []
+    direct_manifest_root = root / "models" / "manifests" / "registry.ollama.ai" / "library"
+    if direct_manifest_root.exists():
+        for family_dir in sorted(path for path in direct_manifest_root.iterdir() if path.is_dir()):
+            for tag_path in sorted(path for path in family_dir.iterdir() if path.is_file()):
+                model_name = f"{family_dir.name}:{tag_path.name}"
+                if model_name not in models:
+                    models.append(model_name)
     for provider_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+        if provider_dir.name == "models":
+            continue
         manifest_root = provider_dir / "manifests" / "registry.ollama.ai" / "library"
         if manifest_root.exists():
             for family_dir in sorted(path for path in manifest_root.iterdir() if path.is_dir()):

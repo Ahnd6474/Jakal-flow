@@ -68,6 +68,8 @@ class ToolingManagerTests(unittest.TestCase):
             version="0.6.0",
             running=True,
             models=["qwen2.5-coder:0.5b"],
+            recommended_models=["qwen2.5-coder:0.5b", "qwen2.5-coder:7b"],
+            model_store_path="C:/repo/third_party/ollama/models",
             reason="Ollama is connected with 1 installed model(s).",
         )):
             statuses = tooling_manager.get_tooling_statuses()
@@ -77,6 +79,8 @@ class ToolingManagerTests(unittest.TestCase):
         self.assertFalse(statuses["gemini"]["installed"])
         self.assertEqual(statuses["claude"]["version"], "1.2.3")
         self.assertEqual(statuses["ollama"]["models"], ["qwen2.5-coder:0.5b"])
+        self.assertEqual(statuses["ollama"]["recommended_models"], ["qwen2.5-coder:0.5b", "qwen2.5-coder:7b"])
+        self.assertEqual(statuses["ollama"]["model_store_path"], "C:/repo/third_party/ollama/models")
 
     def test_run_tooling_action_logs_existing_install_without_changes(self) -> None:
         with TemporaryTestDir() as temp_dir, mock.patch.object(
@@ -117,11 +121,19 @@ class ToolingManagerTests(unittest.TestCase):
                 models=[],
                 reason="Ollama is installed but the local server is not running.",
             ),
+        ), mock.patch.object(
+            tooling_manager,
+            "_configure_ollama_model_store",
+            return_value=Path("C:/repo/third_party/ollama/models"),
         ), mock.patch.object(tooling_manager, "_ensure_ollama_running") as ensure_running, mock.patch.object(
             tooling_manager,
             "_ollama_runtime_status",
             side_effect=[(True, []), (True, ["qwen2.5-coder:0.5b"])],
-        ), mock.patch.object(tooling_manager, "_ollama_api_request", return_value={"status": "success"}) as api_request:
+        ), mock.patch.object(tooling_manager, "_vendored_ollama_models", return_value=[]), mock.patch.object(
+            tooling_manager,
+            "run_subprocess",
+            return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+        ) as run_subprocess_mock:
             result = tooling_manager.run_tooling_action(
                 temp_dir,
                 action="connect",
@@ -130,10 +142,35 @@ class ToolingManagerTests(unittest.TestCase):
             )
 
         ensure_running.assert_called_once()
-        api_request.assert_called_once()
+        run_subprocess_mock.assert_called_once()
+        self.assertEqual(run_subprocess_mock.call_args.args[0][1:], ["pull", "qwen2.5-coder:0.5b"])
+        self.assertTrue(str(run_subprocess_mock.call_args.args[0][0]).lower().endswith("ollama.exe"))
+        self.assertEqual(
+            run_subprocess_mock.call_args.kwargs["env"]["OLLAMA_MODELS"],
+            str(Path("C:/repo/third_party/ollama/models")),
+        )
         self.assertTrue(result["changed"])
         self.assertEqual(result["model"], "qwen2.5-coder:0.5b")
         self.assertIn("pulled", result["message"].lower())
+        self.assertEqual(result["model_store_path"], str(Path("C:/repo/third_party/ollama/models")))
+
+    def test_persist_windows_ollama_models_env_still_calls_setx_when_process_env_matches(self) -> None:
+        with mock.patch.dict(tooling_manager.os.environ, {"OLLAMA_MODELS": "C:/repo/third_party/ollama/models"}, clear=False), mock.patch.object(
+            tooling_manager,
+            "run_subprocess",
+            return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+        ) as run_subprocess_mock:
+            tooling_manager._persist_windows_ollama_models_env(Path("C:/repo/third_party/ollama/models"))
+
+        run_subprocess_mock.assert_called_once_with(
+            ["setx", "OLLAMA_MODELS", str(Path("C:/repo/third_party/ollama/models"))],
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout_seconds=30.0,
+        )
 
 
 class ToolingBridgeTests(unittest.TestCase):

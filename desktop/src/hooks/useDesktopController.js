@@ -2422,15 +2422,44 @@ export function useDesktopController() {
     if (!chatJobId || !["queued", "running"].includes(chatJobStatus) || !canRequestChatStopRef.current) {
       return;
     }
+    if (chatJobStatus === "queued") {
+      await withPending("request-chat-stop", async () => {
+        const job = await cancelBridgeJob(chatJobId);
+        mergeJobUpdate(job);
+        setMessage(
+          messagePayload(
+            "info",
+            translate(languageRef.current, "message.commandCancelled", {
+              command: commandLabel(job?.command, languageRef.current),
+            }),
+          ),
+        );
+      });
+      return;
+    }
+    const currentProjectForm = projectFormRef.current;
+    const currentProjectDetail = projectDetailRef.current;
+    const effectiveProjectDir = resolveProjectDirectory(currentProjectForm, currentProjectDetail);
+    const repoId = String(currentProjectDetail?.project?.repo_id || selectedProjectIdRef.current || "").trim();
+    if (!effectiveProjectDir) {
+      return;
+    }
     await withPending("request-chat-stop", async () => {
-      const job = await cancelBridgeJob(chatJobId);
-      mergeJobUpdate(job);
+      await bridgeRequest(
+        BRIDGE_COMMANDS.REQUEST_CHAT_STOP,
+        {
+          ...(repoId ? { repo_id: repoId } : {}),
+          project_dir: effectiveProjectDir,
+          source: "tauri-react-ui",
+        },
+        workspaceRoot || null,
+      );
       setMessage(
         messagePayload(
           "info",
-          translate(languageRef.current, "message.commandCancelled", {
-            command: commandLabel(job?.command, languageRef.current),
-          }),
+          languageRef.current === "ko"
+            ? "채팅 중단을 요청했습니다."
+            : "Requested that the chat reply stop.",
         ),
       );
     });
