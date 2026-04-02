@@ -4480,6 +4480,35 @@ test("DashboardView hides cards that are disabled in program settings", async ()
   assert.doesNotMatch(html, /Closeout Report/);
 });
 
+test("DashboardView renders an empty state when no project is selected", async () => {
+  const html = await renderBundledComponent(
+    "dashboard-view-empty-state-render",
+    "./src/components/views/DashboardView.jsx",
+    "DashboardView",
+    {
+      detail: null,
+      planDraft: {
+        steps: [],
+      },
+      programSettings: {
+        dashboard_visibility: {
+          status: true,
+          runtime_card: true,
+          codex_usage_card: true,
+        },
+      },
+      modelPresets: [],
+      modelCatalog: [],
+      activeJob: null,
+    },
+  );
+
+  assert.match(html, /No project selected/);
+  assert.match(html, /Select or create a project to see runtime, plan, and usage telemetry\./);
+  assert.match(html, /What appears here/);
+  assert.match(html, /Next step/);
+});
+
 test("DashboardView shows the parallel limit reason in the runtime card", async () => {
   const html = await renderBundledComponent(
     "dashboard-view-parallel-limit-render",
