@@ -166,13 +166,34 @@ function ToolingCard({
   buttonTone = "accent",
   disabled = false,
   onAction,
+  accentColor = null,
   children = null,
 }) {
   return (
-    <div className="subsection" style={{ gap: "10px" }}>
+    <div
+      className="subsection"
+      style={{
+        gap: "10px",
+        borderLeft: accentColor ? `3px solid ${accentColor}` : undefined,
+        paddingLeft: accentColor ? "10px" : undefined,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <strong>{title}</strong>
+          <strong style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            {accentColor ? (
+              <span
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  background: accentColor,
+                  flexShrink: 0,
+                }}
+              />
+            ) : null}
+            {title}
+          </strong>
           <small style={{ color: "var(--text-muted)" }}>{description}</small>
         </div>
         <span className={`status-badge status-badge--${badge.tone}`}>{badge.label}</span>
@@ -204,6 +225,155 @@ function ToolingCard({
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function OllamaModelManagerModal({
+  onClose,
+  installedModels,
+  recommendedModels,
+  ollamaSearch,
+  setOllamaSearch,
+  selectedModel,
+  setSelectedModel,
+  pendingModel,
+  ollamaJob,
+  onConnectOllama,
+  language,
+}) {
+  const normalizedSearch = String(ollamaSearch || "").trim().toLowerCase();
+  const addableModels = recommendedModels.filter((m) => !installedModels.includes(m));
+  const filteredAddable = addableModels.filter((m) => !normalizedSearch || m.toLowerCase().includes(normalizedSearch));
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(0, 0, 0, 0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: "var(--bg-panel)",
+          border: "1px solid var(--border)",
+          borderRadius: "10px",
+          padding: "24px",
+          width: "520px",
+          maxWidth: "92vw",
+          maxHeight: "82vh",
+          overflow: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: "16px",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <strong style={{ fontSize: "15px" }}>
+            {language === "ko" ? "Ollama 모델 관리" : "Ollama Model Manager"}
+          </strong>
+          <button className="toolbar-button toolbar-button--ghost" onClick={onClose} type="button">
+            ✕
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <span style={{ fontSize: "12px", color: "var(--text-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {language === "ko" ? "설치된 모델" : "Installed models"}
+          </span>
+          {installedModels.length ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {installedModels.map((model) => (
+                <button
+                  key={model}
+                  type="button"
+                  className={`toolbar-button ${selectedModel === model ? "toolbar-button--accent" : "toolbar-button--ghost"}`}
+                  onClick={() => setSelectedModel(model)}
+                >
+                  {model}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: "12px", color: "var(--text-muted)", padding: "8px 0" }}>
+              {language === "ko" ? "아직 설치된 Ollama 모델이 없습니다." : "No Ollama models installed yet."}
+            </div>
+          )}
+        </div>
+
+        <div style={{ borderTop: "1px solid var(--border)" }} />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <span style={{ fontSize: "12px", color: "var(--text-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {language === "ko" ? "새 모델 추가" : "Add new model"}
+          </span>
+
+          <label className="field field--wide" style={{ marginTop: 0 }}>
+            <span>{language === "ko" ? "모델 검색" : "Search models"}</span>
+            <input
+              value={ollamaSearch}
+              onChange={(e) => setOllamaSearch(e.target.value)}
+              placeholder="qwen2.5-coder:7b"
+              disabled={Boolean(ollamaJob)}
+              autoFocus
+            />
+          </label>
+
+          {filteredAddable.length ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {filteredAddable.slice(0, 12).map((model) => (
+                <button
+                  key={model}
+                  type="button"
+                  className={`toolbar-button ${selectedModel === model ? "toolbar-button--accent" : "toolbar-button--ghost"}`}
+                  onClick={() => setSelectedModel(model)}
+                  disabled={Boolean(ollamaJob)}
+                >
+                  {model}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+              {language === "ko"
+                ? "검색 결과가 없습니다. 입력한 모델 slug를 그대로 설치할 수 있습니다."
+                : "No preset matches. The typed model slug can still be pulled directly."}
+            </div>
+          )}
+
+          <div className="sidebar-item">
+            <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
+              {language === "ko" ? "선택된 모델" : "Selected model"}
+            </span>
+            <strong style={{ fontFamily: "monospace" }}>{pendingModel || "-"}</strong>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", paddingTop: "4px" }}>
+            <button className="toolbar-button toolbar-button--ghost" onClick={onClose} type="button">
+              {language === "ko" ? "닫기" : "Close"}
+            </button>
+            <button
+              className="toolbar-button toolbar-button--accent"
+              onClick={() => onConnectOllama?.(pendingModel)}
+              type="button"
+              disabled={Boolean(ollamaJob) || !pendingModel}
+            >
+              {ollamaJob
+                ? (String(ollamaJob.status || "").trim().toLowerCase() === "queued"
+                  ? (language === "ko" ? "대기 중" : "Queued")
+                  : (language === "ko" ? "설치 중..." : "Pulling..."))
+                : (language === "ko" ? "선택 모델 설치" : "Pull Selected Model")}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -474,6 +644,7 @@ export const AppSettingsView = memo(function AppSettingsView({
               <ToolingCard
                 title="Codex CLI"
                 description={language === "ko" ? "OpenAI Codex CLI 설치 상태" : "OpenAI Codex CLI installation status"}
+                accentColor="#10a37f"
                 badge={toolingBadge(codexTool, {
                   installedLabel: language === "ko" ? "설치됨" : "Installed",
                   missingLabel: language === "ko" ? "없음" : "Missing",
@@ -496,6 +667,7 @@ export const AppSettingsView = memo(function AppSettingsView({
               <ToolingCard
                 title="Gemini CLI"
                 description={language === "ko" ? "Gemini CLI 설치 상태" : "Gemini CLI installation status"}
+                accentColor="#4285f4"
                 badge={toolingBadge(geminiTool, {
                   installedLabel: language === "ko" ? "설치됨" : "Installed",
                   missingLabel: language === "ko" ? "없음" : "Missing",
@@ -518,6 +690,7 @@ export const AppSettingsView = memo(function AppSettingsView({
               <ToolingCard
                 title="Claude Code"
                 description={language === "ko" ? "Claude Code CLI 설치 상태" : "Claude Code CLI installation status"}
+                accentColor="#d97706"
                 badge={toolingBadge(claudeTool, {
                   installedLabel: language === "ko" ? "설치됨" : "Installed",
                   missingLabel: language === "ko" ? "없음" : "Missing",
@@ -540,6 +713,7 @@ export const AppSettingsView = memo(function AppSettingsView({
               <ToolingCard
                 title="Ollama"
                 description={language === "ko" ? "로컬 Ollama 연결과 모델 저장소 관리" : "Connect a local Ollama server and manage the model store"}
+                accentColor="#8b5cf6"
                 badge={toolingBadge(ollamaTool, {
                   connectedLabel: language === "ko" ? "연결됨" : "Connected",
                   installedLabel: language === "ko" ? "설치됨" : "Installed",
@@ -569,102 +743,26 @@ export const AppSettingsView = memo(function AppSettingsView({
                       <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>{language === "ko" ? "모델 저장 경로" : "Model store path"}</span>
                       <strong style={{ fontFamily: "monospace", wordBreak: "break-all" }}>{ollamaTool.model_store_path || "-"}</strong>
                     </div>
+                    {installedOllamaModels.length ? (
+                      <div className="sidebar-item">
+                        <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
+                          {language === "ko" ? "설치된 모델" : "Installed models"}
+                        </span>
+                        <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                          {installedOllamaModels.length}{language === "ko" ? "개" : " model(s)"}
+                        </span>
+                      </div>
+                    ) : null}
                     <div style={{ display: "flex", justifyContent: "flex-end" }}>
                       <button
                         className="toolbar-button toolbar-button--ghost"
-                        onClick={() => setOllamaManagerOpen((current) => !current)}
+                        onClick={() => setOllamaManagerOpen(true)}
                         type="button"
                         disabled={Boolean(ollamaJob)}
                       >
-                        {ollamaManagerOpen
-                          ? (language === "ko" ? "모델 관리자 닫기" : "Close Model Manager")
-                          : (language === "ko" ? "모델 관리" : "Model Manager")}
+                        {language === "ko" ? "모델 관리" : "Manage Models"}
                       </button>
                     </div>
-                    {ollamaManagerOpen ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "10px", paddingTop: "4px" }}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                          <span style={{ fontSize: "12px", color: "var(--text-dim)" }}>
-                            {language === "ko" ? "설치된 모델" : "Installed models"}
-                          </span>
-                          {installedOllamaModels.length ? (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                              {installedOllamaModels.map((model) => (
-                                <button
-                                  key={model}
-                                  type="button"
-                                  className={`toolbar-button ${selectedOllamaModel === model ? "toolbar-button--accent" : "toolbar-button--ghost"}`}
-                                  onClick={() => setSelectedOllamaModel(model)}
-                                  disabled={Boolean(ollamaJob)}
-                                >
-                                  {model}
-                                </button>
-                              ))}
-                            </div>
-                          ) : (
-                            <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                              {language === "ko" ? "아직 설치된 Ollama 모델이 없습니다." : "No Ollama models are installed yet."}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--border)", paddingTop: "10px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <strong>{language === "ko" ? "+ 모델 추가" : "+ Add model"}</strong>
-                            <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                              {language === "ko" ? "검색해서 설치할 모델을 고르세요." : "Search and choose a model to pull."}
-                            </span>
-                          </div>
-                          <label className="field field--wide" style={{ marginTop: 0 }}>
-                            <span>{language === "ko" ? "모델 검색" : "Search models"}</span>
-                            <input
-                              value={ollamaSearch}
-                              onChange={(event) => setOllamaSearch(event.target.value)}
-                              placeholder="qwen2.5-coder:7b"
-                              disabled={Boolean(ollamaJob)}
-                            />
-                          </label>
-                          {filteredAddableOllamaModels.length ? (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                              {filteredAddableOllamaModels.slice(0, 12).map((model) => (
-                                <button
-                                  key={model}
-                                  type="button"
-                                  className={`toolbar-button ${selectedOllamaModel === model ? "toolbar-button--accent" : "toolbar-button--ghost"}`}
-                                  onClick={() => setSelectedOllamaModel(model)}
-                                  disabled={Boolean(ollamaJob)}
-                                >
-                                  {model}
-                                </button>
-                              ))}
-                            </div>
-                          ) : (
-                            <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                              {language === "ko" ? "검색 결과가 없습니다. 입력한 모델 slug를 그대로 설치할 수 있습니다." : "No preset matches. The typed model slug can still be pulled directly."}
-                            </div>
-                          )}
-                          <div className="sidebar-item">
-                            <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>{language === "ko" ? "선택된 모델" : "Selected model"}</span>
-                            <strong style={{ fontFamily: "monospace" }}>{pendingOllamaModel || "-"}</strong>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                            <button
-                              className="toolbar-button toolbar-button--accent"
-                              onClick={() => onConnectOllama?.(pendingOllamaModel)}
-                              type="button"
-                              disabled={Boolean(ollamaJob) || !pendingOllamaModel}
-                            >
-                              {ollamaJob
-                                ? (
-                                  String(ollamaJob.status || "").trim().toLowerCase() === "queued"
-                                    ? (language === "ko" ? "대기 중" : "Queued")
-                                    : (language === "ko" ? "설치 중..." : "Pulling...")
-                                )
-                                : (language === "ko" ? "선택 모델 설치" : "Pull Selected Model")}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
                   </>
                 ) : null}
               </ToolingCard>
@@ -981,6 +1079,22 @@ export const AppSettingsView = memo(function AppSettingsView({
         ) : null}
 
       </div>
+
+      {ollamaManagerOpen ? (
+        <OllamaModelManagerModal
+          onClose={() => setOllamaManagerOpen(false)}
+          installedModels={installedOllamaModels}
+          recommendedModels={recommendedOllamaModels}
+          ollamaSearch={ollamaSearch}
+          setOllamaSearch={setOllamaSearch}
+          selectedModel={selectedOllamaModel}
+          setSelectedModel={setSelectedOllamaModel}
+          pendingModel={pendingOllamaModel}
+          ollamaJob={ollamaJob}
+          onConnectOllama={onConnectOllama}
+          language={language}
+        />
+      ) : null}
     </section>
   );
 }, appSettingsViewPropsEqual);
