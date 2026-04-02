@@ -246,6 +246,9 @@ function centerWorkspacePropsEqual(previousProps, nextProps) {
     case "app-settings":
       return (
         previousProps.programSettings === nextProps.programSettings
+        && previousProps.globalCodexStatus === nextProps.globalCodexStatus
+        && previousProps.toolingStatus === nextProps.toolingStatus
+        && previousProps.toolingJobs === nextProps.toolingJobs
         && previousProps.detail?.codex_status === nextProps.detail?.codex_status
         && previousProps.detail?.project?.current_status === nextProps.detail?.project?.current_status
         && previousProps.shareSettings === nextProps.shareSettings
@@ -254,6 +257,8 @@ function centerWorkspacePropsEqual(previousProps, nextProps) {
         && previousProps.shareBusy === nextProps.shareBusy
         && previousProps.programSettingsDirty === nextProps.programSettingsDirty
         && previousProps.activeJob === nextProps.activeJob
+        && previousProps.onInstallTooling === nextProps.onInstallTooling
+        && previousProps.onConnectOllama === nextProps.onConnectOllama
       );
     default:
       return false;
@@ -271,6 +276,9 @@ export const CenterWorkspace = memo(function CenterWorkspace({
   shareSettings,
   autoRunAfterPlan,
   programSettings,
+  globalCodexStatus,
+  toolingStatus,
+  toolingJobs,
   planDraft,
   selectedStepId,
   modelPresets,
@@ -285,6 +293,8 @@ export const CenterWorkspace = memo(function CenterWorkspace({
   onChangeProgramSettings,
   onSaveProject,
   onSaveProgramSettings,
+  onInstallTooling,
+  onConnectOllama,
   programSettingsDirty = false,
   onChooseDirectory,
   onArchiveProject,
@@ -496,7 +506,9 @@ export const CenterWorkspace = memo(function CenterWorkspace({
         {normalizedActiveTab === "app-settings" ? (
           <AppSettingsView
             settings={programSettings}
-            codexStatus={detail?.codex_status}
+            codexStatus={detail?.codex_status || globalCodexStatus}
+            toolingStatus={toolingStatus}
+            toolingJobs={toolingJobs}
             modelCatalog={modelCatalog}
             shareSettings={shareSettings}
             shareDetail={workspaceShareDetail}
@@ -506,6 +518,8 @@ export const CenterWorkspace = memo(function CenterWorkspace({
             projectStatus={projectStatus}
             onChangeSettings={onChangeProgramSettings}
             onSaveSettings={onSaveProgramSettings}
+            onInstallTooling={onInstallTooling}
+            onConnectOllama={onConnectOllama}
             onGenerateShareLink={onGenerateShareLink}
             onCopyShareLink={onCopyShareLink}
             onRevokeShareLink={onRevokeShareLink}

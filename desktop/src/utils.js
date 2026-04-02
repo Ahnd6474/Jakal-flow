@@ -3401,6 +3401,8 @@ export function commandLabel(command, language = "en") {
     return locale === "ko" ? "백그라운드 작업" : "Background Job";
   }
   switch (command) {
+    case "manage-tooling":
+      return locale === "ko" ? "도구 설치" : "Tooling Setup";
     case "generate-plan":
       return translate(locale, "action.generatePlan");
     case "run-plan":

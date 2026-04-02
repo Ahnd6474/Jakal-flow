@@ -103,6 +103,8 @@ export function useDesktopController() {
   const [baseRuntime, setBaseRuntime] = useState(null);
   const [modelPresets, setModelPresets] = useState([]);
   const [modelCatalog, setModelCatalog] = useState([]);
+  const [globalCodexStatus, setGlobalCodexStatus] = useState(null);
+  const [toolingStatus, setToolingStatus] = useState({});
   const [projects, setProjects] = useState([]);
   const [historyProjects, setHistoryProjects] = useState([]);
   const [workspaceStats, setWorkspaceStats] = useState(null);
@@ -234,6 +236,10 @@ export function useDesktopController() {
   const programSettingsDirty = useMemo(
     () => !programSettingsEqual(programSettings, savedProgramSettings),
     [programSettings, savedProgramSettings],
+  );
+  const toolingJobs = useMemo(
+    () => jobs.filter((job) => String(job?.command || "").trim().toLowerCase() === BRIDGE_COMMANDS.MANAGE_TOOLING),
+    [jobs],
   );
 
   const filteredProjects = useMemo(() => {
@@ -459,6 +465,23 @@ export function useDesktopController() {
     return nextProjects;
   }
 
+  function applyToolingSnapshot(snapshot = null) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return;
+    }
+    if (Array.isArray(snapshot.model_catalog)) {
+      const nextModelCatalog = mergeModelCatalogs(snapshot.model_catalog, modelCatalogRef.current);
+      modelCatalogRef.current = nextModelCatalog;
+      setModelCatalog(nextModelCatalog);
+    }
+    if (snapshot.codex_status && typeof snapshot.codex_status === "object") {
+      setGlobalCodexStatus(snapshot.codex_status);
+    }
+    if (snapshot.tooling_statuses && typeof snapshot.tooling_statuses === "object") {
+      setToolingStatus(snapshot.tooling_statuses);
+    }
+  }
+
   function applyProjectDetail(detail, options = {}) {
     const normalizedDetail = applyProjectDetailState({
       detail,
@@ -494,6 +517,9 @@ export function useDesktopController() {
         normalizedDetail?.codex_status?.model_catalog || [],
         modelCatalogRef.current,
       );
+      if (normalizedDetail?.codex_status) {
+        setGlobalCodexStatus(normalizedDetail.codex_status);
+      }
       startTransition(() => {
         setChatRuntime((current) => resolveChatRuntimeSelection(
           current,
@@ -651,7 +677,7 @@ export function useDesktopController() {
         setWorkspaceRoot(bootstrap.workspace_root);
         setBaseRuntime(bootstrap.default_runtime);
         setModelPresets(bootstrap.model_presets || []);
-        setModelCatalog(bootstrap.model_catalog || []);
+        applyToolingSnapshot(bootstrap);
         const nextProgramSettings = programSettingsFromRuntime(storedProgramSettings || bootstrap.default_runtime);
         setStoredProgramSettings(nextProgramSettings);
         setProgramSettings(nextProgramSettings);
@@ -1008,6 +1034,9 @@ export function useDesktopController() {
         const jobStatus = String(job.status || "").trim().toLowerCase();
         const normalizedCommand = String(job.command || "").trim().toLowerCase();
         const supersededByActiveJob = jobHasNewerActiveReplacement(job, jobsRef.current);
+        if (normalizedCommand === BRIDGE_COMMANDS.MANAGE_TOOLING && job?.result) {
+          applyToolingSnapshot(job.result);
+        }
         if (shouldImmediatelyRefreshJobUpdate(selectedProjectId, job)) {
           const jobRepoId = String(
             job?.repo_id
@@ -1057,6 +1086,13 @@ export function useDesktopController() {
           return;
         }
         if (!["queued", "running"].includes(jobStatus) && !cancelled) {
+          if (normalizedCommand === BRIDGE_COMMANDS.MANAGE_TOOLING && selectedProjectId) {
+            scheduleBridgeRefresh(selectedProjectId, {
+              immediate: true,
+              refreshListing: false,
+              refreshDetail: true,
+            });
+          }
           if (
             !supersededByActiveJob
             && job.result?.project
@@ -1268,6 +1304,13 @@ export function useDesktopController() {
       const refreshListing = shouldRefreshListingForManualRefresh(selectedProjectId);
       const silent = options.silent === true;
       const jobSnapshotPromise = syncRunningJobSnapshot(activeJobId);
+      const toolingStatePromise = !selectedProjectId && refreshCodexStatus
+        ? bridgeRequest(
+          BRIDGE_COMMANDS.GET_TOOLING_STATUS,
+          { force_refresh: true },
+          workspaceRoot || null,
+        )
+        : Promise.resolve(null);
       const projectStatePromise = refreshVisibleProjectState(
         bridgeRequest,
         workspaceRoot,
@@ -1280,8 +1323,15 @@ export function useDesktopController() {
           bypassListingCache: true,
         },
       );
-      const [jobSnapshot, refreshedState] = await Promise.all([jobSnapshotPromise, projectStatePromise]);
+      const [jobSnapshot, refreshedState, refreshedToolingState] = await Promise.all([
+        jobSnapshotPromise,
+        projectStatePromise,
+        toolingStatePromise,
+      ]);
       applyCurrentJobSnapshot(jobSnapshot);
+      if (refreshedToolingState) {
+        applyToolingSnapshot(refreshedToolingState);
+      }
       const selectedJob = selectedProjectExecutionJob(jobsRef.current);
       if (selectedProjectId) {
         const { listing, detail } = refreshedState || {};
@@ -1605,6 +1655,44 @@ export function useDesktopController() {
     setMessage(messagePayload("success", translate(language, "message.programSettingsSaved")));
   }
 
+  function toolingJobPayload(tool, action, options = {}) {
+    const normalizedTool = String(tool || "").trim().toLowerCase();
+    const normalizedAction = String(action || "").trim().toLowerCase();
+    const normalizedModel = String(options?.model || "").trim().toLowerCase();
+    const actionLabel = normalizedAction === "connect"
+      ? (language === "ko" ? "연결" : "Connect")
+      : (language === "ko" ? "설치" : "Install");
+    const toolLabel = {
+      codex: "Codex CLI",
+      gemini: "Gemini CLI",
+      claude: "Claude Code",
+      ollama: "Ollama",
+    }[normalizedTool] || normalizedTool;
+    return {
+      repo_id: `tooling:${normalizedTool}`,
+      display_name: `${actionLabel} ${toolLabel}`.trim(),
+      tool: normalizedTool,
+      action: normalizedAction,
+      model: normalizedModel,
+    };
+  }
+
+  async function runToolingAction(tool, action, options = {}) {
+    const job = await startJob(
+      BRIDGE_COMMANDS.MANAGE_TOOLING,
+      toolingJobPayload(tool, action, options),
+    );
+    return job || null;
+  }
+
+  async function installTooling(tool) {
+    return runToolingAction(tool, "install");
+  }
+
+  async function connectOllama(model = "") {
+    return runToolingAction("ollama", "connect", { model });
+  }
+
   async function saveProject(options = {}) {
     const { formOverride = null, silent = false } = options;
     const formToSave = cloneValue(formOverride || projectForm);
@@ -1680,6 +1768,10 @@ export function useDesktopController() {
   }
 
   function completedJobMessage(job) {
+    const toolingMessage = String(job?.result?.tooling_action?.message || "").trim();
+    if (toolingMessage) {
+      return toolingMessage;
+    }
     const command = commandLabel(job?.command, language);
     const normalizedCommand = String(job?.command || "").trim().toLowerCase();
     const closeoutCompleted = String(job?.result?.plan?.closeout_status || "").trim().toLowerCase() === "completed";
@@ -2800,6 +2892,9 @@ export function useDesktopController() {
     defaultRuntime,
     programSettings,
     programSettingsDirty,
+    globalCodexStatus,
+    toolingStatus,
+    toolingJobs,
     modelPresets,
     modelCatalog,
     projects,
@@ -2882,6 +2977,8 @@ export function useDesktopController() {
     resetPlan,
     startNewProject,
     saveProgramSettings,
+    installTooling,
+    connectOllama,
     generatePlan,
     runPlan,
     runManualDebugger,

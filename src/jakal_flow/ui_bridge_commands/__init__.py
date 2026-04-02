@@ -6,6 +6,7 @@ from .projects import build_project_command_handlers
 from .read_models import build_read_model_handlers
 from .runs import build_run_command_handlers
 from .share import build_share_command_handlers
+from .tooling import build_tooling_command_handlers, tooling_snapshot_payload
 
 __all__ = [
     "BridgeCommandContext",
@@ -15,4 +16,6 @@ __all__ = [
     "build_read_model_handlers",
     "build_run_command_handlers",
     "build_share_command_handlers",
+    "build_tooling_command_handlers",
+    "tooling_snapshot_payload",
 ]

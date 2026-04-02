@@ -16,6 +16,7 @@ dependencies = []
 [project.scripts]
 jakal-flow = "jakal_flow.cli:main"
 jakal-flow-ui-bridge = "jakal_flow.ui_bridge:main"
+jakal-flow-desktop = "jakal_flow.desktop:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

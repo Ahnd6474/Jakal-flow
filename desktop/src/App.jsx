@@ -391,6 +391,9 @@ export default function App() {
                 workspaceShareDetail={controller.workspaceShareDetail}
                 form={controller.projectForm}
                 programSettings={controller.programSettings}
+                globalCodexStatus={controller.globalCodexStatus}
+                toolingStatus={controller.toolingStatus}
+                toolingJobs={controller.toolingJobs}
                 planDraft={controller.planDraft}
                 historyDetail={controller.historyDetail}
                 selectedHistoryId={controller.selectedHistoryId}
@@ -412,6 +415,8 @@ export default function App() {
                 onChangeProgramSettings={controller.setProgramSettings}
                 onSaveProject={controller.saveProject}
                 onSaveProgramSettings={controller.saveProgramSettings}
+                onInstallTooling={controller.installTooling}
+                onConnectOllama={controller.connectOllama}
                 programSettingsDirty={controller.programSettingsDirty}
                 onChooseDirectory={controller.chooseDirectory}
                 onArchiveProject={controller.archiveProject}

@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const DEFAULT_BRIDGE_TIMEOUT_SECS: u64 = 300;
 const MIN_BRIDGE_TIMEOUT_SECS: u64 = 5;
@@ -19,6 +19,9 @@ const MAX_BRIDGE_TIMEOUT_SECS: u64 = 3_600;
 const MAX_BRIDGE_COMMAND_LEN: usize = 64;
 const MAX_WORKSPACE_ROOT_LEN: usize = 4_096;
 const BRIDGE_EVENT_NAME: &str = "jakal-flow://bridge-event";
+const BUNDLED_RUNTIME_DIRNAME: &str = "rt";
+const BUNDLED_PYTHON_DIRNAME: &str = "py";
+const BUNDLED_TOOLING_DIRNAME: &str = "bin";
 
 #[derive(Default)]
 struct AppState {
@@ -143,18 +146,83 @@ fn normalize_workspace_root(workspace_root: Option<String>) -> Result<Option<Str
     }
 }
 
-fn repo_root() -> Result<PathBuf, String> {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .canonicalize()
-        .map_err(|error| format!("Failed to resolve repo root: {error}"))
+fn checkout_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-fn resolve_python_executable(root: &Path, env_override: Option<String>) -> String {
+fn backend_root_is_usable(root: &Path) -> bool {
+    root.join("src").join("jakal_flow").is_dir()
+}
+
+fn resolve_backend_root(checkout_root: &Path, resource_root: Option<&Path>) -> Result<PathBuf, String> {
+    let checkout_candidate = checkout_root
+        .canonicalize()
+        .unwrap_or_else(|_| checkout_root.to_path_buf());
+    if backend_root_is_usable(&checkout_candidate) {
+        return Ok(checkout_candidate);
+    }
+
+    if let Some(resource_root) = resource_root {
+        let resource_candidate = resource_root
+            .canonicalize()
+            .unwrap_or_else(|_| resource_root.to_path_buf());
+        if backend_root_is_usable(&resource_candidate) {
+            return Ok(resource_candidate);
+        }
+    }
+
+    let resource_hint = resource_root
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<none>".to_string());
+    Err(format!(
+        "Failed to resolve desktop backend root. checkout={} resources={resource_hint}",
+        checkout_root.display()
+    ))
+}
+
+fn repo_root<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    let resource_root = app.path().resource_dir().ok();
+    resolve_backend_root(&checkout_root(), resource_root.as_deref())
+}
+
+fn bundled_runtime_root(resource_root: Option<&Path>) -> Option<PathBuf> {
+    let runtime_root = resource_root?.join(BUNDLED_RUNTIME_DIRNAME);
+    if runtime_root.is_dir() {
+        Some(runtime_root)
+    } else {
+        None
+    }
+}
+
+fn bundled_python_home(resource_root: Option<&Path>) -> Option<PathBuf> {
+    let candidate = bundled_runtime_root(resource_root)?.join(BUNDLED_PYTHON_DIRNAME);
+    if candidate.join("Lib").is_dir() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn bundled_tooling_bin(resource_root: Option<&Path>) -> Option<PathBuf> {
+    let candidate = bundled_runtime_root(resource_root)?.join(BUNDLED_TOOLING_DIRNAME);
+    if candidate.is_dir() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn resolve_python_executable(root: &Path, resource_root: Option<&Path>, env_override: Option<String>) -> String {
     if let Some(value) = env_override {
         if !value.trim().is_empty() {
             return value;
+        }
+    }
+
+    if let Some(bundled_home) = bundled_python_home(resource_root) {
+        let bundled_python = bundled_home.join("python.exe");
+        if bundled_python.exists() {
+            return bundled_python.to_string_lossy().into_owned();
         }
     }
 
@@ -171,10 +239,6 @@ fn resolve_python_executable(root: &Path, env_override: Option<String>) -> Strin
     "python".to_string()
 }
 
-fn python_executable(root: &Path) -> String {
-    resolve_python_executable(root, env::var("JAKAL_FLOW_PYTHON").ok())
-}
-
 fn build_pythonpath(root: &Path, existing: Option<OsString>) -> Result<String, String> {
     let mut paths = vec![root.join("src")];
     if let Some(existing) = existing {
@@ -187,6 +251,16 @@ fn build_pythonpath(root: &Path, existing: Option<OsString>) -> Result<String, S
 
 fn pythonpath_with_src(root: &Path) -> Result<String, String> {
     build_pythonpath(root, env::var_os("PYTHONPATH"))
+}
+
+fn prepend_env_path(path: &Path, existing: Option<OsString>) -> Result<String, String> {
+    let mut paths = vec![path.to_path_buf()];
+    if let Some(existing) = existing {
+        paths.extend(env::split_paths(&existing));
+    }
+    env::join_paths(paths)
+        .map(|joined| joined.to_string_lossy().into_owned())
+        .map_err(|error| format!("Failed to build PATH: {error}"))
 }
 
 fn stderr_excerpt(stderr_lines: &Arc<Mutex<Vec<String>>>) -> String {
@@ -245,10 +319,12 @@ fn log_bridge_issue(
 
 impl BridgeSession {
     fn new<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<Self, String> {
-        let root = repo_root()?;
-        let python = python_executable(&root);
+        let root = repo_root(app)?;
+        let resource_root = app.path().resource_dir().ok();
+        let python = resolve_python_executable(&root, resource_root.as_deref(), env::var("JAKAL_FLOW_PYTHON").ok());
         let pythonpath = pythonpath_with_src(&root)?;
-        let mut child = Command::new(python)
+        let mut command = Command::new(&python);
+        command
             .arg("-m")
             .arg("jakal_flow.bridge_server")
             .arg("--stdio")
@@ -258,7 +334,20 @@ impl BridgeSession {
             .env("PYTHONUTF8", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(python_home) = bundled_python_home(resource_root.as_deref()) {
+            command
+                .env("PYTHONHOME", python_home.as_os_str())
+                .env("PYTHONNOUSERSITE", "1")
+                .env("JAKAL_FLOW_BUNDLED_PYTHON_HOME", python_home.as_os_str());
+        }
+        if let Some(tooling_bin) = bundled_tooling_bin(resource_root.as_deref()) {
+            let path = prepend_env_path(&tooling_bin, env::var_os("PATH"))?;
+            command
+                .env("PATH", path)
+                .env("JAKAL_FLOW_BUNDLED_TOOLING_ROOT", tooling_bin.as_os_str());
+        }
+        let mut child = command
             .spawn()
             .map_err(|error| format!("Failed to start Python bridge server: {error}"))?;
 
@@ -715,7 +804,7 @@ mod tests {
         let root = TestDir::new();
         touch(&root.path().join(".venv").join("Scripts").join("python.exe"));
 
-        let resolved = resolve_python_executable(root.path(), Some("custom-python".to_string()));
+        let resolved = resolve_python_executable(root.path(), None, Some("custom-python".to_string()));
 
         assert_eq!(resolved, "custom-python");
     }
@@ -726,7 +815,7 @@ mod tests {
         let windows_python = root.path().join(".venv").join("Scripts").join("python.exe");
         touch(&windows_python);
 
-        let resolved = resolve_python_executable(root.path(), Some("   ".to_string()));
+        let resolved = resolve_python_executable(root.path(), None, Some("   ".to_string()));
 
         assert_eq!(resolved, windows_python.to_string_lossy());
     }
@@ -737,9 +826,35 @@ mod tests {
         let unix_python = root.path().join(".venv").join("bin").join("python");
         touch(&unix_python);
 
-        let resolved = resolve_python_executable(root.path(), None);
+        let resolved = resolve_python_executable(root.path(), None, None);
 
         assert_eq!(resolved, unix_python.to_string_lossy());
+    }
+
+    #[test]
+    fn resolve_python_executable_prefers_bundled_runtime_before_repo_venv() {
+        let root = TestDir::new();
+        let resources = TestDir::new();
+        let bundled_python = resources
+            .path()
+            .join(BUNDLED_RUNTIME_DIRNAME)
+            .join(BUNDLED_PYTHON_DIRNAME)
+            .join("python.exe");
+        let venv_python = root.path().join(".venv").join("Scripts").join("python.exe");
+        touch(&bundled_python);
+        touch(
+            &resources
+                .path()
+                .join(BUNDLED_RUNTIME_DIRNAME)
+                .join(BUNDLED_PYTHON_DIRNAME)
+                .join("Lib")
+                .join("os.py"),
+        );
+        touch(&venv_python);
+
+        let resolved = resolve_python_executable(root.path(), Some(resources.path()), None);
+
+        assert_eq!(resolved, bundled_python.to_string_lossy());
     }
 
     #[test]
@@ -751,6 +866,45 @@ mod tests {
 
         assert!(pythonpath.contains(&root.path().join("src").to_string_lossy().to_string()));
         assert!(pythonpath.contains("existing"));
+    }
+
+    #[test]
+    fn prepend_env_path_adds_directory_before_existing_entries() {
+        let root = TestDir::new();
+        let bundled = root
+            .path()
+            .join(BUNDLED_RUNTIME_DIRNAME)
+            .join(BUNDLED_TOOLING_DIRNAME);
+        let existing = env::join_paths([root.path().join("existing")]).expect("join paths");
+
+        let path_value = prepend_env_path(&bundled, Some(existing)).expect("path");
+
+        let entries: Vec<PathBuf> = env::split_paths(&OsString::from(path_value)).collect();
+        assert_eq!(entries.first(), Some(&bundled));
+        assert!(entries.iter().any(|entry| entry.ends_with("existing")));
+    }
+
+    #[test]
+    fn resolve_backend_root_prefers_checkout_when_available() {
+        let checkout = TestDir::new();
+        let resources = TestDir::new();
+        touch(&checkout.path().join("src").join("jakal_flow").join("__init__.py"));
+        touch(&resources.path().join("src").join("jakal_flow").join("__init__.py"));
+
+        let resolved = resolve_backend_root(checkout.path(), Some(resources.path())).expect("backend root");
+
+        assert_eq!(resolved, checkout.path().canonicalize().expect("canonical checkout"));
+    }
+
+    #[test]
+    fn resolve_backend_root_falls_back_to_bundled_resources() {
+        let checkout = TestDir::new();
+        let resources = TestDir::new();
+        touch(&resources.path().join("src").join("jakal_flow").join("__init__.py"));
+
+        let resolved = resolve_backend_root(checkout.path(), Some(resources.path())).expect("backend root");
+
+        assert_eq!(resolved, resources.path().canonicalize().expect("canonical resources"));
     }
 
     #[test]

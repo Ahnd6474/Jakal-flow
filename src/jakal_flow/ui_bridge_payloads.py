@@ -2112,7 +2112,10 @@ def _provider_statuses_for_detail(
         checked_at, cached_statuses = _PROVIDER_STATUSES_FETCH_CACHE
         if (monotonic() - checked_at) <= _PROVIDER_STATUSES_FETCH_CACHE_TTL_SECONDS:
             return deepcopy(cached_statuses)
-    statuses = provider_statuses_payload(fetch_snapshot=fetch_codex_status)
+    statuses = provider_statuses_payload(
+        fetch_snapshot=fetch_codex_status,
+        force_refresh=True,
+    )
     _PROVIDER_STATUSES_FETCH_CACHE = (monotonic(), deepcopy(statuses))
     return statuses
 

@@ -25,10 +25,38 @@ UTC = getattr(datetime, "UTC", timezone.utc)
 APP_SERVER_TIMEOUT_SECS = 8.0
 CLI_PROBE_TIMEOUT_SECS = 12.0
 MODEL_PAGE_LIMIT = 100
+_BUNDLED_TOOLING_ROOT_ENV = "JAKAL_FLOW_BUNDLED_TOOLING_ROOT"
+
+
+def _bundled_command_candidate(codex_path: str) -> str:
+    tooling_root = str(os.environ.get(_BUNDLED_TOOLING_ROOT_ENV, "") or "").strip()
+    raw_command = str(codex_path or "").strip()
+    if not tooling_root or not raw_command:
+        return ""
+    if "\\" in raw_command or "/" in raw_command:
+        return ""
+    command_name = Path(raw_command).name
+    candidates = [Path(tooling_root) / command_name]
+    if os.name == "nt":
+        suffix = Path(command_name).suffix.lower()
+        if suffix not in {".cmd", ".bat", ".exe"}:
+            candidates.extend(
+                [
+                    Path(tooling_root) / f"{command_name}.cmd",
+                    Path(tooling_root) / f"{command_name}.exe",
+                ]
+            )
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return ""
 
 
 def resolve_codex_path(codex_path: str) -> str:
     codex_path = str(codex_path or "").strip() or default_codex_path()
+    bundled_match = _bundled_command_candidate(codex_path)
+    if bundled_match:
+        return bundled_match
     if codex_path.lower() in {"codex.cmd", "claude.cmd", "gemini.cmd", "qwen.cmd"}:
         appdata = os.environ.get("APPDATA")
         if appdata:

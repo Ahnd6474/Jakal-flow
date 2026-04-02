@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from jakal_flow import desktop_runtime_bundle
+
+
+class DesktopRuntimeBundleTests(unittest.TestCase):
+    def test_parse_shim_target_extracts_package_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            shim_path = Path(temp_dir) / "codex.cmd"
+            shim_path.write_text(
+                '@ECHO off\n"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\n',
+                encoding="utf-8",
+            )
+
+            parsed = desktop_runtime_bundle._parse_shim_target(shim_path)
+
+        self.assertIsNotNone(parsed)
+        relative_target, package_root = parsed or (Path(), Path())
+        self.assertEqual(relative_target.as_posix(), "node_modules/@openai/codex/bin/codex.js")
+        self.assertEqual(package_root.as_posix(), "node_modules/@openai/codex")
+
+    def test_bundle_tool_command_copies_node_shim_and_package(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            npm_root = root / "npm"
+            target_dir = root / "bundle"
+            package_dir = npm_root / "node_modules" / "@openai" / "codex"
+            package_dir.mkdir(parents=True)
+            (package_dir / "package.json").write_text('{"name":"@openai/codex","version":"1.2.3"}', encoding="utf-8")
+            (package_dir / "bin").mkdir()
+            (package_dir / "bin" / "codex.js").write_text("console.log('codex');\n", encoding="utf-8")
+            (npm_root / "codex.cmd").write_text(
+                '@ECHO off\n"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\n',
+                encoding="utf-8",
+            )
+            (root / "node.exe").write_text("node-binary", encoding="utf-8")
+
+            original_npm_root = desktop_runtime_bundle._resolve_global_npm_root
+            original_which = desktop_runtime_bundle.shutil.which
+            try:
+                desktop_runtime_bundle._resolve_global_npm_root = lambda: npm_root
+                desktop_runtime_bundle.shutil.which = lambda command: str(root / "node.exe") if command == "node" else None
+
+                manifest = desktop_runtime_bundle._bundle_tool_command(target_dir, "codex.cmd")
+            finally:
+                desktop_runtime_bundle._resolve_global_npm_root = original_npm_root
+                desktop_runtime_bundle.shutil.which = original_which
+
+            bundled_root = target_dir / "bin"
+            self.assertTrue((bundled_root / "node.exe").exists())
+            self.assertTrue((bundled_root / "codex.cmd").exists())
+            self.assertTrue((bundled_root / "node_modules" / "@openai" / "codex" / "bin" / "codex.js").exists())
+            self.assertTrue(manifest.available)
+            self.assertEqual(manifest.package_name, "@openai/codex")
+            self.assertEqual(manifest.package_version, "1.2.3")
+
+
+if __name__ == "__main__":
+    unittest.main()

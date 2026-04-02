@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -85,6 +86,18 @@ class CodexAppServerTests(unittest.TestCase):
             side_effect=lambda command: r"C:\Users\alber\.local\bin\claude.exe" if command == "claude" else None,
         ):
             self.assertEqual(resolve_codex_path("claude.cmd"), r"C:\Users\alber\.local\bin\claude.exe")
+
+    def test_resolve_codex_path_prefers_bundled_tooling_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tooling_root = Path(temp_dir)
+            bundled_command = tooling_root / "codex.cmd"
+            bundled_command.write_text("@echo off\n", encoding="utf-8")
+            with mock.patch.dict(
+                "os.environ",
+                {"JAKAL_FLOW_BUNDLED_TOOLING_ROOT": str(tooling_root)},
+                clear=False,
+            ):
+                self.assertEqual(resolve_codex_path("codex.cmd"), str(bundled_command))
 
     def test_fetch_codex_backend_snapshot_formats_models_and_rate_limits(self) -> None:
         with mock.patch("jakal_flow.codex_app_server._CodexAppServerSession", _FakeSession), mock.patch(

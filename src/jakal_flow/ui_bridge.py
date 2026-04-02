@@ -72,7 +72,6 @@ from .step_models import (
     KIMI_DEFAULT_MODEL,
     MINIMAX_DEFAULT_MODEL,
     QWEN_CODE_DEFAULT_MODEL,
-    provider_statuses_payload,
 )
 from .ui_bridge_commands import (
     BridgeCommandContext,
@@ -81,6 +80,8 @@ from .ui_bridge_commands import (
     build_read_model_handlers,
     build_run_command_handlers,
     build_share_command_handlers,
+    build_tooling_command_handlers,
+    tooling_snapshot_payload,
 )
 from .ui_bridge_payloads import progress_caption, project_detail_payload
 from .utils import append_jsonl, normalize_workflow_mode, now_utc_iso, parse_json_text, read_json, write_json
@@ -118,9 +119,10 @@ def default_workspace_root() -> Path:
 
 
 def bootstrap_payload(workspace_root: Path) -> dict[str, Any]:
-    codex_status = _codex_snapshot_service.get_snapshot(force_refresh=True)
-    codex_status_payload = codex_status.to_dict()
-    codex_status_payload["provider_statuses"] = provider_statuses_payload()
+    tooling_snapshot = tooling_snapshot_payload(
+        codex_snapshot_service=_codex_snapshot_service,
+        force_refresh=True,
+    )
     return {
         "workspace_root": str(workspace_root),
         "model_presets": [
@@ -134,8 +136,9 @@ def bootstrap_payload(workspace_root: Path) -> dict[str, Any]:
             }
             for preset in MODEL_PRESETS
         ],
-        "model_catalog": codex_status.model_catalog,
-        "codex_status": codex_status_payload,
+        "model_catalog": tooling_snapshot["model_catalog"],
+        "codex_status": tooling_snapshot["codex_status"],
+        "tooling_statuses": tooling_snapshot["tooling_statuses"],
         "default_runtime": runtime_from_payload({}).to_dict(),
     }
 
@@ -450,6 +453,7 @@ def bridge_command_handlers() -> dict[str, Any]:
         id(start_share_server_process),
         id(stop_share_server_process),
         id(save_share_server_config),
+        id(_codex_snapshot_service),
     )
     if _bridge_command_handlers_cache is not None and _bridge_command_handlers_cache_token == cache_token:
         return _bridge_command_handlers_cache
@@ -501,6 +505,10 @@ def bridge_command_handlers() -> dict[str, Any]:
             execution_scope_id=execution_scope_id,
             execution_stop_registry=EXECUTION_STOP_REGISTRY,
             coerce_bool=coerce_bool,
+        ),
+        **build_tooling_command_handlers(
+            coerce_bool=coerce_bool,
+            codex_snapshot_service=_codex_snapshot_service,
         ),
     }
     return _bridge_command_handlers_cache

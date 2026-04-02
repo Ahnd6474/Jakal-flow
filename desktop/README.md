@@ -9,7 +9,7 @@ It does not replace the Python orchestration backend. The Tauri side calls `pyth
 - Node.js 20+
 - Rust toolchain
 - Tauri system prerequisites for your OS
-- Python 3.11+ available on `PATH`, or set `JAKAL_FLOW_PYTHON`
+- Python 3.11+ available on `PATH`, or set `JAKAL_FLOW_PYTHON`, when building the desktop app
 
 ## Development
 
@@ -22,12 +22,37 @@ npm run test
 npm run tauri:dev
 ```
 
+Or use the root launcher after `python -m pip install -e .`:
+
+```bash
+jakal-flow-desktop dev
+jakal-flow-desktop test
+jakal-flow-desktop build
+```
+
 Build the desktop app:
 
 ```bash
 cd desktop
 npm run tauri:build
 ```
+
+Build the lean installer without bundled runtimes:
+
+```bash
+cd desktop
+npm run tauri:build:lean
+```
+
+`npm run tauri:build` now prepares a bundled runtime under `rt/` before Tauri packages the app. The full installer embeds:
+
+- the Python runtime used for the bridge
+- `src/jakal_flow`
+- a bundled Node runtime plus any detected global npm provider CLIs
+
+On this machine that means Codex CLI and Gemini CLI are embedded. Claude Code and Qwen Code remain optional because they were not installed at build time.
+
+`npm run tauri:build:lean` skips the bundled runtime and only packages the desktop shell plus `src/jakal_flow`. The target machine must already have Python 3.11+ and any required provider CLIs on `PATH`.
 
 Run the desktop unit tests:
 

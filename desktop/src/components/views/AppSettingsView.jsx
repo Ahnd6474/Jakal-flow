@@ -1,18 +1,11 @@
 ﻿import { memo, startTransition, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import {
-  applyProviderDefaults,
-  cloneValue,
   canEditProjectConfig,
+  cloneValue,
   defaultCodexPath,
-  defaultProviderApiKeyEnv,
-  defaultProviderBaseUrl,
   normalizeMemoryBudgetGiB,
   normalizeDashboardVisibility,
-  normalizedModelProvider,
-  providerAvailable,
-  providerUsable,
-  providerStatusReason,
   programSettingsEqual,
 } from "../../utils";
 
@@ -56,6 +49,14 @@ function DashboardIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none">
       <path d="M18 20V10M12 20V4M6 20v-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ToolingIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none">
+      <path d="M14.5 4.5a4 4 0 0 0-5.63 5.64l-5.37 5.36a1.5 1.5 0 1 0 2.12 2.12l5.36-5.37a4 4 0 0 0 5.64-5.63l-2.42 2.41-2-2 2.3-2.53Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -104,51 +105,13 @@ function SectionHeader({ icon, title, description, badge }) {
   );
 }
 
-const SETTINGS_TAB_KEYS = new Set(["app", "execution", "dashboard", "share"]);
-const PROVIDER_CATEGORIES = [
-  {
-    key: "closed",
-    label_ko: "폐쇄형",
-    label_en: "Closed",
-    providers: [
-      { value: "openai", label: "OpenAI" },
-      { value: "claude", label: "Claude" },
-      { value: "gemini", label: "Gemini" },
-    ],
-  },
-  {
-    key: "opensource",
-    label_ko: "오픈소스",
-    label_en: "OpenSource",
-    providers: [
-      { value: "qwen_code", label: "Qwen Code" },
-      { value: "deepseek", label: "DeepSeek" },
-      { value: "kimi", label: "Kimi" },
-      { value: "minimax", label: "MiniMax" },
-      { value: "glm", label: "GLM" },
-      { value: "openrouter", label: "OpenRouter" },
-      { value: "opencdk", label: "OpenCDK" },
-    ],
-  },
-  {
-    key: "oss",
-    label_ko: "OSS",
-    label_en: "OSS",
-    providers: [
-      { value: "ollama", label: "Ollama" },
-      { value: "local_openai", label: "Local OpenAI" },
-      { value: "oss", label: "LM Studio / OSS" },
-    ],
-  },
-  {
-    key: "ensemble",
-    label_ko: "Ensemble",
-    label_en: "Ensemble",
-    providers: [
-      { value: "ensemble", label: "Claude + GPT Ensemble", label_ko: "Claude + GPT Ensemble" },
-    ],
-  },
-];
+const SETTINGS_TAB_KEYS = new Set(["app", "tooling", "execution", "dashboard", "share"]);
+const TOOL_PROVIDER_KEYS = Object.freeze({
+  codex: "openai",
+  claude: "claude",
+  gemini: "gemini",
+  ollama: "ollama",
+});
 
 function cloneSettings(value) {
   return cloneValue(value && typeof value === "object" ? value : {});
@@ -158,22 +121,106 @@ function sameSettingsSnapshot(left, right) {
   return programSettingsEqual(left, right);
 }
 
+function toolingEntry(toolingStatus = {}, tool = "") {
+  const entry = toolingStatus?.[tool];
+  return entry && typeof entry === "object" ? entry : {};
+}
+
+function activeToolingJob(toolingJobs = [], tool = "") {
+  return (Array.isArray(toolingJobs) ? toolingJobs : []).find((job) => {
+    const repoId = String(job?.repo_id || "").trim().toLowerCase();
+    const status = String(job?.status || "").trim().toLowerCase();
+    return repoId === `tooling:${String(tool || "").trim().toLowerCase()}`
+      && ["queued", "running"].includes(status);
+  }) || null;
+}
+
+function toolingBadge(status = {}, { connectedLabel = "Connected", installedLabel = "Installed", missingLabel = "Missing" } = {}) {
+  if (status?.running === true) {
+    return { tone: "success", label: connectedLabel };
+  }
+  if (status?.installed) {
+    return { tone: "success", label: installedLabel };
+  }
+  return { tone: "neutral", label: missingLabel };
+}
+
+function ToolingCard({
+  title,
+  description,
+  badge,
+  reason,
+  version,
+  command,
+  extra,
+  buttonLabel,
+  buttonTone = "accent",
+  disabled = false,
+  onAction,
+  children = null,
+}) {
+  return (
+    <div className="subsection" style={{ gap: "10px" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+          <strong>{title}</strong>
+          <small style={{ color: "var(--text-muted)" }}>{description}</small>
+        </div>
+        <span className={`status-badge status-badge--${badge.tone}`}>{badge.label}</span>
+      </div>
+      {reason ? <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{reason}</div> : null}
+      {version ? (
+        <div className="sidebar-item">
+          <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>Version</span>
+          <strong style={{ fontFamily: "monospace" }}>{version}</strong>
+        </div>
+      ) : null}
+      {command ? (
+        <div className="sidebar-item">
+          <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>Command</span>
+          <strong style={{ fontFamily: "monospace" }}>{command}</strong>
+        </div>
+      ) : null}
+      {extra ? <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{extra}</div> : null}
+      {children}
+      {buttonLabel ? (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            className={`toolbar-button${buttonTone === "ghost" ? " toolbar-button--ghost" : " toolbar-button--accent"}`}
+            onClick={onAction}
+            type="button"
+            disabled={disabled}
+          >
+            {buttonLabel}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function appSettingsViewPropsEqual(previousProps, nextProps) {
   return (
     programSettingsEqual(previousProps.settings, nextProps.settings)
     && previousProps.codexStatus === nextProps.codexStatus
+    && previousProps.toolingStatus === nextProps.toolingStatus
+    && previousProps.toolingJobs === nextProps.toolingJobs
     && previousProps.shareSettings === nextProps.shareSettings
     && previousProps.shareDetail === nextProps.shareDetail
     && previousProps.busy === nextProps.busy
     && previousProps.shareBusy === nextProps.shareBusy
     && previousProps.initialSettingsTab === nextProps.initialSettingsTab
     && previousProps.projectStatus === nextProps.projectStatus
+    && previousProps.onInstallTooling === nextProps.onInstallTooling
+    && previousProps.onConnectOllama === nextProps.onConnectOllama
   );
 }
 
 export const AppSettingsView = memo(function AppSettingsView({
   settings,
   codexStatus,
+  toolingStatus = {},
+  toolingJobs = [],
   modelCatalog = [],
   shareSettings,
   shareDetail,
@@ -182,6 +229,8 @@ export const AppSettingsView = memo(function AppSettingsView({
   initialSettingsTab = "app",
   projectStatus = "",
   onChangeSettings,
+  onInstallTooling,
+  onConnectOllama,
   onGenerateShareLink,
   onCopyShareLink,
   onRevokeShareLink,
@@ -193,21 +242,24 @@ export const AppSettingsView = memo(function AppSettingsView({
   const { language, languageOptions, setLanguage, t } = useI18n();
   const [draftSettings, setDraftSettings] = useState(() => cloneSettings(settings));
   const [localDirty, setLocalDirty] = useState(false);
+  const [ollamaModel, setOllamaModel] = useState(() => String(toolingStatus?.ollama?.models?.[0] || "qwen2.5-coder:0.5b"));
   const lastIncomingSettingsRef = useRef(cloneSettings(settings));
   const lastOutgoingSettingsRef = useRef(cloneSettings(settings));
-  const planningReasoningLabel = language === "ko" ? "계획 추론" : "Planning Reasoning";
   const settingsTabs = [
     { key: "app", label: language === "ko" ? "애플리케이션" : "Application" },
+    { key: "tooling", label: language === "ko" ? "AI 도구" : "AI Tooling" },
     { key: "execution", label: language === "ko" ? "실행 설정" : "Execution" },
     { key: "dashboard", label: "Dashboard" },
     { key: "share", label: language === "ko" ? "공유" : "Share" },
   ];
   const activeShare = shareDetail?.active_session || shareDetail?.project_active_session || null;
   const shareServer = shareDetail?.server || null;
-  const selectedProvider = normalizedModelProvider(draftSettings);
   const dashboardVisibility = normalizeDashboardVisibility(draftSettings?.dashboard_visibility);
   const runtimeBusy = !canEditProjectConfig(projectStatus);
   void busy;
+  void modelCatalog;
+  void shareSettings;
+  void onChangeShareSettings;
   const autoParallelWorkers = String(draftSettings?.parallel_worker_mode || "auto").trim().toLowerCase() !== "manual";
 
   useEffect(() => {
@@ -234,6 +286,13 @@ export const AppSettingsView = memo(function AppSettingsView({
     });
   }, [draftSettings, localDirty, onChangeSettings]);
 
+  useEffect(() => {
+    const detectedModel = String(toolingStatus?.ollama?.models?.[0] || "qwen2.5-coder:0.5b").trim();
+    if (!ollamaModel) {
+      setOllamaModel(detectedModel);
+    }
+  }, [ollamaModel, toolingStatus?.ollama?.models]);
+
   function updateDraftSettings(updater) {
     setDraftSettings((current) => {
       const nextDraft = typeof updater === "function" ? updater(current) : updater;
@@ -241,16 +300,6 @@ export const AppSettingsView = memo(function AppSettingsView({
     });
     setLocalDirty(true);
   }
-
-  function categoryForProvider(provider) {
-    for (const cat of PROVIDER_CATEGORIES) {
-      if (cat.providers.some((p) => p.value === provider)) return cat.key;
-    }
-    return "closed";
-  }
-
-  const activeCategory = categoryForProvider(selectedProvider);
-  const activeCategoryConfig = PROVIDER_CATEGORIES.find((c) => c.key === activeCategory);
 
   const dashboardOptions = [
     ["status", t("common.status")],
@@ -269,9 +318,20 @@ export const AppSettingsView = memo(function AppSettingsView({
     ["codex_usage_card", t("dashboard.codexUsage")],
     ["word_report_card", t("reports.closeoutReport")],
   ];
-
-  const providerUnavailable = !providerUsable(selectedProvider, codexStatus);
-  const providerReason = providerStatusReason(selectedProvider, codexStatus);
+  const providerStatuses = codexStatus?.provider_statuses || {};
+  const npmStatus = toolingEntry(toolingStatus, "npm");
+  const codexTool = toolingEntry(toolingStatus, "codex");
+  const geminiTool = toolingEntry(toolingStatus, "gemini");
+  const claudeTool = toolingEntry(toolingStatus, "claude");
+  const ollamaTool = toolingEntry(toolingStatus, "ollama");
+  const codexProvider = providerStatuses[TOOL_PROVIDER_KEYS.codex] || {};
+  const geminiProvider = providerStatuses[TOOL_PROVIDER_KEYS.gemini] || {};
+  const claudeProvider = providerStatuses[TOOL_PROVIDER_KEYS.claude] || {};
+  const ollamaProvider = providerStatuses[TOOL_PROVIDER_KEYS.ollama] || {};
+  const codexJob = activeToolingJob(toolingJobs, "codex");
+  const geminiJob = activeToolingJob(toolingJobs, "gemini");
+  const claudeJob = activeToolingJob(toolingJobs, "claude");
+  const ollamaJob = activeToolingJob(toolingJobs, "ollama");
 
   return (
     <section className="workspace-view">
@@ -355,6 +415,159 @@ export const AppSettingsView = memo(function AppSettingsView({
                 hint="Persist execution logs to disk for each step"
               />
             ) : null}
+          </div>
+        </div>
+        ) : null}
+
+        {settingsTab === "tooling" ? (
+        <div className="form-section" style={{ gridColumn: "1 / -1" }}>
+          <div className="subsection">
+            <SectionHeader
+              icon={<ToolingIcon />}
+              title={language === "ko" ? "AI 도구 설치" : "AI Tooling"}
+              description={language === "ko" ? "터미널 에이전트와 Ollama 연결을 여기서 관리합니다." : "Install terminal agents and manage the local Ollama connection here."}
+            />
+
+            {!npmStatus?.installed ? (
+              <div className="info-callout" style={{ marginTop: "10px" }}>
+                <InfoIcon />
+                <span>
+                  {language === "ko"
+                    ? "Codex, Gemini, Claude Code 설치에는 Node.js/npm이 필요합니다."
+                    : "Node.js/npm is required before installing Codex, Gemini, or Claude Code."}
+                </span>
+              </div>
+            ) : null}
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px", marginTop: "12px" }}>
+              <ToolingCard
+                title="Codex CLI"
+                description={language === "ko" ? "OpenAI Codex CLI 설치 상태" : "OpenAI Codex CLI installation status"}
+                badge={toolingBadge(codexTool, {
+                  installedLabel: language === "ko" ? "설치됨" : "Installed",
+                  missingLabel: language === "ko" ? "없음" : "Missing",
+                })}
+                reason={codexProvider.reason || codexTool.reason}
+                version={codexTool.version}
+                command={codexTool.resolved_command || codexTool.command}
+                extra={codexProvider.reason && codexProvider.reason !== codexTool.reason ? codexTool.reason : ""}
+                buttonLabel={
+                  codexJob
+                    ? (String(codexJob.status || "").trim().toLowerCase() === "queued"
+                      ? (language === "ko" ? "대기 중" : "Queued")
+                      : (language === "ko" ? "설치 중..." : "Installing..."))
+                    : (!codexTool.installed ? (language === "ko" ? "설치" : "Install") : "")
+                }
+                disabled={Boolean(codexJob)}
+                onAction={() => onInstallTooling?.("codex")}
+              />
+
+              <ToolingCard
+                title="Gemini CLI"
+                description={language === "ko" ? "Gemini CLI 설치 상태" : "Gemini CLI installation status"}
+                badge={toolingBadge(geminiTool, {
+                  installedLabel: language === "ko" ? "설치됨" : "Installed",
+                  missingLabel: language === "ko" ? "없음" : "Missing",
+                })}
+                reason={geminiProvider.reason || geminiTool.reason}
+                version={geminiTool.version}
+                command={geminiTool.resolved_command || geminiTool.command}
+                extra={geminiProvider.reason && geminiProvider.reason !== geminiTool.reason ? geminiTool.reason : ""}
+                buttonLabel={
+                  geminiJob
+                    ? (String(geminiJob.status || "").trim().toLowerCase() === "queued"
+                      ? (language === "ko" ? "대기 중" : "Queued")
+                      : (language === "ko" ? "설치 중..." : "Installing..."))
+                    : (!geminiTool.installed ? (language === "ko" ? "설치" : "Install") : "")
+                }
+                disabled={Boolean(geminiJob)}
+                onAction={() => onInstallTooling?.("gemini")}
+              />
+
+              <ToolingCard
+                title="Claude Code"
+                description={language === "ko" ? "Claude Code CLI 설치 상태" : "Claude Code CLI installation status"}
+                badge={toolingBadge(claudeTool, {
+                  installedLabel: language === "ko" ? "설치됨" : "Installed",
+                  missingLabel: language === "ko" ? "없음" : "Missing",
+                })}
+                reason={claudeProvider.reason || claudeTool.reason}
+                version={claudeTool.version}
+                command={claudeTool.resolved_command || claudeTool.command}
+                extra={claudeProvider.reason && claudeProvider.reason !== claudeTool.reason ? claudeTool.reason : ""}
+                buttonLabel={
+                  claudeJob
+                    ? (String(claudeJob.status || "").trim().toLowerCase() === "queued"
+                      ? (language === "ko" ? "대기 중" : "Queued")
+                      : (language === "ko" ? "설치 중..." : "Installing..."))
+                    : (!claudeTool.installed ? (language === "ko" ? "설치" : "Install") : "")
+                }
+                disabled={Boolean(claudeJob)}
+                onAction={() => onInstallTooling?.("claude")}
+              />
+
+              <ToolingCard
+                title="Ollama"
+                description={language === "ko" ? "로컬 Ollama 연결과 모델 다운로드" : "Connect a local Ollama server and pull a model"}
+                badge={toolingBadge(ollamaTool, {
+                  connectedLabel: language === "ko" ? "연결됨" : "Connected",
+                  installedLabel: language === "ko" ? "설치됨" : "Installed",
+                  missingLabel: language === "ko" ? "없음" : "Missing",
+                })}
+                reason={ollamaTool.reason}
+                version={ollamaTool.version}
+                command={ollamaTool.resolved_command || ollamaTool.command}
+                extra={ollamaProvider.reason && ollamaProvider.reason !== ollamaTool.reason ? ollamaProvider.reason : ""}
+                buttonLabel={
+                  !ollamaTool.installed
+                    ? (
+                      ollamaJob
+                        ? (String(ollamaJob.status || "").trim().toLowerCase() === "queued"
+                          ? (language === "ko" ? "대기 중" : "Queued")
+                          : (language === "ko" ? "설치 중..." : "Installing..."))
+                        : (language === "ko" ? "설치" : "Install")
+                    )
+                    : ""
+                }
+                disabled={Boolean(ollamaJob)}
+                onAction={() => onInstallTooling?.("ollama")}
+              >
+                {ollamaTool.installed ? (
+                  <>
+                    <label className="field field--wide">
+                      <span>{language === "ko" ? "다운로드할 모델" : "Model to pull"}</span>
+                      <input
+                        value={ollamaModel}
+                        onChange={(event) => setOllamaModel(event.target.value)}
+                        placeholder="qwen2.5-coder:0.5b"
+                        disabled={Boolean(ollamaJob)}
+                      />
+                    </label>
+                    {Array.isArray(ollamaTool.models) && ollamaTool.models.length ? (
+                      <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                        {language === "ko" ? "감지된 모델" : "Detected models"}: {ollamaTool.models.join(", ")}
+                      </div>
+                    ) : null}
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      <button
+                        className="toolbar-button toolbar-button--accent"
+                        onClick={() => onConnectOllama?.(ollamaModel)}
+                        type="button"
+                        disabled={Boolean(ollamaJob)}
+                      >
+                        {ollamaJob
+                          ? (
+                            String(ollamaJob.status || "").trim().toLowerCase() === "queued"
+                              ? (language === "ko" ? "대기 중" : "Queued")
+                              : (language === "ko" ? "연결 중..." : "Connecting...")
+                          )
+                          : (language === "ko" ? "연결 및 다운로드" : "Connect & Pull")}
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+              </ToolingCard>
+            </div>
           </div>
         </div>
         ) : null}

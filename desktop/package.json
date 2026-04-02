@@ -8,11 +8,15 @@
     "build": "vite build",
     "check:bundle": "node scripts/check-bundle-budgets.mjs",
     "build:budget": "npm run build && npm run check:bundle",
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
     "test": "node --test --test-isolation=none",
     "preview": "vite preview --host 0.0.0.0 --port 1420",
     "tauri": "tauri",
     "tauri:dev": "node scripts/clean-vite-cache.mjs && tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "node scripts/build-release.mjs full",
+    "tauri:build:full": "node scripts/build-release.mjs full",
+    "tauri:build:lean": "node scripts/build-release.mjs lean",
+    "tauri:build:all": "node scripts/build-release.mjs all"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

@@ -15,6 +15,7 @@ export const BRIDGE_COMMANDS = Object.freeze({
   LOAD_PROJECT_SHARE: "load-project-share",
   LOAD_PROJECT_CHAT: "load-project-chat",
   LOAD_WORKSPACE_SHARE: "load-workspace-share",
+  GET_TOOLING_STATUS: "get-tooling-status",
   SAVE_PROJECT_SETUP: "save-project-setup",
   SAVE_PLAN: "save-plan",
   RESET_PLAN: "reset-plan",
@@ -40,6 +41,7 @@ export const BRIDGE_COMMANDS = Object.freeze({
   DELETE_COMMON_REQUIREMENT: "delete-common-requirement",
   UPDATE_SPINE_CHECKPOINT: "update-spine-checkpoint",
   DELETE_SPINE_CHECKPOINT: "delete-spine-checkpoint",
+  MANAGE_TOOLING: "manage-tooling",
 });
 
 export const BRIDGE_EVENTS = Object.freeze({
@@ -192,5 +194,6 @@ export function isBridgeMutationCommand(command) {
     BRIDGE_COMMANDS.DELETE_COMMON_REQUIREMENT,
     BRIDGE_COMMANDS.UPDATE_SPINE_CHECKPOINT,
     BRIDGE_COMMANDS.DELETE_SPINE_CHECKPOINT,
+    BRIDGE_COMMANDS.MANAGE_TOOLING,
   ]).has(command);
 }

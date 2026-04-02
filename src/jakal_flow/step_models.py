@@ -110,13 +110,19 @@ def resolve_step_model_choice(step: ExecutionStep, runtime: RuntimeOptions) -> S
 
 def provider_statuses_payload(
     fetch_snapshot: Callable[[str], Any] | None = None,
+    *,
+    force_refresh: bool = False,
 ) -> dict[str, dict[str, Any]]:
     global _provider_statuses_cache_no_fetch
-    if fetch_snapshot is None and _provider_statuses_cache_no_fetch is not None:
+    if (
+        not force_refresh
+        and fetch_snapshot is None
+        and _provider_statuses_cache_no_fetch is not None
+    ):
         checked_at, cached_statuses = _provider_statuses_cache_no_fetch
         if (time.monotonic() - checked_at) <= _PROVIDER_STATUSES_CACHE_TTL_SECONDS:
             return deepcopy(cached_statuses)
-    if fetch_snapshot is not None:
+    if fetch_snapshot is not None or force_refresh:
         _command_available_cache.clear()
         _gemini_settings_cache.clear()
     fetch = fetch_snapshot
@@ -126,7 +132,7 @@ def provider_statuses_payload(
         "gemini": _snapshot_to_dict(fetch(default_codex_path("gemini"))) if callable(fetch) else {},
         "qwen_code": _snapshot_to_dict(fetch(default_codex_path("qwen_code"))) if callable(fetch) else {},
     }
-    local_models = discover_local_model_catalog()
+    local_models = discover_local_model_catalog(force_refresh=force_refresh)
     openai_status = _provider_status_from_snapshot("openai", snapshots["openai"])
     claude_status = _provider_status_from_snapshot("claude", snapshots["claude"])
     gemini_status = _provider_status_from_snapshot("gemini", snapshots["gemini"])

@@ -41,6 +41,7 @@ Installed entrypoints:
 
 - `jakal-flow`
 - `jakal-flow-ui-bridge`
+- `jakal-flow-desktop`
 
 Requirements:
 
@@ -146,12 +147,33 @@ npm install
 npm run tauri:dev
 ```
 
+Or from the repository root:
+
+```bash
+jakal-flow-desktop dev
+```
+
 Production build:
 
 ```bash
 cd desktop
 npm run tauri:build
 ```
+
+Lean installer without bundled runtimes:
+
+```bash
+cd desktop
+npm run tauri:build:lean
+```
+
+Or from the repository root:
+
+```bash
+jakal-flow-desktop build
+```
+
+`npm run tauri:build` produces the full installer with bundled runtime dependencies. `npm run tauri:build:lean` produces a smaller installer that does not bundle Python or provider CLIs and instead uses what is already installed on the target machine.
 
 ## Star History
 
