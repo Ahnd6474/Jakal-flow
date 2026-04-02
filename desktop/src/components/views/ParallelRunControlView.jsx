@@ -1085,7 +1085,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
                 </span>
                 <button
                   type="button"
-                  className="run-prompt-strip__collapse-btn"
+                  className="run-prompt-strip__action-btn"
                   onClick={() => setPromptExpanded(false)}
                 >
                   {language === "ko" ? "Collapse" : "Collapse"}
@@ -1114,7 +1114,7 @@ export const ParallelRunControlView = memo(function ParallelRunControlView({
               </span>
               <button
                 type="button"
-                className="run-prompt-collapsed__open"
+                className="run-prompt-strip__action-btn"
                 onClick={() => setPromptExpanded(true)}
               >
                 {language === "ko" ? "Open" : "Open"}
