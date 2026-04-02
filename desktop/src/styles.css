@@ -1,33 +1,46 @@
 :root {
   color-scheme: dark;
   font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
-  --bg: #191b1e;
-  --bg-elevated: #21242b;
-  --bg-panel: #282c32;
-  --bg-panel-alt: #2e333b;
-  --bg-panel-hover: #353c46;
-  --bg-active: #3a404b;
-  --bg-accent: #2f6ab5;
-  --bg-accent-strong: #4a90e2;
-  --border: #2d3139;
-  --border-strong: #434d5a;
-  --text: #e6eaf1;
-  --text-muted: #a7afbb;
-  --text-dim: #848d99;
-  --toolbar-surface: rgba(37, 39, 43, 0.92);
-  --toolbar-pill-bg: rgba(255, 255, 255, 0.035);
-  --toolbar-pill-border: #454b56;
-  --button-bg-start: #373a40;
-  --button-bg-end: #31343a;
-  --button-accent-start: #3a7ad4;
-  --button-accent-end: #2d60a8;
-  --button-accent-border: #5090e8;
-  --success: #3dcc6e;
-  --warning: #e8b644;
-  --danger: #e05a5f;
-  --info: #5ea8f0;
-  --shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
-  --shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.3);
+  --bg: #14181d;
+  --bg-base: #14181d;
+  --bg-elevated: #1a1f26;
+  --bg-sidebar: #181d24;
+  --bg-panel: #20262f;
+  --bg-panel-alt: #28303a;
+  --bg-panel-hover: #313a47;
+  --bg-active: #374253;
+  --bg-accent: #3b74b0;
+  --bg-accent-strong: #5a94d8;
+  --border: #313b49;
+  --border-strong: #465362;
+  --text: #edf2f9;
+  --text-primary: #edf2f9;
+  --text-muted: #b3bcc9;
+  --text-dim: #8a96a7;
+  --toolbar-surface: #161b21;
+  --toolbar-pill-bg: #1f252d;
+  --toolbar-pill-border: #3b4757;
+  --button-bg-start: #27303a;
+  --button-bg-end: #27303a;
+  --button-accent-start: #3b74b0;
+  --button-accent-end: #3b74b0;
+  --button-accent-border: #5a94d8;
+  --success: #57bc80;
+  --warning: #d9a74a;
+  --danger: #d76a73;
+  --info: #69acef;
+  --state-neutral-surface: rgba(237, 242, 249, 0.045);
+  --state-neutral-border: rgba(179, 188, 201, 0.24);
+  --state-success-surface: rgba(87, 188, 128, 0.14);
+  --state-success-border: rgba(87, 188, 128, 0.38);
+  --state-warning-surface: rgba(217, 167, 74, 0.15);
+  --state-warning-border: rgba(217, 167, 74, 0.4);
+  --state-danger-surface: rgba(215, 106, 115, 0.16);
+  --state-danger-border: rgba(215, 106, 115, 0.42);
+  --state-info-surface: rgba(105, 172, 239, 0.16);
+  --state-info-border: rgba(105, 172, 239, 0.42);
+  --shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
+  --shadow-elevated: 0 14px 32px rgba(0, 0, 0, 0.22);
   --radius: 6px;
   --radius-sm: 5px;
   --gap: 8px;
@@ -38,7 +51,9 @@
 :root[data-theme="light"] {
   color-scheme: light;
   --bg: #f3f5f8;
+  --bg-base: #f3f5f8;
   --bg-elevated: #f8fafc;
+  --bg-sidebar: #e9eff6;
   --bg-panel: #ffffff;
   --bg-panel-alt: #eef2f7;
   --bg-panel-hover: #e9eef5;
@@ -48,6 +63,7 @@
   --border: #d3dbe7;
   --border-strong: #b6c4d6;
   --text: #17212f;
+  --text-primary: #17212f;
   --text-muted: #5d6878;
   --text-dim: #788396;
   --toolbar-surface: linear-gradient(180deg, #d6e2ef, #c9d8ea);
@@ -62,6 +78,16 @@
   --warning: #b27a1f;
   --danger: #bb4c50;
   --info: #2f6fb3;
+  --state-neutral-surface: rgba(23, 33, 47, 0.05);
+  --state-neutral-border: rgba(93, 104, 120, 0.22);
+  --state-success-surface: rgba(47, 138, 88, 0.12);
+  --state-success-border: rgba(47, 138, 88, 0.28);
+  --state-warning-surface: rgba(178, 122, 31, 0.12);
+  --state-warning-border: rgba(178, 122, 31, 0.28);
+  --state-danger-surface: rgba(187, 76, 80, 0.12);
+  --state-danger-border: rgba(187, 76, 80, 0.28);
+  --state-info-surface: rgba(47, 111, 179, 0.12);
+  --state-info-border: rgba(47, 111, 179, 0.28);
   --shadow: 0 2px 10px rgba(29, 45, 70, 0.10);
   --shadow-elevated: 0 8px 28px rgba(29, 45, 70, 0.16);
 }
@@ -6169,4 +6195,452 @@ button:focus-visible,
 
 .sidebar-project.selected {
   box-shadow: 0 0 0 1px rgba(94,168,240,0.4), 0 2px 12px rgba(94,168,240,0.18);
+}
+
+/* 2026-04 visual refinement: flatter dark surfaces, contrast-led hierarchy, component-led states */
+body {
+  background: var(--bg-base);
+}
+
+.ide-toolbar,
+.ide-pane--sidebar,
+.ide-pane--details,
+.ide-pane--bottom,
+.ide-pane--workspace-right,
+.workspace-tabs,
+.tool-window__header,
+.sidebar-rail,
+.status-bar {
+  background: var(--bg-elevated);
+  box-shadow: none;
+}
+
+.ide-toolbar,
+.workspace-tabs,
+.tool-window__header,
+.status-bar {
+  border-color: var(--border-strong);
+}
+
+.splitter {
+  background: transparent;
+}
+
+.splitter:hover,
+.splitter:focus {
+  background: color-mix(in srgb, transparent 76%, var(--info));
+}
+
+.toolbar-chip,
+.toolbar-status,
+.ide-toolbar__group--utility .toolbar-btn--icon {
+  background: var(--toolbar-pill-bg);
+  border-color: var(--toolbar-pill-border);
+}
+
+.toolbar-btn,
+.status-bar__toggle,
+.sidebar-icon,
+.settings-subtab,
+.provider-cat-tab {
+  border: 1px solid transparent;
+}
+
+.toolbar-button,
+.toolbar-btn,
+.status-bar__toggle,
+.sidebar-icon,
+.settings-subtab,
+.provider-cat-tab,
+.provider-sub-card,
+.auto-run-badge,
+.choice-radio,
+.context-menu__item {
+  box-shadow: none;
+}
+
+.toolbar-button {
+  background: var(--button-bg-start);
+  border-color: color-mix(in srgb, var(--border) 72%, var(--border-strong));
+}
+
+.toolbar-button--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.toolbar-button:hover:not(:disabled),
+.toolbar-btn:hover:not(:disabled),
+.status-bar__toggle:hover,
+.sidebar-icon:hover,
+.settings-subtab:hover,
+.provider-cat-tab:hover:not(:disabled),
+.provider-sub-card:hover:not(:disabled),
+.auto-run-badge:hover,
+.context-menu__item:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+  box-shadow: none;
+  transform: none;
+}
+
+.toolbar-button:active:not(:disabled),
+.toolbar-btn:active:not(:disabled),
+.status-bar__toggle:active,
+.sidebar-icon:active {
+  background: var(--bg-active);
+  box-shadow: none;
+  transform: none;
+}
+
+.toolbar-button--accent,
+.toolbar-btn--accent {
+  background: var(--bg-accent);
+  border-color: var(--button-accent-border);
+  box-shadow: none;
+}
+
+.toolbar-button--accent:hover:not(:disabled),
+.toolbar-btn--accent:hover:not(:disabled) {
+  background: var(--bg-accent-strong);
+  filter: none;
+  box-shadow: none;
+}
+
+.toolbar-button--danger {
+  background: color-mix(in srgb, var(--bg-panel) 88%, var(--danger) 12%);
+  border-color: var(--state-danger-border);
+  color: color-mix(in srgb, var(--text) 84%, var(--danger));
+}
+
+.toolbar-button--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-panel-hover) 84%, var(--danger) 16%);
+  border-color: color-mix(in srgb, var(--state-danger-border) 72%, var(--danger));
+}
+
+.content-card,
+.metric-card,
+.details-card,
+.sidebar-item,
+.sidebar-project,
+.choice-card,
+.run-node,
+.subsection,
+.provider-sub-card,
+.provider-ensemble-info,
+.rsb-file-card,
+.sidebar-prompt-card {
+  background: var(--bg-panel);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--border-strong));
+  box-shadow: none;
+}
+
+.sidebar-summary,
+.tool-window__body--log,
+.details-text pre,
+.content-card pre,
+.history-flow,
+.output-card,
+.choice-radio,
+.auto-run-badge,
+.details-document,
+.mec-chip,
+.mec-popover,
+.command-palette__kbd {
+  background: var(--bg-panel-alt);
+  border-color: color-mix(in srgb, var(--border) 72%, var(--border-strong));
+  box-shadow: none;
+}
+
+.content-card:hover,
+.metric-card:hover,
+.choice-card:hover:not(:disabled),
+.sidebar-project:hover:not(.selected),
+.run-node:hover,
+.output-card:not(.output-card--disabled):hover,
+.provider-sub-card:hover:not(:disabled),
+.rsb-file-card:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--border-strong);
+  box-shadow: none;
+  transform: none;
+}
+
+.workspace-tab.active,
+.sidebar-tab.active,
+.tool-tab.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-panel) 84%, var(--info) 16%);
+  border-bottom-color: var(--info);
+  filter: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.settings-subtab--active,
+.provider-cat-tab.active,
+.provider-sub-card.active,
+.choice-card.selected,
+.sidebar-project.selected,
+.sidebar-icon.active,
+.status-bar__toggle--active,
+.command-palette__item--selected,
+.toolbar-btn--active,
+.run-effort-seg__btn--active,
+.mec-chip--open {
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-panel) 82%, var(--info) 18%);
+  border-color: var(--state-info-border);
+  box-shadow: none;
+  filter: none;
+}
+
+.sidebar-icon.active::after,
+.rsb-rail .sidebar-icon.active::after {
+  background: var(--info);
+  box-shadow: none;
+  opacity: 0.9;
+}
+
+.sidebar-project.selected {
+  border-left-color: var(--info);
+}
+
+.sidebar-project--success:not(.selected) {
+  background: color-mix(in srgb, var(--bg-panel) 92%, var(--success) 8%);
+  border-color: color-mix(in srgb, var(--border) 46%, var(--success));
+}
+
+.sidebar-project--warning:not(.selected) {
+  background: color-mix(in srgb, var(--bg-panel) 92%, var(--warning) 8%);
+  border-color: color-mix(in srgb, var(--border) 48%, var(--warning));
+}
+
+.sidebar-project--danger:not(.selected) {
+  background: color-mix(in srgb, var(--bg-panel) 90%, var(--danger) 10%);
+  border-color: color-mix(in srgb, var(--border) 42%, var(--danger));
+}
+
+.sidebar-project--info:not(.selected) {
+  background: color-mix(in srgb, var(--bg-panel) 92%, var(--info) 8%);
+  border-color: color-mix(in srgb, var(--border) 48%, var(--info));
+}
+
+.sidebar-project__fill {
+  opacity: 0.09;
+}
+
+.sidebar-project--info .sidebar-project__fill::after {
+  display: none;
+}
+
+.status-badge,
+.toolbar-status,
+.run-progress-stage,
+.model-badge {
+  background: var(--state-neutral-surface);
+  border: 1px solid var(--state-neutral-border);
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
+.status-badge--neutral,
+.toolbar-status--neutral {
+  background: var(--state-neutral-surface);
+  border-color: var(--state-neutral-border);
+  color: var(--text-muted);
+}
+
+.status-badge--success,
+.toolbar-status--success,
+.run-progress-stage--completed {
+  background: var(--state-success-surface);
+  border-color: var(--state-success-border);
+  color: color-mix(in srgb, var(--text) 86%, var(--success));
+}
+
+.status-badge--warning,
+.toolbar-status--warning {
+  background: var(--state-warning-surface);
+  border-color: var(--state-warning-border);
+  color: color-mix(in srgb, var(--text) 84%, var(--warning));
+}
+
+.status-badge--danger,
+.toolbar-status--danger,
+.run-progress-stage--failed {
+  background: var(--state-danger-surface);
+  border-color: var(--state-danger-border);
+  color: color-mix(in srgb, var(--text) 84%, var(--danger));
+}
+
+.status-badge--info,
+.toolbar-status--info,
+.run-progress-stage--running {
+  background: var(--state-info-surface);
+  border-color: var(--state-info-border);
+  color: color-mix(in srgb, var(--text) 84%, var(--info));
+}
+
+.run-progress-stage strong {
+  color: var(--text);
+}
+
+.run-progress-stage__status {
+  opacity: 0.72;
+}
+
+.status-dot--success,
+.status-dot--warning,
+.status-dot--danger,
+.status-dot--info,
+.chip-dot--success,
+.chip-dot--warning,
+.chip-dot--danger,
+.chip-dot--info,
+.chip-dot--neutral,
+.dashboard-hero__dot--success,
+.dashboard-hero__dot--warning,
+.dashboard-hero__dot--danger,
+.dashboard-hero__dot--info,
+.dashboard-hero__dot--neutral {
+  border: none;
+  box-shadow: none;
+  animation: none;
+}
+
+.status-dot--success,
+.chip-dot--success,
+.dashboard-hero__dot--success {
+  background: var(--success);
+}
+
+.status-dot--warning,
+.chip-dot--warning,
+.dashboard-hero__dot--warning {
+  background: var(--warning);
+}
+
+.status-dot--danger,
+.chip-dot--danger,
+.dashboard-hero__dot--danger {
+  background: var(--danger);
+}
+
+.status-dot--info,
+.chip-dot--info,
+.dashboard-hero__dot--info {
+  background: var(--info);
+}
+
+.chip-dot--neutral,
+.dashboard-hero__dot--neutral {
+  background: var(--text-dim);
+  opacity: 1;
+}
+
+.dashboard-hero,
+.metric-card {
+  box-shadow: none;
+}
+
+.dashboard-hero {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--bg-panel) 92%, var(--bg-elevated) 8%);
+}
+
+.dashboard-hero--success,
+.metric-card--success {
+  background: color-mix(in srgb, var(--bg-panel) 86%, var(--success) 14%);
+  border-color: var(--state-success-border);
+}
+
+.dashboard-hero--info,
+.metric-card--info {
+  background: color-mix(in srgb, var(--bg-panel) 86%, var(--info) 14%);
+  border-color: var(--state-info-border);
+}
+
+.dashboard-hero--warning,
+.metric-card--warning {
+  background: color-mix(in srgb, var(--bg-panel) 86%, var(--warning) 14%);
+  border-color: var(--state-warning-border);
+}
+
+.dashboard-hero--danger,
+.metric-card--danger {
+  background: color-mix(in srgb, var(--bg-panel) 86%, var(--danger) 14%);
+  border-color: var(--state-danger-border);
+}
+
+.metric-card--success strong,
+.metric-card--warning strong,
+.metric-card--info strong,
+.metric-card--danger strong,
+.dashboard-hero__status {
+  color: var(--text);
+}
+
+.banner--success {
+  background: color-mix(in srgb, var(--bg-panel) 90%, var(--success) 10%);
+  border-color: var(--state-success-border);
+}
+
+.banner--error,
+.banner--danger {
+  background: color-mix(in srgb, var(--bg-panel) 88%, var(--danger) 12%);
+  border-color: var(--state-danger-border);
+}
+
+.banner--info,
+.run-progress-banner {
+  background: color-mix(in srgb, var(--bg-panel) 90%, var(--info) 10%);
+  border-color: var(--state-info-border);
+}
+
+.run-progress-banner__track {
+  background: color-mix(in srgb, var(--bg-panel-alt) 88%, var(--bg-elevated) 12%);
+  border-color: color-mix(in srgb, var(--border) 72%, var(--border-strong));
+}
+
+.run-progress-banner__fill {
+  background: var(--info);
+  box-shadow: none;
+}
+
+.run-progress-banner__fill:not(.run-progress-banner__fill--indeterminate)::after {
+  display: none;
+}
+
+.dashboard-progress__fill--info {
+  background: var(--info);
+  box-shadow: none;
+}
+
+.dashboard-progress__fill--success {
+  background: var(--success);
+  box-shadow: none;
+}
+
+.dashboard-progress__fill--warning {
+  background: var(--warning);
+  box-shadow: none;
+}
+
+.dashboard-progress__fill--danger {
+  background: var(--danger);
+  box-shadow: none;
+}
+
+.dashboard-progress__fill--neutral {
+  background: var(--text-dim);
+  box-shadow: none;
+}
+
+.command-palette,
+.project-selector__dropdown,
+.context-menu {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-elevated);
 }
