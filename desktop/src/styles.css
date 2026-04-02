@@ -26,13 +26,13 @@
   --warning: #d3a954;
   --danger: #c85d61;
   --info: #5f97d6;
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  --shadow-elevated: 0 6px 18px rgba(0, 0, 0, 0.22);
-  --radius: 4px;
-  --radius-sm: 3px;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  --shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.3);
+  --radius: 6px;
+  --radius-sm: 5px;
   --gap: 8px;
   --gap-lg: 12px;
-  --toolbar-height: 36px;
+  --toolbar-height: 38px;
 }
 
 :root[data-theme="light"] {
@@ -62,8 +62,8 @@
   --warning: #b27a1f;
   --danger: #bb4c50;
   --info: #2f6fb3;
-  --shadow: 0 2px 6px rgba(29, 45, 70, 0.06);
-  --shadow-elevated: 0 8px 20px rgba(29, 45, 70, 0.10);
+  --shadow: 0 2px 10px rgba(29, 45, 70, 0.10);
+  --shadow-elevated: 0 8px 28px rgba(29, 45, 70, 0.16);
 }
 
 * {
@@ -525,7 +525,7 @@ pre {
 
 .run-progress-banner__track {
   width: 100%;
-  height: 5px;
+  height: 6px;
   overflow: hidden;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
@@ -753,9 +753,10 @@ pre {
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 500;
-  border-bottom: 2px solid transparent;
+  border-bottom: 3px solid transparent;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
 .sidebar-tab:hover,
@@ -768,6 +769,7 @@ pre {
 .workspace-tab.active {
   color: var(--text);
   border-bottom-color: var(--info);
+  filter: drop-shadow(0 1px 3px rgba(95, 151, 214, 0.45));
 }
 
 .sidebar-rail {
@@ -857,9 +859,9 @@ pre {
 
 .view-header h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
 }
 
 .view-header p,
@@ -940,9 +942,9 @@ pre {
 }
 
 .dashboard-hero__status {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
 .dashboard-hero__right {
@@ -969,9 +971,9 @@ pre {
 
 .dashboard-progress__bar {
   flex: 1;
-  height: 6px;
+  height: 8px;
   background: var(--bg-panel-alt);
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--border);
 }
@@ -1153,12 +1155,17 @@ pre {
 
 .content-card {
   padding: 16px 18px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1), 0 4px 14px rgba(0,0,0,0.06);
+  transition: box-shadow 160ms ease;
+}
+
+.content-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.14), 0 6px 20px rgba(0,0,0,0.09);
 }
 
 .metric-card {
-  padding: 14px 16px;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  padding: 15px 16px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
 .metric-card:hover {
@@ -1203,8 +1210,8 @@ pre {
 .metric-card strong {
   display: block;
   margin-top: 6px;
-  font-size: 20px;
-  letter-spacing: -0.02em;
+  font-size: 22px;
+  letter-spacing: -0.025em;
   font-weight: 700;
 }
 
@@ -4154,8 +4161,9 @@ select:focus {
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
+  border-bottom: 3px solid transparent;
   white-space: nowrap;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
 .tool-tab:hover {
@@ -4166,6 +4174,7 @@ select:focus {
 .tool-tab.active {
   color: var(--text);
   border-bottom-color: var(--info);
+  filter: drop-shadow(0 1px 3px rgba(95, 151, 214, 0.4));
 }
 
 .tool-window__header-actions {
@@ -4524,7 +4533,9 @@ select:focus {
 .command-palette__backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   z-index: 9998;
 }
 
@@ -4533,13 +4544,13 @@ select:focus {
   top: 15%;
   left: 50%;
   transform: translateX(-50%);
-  width: 520px;
+  width: 540px;
   max-width: 90vw;
-  max-height: 60vh;
+  max-height: 62vh;
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-elevated);
+  border-radius: 10px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.38), 0 4px 16px rgba(0, 0, 0, 0.22);
   z-index: 9999;
   display: flex;
   flex-direction: column;
@@ -4564,7 +4575,7 @@ select:focus {
   border: none;
   background: none;
   color: var(--text);
-  font-size: 14px;
+  font-size: 15px;
   padding: 4px 0;
   outline: none;
   width: auto;
@@ -5936,4 +5947,219 @@ select:focus {
 }
 .rsb {
   transition: opacity 150ms ease;
+}
+
+/* ═══════════════════════════════════════════════════
+   CUSTOM SCROLLBAR
+   ═══════════════════════════════════════════════════ */
+
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  background-clip: padding-box;
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+  background-clip: padding-box;
+}
+
+/* ═══════════════════════════════════════════════════
+   ENTRANCE ANIMATION
+   ═══════════════════════════════════════════════════ */
+
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.workspace-view {
+  animation: view-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ═══════════════════════════════════════════════════
+   IMPROVED FOCUS RING
+   ═══════════════════════════════════════════════════ */
+
+:focus-visible {
+  outline: 2px solid rgba(95, 151, 214, 0.7);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+.workspace-tab:focus-visible,
+.sidebar-tab:focus-visible,
+.tool-tab:focus-visible {
+  outline: 2px solid rgba(95, 151, 214, 0.7);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* ═══════════════════════════════════════════════════
+   IMPROVED RUN NODE
+   ═══════════════════════════════════════════════════ */
+
+.run-node {
+  border-radius: 8px;
+}
+
+.run-node--info {
+  box-shadow: 0 0 0 1px rgba(95, 151, 214, 0.2), 0 2px 8px rgba(95, 151, 214, 0.1);
+}
+
+.run-node--success {
+  box-shadow: 0 0 0 1px rgba(78, 163, 109, 0.2), 0 2px 8px rgba(78, 163, 109, 0.1);
+}
+
+.run-node--warning {
+  box-shadow: 0 0 0 1px rgba(211, 169, 84, 0.2), 0 2px 8px rgba(211, 169, 84, 0.1);
+}
+
+/* ═══════════════════════════════════════════════════
+   IMPROVED SPLITTER VISIBILITY
+   ═══════════════════════════════════════════════════ */
+
+.splitter--vertical {
+  width: 5px;
+  cursor: col-resize;
+  transition: background 140ms ease;
+}
+
+.splitter--horizontal {
+  height: 5px;
+  cursor: row-resize;
+  transition: background 140ms ease;
+}
+
+/* ═══════════════════════════════════════════════════
+   SIDEBAR ICON ACTIVE STATE POLISH
+   ═══════════════════════════════════════════════════ */
+
+.sidebar-icon {
+  transition: background 130ms ease, color 130ms ease;
+}
+
+.sidebar-icon.active {
+  background: var(--bg-active);
+  color: var(--info);
+  box-shadow: 0 0 0 1px rgba(95, 151, 214, 0.2);
+}
+
+/* ═══════════════════════════════════════════════════
+   STATUS BAR IMPROVEMENTS
+   ═══════════════════════════════════════════════════ */
+
+.status-bar {
+  background: color-mix(in srgb, var(--bg-panel) 85%, var(--bg-elevated));
+  border-top-color: var(--border);
+}
+
+/* ═══════════════════════════════════════════════════
+   SETTINGS SUBTAB ACTIVE STATE IMPROVEMENT
+   ═══════════════════════════════════════════════════ */
+
+.settings-subtab--active {
+  background: var(--bg-active);
+  color: var(--text);
+  border-color: var(--border-strong);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+}
+
+/* ═══════════════════════════════════════════════════
+   CHOICE CARD SELECTED GLOW
+   ═══════════════════════════════════════════════════ */
+
+.choice-card.selected {
+  box-shadow: 0 0 0 1px var(--bg-accent-strong), 0 2px 12px rgba(95,151,214,0.15);
+}
+
+/* ═══════════════════════════════════════════════════
+   TOOLBAR BUTTON TRANSITIONS
+   ═══════════════════════════════════════════════════ */
+
+.toolbar-btn {
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.toolbar-btn--accent {
+  box-shadow: 0 1px 6px rgba(65, 105, 155, 0.35);
+  transition: filter 120ms ease, box-shadow 120ms ease;
+}
+
+.toolbar-btn--accent:hover:not(:disabled) {
+  box-shadow: 0 3px 12px rgba(65, 105, 155, 0.45);
+}
+
+/* ═══════════════════════════════════════════════════
+   SUBSECTION IMPROVED LOOK
+   ═══════════════════════════════════════════════════ */
+
+.subsection {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* ═══════════════════════════════════════════════════
+   PROJECT SELECTOR DROPDOWN POLISH
+   ═══════════════════════════════════════════════════ */
+
+.project-selector__dropdown {
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.32), 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* ═══════════════════════════════════════════════════
+   CHIP-DOT NEUTRAL IMPROVEMENT
+   ═══════════════════════════════════════════════════ */
+
+.chip-dot--neutral {
+  background: var(--text-dim);
+  opacity: 0.7;
+}
+
+/* ═══════════════════════════════════════════════════
+   DASHBOARD DETAIL ROW PADDING
+   ═══════════════════════════════════════════════════ */
+
+.dashboard-detail-row {
+  padding: 5px 0;
+}
+
+/* ═══════════════════════════════════════════════════
+   SIDEBAR PROJECT CARD HOVER GLOW
+   ═══════════════════════════════════════════════════ */
+
+.sidebar-project.selected {
+  box-shadow: 0 0 0 1px rgba(95,151,214,0.35), 0 2px 10px rgba(95,151,214,0.12);
 }

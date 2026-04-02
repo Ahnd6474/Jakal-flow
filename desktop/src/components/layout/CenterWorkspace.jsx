@@ -356,7 +356,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
       case "ai-chat": return AiChatWorkspaceView;
       case "flow": return FlowWorkspaceView;
       case "dashboard": return DashboardView;
-      case "reports": return developerMode ? ReportsView : null;
+      case "reports": return ReportsView;
       case "history": return HistoryView;
       case "config": return ConfigEditorView;
       case "app-settings": return AppSettingsView;
@@ -390,11 +390,6 @@ export const CenterWorkspace = memo(function CenterWorkspace({
     });
   }, [developerMode, hasFlowTab, normalizedActiveTab]);
 
-  useEffect(() => {
-    if (!developerMode && normalizedActiveTab === "reports") {
-      onChangeTab("ai-chat");
-    }
-  }, [developerMode, normalizedActiveTab, onChangeTab]);
 
   useEffect(() => {
     if (!hasFlowTab && normalizedActiveTab === "flow") {
@@ -407,7 +402,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
     ["config", t("tab.config")],
     ["dashboard", t("tab.dashboard")],
     ["history", t("tab.history")],
-    ...(developerMode ? [["reports", t("tab.reports")]] : []),
+    ["reports", t("tab.reports")],
   ];
 
   return (
@@ -492,7 +487,7 @@ export const CenterWorkspace = memo(function CenterWorkspace({
             activeJob={activeJob}
           />
         ) : null}
-        {developerMode && normalizedActiveTab === "reports" ? <ReportsView reports={detail?.reports} /> : null}
+        {normalizedActiveTab === "reports" ? <ReportsView reports={detail?.reports} /> : null}
         {normalizedActiveTab === "history" ? (
           <HistoryView detail={visibleHistoryDetail} busy={busy} onDeleteHistoryEntry={onDeleteHistoryEntry} />
         ) : null}
