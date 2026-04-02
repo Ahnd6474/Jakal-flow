@@ -18,6 +18,26 @@ class SubprocessTimeoutError(SubprocessExecutionError):
     """Raised when a subprocess exceeds its configured timeout."""
 
 
+class RequestRejectedError(JakalFlowError):
+    """Raised when a request is well-formed but cannot run in the current state."""
+
+    reason_code = "request_rejected"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        reason_code: str | None = None,
+        details: dict[str, object] | None = None,
+        recoverable: bool | None = True,
+    ) -> None:
+        normalized = str(message).strip() or "Request rejected."
+        super().__init__(normalized)
+        self.reason_code = str(reason_code or self.reason_code).strip() or "request_rejected"
+        self.details = dict(details or {})
+        self.recoverable = bool(recoverable) if isinstance(recoverable, bool) else recoverable
+
+
 class ExecutionFailure(JakalFlowError):
     """Base error for execution failures that carry a reason code."""
 

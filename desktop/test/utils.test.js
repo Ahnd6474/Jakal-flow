@@ -718,8 +718,10 @@ test("commandLabel maps manual recovery commands to readable labels", () => {
 });
 
 test("isDuplicateProjectJobError detects bridge rejections for already-active jobs", () => {
-  assert.equal(isDuplicateProjectJobError("Another background task is already active for this project."), true);
-  assert.equal(isDuplicateProjectJobError(new Error("another background task is already active for this project.")), true);
+  assert.equal(isDuplicateProjectJobError({ reason_code: "duplicate_job" }), true);
+  assert.equal(isDuplicateProjectJobError({ reasonCode: "already_active_for_project" }), true);
+  assert.equal(isDuplicateProjectJobError("Another background task is already active for this project."), false);
+  assert.equal(isDuplicateProjectJobError(new Error("another background task is already active for this project.")), false);
   assert.equal(isDuplicateProjectJobError("The requested background job was not found."), false);
 });
 

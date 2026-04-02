@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 from ._version import __version__
 from .errors import HANDLED_OPERATION_EXCEPTIONS
+from .job_scheduler import active_scheduler_jobs, load_scheduler_state, matching_active_scheduler_job, running_scheduler_job_count
 from .orchestrator import Orchestrator
 from .project_snapshot import context_execution_snapshot
 from .rate_limiter import TokenBucketRateLimiter, TokenBucketRule
@@ -72,6 +73,35 @@ class ShareRemoteControlManager:
             else:
                 self._resume_starting_repo_ids.discard(repo_id)
 
+    def _starting_resume_count(self, *, exclude_repo_id: str = "") -> int:
+        normalized_exclude = str(exclude_repo_id or "").strip()
+        with self._lock:
+            return sum(1 for item in self._resume_starting_repo_ids if item != normalized_exclude)
+
+    def _ensure_resume_slot_available(
+        self,
+        *,
+        repo_id: str,
+        project_dir: Path,
+        exclude_starting_repo_id: str = "",
+    ) -> None:
+        scheduler_state = load_scheduler_state(self.workspace_root)
+        if matching_active_scheduler_job(
+            scheduler_state,
+            repo_id=repo_id,
+            project_dir=project_dir,
+            job_lane="execution",
+        ) is not None:
+            raise RuntimeError("Another background task is already active for this project.")
+        active_jobs = active_scheduler_jobs(scheduler_state)
+        queued_jobs = [job for job in active_jobs if str(job.get("status", "")).strip().lower() == "queued"]
+        if queued_jobs:
+            raise RuntimeError("Reservations are disabled for this project, so this run must wait for a free slot.")
+        running_jobs = running_scheduler_job_count(scheduler_state)
+        pending_resumes = self._starting_resume_count(exclude_repo_id=exclude_starting_repo_id)
+        if (running_jobs + pending_resumes) >= int(scheduler_state.max_concurrent_jobs or 1):
+            raise RuntimeError("Reservations are disabled for this project, so this run must wait for a free slot.")
+
     def _append_project_event(
         self,
         project,
@@ -107,8 +137,10 @@ class ShareRemoteControlManager:
         if not can_resume_from_remote(project, plan_state):
             raise RuntimeError("No remaining paused or pending work is available to resume.")
         repo_id = project.metadata.repo_id
+        project_dir = Path(project.metadata.repo_path)
         if self.is_resume_starting(repo_id):
             raise RuntimeError("A remote resume request is already starting.")
+        self._ensure_resume_slot_available(repo_id=repo_id, project_dir=project_dir)
 
         requested_at = now_utc_iso()
         payload = {
@@ -140,6 +172,11 @@ class ShareRemoteControlManager:
     def _run_resume_job(self, repo_id: str, payload: dict[str, Any]) -> None:
         project_dir = Path(str(payload.get("project_dir", "")).strip()).expanduser()
         try:
+            self._ensure_resume_slot_available(
+                repo_id=repo_id,
+                project_dir=project_dir,
+                exclude_starting_repo_id=repo_id,
+            )
             run_command("run-plan", self.workspace_root, payload)
         except HANDLED_OPERATION_EXCEPTIONS as exc:
             orchestrator = Orchestrator(self.workspace_root)

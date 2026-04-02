@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jakal_flow.orchestrator import Orchestrator
 from jakal_flow.models import ExecutionPlanState, ExecutionStep
+from jakal_flow.job_scheduler import write_scheduler_state
 from jakal_flow.share import (
     ShareSession,
     ShareServerState,
@@ -1065,6 +1066,84 @@ class ShareMonitoringTests(unittest.TestCase):
                 self.assertTrue(monitored["remote_control"]["resume_starting"])
             finally:
                 release.set()
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_share_control_api_rejects_resume_when_workspace_scheduler_is_busy(self) -> None:
+        with TemporaryTestDir() as temp_dir:
+            workspace_root = temp_dir / "workspace"
+            repo_dir = temp_dir / "repo"
+            other_repo_dir = temp_dir / "other-repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            other_repo_dir.mkdir(parents=True, exist_ok=True)
+            _orchestrator, project = create_project(workspace_root, repo_dir)
+            save_plan_payload = {
+                "project_dir": str(repo_dir),
+                "display_name": "Share Demo",
+                "branch": "main",
+                "origin_url": "",
+                "runtime": project.runtime.to_dict(),
+                "plan": {
+                    "execution_mode": "parallel",
+                    "workflow_mode": "standard",
+                    "steps": [
+                        {
+                            "step_id": "ST1",
+                            "title": "Resume me",
+                            "display_description": "Resume the saved run.",
+                            "codex_description": "Continue the remaining work for the saved plan.",
+                            "test_command": "python -m pytest",
+                            "success_criteria": "The saved plan can continue.",
+                            "reasoning_effort": "high",
+                            "depends_on": [],
+                            "owned_paths": ["src/jakal_flow/share_server.py"],
+                            "status": "pending",
+                        }
+                    ],
+                },
+            }
+            with mock.patch("jakal_flow.ui_bridge.fetch_codex_backend_snapshot", side_effect=lambda *args, **kwargs: _fake_codex_snapshot()):
+                run_command("save-plan", workspace_root, save_plan_payload)
+            project = Orchestrator(workspace_root).local_project(repo_dir)
+            assert project is not None
+            session = create_share_session(project, expires_in_minutes=60, created_by="test")
+            write_scheduler_state(
+                workspace_root,
+                max_concurrent_jobs=1,
+                jobs=[
+                    {
+                        "id": "job-other",
+                        "command": "run-plan",
+                        "status": "running",
+                        "repo_id": "repo-other",
+                        "project_dir": str(other_repo_dir),
+                        "workspace_root": str(workspace_root),
+                        "job_lane": "execution",
+                    }
+                ],
+            )
+
+            server = ShareHTTPServer(("127.0.0.1", 0), ShareRequestHandler, workspace_root=workspace_root)
+            thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True)
+            thread.start()
+            try:
+                base_url = f"http://127.0.0.1:{server.server_address[1]}"
+                request = urllib.request.Request(
+                    f"{base_url}/share/api/control?session={session.session_id}&token={session.viewer_token}",
+                    data=json.dumps({"action": "resume", "repo_id": project.metadata.repo_id}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with mock.patch("jakal_flow.share_server.run_command") as mocked_run:
+                    with self.assertRaises(urllib.error.HTTPError) as error_context:
+                        urllib.request.urlopen(request)
+
+                self.assertEqual(error_context.exception.code, 409)
+                payload = json.loads(error_context.exception.read().decode("utf-8"))
+                self.assertIn("wait for a free slot", payload.get("error", ""))
+                mocked_run.assert_not_called()
+            finally:
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)

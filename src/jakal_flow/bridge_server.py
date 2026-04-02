@@ -11,11 +11,13 @@ from typing import Any
 
 from .bridge_contract import BRIDGE_PROTOCOL_VERSION, BridgeEnvelope, BridgeError, BridgeEvent, BridgeJobSnapshot
 from .bridge_events import BridgeEventSink, bridge_event_context
-from .errors import ExecutionFailure, HANDLED_OPERATION_EXCEPTIONS, JSON_PARSE_EXCEPTIONS
+from .errors import ExecutionFailure, HANDLED_OPERATION_EXCEPTIONS, JSON_PARSE_EXCEPTIONS, RequestRejectedError
 from .job_scheduler import (
     DEFAULT_MAX_CONCURRENT_JOBS,
     append_scheduler_event,
+    load_scheduler_state,
     normalize_max_concurrent_jobs,
+    scheduler_state_file,
     write_scheduler_state,
 )
 from .failure_logs import write_runtime_failure_log
@@ -96,7 +98,8 @@ class BridgeJobStore:
         raw_limit = max_running_jobs
         if raw_limit is None:
             raw_limit = os.environ.get("JAKAL_FLOW_MAX_CONCURRENT_JOBS", DEFAULT_MAX_CONCURRENT_JOBS)
-        self._max_running_jobs = normalize_max_concurrent_jobs(raw_limit)
+        self._default_max_running_jobs = normalize_max_concurrent_jobs(raw_limit)
+        self._workspace_max_running_jobs: dict[str, int] = {}
 
     def _next_job_id_unlocked(self, command: str) -> str:
         self._job_sequence += 1
@@ -139,6 +142,24 @@ class BridgeJobStore:
             if job.workspace_root == workspace_key and str(job.status).strip().lower() == "running"
         )
 
+    def _max_running_jobs_for_workspace_unlocked(self, workspace_root: Path) -> int:
+        workspace_key = str(workspace_root)
+        cached = self._workspace_max_running_jobs.get(workspace_key)
+        if cached is not None:
+            return cached
+        default_limit = self._default_max_running_jobs
+        if scheduler_state_file(workspace_root).exists():
+            scheduler_state = load_scheduler_state(
+                workspace_root,
+                default_max_concurrent_jobs=default_limit,
+            )
+            default_limit = normalize_max_concurrent_jobs(
+                scheduler_state.max_concurrent_jobs,
+                default=default_limit,
+            )
+        self._workspace_max_running_jobs[workspace_key] = default_limit
+        return default_limit
+
     def _refresh_queue_positions_unlocked(self, workspace_root: Path, *, touch_timestamp: bool) -> list[BridgeJobSnapshot]:
         workspace_key = str(workspace_root)
         queued_jobs = sorted(
@@ -167,7 +188,7 @@ class BridgeJobStore:
         ]
         write_scheduler_state(
             workspace_root,
-            max_concurrent_jobs=self._max_running_jobs,
+            max_concurrent_jobs=self._max_running_jobs_for_workspace_unlocked(workspace_root),
             jobs=active_jobs,
         )
 
@@ -182,7 +203,7 @@ class BridgeJobStore:
         queued_jobs = [job for job in active_jobs if str(job.get("status", "")).strip().lower() == "queued"]
         return {
             "workspace_root": workspace_key,
-            "max_concurrent_jobs": self._max_running_jobs,
+            "max_concurrent_jobs": self._max_running_jobs_for_workspace_unlocked(workspace_root),
             "running_jobs": running_jobs,
             "queued_jobs": queued_jobs,
             "jobs": active_jobs,
@@ -243,22 +264,12 @@ class BridgeJobStore:
 
     def set_max_running_jobs(self, workspace_root: Path, max_running_jobs: Any) -> tuple[dict[str, Any], list[BridgeJobSnapshot]]:
         publish_updates: list[BridgeJobSnapshot] = []
-        impacted_workspaces: list[Path] = []
         with self._lock:
-            self._max_running_jobs = normalize_max_concurrent_jobs(max_running_jobs)
-            impacted_keys = {
-                str(key).strip()
-                for key in [workspace_root, *[job.workspace_root for job in self._jobs.values()]]
-                if str(key).strip()
-            }
-            impacted_workspaces = [Path(key) for key in sorted(impacted_keys)]
-            for item in impacted_workspaces:
-                publish_updates.extend(self._refresh_queue_positions_unlocked(item, touch_timestamp=False))
-                self._persist_workspace_state_unlocked(item)
+            self._workspace_max_running_jobs[str(workspace_root)] = normalize_max_concurrent_jobs(max_running_jobs)
+            publish_updates.extend(self._refresh_queue_positions_unlocked(workspace_root, touch_timestamp=False))
+            self._persist_workspace_state_unlocked(workspace_root)
         self._publish_many(publish_updates)
-        promoted: list[BridgeJobSnapshot] = []
-        for item in impacted_workspaces:
-            promoted.extend(self.dequeue_startable_jobs(item))
+        promoted = self.dequeue_startable_jobs(workspace_root)
         return self.scheduler_snapshot(workspace_root), promoted
 
     def create(self, command: str, workspace_root: Path, payload: dict[str, Any] | None = None) -> BridgeJobSnapshot:
@@ -285,11 +296,20 @@ class BridgeJobStore:
                 payload=request_payload,
             )
             if existing is not None:
-                raise RuntimeError("Another background task is already active for this project.")
+                raise RequestRejectedError(
+                    "Another background task is already active for this project.",
+                    reason_code="duplicate_job",
+                    details={"active_job_id": existing.id},
+                )
+            workspace_limit = self._max_running_jobs_for_workspace_unlocked(workspace_root)
             running_count = self._running_count_unlocked(workspace_root)
-            if running_count >= self._max_running_jobs and not allow_background_queue:
-                raise RuntimeError("Reservations are disabled for this project, so this run must wait for a free slot.")
-            status = "running" if running_count < self._max_running_jobs else "queued"
+            if running_count >= workspace_limit and not allow_background_queue:
+                raise RequestRejectedError(
+                    "Reservations are disabled for this project, so this run must wait for a free slot.",
+                    reason_code="background_queue_disabled",
+                    details={"max_concurrent_jobs": workspace_limit},
+                )
+            status = "running" if running_count < workspace_limit else "queued"
             snapshot = BridgeJobSnapshot(
                 id=job_id,
                 command=command,
@@ -369,7 +389,11 @@ class BridgeJobStore:
                 return None
             current_status = str(snapshot.status).strip().lower()
             if current_status != "queued":
-                raise RuntimeError("Only queued jobs can be cancelled.")
+                raise RequestRejectedError(
+                    "Only queued jobs can be cancelled.",
+                    reason_code="job_not_queued",
+                    details={"status": current_status},
+                )
             snapshot.status = "cancelled"
             snapshot.error = "Cancelled before execution."
             snapshot.queue_position = 0
@@ -403,7 +427,8 @@ class BridgeJobStore:
         publish_updates: list[BridgeJobSnapshot] = []
         started_jobs: list[BridgeJobSnapshot] = []
         with self._lock:
-            while self._running_count_unlocked(workspace_root) < self._max_running_jobs:
+            workspace_limit = self._max_running_jobs_for_workspace_unlocked(workspace_root)
+            while self._running_count_unlocked(workspace_root) < workspace_limit:
                 queued_jobs = sorted(
                     [
                         job
@@ -462,9 +487,17 @@ class BridgeServer:
         recoverable = None
         details: dict[str, Any] = {}
         normalized_message = message.lower().strip()
-        if isinstance(error, ExecutionFailure):
-            reason_code = error.reason_code
-            recoverable = True
+        explicit_reason_code = str(getattr(error, "reason_code", "")).strip().lower()
+        explicit_details = getattr(error, "details", None)
+        explicit_recoverable = getattr(error, "recoverable", None)
+        if isinstance(explicit_details, dict):
+            details = dict(explicit_details)
+        if explicit_reason_code:
+            reason_code = explicit_reason_code
+            if isinstance(explicit_recoverable, bool):
+                recoverable = explicit_recoverable
+            elif isinstance(error, ExecutionFailure):
+                recoverable = True
         elif isinstance(error, ValueError):
             if normalized_message.startswith("unsupported bridge method"):
                 reason_code = "unsupported_method"
@@ -475,6 +508,7 @@ class BridgeServer:
             reason_code = "request_rejected"
         elif isinstance(error, LookupError):
             reason_code = "not_found"
+            recoverable = True
         else:
             reason_code = "bridge_server_error"
             if normalized_message == "cancelled":
@@ -693,7 +727,7 @@ class BridgeServer:
             if method == "cancel_job":
                 result = self._jobs.cancel(str(params.get("job_id", "")).strip())
                 if result is None:
-                    raise RuntimeError("The requested background job was not found.")
+                    raise LookupError("The requested background job was not found.")
                 self._send_envelope(BridgeEnvelope(kind="response", id=request_id, ok=True, result=result.to_dict()))
                 return
 

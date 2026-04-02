@@ -1,5 +1,9 @@
 import { BRIDGE_EVENTS } from "../bridgeProtocol.js";
 
+function normalizedText(value = "") {
+  return String(value || "").trim();
+}
+
 export function bridgeEventType(eventPayload) {
   return String(eventPayload?.event || "").trim();
 }
@@ -35,10 +39,31 @@ function bridgeEventProjectKey(eventPayload) {
   if (!project || !eventType) {
     return "";
   }
+  const payload = eventPayload?.payload;
+  const event = payload?.event;
+  let detailKey = "";
+  if (eventType === BRIDGE_EVENTS.PROJECT_UI_EVENT && event && typeof event === "object") {
+    const uiEventType = normalizedText(event.event_type);
+    const details = event.details && typeof event.details === "object" ? event.details : {};
+    const stepId = normalizedText(details.step_id);
+    const stepIds = Array.isArray(details.step_ids)
+      ? details.step_ids.map((value) => normalizedText(value)).filter(Boolean).sort()
+      : [];
+    const statusStepIds = details.statuses && typeof details.statuses === "object"
+      ? Object.keys(details.statuses).map((value) => normalizedText(value)).filter(Boolean).sort()
+      : [];
+    detailKey = [
+      uiEventType,
+      stepId,
+      stepIds.join(","),
+      statusStepIds.join(","),
+    ].join("|");
+  }
   return [
     eventType,
     String(project.repo_id || "").trim(),
     String(project.project_dir || "").trim(),
+    detailKey,
   ].join("|");
 }
 

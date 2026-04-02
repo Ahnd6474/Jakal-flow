@@ -240,12 +240,12 @@ test("isDuplicateProjectJobError reads structured reason code fields", () => {
   );
 });
 
-test("isDuplicateProjectJobError falls back to legacy message match", () => {
+test("isDuplicateProjectJobError ignores message-only legacy payloads", () => {
   assert.equal(
     isDuplicateProjectJobError({
       message: "Another background task is already active for this project.",
     }),
-    true,
+    false,
   );
   assert.equal(isDuplicateProjectJobError({ message: "No match here." }), false);
 });

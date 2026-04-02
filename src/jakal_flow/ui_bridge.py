@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import time
+from threading import Lock, RLock
 from time import perf_counter
 from typing import Any
 
@@ -97,9 +98,12 @@ _codex_snapshot_service = CodexBackendSnapshotService(
     ttl_seconds=CODEX_SNAPSHOT_TTL_SECONDS,
 )
 _orchestrator_cache: dict[str, Orchestrator] = {}
+_orchestrator_cache_lock = Lock()
 _bridge_command_handlers_cache: dict[str, Any] | None = None
 _bridge_command_handlers_cache_token: tuple[int, ...] | None = None
+_bridge_command_handlers_cache_lock = Lock()
 _bridge_perf_aggregate_cache: dict[str, dict[str, Any]] = {}
+_bridge_perf_cache_lock = RLock()
 _BRIDGE_PERF_AGGREGATE_WINDOW_SECONDS = 1.0
 _BRIDGE_PERF_AGGREGATE_SAMPLE_LIMIT = 10
 _BRIDGE_PERF_AGGREGATE_COMMANDS = frozenset({"list-projects", "load-project", "load-project-core", "load-visible-project-state"})
@@ -147,12 +151,13 @@ def bootstrap_payload(workspace_root: Path) -> dict[str, Any]:
 def orchestrator_for(workspace_root: Path) -> Orchestrator:
     resolved_root = workspace_root.expanduser().resolve()
     cache_key = str(resolved_root)
-    cached = _orchestrator_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    orchestrator = Orchestrator(resolved_root)
-    _orchestrator_cache[cache_key] = orchestrator
-    return orchestrator
+    with _orchestrator_cache_lock:
+        cached = _orchestrator_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        orchestrator = Orchestrator(resolved_root)
+        _orchestrator_cache[cache_key] = orchestrator
+        return orchestrator
 
 
 def repo_root() -> Path:
@@ -456,64 +461,65 @@ def bridge_command_handlers() -> dict[str, Any]:
         id(save_share_server_config),
         id(_codex_snapshot_service),
     )
-    if _bridge_command_handlers_cache is not None and _bridge_command_handlers_cache_token == cache_token:
+    with _bridge_command_handlers_cache_lock:
+        if _bridge_command_handlers_cache is not None and _bridge_command_handlers_cache_token == cache_token:
+            return _bridge_command_handlers_cache
+        _bridge_command_handlers_cache_token = cache_token
+        _bridge_command_handlers_cache = {
+            **build_read_model_handlers(
+                bootstrap_payload=bootstrap_payload,
+                resolve_project=resolve_project,
+                resolve_history_project=resolve_history_project,
+                coerce_bool=coerce_bool,
+                codex_snapshot_service=_codex_snapshot_service,
+            ),
+            **build_project_command_handlers(
+                resolve_project=resolve_project,
+                resolve_history_project=resolve_history_project,
+                common_project_inputs=common_project_inputs,
+                parse_plan_state=parse_plan_state,
+                append_ui_event=append_ui_event,
+                save_run_control=save_run_control,
+                default_run_control=default_run_control,
+                clear_stop_request=clear_stop_request,
+                execution_scope_id=execution_scope_id,
+                execution_stop_registry=EXECUTION_STOP_REGISTRY,
+            ),
+            **build_contract_command_handlers(
+                resolve_project=resolve_project,
+                append_ui_event=append_ui_event,
+            ),
+            **build_share_command_handlers(
+                resolve_project=resolve_project,
+                coerce_positive_int=coerce_positive_int,
+                append_ui_event=append_ui_event,
+                start_share_server_process=start_share_server_process,
+                stop_share_server_process=stop_share_server_process,
+                start_public_tunnel=lambda workspace_root, target_url: start_cloudflare_quick_tunnel(workspace_root, target_url),
+                stop_public_tunnel=lambda workspace_root: stop_public_tunnel_process(workspace_root),
+                save_share_server_config=save_share_server_config,
+            ),
+            **build_run_command_handlers(
+                resolve_project=resolve_project,
+                common_project_inputs=common_project_inputs,
+                parse_plan_state=parse_plan_state,
+                append_ui_event=append_ui_event,
+                save_run_control=save_run_control,
+                default_run_control=default_run_control,
+                request_stop_immediately=request_stop_immediately,
+                stop_requested=stop_requested,
+                immediate_stop_requested=immediate_stop_requested,
+                chat_execution_scope_id=chat_execution_scope_id,
+                execution_scope_id=execution_scope_id,
+                execution_stop_registry=EXECUTION_STOP_REGISTRY,
+                coerce_bool=coerce_bool,
+            ),
+            **build_tooling_command_handlers(
+                coerce_bool=coerce_bool,
+                codex_snapshot_service=_codex_snapshot_service,
+            ),
+        }
         return _bridge_command_handlers_cache
-    _bridge_command_handlers_cache_token = cache_token
-    _bridge_command_handlers_cache = {
-        **build_read_model_handlers(
-            bootstrap_payload=bootstrap_payload,
-            resolve_project=resolve_project,
-            resolve_history_project=resolve_history_project,
-            coerce_bool=coerce_bool,
-            codex_snapshot_service=_codex_snapshot_service,
-        ),
-        **build_project_command_handlers(
-            resolve_project=resolve_project,
-            resolve_history_project=resolve_history_project,
-            common_project_inputs=common_project_inputs,
-            parse_plan_state=parse_plan_state,
-            append_ui_event=append_ui_event,
-            save_run_control=save_run_control,
-            default_run_control=default_run_control,
-            clear_stop_request=clear_stop_request,
-            execution_scope_id=execution_scope_id,
-            execution_stop_registry=EXECUTION_STOP_REGISTRY,
-        ),
-        **build_contract_command_handlers(
-            resolve_project=resolve_project,
-            append_ui_event=append_ui_event,
-        ),
-        **build_share_command_handlers(
-            resolve_project=resolve_project,
-            coerce_positive_int=coerce_positive_int,
-            append_ui_event=append_ui_event,
-            start_share_server_process=start_share_server_process,
-            stop_share_server_process=stop_share_server_process,
-            start_public_tunnel=lambda workspace_root, target_url: start_cloudflare_quick_tunnel(workspace_root, target_url),
-            stop_public_tunnel=lambda workspace_root: stop_public_tunnel_process(workspace_root),
-            save_share_server_config=save_share_server_config,
-        ),
-        **build_run_command_handlers(
-            resolve_project=resolve_project,
-            common_project_inputs=common_project_inputs,
-            parse_plan_state=parse_plan_state,
-            append_ui_event=append_ui_event,
-            save_run_control=save_run_control,
-            default_run_control=default_run_control,
-            request_stop_immediately=request_stop_immediately,
-            stop_requested=stop_requested,
-            immediate_stop_requested=immediate_stop_requested,
-            chat_execution_scope_id=chat_execution_scope_id,
-            execution_scope_id=execution_scope_id,
-            execution_stop_registry=EXECUTION_STOP_REGISTRY,
-            coerce_bool=coerce_bool,
-        ),
-        **build_tooling_command_handlers(
-            coerce_bool=coerce_bool,
-            codex_snapshot_service=_codex_snapshot_service,
-        ),
-    }
-    return _bridge_command_handlers_cache
 
 
 def _payload_size_bytes(value: Any) -> int:
@@ -593,72 +599,74 @@ def _write_bridge_perf_entry(workspace_root: Path, entry: dict[str, Any]) -> Non
 
 
 def _flush_bridge_perf_aggregates(workspace_root: Path | None = None, *, force: bool = False) -> None:
-    now_monotonic = time.monotonic()
-    flush_keys: list[str] = []
-    for key, aggregate in _bridge_perf_aggregate_cache.items():
-        if workspace_root is not None and aggregate.get("workspace_root") != str(workspace_root):
-            continue
-        if force or (now_monotonic - float(aggregate.get("started_monotonic", now_monotonic))) >= _BRIDGE_PERF_AGGREGATE_WINDOW_SECONDS:
-            flush_keys.append(key)
-    for key in flush_keys:
-        aggregate = _bridge_perf_aggregate_cache.pop(key, None)
-        if aggregate is None:
-            continue
-        entry = dict(aggregate["entry"])
-        sample_count = int(aggregate.get("sample_count", 1) or 1)
-        total_duration_ms = float(aggregate.get("total_duration_ms", entry.get("duration_ms", 0.0)) or 0.0)
-        entry["sample_count"] = sample_count
-        entry["duration_ms_avg"] = round(total_duration_ms / sample_count, 3)
-        entry["duration_ms_max"] = round(float(aggregate.get("max_duration_ms", entry.get("duration_ms", 0.0)) or 0.0), 3)
-        entry["payload_size_bytes_avg"] = int(entry.get("payload_size_bytes", 0))
-        entry["result_size_bytes_avg"] = int(entry.get("result_size_bytes", 0))
-        _write_bridge_perf_entry(Path(str(aggregate["workspace_root"])), entry)
+    with _bridge_perf_cache_lock:
+        now_monotonic = time.monotonic()
+        flush_keys: list[str] = []
+        for key, aggregate in _bridge_perf_aggregate_cache.items():
+            if workspace_root is not None and aggregate.get("workspace_root") != str(workspace_root):
+                continue
+            if force or (now_monotonic - float(aggregate.get("started_monotonic", now_monotonic))) >= _BRIDGE_PERF_AGGREGATE_WINDOW_SECONDS:
+                flush_keys.append(key)
+        for key in flush_keys:
+            aggregate = _bridge_perf_aggregate_cache.pop(key, None)
+            if aggregate is None:
+                continue
+            entry = dict(aggregate["entry"])
+            sample_count = int(aggregate.get("sample_count", 1) or 1)
+            total_duration_ms = float(aggregate.get("total_duration_ms", entry.get("duration_ms", 0.0)) or 0.0)
+            entry["sample_count"] = sample_count
+            entry["duration_ms_avg"] = round(total_duration_ms / sample_count, 3)
+            entry["duration_ms_max"] = round(float(aggregate.get("max_duration_ms", entry.get("duration_ms", 0.0)) or 0.0), 3)
+            entry["payload_size_bytes_avg"] = int(entry.get("payload_size_bytes", 0))
+            entry["result_size_bytes_avg"] = int(entry.get("result_size_bytes", 0))
+            _write_bridge_perf_entry(Path(str(aggregate["workspace_root"])), entry)
 
 
 def _bridge_perf_log(workspace_root: Path, command: str, payload: dict[str, Any], result: Any, duration_ms: float) -> None:
-    _flush_bridge_perf_aggregates(workspace_root)
-    payload_cache_hit = bool(result.get("payload_cache_hit")) if isinstance(result, dict) else False
-    if (
-        command not in _BRIDGE_PERF_AGGREGATE_COMMANDS
-        or not payload_cache_hit
-        or duration_ms >= 25.0
-    ):
-        entry = _bridge_perf_entry(command, payload, result, duration_ms)
-        _write_bridge_perf_entry(workspace_root, entry)
-        return
+    with _bridge_perf_cache_lock:
+        _flush_bridge_perf_aggregates(workspace_root)
+        payload_cache_hit = bool(result.get("payload_cache_hit")) if isinstance(result, dict) else False
+        if (
+            command not in _BRIDGE_PERF_AGGREGATE_COMMANDS
+            or not payload_cache_hit
+            or duration_ms >= 25.0
+        ):
+            entry = _bridge_perf_entry(command, payload, result, duration_ms)
+            _write_bridge_perf_entry(workspace_root, entry)
+            return
 
-    aggregate_key = "|".join(
-        [
-            str(workspace_root),
-            command,
-            str(payload.get("repo_id", "")).strip(),
-            str(payload.get("project_dir", "")).strip(),
-            str(payload.get("detail_level", "")).strip().lower(),
-            str(coerce_bool(payload.get("refresh_codex_status", False), False)).lower(),
-        ]
-    )
-    aggregate = _bridge_perf_aggregate_cache.get(aggregate_key)
-    if aggregate is None:
-        entry = _bridge_perf_hot_entry(command, payload, result, duration_ms)
-        _bridge_perf_aggregate_cache[aggregate_key] = {
-            "workspace_root": str(workspace_root),
-            "entry": entry,
-            "sample_count": 1,
-            "total_duration_ms": float(entry["duration_ms"]),
-            "max_duration_ms": float(entry["duration_ms"]),
-            "started_monotonic": time.monotonic(),
-        }
-        return
-    aggregate["sample_count"] = int(aggregate.get("sample_count", 1) or 1) + 1
-    aggregate["total_duration_ms"] = float(aggregate.get("total_duration_ms", 0.0) or 0.0) + float(duration_ms)
-    aggregate["max_duration_ms"] = max(float(aggregate.get("max_duration_ms", 0.0) or 0.0), float(duration_ms))
-    aggregate["entry"]["timestamp"] = now_utc_iso()
-    aggregate["entry"]["duration_ms"] = round(duration_ms, 3)
-    if isinstance(result, dict):
-        aggregate["entry"]["content_signature"] = str(result.get("content_signature", "")).strip()
-        aggregate["entry"]["detail_signature"] = str(result.get("detail_signature", "")).strip()
-    if int(aggregate["sample_count"]) >= _BRIDGE_PERF_AGGREGATE_SAMPLE_LIMIT:
-        _flush_bridge_perf_aggregates(workspace_root, force=True)
+        aggregate_key = "|".join(
+            [
+                str(workspace_root),
+                command,
+                str(payload.get("repo_id", "")).strip(),
+                str(payload.get("project_dir", "")).strip(),
+                str(payload.get("detail_level", "")).strip().lower(),
+                str(coerce_bool(payload.get("refresh_codex_status", False), False)).lower(),
+            ]
+        )
+        aggregate = _bridge_perf_aggregate_cache.get(aggregate_key)
+        if aggregate is None:
+            entry = _bridge_perf_hot_entry(command, payload, result, duration_ms)
+            _bridge_perf_aggregate_cache[aggregate_key] = {
+                "workspace_root": str(workspace_root),
+                "entry": entry,
+                "sample_count": 1,
+                "total_duration_ms": float(entry["duration_ms"]),
+                "max_duration_ms": float(entry["duration_ms"]),
+                "started_monotonic": time.monotonic(),
+            }
+            return
+        aggregate["sample_count"] = int(aggregate.get("sample_count", 1) or 1) + 1
+        aggregate["total_duration_ms"] = float(aggregate.get("total_duration_ms", 0.0) or 0.0) + float(duration_ms)
+        aggregate["max_duration_ms"] = max(float(aggregate.get("max_duration_ms", 0.0) or 0.0), float(duration_ms))
+        aggregate["entry"]["timestamp"] = now_utc_iso()
+        aggregate["entry"]["duration_ms"] = round(duration_ms, 3)
+        if isinstance(result, dict):
+            aggregate["entry"]["content_signature"] = str(result.get("content_signature", "")).strip()
+            aggregate["entry"]["detail_signature"] = str(result.get("detail_signature", "")).strip()
+        if int(aggregate["sample_count"]) >= _BRIDGE_PERF_AGGREGATE_SAMPLE_LIMIT:
+            _flush_bridge_perf_aggregates(workspace_root, force=True)
 
 
 def run_command(command: str, workspace_root: Path, payload: dict[str, Any] | None = None) -> dict[str, Any]:
