@@ -61,6 +61,35 @@ class DesktopRuntimeBundleTests(unittest.TestCase):
             self.assertEqual(manifest.package_name, "@openai/codex")
             self.assertEqual(manifest.package_version, "1.2.3")
 
+    def test_remove_tree_retries_transient_windows_directory_not_empty_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "bundle"
+            target.mkdir()
+            (target / "placeholder.txt").write_text("data", encoding="utf-8")
+
+            attempt_state = {"count": 0}
+            original_rmtree = desktop_runtime_bundle.shutil.rmtree
+            original_sleep = desktop_runtime_bundle.time.sleep
+
+            def flaky_rmtree(path, onerror=None):
+                attempt_state["count"] += 1
+                if attempt_state["count"] < 4:
+                    exc = OSError(145, "directory is not empty")
+                    exc.winerror = 145
+                    raise exc
+                return original_rmtree(path, onerror=onerror)
+
+            try:
+                desktop_runtime_bundle.shutil.rmtree = flaky_rmtree
+                desktop_runtime_bundle.time.sleep = lambda _: None
+                desktop_runtime_bundle._remove_tree(target)
+            finally:
+                desktop_runtime_bundle.shutil.rmtree = original_rmtree
+                desktop_runtime_bundle.time.sleep = original_sleep
+
+            self.assertEqual(attempt_state["count"], 4)
+            self.assertFalse(target.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

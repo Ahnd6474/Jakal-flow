@@ -28,6 +28,7 @@ import {
   selectedConfigReasoning,
   shouldAutoSelectProject,
   shouldReplaceVisibleProject,
+  statusTone,
   stepModelSelectionPatch,
 } from "./utils.js";
 
@@ -106,6 +107,16 @@ test("canEditProjectConfig allows edits while paused but blocks active runs", ()
   assert.equal(canEditProjectConfig("paused", "running"), true);
   assert.equal(canEditProjectConfig("ready", "running"), false);
   assert.equal(canEditProjectConfig("running", ""), false);
+});
+
+test("statusTone keeps flowchart colors aligned with queued and review statuses", () => {
+  assert.equal(statusTone("queued"), "info");
+  assert.equal(statusTone("queued:run-plan"), "info");
+  assert.equal(statusTone("awaiting_review"), "warning");
+  assert.equal(statusTone("awaiting_checkpoint_approval"), "warning");
+  assert.equal(statusTone("running:debugging"), "warning");
+  assert.equal(statusTone("completed"), "success");
+  assert.equal(statusTone("failed"), "danger");
 });
 
 test("project selection helpers keep new-project drafts from being overwritten", () => {

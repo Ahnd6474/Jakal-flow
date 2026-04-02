@@ -1,6 +1,6 @@
 import { memo, useId, useMemo } from "react";
 import { displayStatus } from "../../locale";
-import { deriveExecutionUiState, effectiveStepStatus, failureReasonLabel, isDebuggingStatus } from "../../utils";
+import { deriveExecutionUiState, effectiveStepStatus, failureReasonLabel, statusTone } from "../../utils";
 
 const FONT_FAMILY = '"Segoe UI", "Malgun Gothic", sans-serif';
 const BOX_WIDTH = 220;
@@ -219,60 +219,9 @@ function chartTopologySignature(steps = []) {
     .join("::");
 }
 
-function resolveChartNodeVisuals(persistedStatus = "", displayStatus = "") {
-  const normalizedPersisted = String(persistedStatus || "").trim().toLowerCase();
-  const normalizedDisplay = String(displayStatus || "").trim().toLowerCase();
-  let resolvedStatus = normalizedPersisted || "pending";
-  if (normalizedDisplay) {
-    if (
-      normalizedDisplay === "completed"
-      || normalizedDisplay.includes("failed")
-      || normalizedDisplay === "awaiting_review"
-      || normalizedDisplay === "syncing"
-      || isDebuggingStatus(normalizedDisplay)
-    ) {
-      resolvedStatus = normalizedDisplay;
-    } else if (
-      normalizedDisplay === "integrating"
-      || normalizedDisplay === "running"
-      || normalizedDisplay.startsWith("running:")
-      || normalizedDisplay === "queued"
-      || normalizedDisplay.startsWith("queued:")
-    ) {
-      resolvedStatus = normalizedPersisted || "pending";
-    } else {
-      resolvedStatus = normalizedDisplay;
-    }
-  }
-  const tone = (() => {
-    if (!resolvedStatus) {
-      return "neutral";
-    }
-    if (resolvedStatus === "completed") {
-      return "success";
-    }
-    if (resolvedStatus.includes("failed")) {
-      return "danger";
-    }
-    if (isDebuggingStatus(resolvedStatus)) {
-      return "warning";
-    }
-    if (resolvedStatus === "integrating" || resolvedStatus.includes("running")) {
-      return "info";
-    }
-    if (
-      resolvedStatus === "pending"
-      || resolvedStatus === "not_started"
-      || resolvedStatus === "idle"
-      || resolvedStatus === "ready"
-      || resolvedStatus === "blocked"
-      || resolvedStatus.includes("queued")
-      || resolvedStatus.includes("cancelled")
-    ) {
-      return "neutral";
-    }
-    return "warning";
-  })();
+function resolveChartNodeVisuals(status = "", fallbackStatus = "") {
+  const resolvedStatus = String(status || "").trim().toLowerCase() || String(fallbackStatus || "").trim().toLowerCase();
+  const tone = statusTone(resolvedStatus);
   return {
     tone,
     palette: PALETTE[tone] || PALETTE.warning,
@@ -580,7 +529,7 @@ function buildChartData(steps = [], projectStatus = "", language = "en", activeL
       const renderedStep = liveStatus ? { ...node.step, status: liveStatus } : node.step;
       const stepStatus = effectiveChartStepStatus(renderedStep, projectStatus, activeLineageId, checkpointLookup, checkpointFamily);
       const persistedStatus = String(node.step?.status || "").trim().toLowerCase() || "pending";
-      const { tone, palette } = resolveChartNodeVisuals(persistedStatus, stepStatus);
+      const { tone, palette } = resolveChartNodeVisuals(stepStatus, persistedStatus);
       const failureReason = failureReasonLabel(renderedStep, language);
       return {
         ...node,

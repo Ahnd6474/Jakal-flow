@@ -28,6 +28,8 @@ _DEFAULT_OPTIONAL_COMMANDS = ("gemini.cmd", "claude.cmd", "qwen.cmd") if os.name
 _SHIM_TARGET_PATTERN = re.compile(r"%dp0%\\(?P<relative>node_modules\\[^\"]+)", re.IGNORECASE)
 _BUNDLED_PYTHON_DIRNAME = "py"
 _BUNDLED_TOOLING_DIRNAME = "bin"
+_REMOVE_TREE_ATTEMPTS = 8
+_REMOVE_TREE_RETRY_DELAY_SECONDS = 0.25
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +106,25 @@ def _copy_file(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def _make_writable(path: Path | str) -> None:
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    except OSError:
+        return
+
+
+def _prepare_tree_for_removal(target: Path) -> None:
+    if not target.exists():
+        return
+    for root, dir_names, file_names in os.walk(target, topdown=False):
+        current = Path(root)
+        for file_name in file_names:
+            _make_writable(current / file_name)
+        for directory_name in dir_names:
+            _make_writable(current / directory_name)
+    _make_writable(target)
+
+
 def _remove_tree(path: Path) -> None:
     target = Path(path)
     if not target.exists():
@@ -111,19 +132,22 @@ def _remove_tree(path: Path) -> None:
 
     def _handle_remove_readonly(func, failed_path, exc_info) -> None:
         try:
-            os.chmod(failed_path, stat.S_IWRITE | stat.S_IREAD)
+            _make_writable(failed_path)
             func(failed_path)
         except OSError:
             raise exc_info[1]
 
     last_error: OSError | None = None
-    for _ in range(3):
+    for attempt in range(_REMOVE_TREE_ATTEMPTS):
         try:
             shutil.rmtree(target, onerror=_handle_remove_readonly)
             return
         except OSError as exc:
             last_error = exc
-            time.sleep(0.2)
+            _prepare_tree_for_removal(target)
+            if not target.exists():
+                return
+            time.sleep(_REMOVE_TREE_RETRY_DELAY_SECONDS * (attempt + 1))
     if last_error is not None:
         raise last_error
 
