@@ -106,6 +106,54 @@ class ToolingManagerTests(unittest.TestCase):
         self.assertEqual(second["codex"]["installed"], False)
         self.assertEqual(refreshed["codex"]["installed"], True)
 
+    def test_get_tooling_statuses_keeps_startup_safe_cache_separate(self) -> None:
+        with mock.patch.object(
+            tooling_manager,
+            "_collect_tooling_statuses",
+            side_effect=[
+                {"codex": {"installed": False, "version": ""}},
+                {"codex": {"installed": True, "version": "0.1.0"}},
+            ],
+        ) as collect_statuses:
+            startup = tooling_manager.get_tooling_statuses(startup_safe=True)
+            full = tooling_manager.get_tooling_statuses()
+
+        self.assertEqual(collect_statuses.call_count, 2)
+        self.assertEqual(
+            collect_statuses.call_args_list[0].kwargs,
+            {"startup_safe": True, "include_ollama_details": True},
+        )
+        self.assertEqual(
+            collect_statuses.call_args_list[1].kwargs,
+            {"startup_safe": False, "include_ollama_details": True},
+        )
+        self.assertEqual(startup["codex"]["version"], "")
+        self.assertEqual(full["codex"]["version"], "0.1.0")
+
+    def test_get_tooling_statuses_keeps_ollama_detail_cache_separate(self) -> None:
+        with mock.patch.object(
+            tooling_manager,
+            "_collect_tooling_statuses",
+            side_effect=[
+                {"ollama": {"running": None, "models": []}},
+                {"ollama": {"running": False, "models": ["qwen2.5-coder:0.5b"]}},
+            ],
+        ) as collect_statuses:
+            summary = tooling_manager.get_tooling_statuses(include_ollama_details=False)
+            detailed = tooling_manager.get_tooling_statuses(include_ollama_details=True)
+
+        self.assertEqual(collect_statuses.call_count, 2)
+        self.assertEqual(
+            collect_statuses.call_args_list[0].kwargs,
+            {"startup_safe": False, "include_ollama_details": False},
+        )
+        self.assertEqual(
+            collect_statuses.call_args_list[1].kwargs,
+            {"startup_safe": False, "include_ollama_details": True},
+        )
+        self.assertIsNone(summary["ollama"]["running"])
+        self.assertFalse(detailed["ollama"]["running"])
+
     def test_run_tooling_action_logs_existing_install_without_changes(self) -> None:
         with TemporaryTestDir() as temp_dir, mock.patch.object(
             tooling_manager,
@@ -250,6 +298,72 @@ class ToolingBridgeTests(unittest.TestCase):
         self.assertEqual(result["tooling_action"]["tool"], "codex")
         self.assertTrue(result["tooling_statuses"]["codex"]["installed"])
         self.assertFalse(result["emit_project_changed"])
+
+    def test_get_tooling_status_command_skips_ollama_details_by_default(self) -> None:
+        fake_service = mock.Mock(get_snapshot=mock.Mock(return_value=fake_codex_snapshot()))
+        with TemporaryTestDir() as temp_dir, mock.patch(
+            "jakal_flow.ui_bridge._codex_snapshot_service",
+            new=fake_service,
+        ), mock.patch(
+            "jakal_flow.ui_bridge_commands.tooling.tooling_snapshot_payload",
+            return_value={
+                "codex_status": fake_codex_snapshot_payload(),
+                "model_catalog": [{"model": "auto", "provider": "openai"}],
+                "tooling_statuses": {"ollama": {"installed": True}},
+            },
+        ) as tooling_snapshot_payload_mock:
+            ui_bridge.run_command("get-tooling-status", temp_dir, {})
+
+        self.assertFalse(tooling_snapshot_payload_mock.call_args.kwargs["include_ollama_details"])
+
+    def test_manage_tooling_connect_includes_ollama_details(self) -> None:
+        fake_service = mock.Mock(get_snapshot=mock.Mock(return_value=fake_codex_snapshot()))
+        with TemporaryTestDir() as temp_dir, mock.patch(
+            "jakal_flow.ui_bridge._codex_snapshot_service",
+            new=fake_service,
+        ), mock.patch(
+            "jakal_flow.ui_bridge_commands.tooling.run_tooling_action",
+            return_value={
+                "tool": "ollama",
+                "action": "connect",
+                "changed": True,
+                "message": "Connected Ollama.",
+            },
+        ), mock.patch(
+            "jakal_flow.ui_bridge_commands.tooling.tooling_snapshot_payload",
+            return_value={
+                "codex_status": fake_codex_snapshot_payload(),
+                "model_catalog": [{"model": "auto", "provider": "openai"}],
+                "tooling_statuses": {"ollama": {"installed": True}},
+            },
+        ) as tooling_snapshot_payload_mock:
+            ui_bridge.run_command(
+                "manage-tooling",
+                temp_dir,
+                {"tool": "ollama", "action": "connect", "model": "qwen2.5-coder:0.5b"},
+            )
+
+        self.assertTrue(tooling_snapshot_payload_mock.call_args.kwargs["include_ollama_details"])
+
+    def test_tooling_snapshot_payload_prefers_startup_safe_tooling_statuses_when_cached(self) -> None:
+        fake_service = mock.Mock(
+            peek_snapshot=mock.Mock(return_value=fake_codex_snapshot()),
+        )
+        with mock.patch(
+            "jakal_flow.ui_bridge_commands.tooling.provider_statuses_payload",
+            return_value={"openai": {"available": True}},
+        ), mock.patch(
+            "jakal_flow.ui_bridge_commands.tooling.get_tooling_statuses",
+            return_value={"codex": {"installed": True, "version": ""}},
+        ) as get_tooling_statuses_mock:
+            snapshot = ui_bridge.tooling_snapshot_payload(
+                codex_snapshot_service=fake_service,
+                force_refresh=False,
+                prefer_cached=True,
+            )
+
+        get_tooling_statuses_mock.assert_called_once_with(force_refresh=False, startup_safe=True)
+        self.assertTrue(snapshot["tooling_statuses"]["codex"]["installed"])
 
 
 if __name__ == "__main__":

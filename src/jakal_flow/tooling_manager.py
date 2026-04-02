@@ -49,7 +49,7 @@ _OLLAMA_SUGGESTED_MODELS: tuple[str, ...] = (
     "gemma3:4b",
     "mistral-small:24b",
 )
-_TOOLING_STATUS_CACHE: tuple[float, dict[str, dict[str, Any]]] | None = None
+_TOOLING_STATUS_CACHE: dict[str, tuple[float, dict[str, dict[str, Any]]]] = {}
 _TOOLING_STATUS_CACHE_LOCK = Lock()
 
 
@@ -85,28 +85,43 @@ class ToolingStatus:
         }
 
 
-def get_tooling_statuses(*, force_refresh: bool = False) -> dict[str, dict[str, Any]]:
-    global _TOOLING_STATUS_CACHE
+def get_tooling_statuses(
+    *,
+    force_refresh: bool = False,
+    startup_safe: bool = False,
+    include_ollama_details: bool = True,
+) -> dict[str, dict[str, Any]]:
     now = time.monotonic()
+    cache_key = (
+        f"{'startup' if startup_safe else 'full'}:"
+        f"{'ollama-details' if include_ollama_details else 'ollama-summary'}"
+    )
     with _TOOLING_STATUS_CACHE_LOCK:
-        if (
-            not force_refresh
-            and _TOOLING_STATUS_CACHE is not None
-            and (now - _TOOLING_STATUS_CACHE[0]) <= _TOOLING_STATUS_CACHE_TTL_SECONDS
-        ):
-            return deepcopy(_TOOLING_STATUS_CACHE[1])
-    statuses = _collect_tooling_statuses()
+        cached = _TOOLING_STATUS_CACHE.get(cache_key)
+        if not force_refresh and cached is not None and (now - cached[0]) <= _TOOLING_STATUS_CACHE_TTL_SECONDS:
+            return deepcopy(cached[1])
+    statuses = _collect_tooling_statuses(
+        startup_safe=startup_safe,
+        include_ollama_details=include_ollama_details,
+    )
     with _TOOLING_STATUS_CACHE_LOCK:
-        _TOOLING_STATUS_CACHE = (time.monotonic(), deepcopy(statuses))
+        _TOOLING_STATUS_CACHE[cache_key] = (time.monotonic(), deepcopy(statuses))
     return statuses
 
 
-def _collect_tooling_statuses() -> dict[str, dict[str, Any]]:
-    npm_status = _npm_status()
-    codex_status = _cli_status("codex")
-    gemini_status = _cli_status("gemini")
-    claude_status = _cli_status("claude")
-    ollama_status = _ollama_status()
+def _collect_tooling_statuses(
+    *,
+    startup_safe: bool = False,
+    include_ollama_details: bool = True,
+) -> dict[str, dict[str, Any]]:
+    npm_status = _npm_status(startup_safe=startup_safe)
+    codex_status = _cli_status("codex", startup_safe=startup_safe)
+    gemini_status = _cli_status("gemini", startup_safe=startup_safe)
+    claude_status = _cli_status("claude", startup_safe=startup_safe)
+    ollama_status = _ollama_status(
+        startup_safe=startup_safe,
+        include_details=include_ollama_details,
+    )
     return {
         "npm": npm_status.to_dict(),
         "codex": codex_status.to_dict(),
@@ -117,9 +132,8 @@ def _collect_tooling_statuses() -> dict[str, dict[str, Any]]:
 
 
 def _invalidate_tooling_status_cache() -> None:
-    global _TOOLING_STATUS_CACHE
     with _TOOLING_STATUS_CACHE_LOCK:
-        _TOOLING_STATUS_CACHE = None
+        _TOOLING_STATUS_CACHE.clear()
 
 
 def run_tooling_action(
@@ -194,11 +208,11 @@ def _append_tooling_event(workspace_root: Path, payload: dict[str, Any]) -> None
     )
 
 
-def _npm_status() -> ToolingStatus:
+def _npm_status(*, startup_safe: bool = False) -> ToolingStatus:
     command = "npm.cmd" if os.name == "nt" else "npm"
     resolved_command = _resolve_command(command)
     installed = bool(resolved_command)
-    version = _command_version(resolved_command) if installed else ""
+    version = _command_version(resolved_command) if installed and not startup_safe else ""
     reason = (
         "npm is available for installing terminal agents."
         if installed
@@ -216,11 +230,11 @@ def _npm_status() -> ToolingStatus:
     )
 
 
-def _cli_status(tool: str) -> ToolingStatus:
+def _cli_status(tool: str, *, startup_safe: bool = False) -> ToolingStatus:
     command = default_codex_path("openai" if tool == "codex" else tool)
     resolved_command = _resolve_command(command)
     installed = bool(resolved_command)
-    version = _command_version(resolved_command) if installed else ""
+    version = _command_version(resolved_command) if installed and not startup_safe else ""
     reason = (
         f"{_DISPLAY_NAMES[tool]} is installed."
         if installed
@@ -242,16 +256,25 @@ def _cli_status(tool: str) -> ToolingStatus:
     )
 
 
-def _ollama_status() -> ToolingStatus:
+def _ollama_status(*, startup_safe: bool = False, include_details: bool = True) -> ToolingStatus:
     model_store_root = _ollama_model_store_root()
     resolved_command = _resolve_command("ollama")
     installed = bool(resolved_command)
-    version = _command_version(resolved_command) if installed else ""
-    running, runtime_models = _ollama_runtime_status() if installed else (False, [])
-    vendored_models = _vendored_ollama_models()
-    models = _merge_model_names(runtime_models, vendored_models)
+    version = _command_version(resolved_command) if installed and not startup_safe else ""
+    details_requested = include_details and not startup_safe
+    if not details_requested:
+        running = None
+        models: list[str] = []
+    else:
+        running, runtime_models = _ollama_runtime_status() if installed else (False, [])
+        vendored_models = _vendored_ollama_models()
+        models = _merge_model_names(runtime_models, vendored_models)
     if not installed:
         reason = "Ollama is not installed."
+    elif startup_safe:
+        reason = "Ollama is installed. Detailed runtime status loads after startup."
+    elif not include_details:
+        reason = "Ollama is installed. Open the model manager to load runtime details."
     elif running and models:
         reason = f"Ollama is connected with {len(models)} installed model(s)."
     elif models:

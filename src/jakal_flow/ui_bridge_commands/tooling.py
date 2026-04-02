@@ -54,7 +54,7 @@ def _fallback_tooling_snapshot() -> dict[str, Any]:
     return {
         "codex_status": codex_status,
         "model_catalog": model_catalog,
-        "tooling_statuses": get_tooling_statuses(force_refresh=False),
+        "tooling_statuses": get_tooling_statuses(force_refresh=False, startup_safe=True),
     }
 
 
@@ -63,6 +63,7 @@ def tooling_snapshot_payload(
     codex_snapshot_service,
     force_refresh: bool = False,
     prefer_cached: bool = False,
+    include_ollama_details: bool = False,
 ) -> dict[str, Any]:
     if prefer_cached and not force_refresh:
         cached_snapshot = codex_snapshot_service.peek_snapshot()
@@ -73,7 +74,7 @@ def tooling_snapshot_payload(
         return {
             "codex_status": codex_status,
             "model_catalog": codex_status.get("model_catalog", []),
-            "tooling_statuses": get_tooling_statuses(force_refresh=False),
+            "tooling_statuses": get_tooling_statuses(force_refresh=False, startup_safe=True),
         }
 
     fetch_snapshot = lambda codex_path="": codex_snapshot_service.get_snapshot(  # noqa: E731
@@ -88,7 +89,10 @@ def tooling_snapshot_payload(
     return {
         "codex_status": codex_status,
         "model_catalog": codex_status.get("model_catalog", []),
-        "tooling_statuses": get_tooling_statuses(force_refresh=force_refresh),
+        "tooling_statuses": get_tooling_statuses(
+            force_refresh=force_refresh,
+            include_ollama_details=include_ollama_details,
+        ),
     }
 
 
@@ -99,10 +103,12 @@ def build_tooling_command_handlers(
 ) -> dict[str, BridgeCommandHandler]:
     def get_tooling_status(ctx: BridgeCommandContext) -> dict[str, Any]:
         force_refresh = coerce_bool(ctx.payload.get("force_refresh", False), False)
+        include_ollama_details = coerce_bool(ctx.payload.get("include_ollama_details", False), False)
         return {
             **tooling_snapshot_payload(
                 codex_snapshot_service=codex_snapshot_service,
                 force_refresh=force_refresh,
+                include_ollama_details=include_ollama_details,
             ),
             "emit_project_changed": False,
         }
@@ -121,6 +127,7 @@ def build_tooling_command_handlers(
             **tooling_snapshot_payload(
                 codex_snapshot_service=codex_snapshot_service,
                 force_refresh=True,
+                include_ollama_details=(tool == "ollama" and action == "connect"),
             ),
             "tooling_action": action_result,
             "emit_project_changed": False,

@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useI18n } from "../../i18n";
+import { scheduleIdleTask } from "../../lazyLoad";
 import { displayStatus } from "../../locale";
 import { arePropsEqualExceptFunctions } from "../../shallowProps";
 import { codexUsageBuckets, formatCheckpointDisplayId, formatUsd, rateLimitRemainingLabel, rateLimitWindowSummary, shouldShowEstimatedCost, statusTone } from "../../utils";
@@ -25,15 +26,6 @@ function buildJsonPreview(value, depth = 0) {
   return value;
 }
 
-function scheduleJsonFormatting(callback) {
-  if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
-    const handle = window.requestIdleCallback(callback, { timeout: 200 });
-    return () => window.cancelIdleCallback(handle);
-  }
-  const handle = window.setTimeout(callback, 80);
-  return () => window.clearTimeout(handle);
-}
-
 const LazyJsonPanel = memo(function LazyJsonPanel({ eventJson = null }) {
   const [showFullJson, setShowFullJson] = useState(false);
   const [formattedJson, setFormattedJson] = useState("");
@@ -49,13 +41,13 @@ const LazyJsonPanel = memo(function LazyJsonPanel({ eventJson = null }) {
     if (!showFullJson) {
       return undefined;
     }
-    const cancelFormatting = scheduleJsonFormatting(() => {
+    const cancelFormatting = scheduleIdleTask(() => {
       try {
         setFormattedJson(JSON.stringify(eventJson || {}, null, 2));
       } catch {
         setFormattedJson(String(eventJson || ""));
       }
-    });
+    }, { idleTimeout: 200, fallbackDelay: 80 });
     return cancelFormatting;
   }, [eventJson, showFullJson]);
 

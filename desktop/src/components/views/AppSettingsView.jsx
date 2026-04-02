@@ -126,6 +126,11 @@ function cloneSettings(value) {
   return cloneValue(value && typeof value === "object" ? value : {});
 }
 
+function normalizeSettingsTabKey(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return SETTINGS_TAB_KEYS.has(normalized) ? normalized : "app";
+}
+
 function sameSettingsSnapshot(left, right) {
   return programSettingsEqual(left, right);
 }
@@ -241,6 +246,7 @@ function OllamaModelManagerModal({
   ollamaJob,
   onConnectOllama,
   language,
+  loading = false,
 }) {
   const normalizedSearch = String(ollamaSearch || "").trim().toLowerCase();
   const addableModels = recommendedModels.filter((m) => !installedModels.includes(m));
@@ -288,7 +294,11 @@ function OllamaModelManagerModal({
           <span style={{ fontSize: "12px", color: "var(--text-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
             {language === "ko" ? "설치된 모델" : "Installed models"}
           </span>
-          {installedModels.length ? (
+          {loading ? (
+            <div style={{ fontSize: "12px", color: "var(--text-muted)", padding: "8px 0" }}>
+              {language === "ko" ? "설치된 모델 목록을 불러오는 중입니다." : "Loading installed models..."}
+            </div>
+          ) : installedModels.length ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
               {installedModels.map((model) => (
                 <button
@@ -296,6 +306,7 @@ function OllamaModelManagerModal({
                   type="button"
                   className={`toolbar-button ${selectedModel === model ? "toolbar-button--accent" : "toolbar-button--ghost"}`}
                   onClick={() => setSelectedModel(model)}
+                  disabled={loading}
                 >
                   {model}
                 </button>
@@ -321,12 +332,16 @@ function OllamaModelManagerModal({
               value={ollamaSearch}
               onChange={(e) => setOllamaSearch(e.target.value)}
               placeholder="qwen2.5-coder:7b"
-              disabled={Boolean(ollamaJob)}
+              disabled={loading || Boolean(ollamaJob)}
               autoFocus
             />
           </label>
 
-          {filteredAddable.length ? (
+          {loading ? (
+            <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+              {language === "ko" ? "추천 모델을 준비하는 중입니다." : "Preparing recommended models..."}
+            </div>
+          ) : filteredAddable.length ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
               {filteredAddable.slice(0, 12).map((model) => (
                 <button
@@ -334,7 +349,7 @@ function OllamaModelManagerModal({
                   type="button"
                   className={`toolbar-button ${selectedModel === model ? "toolbar-button--accent" : "toolbar-button--ghost"}`}
                   onClick={() => setSelectedModel(model)}
-                  disabled={Boolean(ollamaJob)}
+                  disabled={loading || Boolean(ollamaJob)}
                 >
                   {model}
                 </button>
@@ -363,7 +378,7 @@ function OllamaModelManagerModal({
               className="toolbar-button toolbar-button--accent"
               onClick={() => onConnectOllama?.(pendingModel)}
               type="button"
-              disabled={Boolean(ollamaJob) || !pendingModel}
+              disabled={loading || Boolean(ollamaJob) || !pendingModel}
             >
               {ollamaJob
                 ? (String(ollamaJob.status || "").trim().toLowerCase() === "queued"
@@ -388,10 +403,15 @@ function appSettingsViewPropsEqual(previousProps, nextProps) {
     && previousProps.shareDetail === nextProps.shareDetail
     && previousProps.busy === nextProps.busy
     && previousProps.shareBusy === nextProps.shareBusy
-    && previousProps.initialSettingsTab === nextProps.initialSettingsTab
+    && previousProps.settingsTab === nextProps.settingsTab
     && previousProps.projectStatus === nextProps.projectStatus
+    && previousProps.ollamaManagerOpen === nextProps.ollamaManagerOpen
+    && previousProps.ollamaManagerLoading === nextProps.ollamaManagerLoading
     && previousProps.onInstallTooling === nextProps.onInstallTooling
     && previousProps.onConnectOllama === nextProps.onConnectOllama
+    && previousProps.onChangeSettingsTab === nextProps.onChangeSettingsTab
+    && previousProps.onOpenOllamaManager === nextProps.onOpenOllamaManager
+    && previousProps.onCloseOllamaManager === nextProps.onCloseOllamaManager
   );
 }
 
@@ -405,23 +425,24 @@ export const AppSettingsView = memo(function AppSettingsView({
   shareDetail,
   busy,
   shareBusy = false,
-  initialSettingsTab = "app",
+  settingsTab = "app",
   projectStatus = "",
+  ollamaManagerOpen = false,
+  ollamaManagerLoading = false,
   onChangeSettings,
+  onChangeSettingsTab,
   onInstallTooling,
   onConnectOllama,
+  onOpenOllamaManager,
+  onCloseOllamaManager,
   onGenerateShareLink,
   onCopyShareLink,
   onRevokeShareLink,
   onChangeShareSettings,
 }) {
-  const [settingsTab, setSettingsTab] = useState(() => (
-    SETTINGS_TAB_KEYS.has(initialSettingsTab) ? initialSettingsTab : "app"
-  ));
   const { language, languageOptions, setLanguage, t } = useI18n();
   const [draftSettings, setDraftSettings] = useState(() => cloneSettings(settings));
   const [localDirty, setLocalDirty] = useState(false);
-  const [ollamaManagerOpen, setOllamaManagerOpen] = useState(false);
   const [ollamaSearch, setOllamaSearch] = useState("");
   const [selectedOllamaModel, setSelectedOllamaModel] = useState("");
   const lastIncomingSettingsRef = useRef(cloneSettings(settings));
@@ -433,6 +454,7 @@ export const AppSettingsView = memo(function AppSettingsView({
     { key: "dashboard", label: "Dashboard" },
     { key: "share", label: language === "ko" ? "공유" : "Share" },
   ];
+  const activeSettingsTab = normalizeSettingsTabKey(settingsTab);
   const activeShare = shareDetail?.active_session || shareDetail?.project_active_session || null;
   const shareServer = shareDetail?.server || null;
   const dashboardVisibility = normalizeDashboardVisibility(draftSettings?.dashboard_visibility);
@@ -517,6 +539,7 @@ export const AppSettingsView = memo(function AppSettingsView({
   const geminiJob = activeToolingJob(toolingJobs, "gemini");
   const claudeJob = activeToolingJob(toolingJobs, "claude");
   const ollamaJob = activeToolingJob(toolingJobs, "ollama");
+  const ollamaDetailsLoaded = ollamaTool.running !== null && ollamaTool.running !== undefined;
   const installedOllamaModels = Array.isArray(ollamaTool.models) ? ollamaTool.models : [];
   const recommendedOllamaModels = Array.isArray(ollamaTool.recommended_models) && ollamaTool.recommended_models.length
     ? ollamaTool.recommended_models
@@ -549,8 +572,8 @@ export const AppSettingsView = memo(function AppSettingsView({
         {settingsTabs.map((tab) => (
           <button
             key={tab.key}
-            className={`settings-subtab ${settingsTab === tab.key ? "settings-subtab--active" : ""}`}
-            onClick={() => setSettingsTab(tab.key)}
+            className={`settings-subtab ${activeSettingsTab === tab.key ? "settings-subtab--active" : ""}`}
+            onClick={() => onChangeSettingsTab?.(tab.key)}
             type="button"
           >
             {tab.label}
@@ -561,7 +584,7 @@ export const AppSettingsView = memo(function AppSettingsView({
       <div className="form-layout">
 
         {/* ?? Application tab ?? */}
-        {settingsTab === "app" ? (
+        {activeSettingsTab === "app" ? (
         <div className="form-section" style={{ gridColumn: "1 / -1" }}>
           <div className="subsection">
             <SectionHeader
@@ -620,7 +643,7 @@ export const AppSettingsView = memo(function AppSettingsView({
         </div>
         ) : null}
 
-        {settingsTab === "tooling" ? (
+        {activeSettingsTab === "tooling" ? (
         <div className="form-section" style={{ gridColumn: "1 / -1" }}>
           <div className="subsection">
             <SectionHeader
@@ -743,7 +766,7 @@ export const AppSettingsView = memo(function AppSettingsView({
                       <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>{language === "ko" ? "모델 저장 경로" : "Model store path"}</span>
                       <strong style={{ fontFamily: "monospace", wordBreak: "break-all" }}>{ollamaTool.model_store_path || "-"}</strong>
                     </div>
-                    {installedOllamaModels.length ? (
+                    {ollamaDetailsLoaded && installedOllamaModels.length ? (
                       <div className="sidebar-item">
                         <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>
                           {language === "ko" ? "설치된 모델" : "Installed models"}
@@ -753,10 +776,17 @@ export const AppSettingsView = memo(function AppSettingsView({
                         </span>
                       </div>
                     ) : null}
+                    {!ollamaDetailsLoaded ? (
+                      <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                        {language === "ko"
+                          ? "모델 세부 정보는 모델 관리자에서 불러옵니다."
+                          : "Model details load when the manager opens."}
+                      </div>
+                    ) : null}
                     <div style={{ display: "flex", justifyContent: "flex-end" }}>
                       <button
                         className="toolbar-button toolbar-button--ghost"
-                        onClick={() => setOllamaManagerOpen(true)}
+                        onClick={() => onOpenOllamaManager?.()}
                         type="button"
                         disabled={Boolean(ollamaJob)}
                       >
@@ -772,7 +802,7 @@ export const AppSettingsView = memo(function AppSettingsView({
         ) : null}
 
         {/* Dashboard tab */}
-        {settingsTab === "dashboard" ? (
+        {activeSettingsTab === "dashboard" ? (
         <div className="form-section" style={{ gridColumn: "1 / -1" }}>
           <div className="subsection">
             <SectionHeader
@@ -811,7 +841,7 @@ export const AppSettingsView = memo(function AppSettingsView({
         ) : null}
 
         {/* ?? Execution tab ?? */}
-        {settingsTab === "execution" ? (
+        {activeSettingsTab === "execution" ? (
         <div className="form-section" style={{ gridColumn: "1 / -1" }}>
           <div className="subsection">
             <SectionHeader
@@ -1012,7 +1042,7 @@ export const AppSettingsView = memo(function AppSettingsView({
         ) : null}
 
         {/* ?? Share tab ?? */}
-        {settingsTab === "share" ? (
+        {activeSettingsTab === "share" ? (
         <div className="form-section" style={{ gridColumn: "1 / -1" }}>
           <div className="subsection">
             <SectionHeader
@@ -1082,7 +1112,7 @@ export const AppSettingsView = memo(function AppSettingsView({
 
       {ollamaManagerOpen ? (
         <OllamaModelManagerModal
-          onClose={() => setOllamaManagerOpen(false)}
+          onClose={onCloseOllamaManager}
           installedModels={installedOllamaModels}
           recommendedModels={recommendedOllamaModels}
           ollamaSearch={ollamaSearch}
@@ -1093,6 +1123,7 @@ export const AppSettingsView = memo(function AppSettingsView({
           ollamaJob={ollamaJob}
           onConnectOllama={onConnectOllama}
           language={language}
+          loading={ollamaManagerLoading}
         />
       ) : null}
     </section>

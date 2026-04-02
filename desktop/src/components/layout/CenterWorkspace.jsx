@@ -1,5 +1,6 @@
-import { Suspense, lazy, memo, useEffect } from "react";
+import { Suspense, memo, useEffect } from "react";
 import { useI18n } from "../../i18n";
+import { createPreloadableNamedExport, scheduleIdleTask } from "../../lazyLoad";
 import { projectDetailStatus, sameQueuedJobs } from "../../utils";
 
 function AiChatTabIcon() {
@@ -78,53 +79,13 @@ const TAB_ICONS = {
   reports: <ReportsTabIcon />,
 };
 
-function createLazyNamedView(loader, exportName) {
-  let loadedComponent = null;
-  let pendingModule = null;
-
-  function load() {
-    if (!pendingModule) {
-      pendingModule = loader().then((module) => {
-        loadedComponent = module[exportName];
-        return { default: module[exportName] };
-      });
-    }
-    return pendingModule;
-  }
-
-  const LazyComponent = lazy(load);
-
-  function PreloadableView(props) {
-    if (loadedComponent) {
-      const Component = loadedComponent;
-      return <Component {...props} />;
-    }
-    return <LazyComponent {...props} />;
-  }
-
-  PreloadableView.preload = load;
-  return PreloadableView;
-}
-
-const AiChatWorkspaceView = createLazyNamedView(() => import("../views/AiChatWorkspaceView"), "AiChatWorkspaceView");
-const FlowWorkspaceView = createLazyNamedView(() => import("../views/FlowWorkspaceView"), "FlowWorkspaceView");
-const DashboardView = createLazyNamedView(() => import("../views/DashboardView"), "DashboardView");
-const ReportsView = createLazyNamedView(() => import("../views/ReportsView"), "ReportsView");
-const HistoryView = createLazyNamedView(() => import("../views/HistoryView"), "HistoryView");
-const ConfigEditorView = createLazyNamedView(() => import("../views/ConfigEditorView"), "ConfigEditorView");
-const AppSettingsView = createLazyNamedView(() => import("../views/AppSettingsView"), "AppSettingsView");
-
-function scheduleIdlePrefetch(callback) {
-  if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
-    const handle = window.requestIdleCallback(callback, { timeout: 400 });
-    return () => window.cancelIdleCallback(handle);
-  }
-  if (typeof window !== "undefined") {
-    const handle = window.setTimeout(callback, 120);
-    return () => window.clearTimeout(handle);
-  }
-  return () => {};
-}
+const AiChatWorkspaceView = createPreloadableNamedExport(() => import("../views/AiChatWorkspaceView"), "AiChatWorkspaceView");
+const FlowWorkspaceView = createPreloadableNamedExport(() => import("../views/FlowWorkspaceView"), "FlowWorkspaceView");
+const DashboardView = createPreloadableNamedExport(() => import("../views/DashboardView"), "DashboardView");
+const ReportsView = createPreloadableNamedExport(() => import("../views/ReportsView"), "ReportsView");
+const HistoryView = createPreloadableNamedExport(() => import("../views/HistoryView"), "HistoryView");
+const ConfigEditorView = createPreloadableNamedExport(() => import("../views/ConfigEditorView"), "ConfigEditorView");
+const AppSettingsView = createPreloadableNamedExport(() => import("../views/AppSettingsView"), "AppSettingsView");
 
 function ViewLoadingFallback() {
   return (
@@ -266,9 +227,15 @@ function centerWorkspacePropsEqual(previousProps, nextProps) {
         && previousProps.busy === nextProps.busy
         && previousProps.shareBusy === nextProps.shareBusy
         && previousProps.programSettingsDirty === nextProps.programSettingsDirty
+        && previousProps.appSettingsTab === nextProps.appSettingsTab
+        && previousProps.ollamaManagerOpen === nextProps.ollamaManagerOpen
+        && previousProps.ollamaManagerLoading === nextProps.ollamaManagerLoading
         && previousProps.activeJob === nextProps.activeJob
         && previousProps.onInstallTooling === nextProps.onInstallTooling
         && previousProps.onConnectOllama === nextProps.onConnectOllama
+        && previousProps.onChangeAppSettingsTab === nextProps.onChangeAppSettingsTab
+        && previousProps.onOpenOllamaManager === nextProps.onOpenOllamaManager
+        && previousProps.onCloseOllamaManager === nextProps.onCloseOllamaManager
       );
     default:
       return false;
@@ -305,6 +272,12 @@ export const CenterWorkspace = memo(function CenterWorkspace({
   onSaveProgramSettings,
   onInstallTooling,
   onConnectOllama,
+  appSettingsTab,
+  ollamaManagerOpen,
+  ollamaManagerLoading,
+  onChangeAppSettingsTab,
+  onOpenOllamaManager,
+  onCloseOllamaManager,
   programSettingsDirty = false,
   onChooseDirectory,
   onArchiveProject,
@@ -385,9 +358,9 @@ export const CenterWorkspace = memo(function CenterWorkspace({
               : normalizedActiveTab === "history"
                 ? ["reports", "dashboard"]
                 : ["config"];
-    return scheduleIdlePrefetch(() => {
+    return scheduleIdleTask(() => {
       likelyNextTabs.forEach((tab) => preloadTab(tab));
-    });
+    }, { idleTimeout: 400, fallbackDelay: 120 });
   }, [developerMode, hasFlowTab, normalizedActiveTab]);
 
 
@@ -519,12 +492,17 @@ export const CenterWorkspace = memo(function CenterWorkspace({
             shareDetail={workspaceShareDetail}
             busy={busy}
             shareBusy={shareBusy}
-            dirty={programSettingsDirty}
+            settingsTab={appSettingsTab}
             projectStatus={projectStatus}
+            ollamaManagerOpen={ollamaManagerOpen}
+            ollamaManagerLoading={ollamaManagerLoading}
             onChangeSettings={onChangeProgramSettings}
+            onChangeSettingsTab={onChangeAppSettingsTab}
             onSaveSettings={onSaveProgramSettings}
             onInstallTooling={onInstallTooling}
             onConnectOllama={onConnectOllama}
+            onOpenOllamaManager={onOpenOllamaManager}
+            onCloseOllamaManager={onCloseOllamaManager}
             onGenerateShareLink={onGenerateShareLink}
             onCopyShareLink={onCopyShareLink}
             onRevokeShareLink={onRevokeShareLink}

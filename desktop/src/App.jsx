@@ -1,12 +1,16 @@
-import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { BottomToolPanel } from "./components/layout/BottomToolPanel";
 import { CenterWorkspace } from "./components/layout/CenterWorkspace";
 import { IdeToolbar } from "./components/layout/IdeToolbar";
+import { RightSidebarPane } from "./components/layout/RightSidebarPane";
 import { RunProgressPanel } from "./components/layout/RunProgressPanel";
+import { SidebarPane } from "./components/layout/SidebarPane";
 import { Splitter } from "./components/layout/Splitter";
 import { StatusBar } from "./components/layout/StatusBar";
 import { nextRightSidebarState, nextSidebarTab } from "./controllerHelpers";
 import { useDesktopController } from "./hooks/useDesktopController";
 import { useI18n } from "./i18n";
+import { lazyNamedExport } from "./lazyLoad";
 import { toggleStepSelection } from "./utils";
 
 const SIDEBAR_MIN = 200;
@@ -21,41 +25,9 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function lazyNamedExport(loader, exportName) {
-  return lazy(() => loader().then((module) => ({ default: module[exportName] })));
-}
-
-function scheduleIdleWork(callback) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-  if (typeof window.requestIdleCallback === "function") {
-    const handle = window.requestIdleCallback(callback, { timeout: 1200 });
-    return () => window.cancelIdleCallback?.(handle);
-  }
-  const handle = window.setTimeout(callback, 200);
-  return () => window.clearTimeout(handle);
-}
-
-function PanelSuspenseFallback({ className = "" }) {
-  return <div className={className} aria-hidden="true" />;
-}
-
 const LazyCommandPalette = lazyNamedExport(
   () => import("./components/layout/CommandPalette"),
   "CommandPalette",
-);
-const LazySidebarPane = lazyNamedExport(
-  () => import("./components/layout/SidebarPane"),
-  "SidebarPane",
-);
-const LazyRightSidebarPane = lazyNamedExport(
-  () => import("./components/layout/RightSidebarPane"),
-  "RightSidebarPane",
-);
-const LazyBottomToolPanel = lazyNamedExport(
-  () => import("./components/layout/BottomToolPanel"),
-  "BottomToolPanel",
 );
 
 export default function App() {
@@ -108,13 +80,6 @@ export default function App() {
     controller.setSidebarTab,
     controller.startNewProject,
   ]);
-
-  useEffect(() => scheduleIdleWork(() => {
-    void import("./components/layout/CommandPalette");
-    void import("./components/layout/SidebarPane");
-    void import("./components/layout/RightSidebarPane");
-    void import("./components/layout/BottomToolPanel");
-  }), []);
 
   useEffect(() => {
     const nextTheme = controller.programSettings?.ui_theme === "light" ? "light" : "dark";
@@ -335,46 +300,44 @@ export default function App() {
           className={`ide-pane ide-pane--sidebar ${sidebarOpen ? "" : "ide-pane--sidebar-collapsed"}`.trim()}
           style={sidebarStyle}
         >
-          <Suspense fallback={<PanelSuspenseFallback className="ide-pane ide-pane--sidebar" />}>
-            <LazySidebarPane
-              activeTab={controller.sidebarTab}
-              onChangeTab={(nextTab) =>
-                controller.setSidebarTab((currentTab) => nextSidebarTab(currentTab, nextTab))
-              }
-              projects={controller.filteredProjects}
-              historyProjects={controller.filteredHistoryProjects}
-              selectedProjectId={controller.selectedProjectId}
-              selectedHistoryId={controller.selectedHistoryId}
-              loadingProjectId={controller.loadingProjectId}
-              projectFilter={controller.projectFilter}
-              workspaceFilter={controller.workspaceFilter}
-              onProjectFilterChange={controller.setProjectFilter}
-              onWorkspaceFilterChange={controller.setWorkspaceFilter}
-              onSelectProject={controller.loadProject}
-              onSelectHistory={controller.setSelectedHistoryId}
-              onNewProject={controller.startNewProject}
-              onArchiveProject={controller.archiveProjectById}
-              onDeleteProject={controller.deleteProjectById}
-              onDeleteHistoryEntry={controller.deleteHistoryEntry}
-              workspaceTree={deferredDetail?.workspace_tree}
-              checkpoints={deferredDetail?.checkpoints}
-              detail={deferredDetail}
-              planDraft={controller.planDraft}
-              activeJob={controller.activeJob}
-              selectedStepId={controller.selectedStepId}
-              onSelectStep={handleSelectStep}
-              github={deferredDetail?.github}
-              planPrompt={controller.planDraft?.project_prompt || ""}
-              onRunPlan={controller.runPlan}
-              canRunPlan={controller.canRunPlan}
-              onOpenFolder={controller.openRepoInFolder}
-              onOpenVsCode={controller.openRepoInVsCode}
-              onOpenGithub={controller.openRepoOnGithub}
-              queuedJobs={controller.queuedJobs}
-              onCancelQueuedJob={controller.cancelQueuedReservation}
-              busy={controller.busy}
-            />
-          </Suspense>
+          <SidebarPane
+            activeTab={controller.sidebarTab}
+            onChangeTab={(nextTab) =>
+              controller.setSidebarTab((currentTab) => nextSidebarTab(currentTab, nextTab))
+            }
+            projects={controller.filteredProjects}
+            historyProjects={controller.filteredHistoryProjects}
+            selectedProjectId={controller.selectedProjectId}
+            selectedHistoryId={controller.selectedHistoryId}
+            loadingProjectId={controller.loadingProjectId}
+            projectFilter={controller.projectFilter}
+            workspaceFilter={controller.workspaceFilter}
+            onProjectFilterChange={controller.setProjectFilter}
+            onWorkspaceFilterChange={controller.setWorkspaceFilter}
+            onSelectProject={controller.loadProject}
+            onSelectHistory={controller.setSelectedHistoryId}
+            onNewProject={controller.startNewProject}
+            onArchiveProject={controller.archiveProjectById}
+            onDeleteProject={controller.deleteProjectById}
+            onDeleteHistoryEntry={controller.deleteHistoryEntry}
+            workspaceTree={deferredDetail?.workspace_tree}
+            checkpoints={deferredDetail?.checkpoints}
+            detail={deferredDetail}
+            planDraft={controller.planDraft}
+            activeJob={controller.activeJob}
+            selectedStepId={controller.selectedStepId}
+            onSelectStep={handleSelectStep}
+            github={deferredDetail?.github}
+            planPrompt={controller.planDraft?.project_prompt || ""}
+            onRunPlan={controller.runPlan}
+            canRunPlan={controller.canRunPlan}
+            onOpenFolder={controller.openRepoInFolder}
+            onOpenVsCode={controller.openRepoInVsCode}
+            onOpenGithub={controller.openRepoOnGithub}
+            queuedJobs={controller.queuedJobs}
+            onCancelQueuedJob={controller.cancelQueuedReservation}
+            busy={controller.busy}
+          />
         </div>
 
         {sidebarOpen ? (
@@ -417,6 +380,12 @@ export default function App() {
                 onSaveProgramSettings={controller.saveProgramSettings}
                 onInstallTooling={controller.installTooling}
                 onConnectOllama={controller.connectOllama}
+                appSettingsTab={controller.appSettingsTab}
+                ollamaManagerOpen={controller.ollamaManagerOpen}
+                ollamaManagerLoading={controller.ollamaManagerLoading}
+                onChangeAppSettingsTab={controller.setAppSettingsTab}
+                onOpenOllamaManager={controller.openOllamaManager}
+                onCloseOllamaManager={controller.closeOllamaManager}
                 programSettingsDirty={controller.programSettingsDirty}
                 onChooseDirectory={controller.chooseDirectory}
                 onArchiveProject={controller.archiveProject}
@@ -464,14 +433,12 @@ export default function App() {
               <>
                 <Splitter axis="horizontal" onResize={bottomSplitter.onResize} onDragEnd={bottomSplitter.onDragEnd} title="Resize bottom panel" />
                 <div className="ide-pane ide-pane--bottom" style={{ height: controller.bottomHeight, flex: `0 0 ${controller.bottomHeight}px` }}>
-                  <Suspense fallback={<PanelSuspenseFallback className="ide-pane ide-pane--bottom" />}>
-                    <LazyBottomToolPanel
-                      activeTab={controller.bottomTab}
-                      onChangeTab={controller.setBottomTab}
-                      data={deferredDetail}
-                      onHide={() => controller.setBottomCollapsed(true)}
-                    />
-                  </Suspense>
+                  <BottomToolPanel
+                    activeTab={controller.bottomTab}
+                    onChangeTab={controller.setBottomTab}
+                    data={deferredDetail}
+                    onHide={() => controller.setBottomCollapsed(true)}
+                  />
                 </div>
               </>
             ) : null}
@@ -482,60 +449,58 @@ export default function App() {
             <Splitter axis="vertical" onResize={rightSplitter.onResize} onDragEnd={rightSplitter.onDragEnd} title="Resize right sidebar" />
           )}
           <div className="ide-pane" style={rightSidebarStyle}>
-            <Suspense fallback={<PanelSuspenseFallback className="ide-pane" />}>
-              <LazyRightSidebarPane
-                activeTab={rightTab}
-                collapsed={controller.rightCollapsed}
-                includeChatTab={false}
-                onChangeTab={handleRightSidebarChange}
-                detail={detail}
-                planDraft={controller.planDraft}
-                selectedStepId={controller.selectedStepId}
-                  modelPresets={controller.modelPresets}
-                  modelCatalog={controller.modelCatalog}
-                  form={controller.projectForm}
-                  activeJob={controller.activeJob}
-                  chatJob={controller.chatJob}
-                  busy={controller.busy}
-                  runActionDisabled={controller.runActionDisabled}
-                  autoRunAfterPlan={controller.autoRunAfterPlan}
-                  canRequestStop={controller.canRequestStop}
-                  canCancelReservation={controller.canCancelReservation}
-                  queuedJobs={controller.queuedJobs}
-                  onChangeForm={controller.setProjectForm}
-                  chat={detail?.chat}
-                  chatSettings={controller.chatRuntime || {}}
-                  selectedChatSessionId={controller.selectedChatSessionId}
-                  chatDraftSession={controller.chatDraftSession}
-                  onSelectChatSession={controller.loadChatSession}
-                  onStartNewChatSession={controller.startNewChatSession}
-                  onSendChatMessage={controller.sendChatMessage}
-                  onChangeChatModelSelection={controller.setChatModelSelection}
-                  onChangeChatReasoningEffort={controller.setChatReasoningEffort}
-                  onPromptChange={(value) =>
-                    controller.syncPlan({
-                      ...(controller.planDraft || {}),
-                      project_prompt: value,
-                    })
-                  }
-                  onGeneratePlan={controller.generatePlan}
-                  onSavePlan={controller.savePlan}
-                  onResetPlan={controller.resetPlan}
-                  onRunPlan={controller.runPlan}
-                  onRunManualDebugger={controller.runManualDebugger}
-                  onRunManualMerger={controller.runManualMerger}
-                  onRequestStop={controller.requestStop}
-                  onRequestChatStop={controller.requestChatStop}
-                  onCancelQueuedJob={controller.cancelQueuedReservation}
-                  onChangeAutoRunAfterPlan={controller.setAutoRunAfterPlan}
-                  onSelectStep={handleSelectStep}
-                  onUpdateStepField={controller.updateSelectedStep}
-                  onSaveStepLocal={controller.saveStepLocal}
-                  onAddStep={controller.addStep}
-                  onDeleteStep={controller.deleteStep}
-                />
-              </Suspense>
-            </div>
+            <RightSidebarPane
+              activeTab={rightTab}
+              collapsed={controller.rightCollapsed}
+              includeChatTab={false}
+              onChangeTab={handleRightSidebarChange}
+              detail={detail}
+              planDraft={controller.planDraft}
+              selectedStepId={controller.selectedStepId}
+              modelPresets={controller.modelPresets}
+              modelCatalog={controller.modelCatalog}
+              form={controller.projectForm}
+              activeJob={controller.activeJob}
+              chatJob={controller.chatJob}
+              busy={controller.busy}
+              runActionDisabled={controller.runActionDisabled}
+              autoRunAfterPlan={controller.autoRunAfterPlan}
+              canRequestStop={controller.canRequestStop}
+              canCancelReservation={controller.canCancelReservation}
+              queuedJobs={controller.queuedJobs}
+              onChangeForm={controller.setProjectForm}
+              chat={detail?.chat}
+              chatSettings={controller.chatRuntime || {}}
+              selectedChatSessionId={controller.selectedChatSessionId}
+              chatDraftSession={controller.chatDraftSession}
+              onSelectChatSession={controller.loadChatSession}
+              onStartNewChatSession={controller.startNewChatSession}
+              onSendChatMessage={controller.sendChatMessage}
+              onChangeChatModelSelection={controller.setChatModelSelection}
+              onChangeChatReasoningEffort={controller.setChatReasoningEffort}
+              onPromptChange={(value) =>
+                controller.syncPlan({
+                  ...(controller.planDraft || {}),
+                  project_prompt: value,
+                })
+              }
+              onGeneratePlan={controller.generatePlan}
+              onSavePlan={controller.savePlan}
+              onResetPlan={controller.resetPlan}
+              onRunPlan={controller.runPlan}
+              onRunManualDebugger={controller.runManualDebugger}
+              onRunManualMerger={controller.runManualMerger}
+              onRequestStop={controller.requestStop}
+              onRequestChatStop={controller.requestChatStop}
+              onCancelQueuedJob={controller.cancelQueuedReservation}
+              onChangeAutoRunAfterPlan={controller.setAutoRunAfterPlan}
+              onSelectStep={handleSelectStep}
+              onUpdateStepField={controller.updateSelectedStep}
+              onSaveStepLocal={controller.saveStepLocal}
+              onAddStep={controller.addStep}
+              onDeleteStep={controller.deleteStep}
+            />
+          </div>
           </>
         </div>
       </div>

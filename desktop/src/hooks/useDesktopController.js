@@ -99,7 +99,6 @@ const LISTING_RELOAD_COMMANDS = new Set([
 const ACTIVE_SYNC_WATCHDOG_INTERVAL_MS = 15000;
 const ACTIVE_SYNC_EVENT_STALE_MS = 30000;
 const ACTIVE_SYNC_WATCHDOG_COOLDOWN_MS = 30000;
-const STARTUP_TOOLING_REFRESH_DELAY_MS = 1500;
 
 export function useDesktopController() {
   const { language } = useI18n();
@@ -158,6 +157,7 @@ export function useDesktopController() {
   const projectDetailRef = useRef(null);
   const planDraftRef = useRef(null);
   const modelCatalogRef = useRef([]);
+  const toolingStatusRef = useRef({});
   const chatJobRef = useRef(null);
   const canRequestStopRef = useRef(false);
   const canRequestChatStopRef = useRef(false);
@@ -170,11 +170,13 @@ export function useDesktopController() {
   const projectSupplementRequestDeduperRef = useRef(createRequestDeduper());
   const workspaceShareRequestDeduperRef = useRef(createRequestDeduper());
   const selectedProjectLoadSequenceRef = useRef(0);
-  const bootstrapToolingRefreshStartedRef = useRef(false);
+  const toolingSummaryRequestedRef = useRef(false);
+  const ollamaManagerLoadInFlightRef = useRef(false);
 
   const [centerTab, setCenterTab] = usePersistentState("jakal-flow:center-tab", "ai-chat");
   const [bottomTab, setBottomTab] = usePersistentState("jakal-flow:bottom-tab", "json");
   const [sidebarTab, setSidebarTab] = usePersistentState("jakal-flow:sidebar-tab-v2", "workspace");
+  const [appSettingsTab, setAppSettingsTab] = usePersistentState("jakal-flow:app-settings-tab", "app");
   const [bottomCollapsed, setBottomCollapsed] = usePersistentState("jakal-flow:bottom-collapsed", false);
   const [bottomHeight, setBottomHeight] = usePersistentState("jakal-flow:bottom-height", 250);
   const [rightCollapsed, setRightCollapsed] = usePersistentState("jakal-flow:right-panel-v2", false);
@@ -182,6 +184,8 @@ export function useDesktopController() {
   const [sidebarWidth, setSidebarWidth] = usePersistentState("jakal-flow:sidebar-width", 312);
   const [projectFilter, setProjectFilter] = usePersistentState("jakal-flow:project-filter", "");
   const [workspaceFilter, setWorkspaceFilter] = usePersistentState("jakal-flow:workspace-filter", "");
+  const [ollamaManagerOpen, setOllamaManagerOpen] = useState(false);
+  const [ollamaManagerLoading, setOllamaManagerLoading] = useState(false);
   const [selectedChatSessionId, setSelectedChatSessionId] = useState("");
   const [chatDraftSession, setChatDraftSession] = useState(false);
   const deferredProjectFilter = useDeferredValue(projectFilter);
@@ -230,6 +234,7 @@ export function useDesktopController() {
   projectDetailRef.current = projectDetail;
   planDraftRef.current = planDraft;
   modelCatalogRef.current = modelCatalog;
+  toolingStatusRef.current = toolingStatus;
   activeJobRef.current = activeJob;
   chatJobRef.current = chatJob;
   canRequestStopRef.current = canRequestStop;
@@ -332,6 +337,30 @@ export function useDesktopController() {
   useEffect(() => {
     forceRefreshRef.current = forceRefresh;
   }, [forceRefresh]);
+
+  useEffect(() => {
+    toolingSummaryRequestedRef.current = false;
+    ollamaManagerLoadInFlightRef.current = false;
+    setOllamaManagerOpen(false);
+    setOllamaManagerLoading(false);
+  }, [workspaceRoot]);
+
+  useEffect(() => {
+    if (
+      centerTab !== "app-settings"
+      || appSettingsTab !== "tooling"
+      || toolingSummaryRequestedRef.current
+      || !workspaceRoot
+    ) {
+      return;
+    }
+    toolingSummaryRequestedRef.current = true;
+    void refreshToolingStatus({
+      forceRefresh: true,
+      includeOllamaDetails: false,
+      quiet: true,
+    });
+  }, [appSettingsTab, centerTab, workspaceRoot]);
 
   useEffect(() => {
     if (!hasActiveSyncWork) {
@@ -506,8 +535,54 @@ export function useDesktopController() {
       setGlobalCodexStatus(snapshot.codex_status);
     }
     if (snapshot.tooling_statuses && typeof snapshot.tooling_statuses === "object") {
-      setToolingStatus(snapshot.tooling_statuses);
+      setToolingStatus((current) => {
+        const currentStatuses = current && typeof current === "object" ? current : {};
+        const nextStatuses = snapshot.tooling_statuses;
+        const mergedStatuses = { ...currentStatuses, ...nextStatuses };
+        const currentOllama = currentStatuses?.ollama;
+        const nextOllama = nextStatuses?.ollama;
+        const nextHasRuntimeDetails = Boolean(
+          nextOllama
+          && (
+            nextOllama.running !== null
+            && nextOllama.running !== undefined
+            || (Array.isArray(nextOllama.models) && nextOllama.models.length > 0)
+          ),
+        );
+        const currentHasRuntimeDetails = Boolean(
+          currentOllama
+          && (
+            currentOllama.running !== null
+            && currentOllama.running !== undefined
+            || (Array.isArray(currentOllama.models) && currentOllama.models.length > 0)
+          ),
+        );
+        if (nextOllama && currentOllama && nextOllama.installed && !nextHasRuntimeDetails && currentHasRuntimeDetails) {
+          mergedStatuses.ollama = {
+            ...nextOllama,
+            running: currentOllama.running,
+            models: Array.isArray(currentOllama.models) ? currentOllama.models : [],
+            recommended_models:
+              Array.isArray(nextOllama.recommended_models) && nextOllama.recommended_models.length
+                ? nextOllama.recommended_models
+                : (Array.isArray(currentOllama.recommended_models) ? currentOllama.recommended_models : []),
+            model_store_path: nextOllama.model_store_path || currentOllama.model_store_path || "",
+            reason: currentOllama.reason || nextOllama.reason,
+          };
+        }
+        toolingStatusRef.current = mergedStatuses;
+        return mergedStatuses;
+      });
     }
+  }
+
+  function ollamaDetailsLoaded(statuses = toolingStatusRef.current) {
+    const ollamaStatus = statuses?.ollama;
+    return Boolean(
+      ollamaStatus
+      && ollamaStatus.running !== null
+      && ollamaStatus.running !== undefined,
+    );
   }
 
   function applyProjectDetail(detail, options = {}) {
@@ -747,55 +822,6 @@ export function useDesktopController() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!workspaceRoot || bootstrapToolingRefreshStartedRef.current) {
-      return undefined;
-    }
-    bootstrapToolingRefreshStartedRef.current = true;
-
-    let timerId = null;
-    let idleId = null;
-    const refreshTooling = () => {
-      void bridgeRequest(
-        BRIDGE_COMMANDS.GET_TOOLING_STATUS,
-        { force_refresh: true },
-        workspaceRoot || null,
-      )
-        .then((snapshot) => {
-          if (!cancelled) {
-            lastBridgeActivityAtRef.current = Date.now();
-            applyToolingSnapshot(snapshot);
-          }
-        })
-        .catch(() => {
-          // Startup tooling refresh is opportunistic; keep the boot path quiet.
-        });
-    };
-    if (typeof window.requestIdleCallback === "function") {
-      idleId = window.requestIdleCallback(
-        () => {
-          refreshTooling();
-        },
-        { timeout: STARTUP_TOOLING_REFRESH_DELAY_MS * 2 },
-      );
-    } else {
-      timerId = window.setTimeout(() => {
-        refreshTooling();
-      }, STARTUP_TOOLING_REFRESH_DELAY_MS);
-    }
-
-    return () => {
-      cancelled = true;
-      if (idleId !== null && typeof window.cancelIdleCallback === "function") {
-        window.cancelIdleCallback(idleId);
-      }
-      if (timerId !== null) {
-        window.clearTimeout(timerId);
-      }
-    };
-  }, [workspaceRoot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1378,6 +1404,64 @@ export function useDesktopController() {
     }
   }
 
+  async function requestToolingStatus(options = {}) {
+    if (!workspaceRoot) {
+      return null;
+    }
+    return bridgeRequest(
+      BRIDGE_COMMANDS.GET_TOOLING_STATUS,
+      {
+        force_refresh: options.forceRefresh === true,
+        include_ollama_details: options.includeOllamaDetails === true,
+      },
+      workspaceRoot || null,
+    );
+  }
+
+  async function refreshToolingStatus(options = {}) {
+    const quiet = options.quiet === true;
+    try {
+      const snapshot = await requestToolingStatus(options);
+      if (snapshot) {
+        lastBridgeActivityAtRef.current = Date.now();
+        applyToolingSnapshot(snapshot);
+      }
+      return snapshot;
+    } catch (error) {
+      if (!quiet) {
+        setMessage(messagePayload("error", String(error)));
+      }
+      return null;
+    }
+  }
+
+  async function openOllamaManager() {
+    setOllamaManagerOpen(true);
+    if (
+      ollamaManagerLoadInFlightRef.current
+      || !toolingStatusRef.current?.ollama?.installed
+      || ollamaDetailsLoaded()
+    ) {
+      return;
+    }
+    ollamaManagerLoadInFlightRef.current = true;
+    setOllamaManagerLoading(true);
+    try {
+      await refreshToolingStatus({
+        forceRefresh: true,
+        includeOllamaDetails: true,
+        quiet: true,
+      });
+    } finally {
+      ollamaManagerLoadInFlightRef.current = false;
+      setOllamaManagerLoading(false);
+    }
+  }
+
+  function closeOllamaManager() {
+    setOllamaManagerOpen(false);
+  }
+
   async function forceRefresh(options = {}) {
     try {
       const silent = options.silent === true;
@@ -1386,11 +1470,7 @@ export function useDesktopController() {
       const forceDiskRefresh = options.forceDiskRefresh ?? !silent;
       const jobSnapshotPromise = syncRunningJobSnapshot(activeJobId);
       const toolingStatePromise = !selectedProjectId && refreshCodexStatus
-        ? bridgeRequest(
-          BRIDGE_COMMANDS.GET_TOOLING_STATUS,
-          { force_refresh: true },
-          workspaceRoot || null,
-        )
+        ? requestToolingStatus({ forceRefresh: true, includeOllamaDetails: false })
         : Promise.resolve(null);
       const projectStatePromise = refreshVisibleProjectState(
         bridgeRequest,
@@ -3039,6 +3119,7 @@ export function useDesktopController() {
     centerTab,
     bottomTab,
     sidebarTab,
+    appSettingsTab,
     bottomCollapsed,
     bottomHeight,
     rightCollapsed,
@@ -3046,6 +3127,8 @@ export function useDesktopController() {
     sidebarWidth,
     projectFilter,
     workspaceFilter,
+    ollamaManagerOpen,
+    ollamaManagerLoading,
     selectedChatSessionId,
     chatDraftSession,
     chatRuntime,
@@ -3061,6 +3144,7 @@ export function useDesktopController() {
     setCenterTab,
     setBottomTab,
     setSidebarTab,
+    setAppSettingsTab,
     setBottomCollapsed,
     setBottomHeight,
     setRightCollapsed,
@@ -3090,6 +3174,9 @@ export function useDesktopController() {
     saveProgramSettings,
     installTooling,
     connectOllama,
+    refreshToolingStatus,
+    openOllamaManager,
+    closeOllamaManager,
     generatePlan,
     runPlan,
     runManualDebugger,
