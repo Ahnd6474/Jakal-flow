@@ -8,6 +8,8 @@ import {
   effectiveStepStatus,
   formatCheckpointDisplayId,
   formatChatSessionTitle,
+  formatDurationCompact,
+  isActiveExecutionStatus,
   planStepsWithCloseout,
   statusTone,
 } from "../../utils";
@@ -1150,6 +1152,10 @@ export const SidebarPane = memo(function SidebarPane({
                 {projects.length ? (
                   projects.map((project) => {
                     const tone = statusTone(project?.status);
+                    const progressPercent = project?.progress?.percent ?? null;
+                    const currentStep = project?.progress?.currentStep ?? null;
+                    const estimatedRemaining = project?.progress?.estimatedRemaining ?? null;
+                    const isActive = isActiveExecutionStatus(project?.status);
                     return (
                       <button
                         key={project.repo_id || project.display_name}
@@ -1165,6 +1171,31 @@ export const SidebarPane = memo(function SidebarPane({
                           </span>
                         </div>
                         {project.detail ? <span className="sidebar-project__detail" title={project.detail}>{project.detail}</span> : null}
+                        
+                        {/* P1-1: Mini progress bar for active projects */}
+                        {isActive && progressPercent != null ? (
+                          <div className="sidebar-project__progress">
+                            <div className="sidebar-project__progress-bar">
+                              <div 
+                                className={`sidebar-project__progress-fill sidebar-project__progress-fill--${tone}`} 
+                                style={{ width: `${progressPercent}%` }} 
+                              />
+                            </div>
+                            <div className="sidebar-project__progress-meta">
+                              <span className="sidebar-project__progress-percent">{progressPercent}%</span>
+                              {currentStep ? (
+                                <span className="sidebar-project__progress-step" title={currentStep}>
+                                  {currentStep.length > 30 ? `${currentStep.slice(0, 30)}...` : currentStep}
+                                </span>
+                              ) : null}
+                              {estimatedRemaining != null ? (
+                                <span className="sidebar-project__progress-eta">
+                                  {formatDurationCompact(estimatedRemaining, language)}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
                       </button>
                     );
                   })
