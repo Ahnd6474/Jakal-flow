@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import replace
+from functools import wraps
 from pathlib import Path
 import shutil
+from threading import RLock
 from uuid import uuid4
 
 from .bridge_events import emit_bridge_event
@@ -16,11 +18,21 @@ from .utils import ensure_dir, now_utc_iso, read_json, remove_tree, stable_repo_
 LOCAL_PROJECT_LOG_DIRNAME = "jakal-flow-logs"
 
 
+def _workspace_locked(method):
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class WorkspaceManager:
     def __init__(self, workspace_root: Path) -> None:
         self.workspace_root = workspace_root.resolve()
         self.projects_root = self.workspace_root / "projects"
         self.history_root = self.workspace_root / "history"
+        self._lock = RLock()
         self._registry_cache_token: tuple[int, int, int] | None = None
         self._registry_cache_value: dict[str, dict[str, dict[str, str]]] | None = None
         self._project_context_cache: dict[str, tuple[tuple[tuple[int, int, int], ...], ProjectContext]] = {}
@@ -112,6 +124,7 @@ class WorkspaceManager:
             return best_match
         return None
 
+    @_workspace_locked
     def _sync_registry_project_root(self, repo_id: str, context: ProjectContext) -> None:
         registry = self._read_registry()
         item = registry["projects"].get(repo_id)
@@ -120,6 +133,7 @@ class WorkspaceManager:
             registry["projects"][repo_id] = normalized_item
             self._write_registry(registry)
 
+    @_workspace_locked
     def _sync_registry_history_root(self, archive_id: str, context: ProjectContext) -> None:
         registry = self._read_registry()
         item = registry["history"].get(archive_id)
@@ -128,6 +142,7 @@ class WorkspaceManager:
             registry["history"][archive_id] = normalized_item
             self._write_registry(registry)
 
+    @_workspace_locked
     def _cache_project_context(self, context: ProjectContext) -> None:
         cache_key = self._project_cache_key(context.paths.project_root)
         self._project_context_cache[cache_key] = (
@@ -151,6 +166,7 @@ class WorkspaceManager:
             loop_state=copied_loop_state,
         )
 
+    @_workspace_locked
     def _invalidate_project_context_cache(self, project_root: Path | None = None) -> None:
         if project_root is None:
             self._project_context_cache.clear()
@@ -160,6 +176,7 @@ class WorkspaceManager:
     def _empty_registry(self) -> dict[str, dict[str, dict[str, str]]]:
         return {"projects": {}, "history": {}}
 
+    @_workspace_locked
     def _read_registry(self) -> dict[str, dict[str, dict[str, str]]]:
         cache_token = self._path_cache_token(self.registry_file)
         if self._registry_cache_token == cache_token and self._registry_cache_value is not None:
@@ -180,6 +197,7 @@ class WorkspaceManager:
         self._registry_cache_value = deepcopy(normalized)
         return normalized
 
+    @_workspace_locked
     def _write_registry(self, registry: dict[str, dict[str, dict[str, str]]]) -> None:
         normalized = {
             "projects": registry.get("projects", {}),
@@ -189,6 +207,7 @@ class WorkspaceManager:
         self._registry_cache_token = self._path_cache_token(self.registry_file)
         self._registry_cache_value = deepcopy(normalized)
 
+    @_workspace_locked
     def ensure_workspace(self) -> None:
         ensure_dir(self.projects_root)
         ensure_dir(self.history_root)
@@ -345,6 +364,7 @@ class WorkspaceManager:
             shared_contracts_file=docs_dir / "SHARED_CONTRACTS.md",
         )
 
+    @_workspace_locked
     def initialize_project(
         self,
         repo_url: str,
@@ -399,6 +419,7 @@ class WorkspaceManager:
         self.save_project(ProjectContext(metadata=metadata, runtime=runtime, paths=paths, loop_state=loop_state))
         return self.load_project_by_id(repo_id)
 
+    @_workspace_locked
     def initialize_local_project(
         self,
         project_dir: Path,
@@ -562,6 +583,7 @@ class WorkspaceManager:
             },
         )
 
+    @_workspace_locked
     def save_project(self, context: ProjectContext) -> None:
         self._write_project_files(context)
         registry = self._read_registry()
@@ -575,6 +597,7 @@ class WorkspaceManager:
             self._write_registry(registry)
         self._emit_project_state_sync(context)
 
+    @_workspace_locked
     def _cached_registered_context(self, registry_root_text: str) -> ProjectContext | None:
         registry_root = self._normalized_path(registry_root_text)
         if registry_root is None:
@@ -600,6 +623,7 @@ class WorkspaceManager:
         context.metadata.source_repo_id = str(item.get("source_repo_id", "")).strip() or context.metadata.source_repo_id
         return context
 
+    @_workspace_locked
     def _load_registered_context(
         self,
         entry_id: str,
@@ -654,6 +678,7 @@ class WorkspaceManager:
     def load_project_by_slug(self, slug: str) -> ProjectContext:
         return self.load_project_from_root(self.projects_root / slug)
 
+    @_workspace_locked
     def load_project_from_root(self, project_root: Path) -> ProjectContext:
         paths = self.build_paths_from_root(project_root)
         metadata_data = None
@@ -725,6 +750,7 @@ class WorkspaceManager:
         self._project_context_cache[cache_key] = (signature, self._copy_project_context(context))
         return context
 
+    @_workspace_locked
     def find_project(self, repo_url: str, branch: str) -> ProjectContext | None:
         self.ensure_workspace()
         repo_id, _ = stable_repo_identity(repo_url, branch)
@@ -733,6 +759,7 @@ class WorkspaceManager:
             return None
         return self.load_project_by_id(repo_id)
 
+    @_workspace_locked
     def _list_registered_contexts(
         self,
         registry_section: str,
@@ -763,6 +790,7 @@ class WorkspaceManager:
             reverse=True,
         )
 
+    @_workspace_locked
     def find_project_by_repo_path(self, repo_path: Path) -> ProjectContext | None:
         self.ensure_workspace()
         resolved_target = repo_path.resolve()
@@ -792,6 +820,7 @@ class WorkspaceManager:
         slug_prefix = slug.strip("-")[:20].strip("-") or "project"
         return f"{slug_prefix}-hist-{repo_id[:8]}-{compact_timestamp}-{uuid4().hex[:4]}"
 
+    @_workspace_locked
     def archive_project(self, repo_id: str) -> ProjectContext:
         self.ensure_workspace()
         registry = self._read_registry()
@@ -827,6 +856,7 @@ class WorkspaceManager:
         self._write_registry(registry)
         return archived_context
 
+    @_workspace_locked
     def delete_project(self, repo_id: str) -> ProjectContext:
         self.ensure_workspace()
         registry = self._read_registry()
@@ -844,6 +874,7 @@ class WorkspaceManager:
         self._write_registry(registry)
         return context
 
+    @_workspace_locked
     def archive_all_projects(self) -> list[ProjectContext]:
         self.ensure_workspace()
         archived: list[ProjectContext] = []
@@ -851,6 +882,7 @@ class WorkspaceManager:
             archived.append(self.archive_project(repo_id))
         return archived
 
+    @_workspace_locked
     def delete_all_projects(self) -> list[ProjectContext]:
         self.ensure_workspace()
         deleted: list[ProjectContext] = []
@@ -858,6 +890,7 @@ class WorkspaceManager:
             deleted.append(self.delete_project(repo_id))
         return deleted
 
+    @_workspace_locked
     def delete_history_entry(self, archive_id: str) -> ProjectContext:
         self.ensure_workspace()
         registry = self._read_registry()

@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import RLock
 from time import perf_counter
 
 from .commit_naming import build_commit_descriptor, build_initial_commit_descriptor, build_setup_commit_descriptor
@@ -142,6 +143,7 @@ class Orchestrator(
         self.verification = VerificationRunner()
         self._execution_plan_state_cache: dict[str, tuple[tuple[object, ...], ExecutionPlanState]] = {}
         self._static_plan_artifact_signature_cache: dict[str, tuple[object, ...]] = {}
+        self._state_lock = RLock()
 
     @staticmethod
     def _plan_state_content_signature(state: ExecutionPlanState) -> str:
@@ -173,10 +175,11 @@ class Orchestrator(
         )
 
     def _cache_execution_plan_state(self, context: ProjectContext, state: ExecutionPlanState) -> None:
-        self._execution_plan_state_cache[self._execution_plan_cache_key(context)] = (
-            self._execution_plan_cache_signature(context),
-            deepcopy(state),
-        )
+        with self._state_lock:
+            self._execution_plan_state_cache[self._execution_plan_cache_key(context)] = (
+                self._execution_plan_cache_signature(context),
+                deepcopy(state),
+            )
 
     def _scan_repository_inputs(self, context: ProjectContext, *, force_refresh: bool = False) -> dict[str, str]:
         return scan_repository_inputs(
@@ -1001,29 +1004,30 @@ class Orchestrator(
 
 
     def load_execution_plan_state(self, context: ProjectContext) -> ExecutionPlanState:
-        cache_key = self._execution_plan_cache_key(context)
-        cache_signature = self._execution_plan_cache_signature(context)
-        cached = self._execution_plan_state_cache.get(cache_key)
-        if cached is not None and cached[0] == cache_signature:
-            cached_state = deepcopy(cached[1])
-            self._normalize_loaded_execution_plan_state(context, cached_state)
-            if not self._closeout_run_is_stale(context, cached_state):
-                self._cache_execution_plan_state(context, cached_state)
-                return cached_state
-        payload = read_json(context.paths.execution_plan_file, default=None)
-        if not isinstance(payload, dict):
-            state = ExecutionPlanState(
-                workflow_mode=normalize_workflow_mode(context.runtime.workflow_mode),
-                default_test_command=context.runtime.test_cmd,
-                last_updated_at=now_utc_iso(),
-                steps=[],
-            )
+        with self._state_lock:
+            cache_key = self._execution_plan_cache_key(context)
+            cache_signature = self._execution_plan_cache_signature(context)
+            cached = self._execution_plan_state_cache.get(cache_key)
+            if cached is not None and cached[0] == cache_signature:
+                cached_state = deepcopy(cached[1])
+                self._normalize_loaded_execution_plan_state(context, cached_state)
+                if not self._closeout_run_is_stale(context, cached_state):
+                    self._cache_execution_plan_state(context, cached_state)
+                    return cached_state
+            payload = read_json(context.paths.execution_plan_file, default=None)
+            if not isinstance(payload, dict):
+                state = ExecutionPlanState(
+                    workflow_mode=normalize_workflow_mode(context.runtime.workflow_mode),
+                    default_test_command=context.runtime.test_cmd,
+                    last_updated_at=now_utc_iso(),
+                    steps=[],
+                )
+                self._cache_execution_plan_state(context, state)
+                return state
+            state = ExecutionPlanState.from_dict(payload)
+            self._normalize_loaded_execution_plan_state(context, state)
             self._cache_execution_plan_state(context, state)
             return state
-        state = ExecutionPlanState.from_dict(payload)
-        self._normalize_loaded_execution_plan_state(context, state)
-        self._cache_execution_plan_state(context, state)
-        return state
 
     def _normalize_loaded_execution_plan_state(self, context: ProjectContext, state: ExecutionPlanState) -> None:
         state.workflow_mode = normalize_workflow_mode(state.workflow_mode or context.runtime.workflow_mode)
@@ -1054,61 +1058,62 @@ class Orchestrator(
         return context, saved
 
     def save_execution_plan_state(self, context: ProjectContext, plan_state: ExecutionPlanState) -> ExecutionPlanState:
-        execution_mode = self._normalize_execution_mode(plan_state.execution_mode or context.runtime.execution_mode)
-        workflow_mode = normalize_workflow_mode(plan_state.workflow_mode or context.runtime.workflow_mode)
-        normalized_steps = self._normalize_execution_steps(context, plan_state.steps, plan_state.default_test_command, execution_mode)
-        closeout_ready = self._all_steps_completed(normalized_steps)
-        closeout_status = plan_state.closeout_status.strip() or "not_started"
-        closeout_started_at = plan_state.closeout_started_at
-        closeout_completed_at = plan_state.closeout_completed_at
-        closeout_commit_hash = plan_state.closeout_commit_hash
-        closeout_notes = plan_state.closeout_notes.strip()
-        if not closeout_ready:
-            closeout_status = "not_started"
-            closeout_started_at = None
-            closeout_completed_at = None
-            closeout_commit_hash = None
-            closeout_notes = ""
-        state = ExecutionPlanState(
-            plan_title=plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug,
-            project_prompt=plan_state.project_prompt.strip(),
-            summary=plan_state.summary.strip(),
-            workflow_mode=workflow_mode,
-            execution_mode=execution_mode,
-            default_test_command=plan_state.default_test_command.strip() or context.runtime.test_cmd,
-            last_updated_at="",
-            closeout_status=closeout_status,
-            closeout_title=plan_state.closeout_title.strip() or "Closeout",
-            closeout_display_description=plan_state.closeout_display_description.strip() or "Closeout",
-            closeout_codex_description=plan_state.closeout_codex_description.strip() or "Closeout",
-            closeout_success_criteria=plan_state.closeout_success_criteria.strip() or "Closeout",
-            closeout_deadline_at=plan_state.closeout_deadline_at.strip(),
-            closeout_reasoning_effort=plan_state.closeout_reasoning_effort.strip() or "high",
-            closeout_model_provider=plan_state.closeout_model_provider.strip().lower(),
-            closeout_model=plan_state.closeout_model.strip().lower(),
-            closeout_parallel_group=plan_state.closeout_parallel_group.strip(),
-            closeout_depends_on=list(plan_state.closeout_depends_on),
-            closeout_owned_paths=list(plan_state.closeout_owned_paths),
-            closeout_started_at=closeout_started_at,
-            closeout_completed_at=closeout_completed_at,
-            closeout_commit_hash=closeout_commit_hash,
-            closeout_notes=closeout_notes,
-            steps=normalized_steps,
-        )
-        cached_entry = self._execution_plan_state_cache.get(self._execution_plan_cache_key(context))
-        cached_state = cached_entry[1] if cached_entry else None
-        if cached_state is not None and self._plan_state_content_signature(cached_state) == self._plan_state_content_signature(state):
-            state.last_updated_at = cached_state.last_updated_at
-        else:
-            state.last_updated_at = now_utc_iso()
-        write_json_if_changed(context.paths.execution_plan_file, state.to_dict())
-        static_signature = self._static_plan_artifact_signature(context, state)
-        if self._static_plan_artifacts_need_refresh(context, static_signature):
-            self._save_execution_plan_static_artifacts(context, state)
-            self._static_plan_artifact_signature_cache[self._execution_plan_cache_key(context)] = static_signature
-        self._save_execution_plan_runtime_artifacts(context, state)
-        self._cache_execution_plan_state(context, state)
-        return state
+        with self._state_lock:
+            execution_mode = self._normalize_execution_mode(plan_state.execution_mode or context.runtime.execution_mode)
+            workflow_mode = normalize_workflow_mode(plan_state.workflow_mode or context.runtime.workflow_mode)
+            normalized_steps = self._normalize_execution_steps(context, plan_state.steps, plan_state.default_test_command, execution_mode)
+            closeout_ready = self._all_steps_completed(normalized_steps)
+            closeout_status = plan_state.closeout_status.strip() or "not_started"
+            closeout_started_at = plan_state.closeout_started_at
+            closeout_completed_at = plan_state.closeout_completed_at
+            closeout_commit_hash = plan_state.closeout_commit_hash
+            closeout_notes = plan_state.closeout_notes.strip()
+            if not closeout_ready:
+                closeout_status = "not_started"
+                closeout_started_at = None
+                closeout_completed_at = None
+                closeout_commit_hash = None
+                closeout_notes = ""
+            state = ExecutionPlanState(
+                plan_title=plan_state.plan_title.strip() or context.metadata.display_name or context.metadata.slug,
+                project_prompt=plan_state.project_prompt.strip(),
+                summary=plan_state.summary.strip(),
+                workflow_mode=workflow_mode,
+                execution_mode=execution_mode,
+                default_test_command=plan_state.default_test_command.strip() or context.runtime.test_cmd,
+                last_updated_at="",
+                closeout_status=closeout_status,
+                closeout_title=plan_state.closeout_title.strip() or "Closeout",
+                closeout_display_description=plan_state.closeout_display_description.strip() or "Closeout",
+                closeout_codex_description=plan_state.closeout_codex_description.strip() or "Closeout",
+                closeout_success_criteria=plan_state.closeout_success_criteria.strip() or "Closeout",
+                closeout_deadline_at=plan_state.closeout_deadline_at.strip(),
+                closeout_reasoning_effort=plan_state.closeout_reasoning_effort.strip() or "high",
+                closeout_model_provider=plan_state.closeout_model_provider.strip().lower(),
+                closeout_model=plan_state.closeout_model.strip().lower(),
+                closeout_parallel_group=plan_state.closeout_parallel_group.strip(),
+                closeout_depends_on=list(plan_state.closeout_depends_on),
+                closeout_owned_paths=list(plan_state.closeout_owned_paths),
+                closeout_started_at=closeout_started_at,
+                closeout_completed_at=closeout_completed_at,
+                closeout_commit_hash=closeout_commit_hash,
+                closeout_notes=closeout_notes,
+                steps=normalized_steps,
+            )
+            cached_entry = self._execution_plan_state_cache.get(self._execution_plan_cache_key(context))
+            cached_state = cached_entry[1] if cached_entry else None
+            if cached_state is not None and self._plan_state_content_signature(cached_state) == self._plan_state_content_signature(state):
+                state.last_updated_at = cached_state.last_updated_at
+            else:
+                state.last_updated_at = now_utc_iso()
+            write_json_if_changed(context.paths.execution_plan_file, state.to_dict())
+            static_signature = self._static_plan_artifact_signature(context, state)
+            if self._static_plan_artifacts_need_refresh(context, static_signature):
+                self._save_execution_plan_static_artifacts(context, state)
+                self._static_plan_artifact_signature_cache[self._execution_plan_cache_key(context)] = static_signature
+            self._save_execution_plan_runtime_artifacts(context, state)
+            self._cache_execution_plan_state(context, state)
+            return state
 
     def _current_verify_state_fingerprint(self, context: ProjectContext, changed_files: list[str] | None = None) -> str:
         try:

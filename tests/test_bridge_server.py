@@ -257,3 +257,65 @@ class BridgeServerTests(unittest.TestCase):
             self.assertIsInstance(args[1], ValueError)
             self.assertEqual(str(args[1]), "Bridge params must be a JSON object.")
             self.assertEqual(kwargs["method"], "bridge_request")
+
+    def test_scheduler_limit_is_scoped_per_workspace(self) -> None:
+        with TemporaryTestDir() as workspace_one, TemporaryTestDir() as workspace_two:
+            repo_one_a = workspace_one / "repo-one-a"
+            repo_one_b = workspace_one / "repo-one-b"
+            repo_two = workspace_two / "repo-two"
+            repo_one_a.mkdir(parents=True, exist_ok=True)
+            repo_one_b.mkdir(parents=True, exist_ok=True)
+            repo_two.mkdir(parents=True, exist_ok=True)
+            server = CaptureBridgeServer()
+
+            snapshot, _promoted = server._jobs.set_max_running_jobs(workspace_one, 1)
+
+            self.assertEqual(snapshot["max_concurrent_jobs"], 1)
+            self.assertEqual(server._jobs.scheduler_snapshot(workspace_two)["max_concurrent_jobs"], 2)
+
+            server._jobs.create(
+                "run-plan",
+                workspace_one,
+                {"project_dir": str(repo_one_a), "runtime": {"allow_background_queue": False}},
+            )
+            with self.assertRaisesRegex(RuntimeError, "wait for a free slot"):
+                server._jobs.create(
+                    "run-plan",
+                    workspace_one,
+                    {"project_dir": str(repo_one_b), "runtime": {"allow_background_queue": False}},
+                )
+
+            other_workspace_job = server._jobs.create(
+                "run-plan",
+                workspace_two,
+                {"project_dir": str(repo_two), "runtime": {"allow_background_queue": False}},
+            )
+            self.assertEqual(other_workspace_job.status, "running")
+
+    def test_start_job_returns_duplicate_job_reason_code(self) -> None:
+        with TemporaryTestDir() as workspace_root:
+            workspace_root.mkdir(parents=True, exist_ok=True)
+            repo_dir = workspace_root / "repo"
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            server = CaptureBridgeServer()
+
+            server._jobs.create(
+                "run-plan",
+                workspace_root,
+                {"project_dir": str(repo_dir)},
+            )
+            server._handle_request(
+                "req-dup",
+                "start_job",
+                {
+                    "command": "run-plan",
+                    "workspace_root": str(workspace_root),
+                    "payload": {"project_dir": str(repo_dir)},
+                },
+            )
+
+            responses = [item for item in server.envelopes if item.get("kind") == "response"]
+            self.assertTrue(responses)
+            last_response = responses[-1]
+            self.assertFalse(bool(last_response.get("ok")))
+            self.assertEqual(last_response["error"].get("reason_code"), "duplicate_job")
