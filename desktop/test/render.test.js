@@ -3615,7 +3615,9 @@ test("AppSettingsView omits the removed subsection helper copy", async () => {
   assert.doesNotMatch(html, /These preferences affect the desktop shell itself\./);
   assert.doesNotMatch(html, /Show only the dashboard cards you want to keep visible\./);
   assert.doesNotMatch(html, /These defaults are reused across projects unless a project-specific field replaces them\./);
+  assert.doesNotMatch(html, /Keep desktop-wide preferences and execution defaults in one place instead of scattering them across project forms\./);
   assert.doesNotMatch(html, /Save Program Settings/);
+  assert.doesNotMatch(html, /class="eyebrow"/);
   assert.match(html, /Application/);
   assert.match(html, /Dashboard/);
   assert.match(html, /Execution/);
@@ -5604,6 +5606,8 @@ test("AppSettingsView exposes tooling install cards in the AI tooling tab", asyn
   assert.match(html, /Claude Code/);
   assert.match(html, /Model Manager/);
   assert.match(html, /C:\/demo\/third_party\/ollama\/models/);
+  assert.doesNotMatch(html, /Install terminal agents and manage the local Ollama connection here\./);
+  assert.doesNotMatch(html, /class="eyebrow"/);
   assert.doesNotMatch(html, /Connect &amp; Pull|Connect & Pull/);
   assert.doesNotMatch(html, /Model to pull/);
 });
