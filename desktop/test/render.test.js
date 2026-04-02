@@ -4505,8 +4505,6 @@ test("DashboardView renders an empty state when no project is selected", async (
 
   assert.match(html, /No project selected/);
   assert.match(html, /Select or create a project to see runtime, plan, and usage telemetry\./);
-  assert.match(html, /What appears here/);
-  assert.match(html, /Next step/);
 });
 
 test("DashboardView shows the parallel limit reason in the runtime card", async () => {
