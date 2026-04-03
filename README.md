@@ -175,6 +175,18 @@ jakal-flow-desktop build
 
 `npm run tauri:build` produces the full installer with bundled runtime dependencies. `npm run tauri:build:lean` produces a smaller installer that does not bundle Python or provider CLIs and instead uses what is already installed on the target machine.
 
+## Terminal-Bench 2.0
+
+`jakal-flow` now includes a Terminal-Bench custom agent adapter for the official harness flow:
+
+```bash
+harbor run -d terminal-bench@2.0 \
+  --agent-import-path "jakal_flow.terminal_bench_agent:JakalFlowInstalledAgent" \
+  -k 5
+```
+
+See [docs/TERMINAL_BENCH.md](docs/TERMINAL_BENCH.md) for environment variables and leaderboard notes.
+
 ## Star History
 
 [![GitHub stars](https://img.shields.io/github/stars/Ahnd6474/Jakal-flow?style=social)](https://www.star-history.com/#Ahnd6474/Jakal-flow&Date)
