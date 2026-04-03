@@ -30,7 +30,7 @@ Set the model you want the installed agent to use:
 ```bash
 export JAKAL_FLOW_MODEL_PROVIDER="openai"
 export JAKAL_FLOW_MODEL="gpt-5.4"
-export JAKAL_FLOW_EFFORT="high"
+export JAKAL_FLOW_EFFORT="xhigh"
 export JAKAL_FLOW_MAX_BLOCKS="12"
 ```
 

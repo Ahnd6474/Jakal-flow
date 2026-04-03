@@ -30,7 +30,7 @@ def _runtime_from_env(config_path: str) -> object:
 
     model_provider = os.environ.get("JAKAL_FLOW_MODEL_PROVIDER", "").strip() or "openai"
     model = os.environ.get("JAKAL_FLOW_MODEL", "").strip() or "gpt-5.4"
-    effort = os.environ.get("JAKAL_FLOW_EFFORT", "").strip() or "high"
+    effort = os.environ.get("JAKAL_FLOW_EFFORT", "").strip() or "xhigh"
     max_blocks = int(os.environ.get("JAKAL_FLOW_MAX_BLOCKS", "12") or "12")
     test_cmd = os.environ.get("JAKAL_FLOW_TEST_CMD", "").strip() or "python -m jakal_flow.terminal_bench_verify"
     payload = {

@@ -92,7 +92,7 @@ if (-not $env:JAKAL_FLOW_MODEL) {
     $env:JAKAL_FLOW_MODEL = "gpt-5.4"
 }
 if (-not $env:JAKAL_FLOW_EFFORT) {
-    $env:JAKAL_FLOW_EFFORT = "high"
+    $env:JAKAL_FLOW_EFFORT = "xhigh"
 }
 if (-not $env:JAKAL_FLOW_MAX_BLOCKS) {
     $env:JAKAL_FLOW_MAX_BLOCKS = "12"
