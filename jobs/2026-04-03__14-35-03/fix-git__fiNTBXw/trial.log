@@ -1,0 +1,2 @@
+Running command: chmod +x /installed-agent/install-agent.sh && /installed-agent/install-agent.sh
+Trial fix-git__fiNTBXw failed: Agent setup timed out after 360.0 seconds

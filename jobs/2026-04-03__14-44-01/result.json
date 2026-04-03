@@ -1,0 +1,27 @@
+{
+    "id": "523d6537-5aeb-47e5-9739-3e85f9e04370",
+    "started_at": "2026-04-03T14:44:19.468420",
+    "finished_at": "2026-04-03T14:50:44.373886",
+    "n_total_trials": 1,
+    "stats": {
+        "n_trials": 1,
+        "n_errors": 1,
+        "evals": {
+            "Jakal Flow__gpt-5.4__terminal-bench": {
+                "n_trials": 0,
+                "n_errors": 1,
+                "metrics": [
+                    {
+                        "mean": 0.0
+                    }
+                ],
+                "reward_stats": {},
+                "exception_stats": {
+                    "AgentSetupTimeoutError": [
+                        "fix-git__oDntNrV"
+                    ]
+                }
+            }
+        }
+    }
+}
