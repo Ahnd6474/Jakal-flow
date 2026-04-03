@@ -25,15 +25,16 @@ Terminal-Bench 2.0 leaderboard submissions may not modify timeouts or resources:
 
 ## Recommended environment
 
-Set the model and auth you want the installed agent to use:
+Set the model you want the installed agent to use:
 
 ```bash
-export OPENAI_API_KEY="..."
 export JAKAL_FLOW_MODEL_PROVIDER="openai"
 export JAKAL_FLOW_MODEL="gpt-5.4"
 export JAKAL_FLOW_EFFORT="high"
 export JAKAL_FLOW_MAX_BLOCKS="12"
 ```
+
+Authentication is expected to come from a local Codex CLI login. Run `codex login` on the host machine first. The PowerShell runner mounts the host `~/.codex` directory into the task container so the installed `codex` binary can reuse that session.
 
 Optional:
 

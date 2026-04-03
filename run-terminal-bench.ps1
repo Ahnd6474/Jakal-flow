@@ -12,10 +12,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Get-Command harbor -ErrorAction SilentlyContinue)) {
-    throw "harbor is not installed or not on PATH."
-}
-
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     $dockerPath = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
     if (Test-Path $dockerPath) {
@@ -28,44 +24,52 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 }
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$srcPath = Join-Path $repoRoot "src"
+$codexHome = Join-Path $HOME ".codex"
 if (-not $UseLocalSource.IsPresent -and $Mode -eq "smoke") {
     $UseLocalSource = $true
 }
 
-if (-not $env:OPENAI_API_KEY) {
-    throw "OPENAI_API_KEY is not set."
+if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+    throw "codex CLI is not installed or not on PATH."
+}
+
+if (-not (Test-Path (Join-Path $codexHome "auth.json"))) {
+    throw "Codex CLI auth was not found at $codexHome\auth.json. Run 'codex login' first."
+}
+
+$runner = @()
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+    $runner = @("uv", "tool", "run", "--from", "harbor", "--with", "terminal-bench", "harbor")
+}
+elseif (Get-Command harbor -ErrorAction SilentlyContinue) {
+    $runner = @("harbor")
+}
+else {
+    throw "Either uv or harbor must be installed and available on PATH."
 }
 
 $harborArgs = @(
     "run",
-    "-d", $Dataset,
-    "--agent-import-path", $AgentImportPath,
-    "-k", "$Attempts",
-    "-n", "$Concurrent",
     "--yes"
 )
 
-if ($Mode -eq "smoke") {
-    foreach ($task in $Tasks) {
-        $harborArgs += @("-i", $task)
+$mounts = @(
+    @{
+        type = "bind"
+        source = $codexHome
+        target = "/opt/codex-home"
+        read_only = $true
     }
-    $harborArgs += @("-l", "$($Tasks.Count)")
-}
-
-if ($KeepEnvironment.IsPresent) {
-    $harborArgs += "--no-delete"
-}
+)
 
 if ($UseLocalSource.IsPresent) {
-    $mountsJson = @(
-        @{
-            type = "bind"
-            source = $repoRoot
-            target = "/opt/jakal-flow-src"
-            read_only = $true
-        }
-    ) | ConvertTo-Json -Compress -AsArray
-    $harborArgs += @("--mounts-json", $mountsJson)
+    $mounts += @{
+        type = "bind"
+        source = $repoRoot
+        target = "/opt/jakal-flow-src"
+        read_only = $true
+    }
     $env:JAKAL_FLOW_GIT_URL = "/opt/jakal-flow-src"
     if (-not $env:JAKAL_FLOW_GIT_REF) {
         $env:JAKAL_FLOW_GIT_REF = "main"
@@ -84,9 +88,63 @@ if (-not $env:JAKAL_FLOW_EFFORT) {
 if (-not $env:JAKAL_FLOW_MAX_BLOCKS) {
     $env:JAKAL_FLOW_MAX_BLOCKS = "12"
 }
+if (-not $env:CODEX_HOME) {
+    $env:CODEX_HOME = "/opt/codex-home"
+}
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+if ($env:PYTHONPATH) {
+    $env:PYTHONPATH = "$srcPath;$env:PYTHONPATH"
+}
+else {
+    $env:PYTHONPATH = $srcPath
+}
+
+$datasetConfig = @{
+    name = "terminal-bench"
+    version = "2.0"
+}
+
+if ($Mode -eq "smoke") {
+    $datasetConfig.task_names = @($Tasks)
+    $datasetConfig.n_tasks = $Tasks.Count
+}
+
+$jobConfig = @{
+    n_attempts = $Attempts
+    n_concurrent_trials = $Concurrent
+    quiet = $true
+    agents = @(
+        @{
+            import_path = $AgentImportPath
+            model_name = "$($env:JAKAL_FLOW_MODEL_PROVIDER)/$($env:JAKAL_FLOW_MODEL)"
+        }
+    )
+    environment = @{
+        type = "docker"
+        delete = (-not $KeepEnvironment.IsPresent)
+        mounts_json = @($mounts)
+    }
+    datasets = @($datasetConfig)
+}
+
+$tempConfigPath = Join-Path ([System.IO.Path]::GetTempPath()) ("jakal-flow-terminal-bench-" + [System.Guid]::NewGuid().ToString("N") + ".json")
+$jsonText = ConvertTo-Json -InputObject $jobConfig -Depth 8
+[System.IO.File]::WriteAllText($tempConfigPath, $jsonText, [System.Text.UTF8Encoding]::new($false))
+$harborArgs += @("--config", $tempConfigPath)
 
 Write-Host "Running Harbor with args:" -ForegroundColor Cyan
-Write-Host ("harbor " + ($harborArgs -join " ")) -ForegroundColor Yellow
+Write-Host (($runner -join " ") + " " + ($harborArgs -join " ")) -ForegroundColor Yellow
 
-& harbor @harborArgs
-exit $LASTEXITCODE
+try {
+    $runnerExecutable = $runner[0]
+    $runnerArgs = @()
+    if ($runner.Length -gt 1) {
+        $runnerArgs = $runner[1..($runner.Length - 1)]
+    }
+    & $runnerExecutable @runnerArgs @harborArgs
+    exit $LASTEXITCODE
+}
+finally {
+    Remove-Item -LiteralPath $tempConfigPath -Force -ErrorAction SilentlyContinue
+}
