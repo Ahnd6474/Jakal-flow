@@ -247,25 +247,12 @@ Useful details:
 - [`calculator`](https://github.com/Ahnd6474/calculator): a precision scientific calculator with a React + TypeScript front end and a Tauri desktop wrapper. It shows `jakal-flow` working on a real packaged product repo, not just scripts and markdown.
 - [`tetris`](https://github.com/Ahnd6474/tetris): a stage-based Tetris prototype with a shared headless engine and a `tkinter` UI shell. It shows that the same workflow also fits iterative Python product work where engine logic, content, tests, and UI have to move together.
 
-## Terminal-Bench 2.0
-
-`jakal-flow` includes a Terminal-Bench custom agent adapter for the official harness flow:
-
-```bash
-harbor run -d terminal-bench@2.0 \
-  --agent-import-path "jakal_flow.terminal_bench_agent:JakalFlowInstalledAgent" \
-  -k 5
-```
-
-See [docs/TERMINAL_BENCH.md](docs/TERMINAL_BENCH.md) for environment variables and leaderboard notes.
-
 ## Further reading
 
 - [desktop/README.md](desktop/README.md) for desktop build and runtime bundling details
-- [docs/TERMINAL_BENCH.md](docs/TERMINAL_BENCH.md) for the Terminal-Bench adapter
 - [website/index.html](website/index.html) for the landing page that frames product, release, and case-study positioning
 
-## Star history
+## Star History
 
 [![GitHub stars](https://img.shields.io/github/stars/Ahnd6474/Jakal-flow?style=social)](https://www.star-history.com/#Ahnd6474/Jakal-flow&Date)
 
