@@ -7,6 +7,7 @@ from io import StringIO
 from pathlib import Path
 
 from .errors import SubprocessTimeoutError
+from .lit_ops import LitCommandError, LitOps
 from .models import CommandResult
 from .subprocess_utils import run_subprocess
 from .utils import decode_process_output, read_text, remove_tree
@@ -86,6 +87,23 @@ class GitOps:
     def __init__(self) -> None:
         self._current_revision_cache: dict[str, str] = {}
         self._configured_identity_cache: dict[str, tuple[str, str]] = {}
+        self.lit = LitOps()
+
+    def is_lit_repository(self, repo_dir: Path) -> bool:
+        return self.lit.is_lit_repository(repo_dir)
+
+    def repository_backend(self, repo_dir: Path, preferred: str = "auto") -> str:
+        normalized = str(preferred or "auto").strip().lower() or "auto"
+        if normalized in {"git", "lit"}:
+            return normalized
+        if self.is_git_repository(repo_dir):
+            return "git"
+        if self.is_lit_repository(repo_dir):
+            return "lit"
+        return "git"
+
+    def _uses_lit_backend(self, repo_dir: Path) -> bool:
+        return self.repository_backend(repo_dir) == "lit"
 
     def _safe_directory_args(self, cwd: Path) -> list[str]:
         resolved = cwd.resolve()
@@ -174,6 +192,8 @@ class GitOps:
         return "\n".join(filtered_lines).rstrip() + "\n"
 
     def clone_or_update(self, repo_url: str, branch: str, repo_dir: Path) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support remote clone/update through jakal-flow.")
         if (repo_dir / ".git").exists():
             self.run(["fetch", "origin", branch], cwd=repo_dir)
             self.run(["checkout", branch], cwd=repo_dir)
@@ -185,7 +205,14 @@ class GitOps:
     def is_git_repository(self, repo_dir: Path) -> bool:
         return (repo_dir / ".git").exists()
 
-    def ensure_repository(self, repo_dir: Path, branch: str) -> bool:
+    def ensure_repository(self, repo_dir: Path, branch: str, backend: str = "git") -> bool:
+        if self.repository_backend(repo_dir, preferred=backend) == "lit":
+            try:
+                created = self.lit.ensure_repository(repo_dir, branch)
+            except LitCommandError as exc:
+                raise GitCommandError(str(exc)) from exc
+            self._invalidate_repo_caches(repo_dir)
+            return created
         repo_dir.mkdir(parents=True, exist_ok=True)
         created = False
         if not self.is_git_repository(repo_dir):
@@ -202,6 +229,8 @@ class GitOps:
         return created
 
     def configure_local_identity(self, repo_dir: Path, name: str, email: str) -> None:
+        if self._uses_lit_backend(repo_dir):
+            return
         repo_key = str(repo_dir.resolve())
         normalized = (str(name).strip(), str(email).strip())
         if self._configured_identity_cache.get(repo_key) == normalized:
@@ -222,6 +251,11 @@ class GitOps:
         cached = self._current_revision_cache.get(repo_key)
         if cached:
             return cached
+        if self._uses_lit_backend(repo_dir):
+            revision = self.lit.current_revision(repo_dir)
+            if revision:
+                self._current_revision_cache[repo_key] = revision
+            return revision
         revision = self._current_revision_from_head(repo_dir)
         if not revision:
             try:
@@ -233,6 +267,8 @@ class GitOps:
         return revision
 
     def has_commits(self, repo_dir: Path) -> bool:
+        if self._uses_lit_backend(repo_dir):
+            return self.lit.has_commits(repo_dir)
         if self._current_revision_from_head(repo_dir):
             return True
         try:
@@ -417,6 +453,8 @@ class GitOps:
         return all(character in "0123456789abcdefABCDEF" for character in normalized)
 
     def current_branch(self, repo_dir: Path) -> str:
+        if self._uses_lit_backend(repo_dir):
+            return self.lit.current_branch(repo_dir)
         head_branch = self._current_branch_from_head(repo_dir)
         if head_branch:
             return head_branch
@@ -434,6 +472,8 @@ class GitOps:
         return "" if fallback == "HEAD" else fallback
 
     def remote_url(self, repo_dir: Path, remote_name: str = "origin") -> str | None:
+        if self._uses_lit_backend(repo_dir):
+            return None
         section = f'remote "{str(remote_name or "").strip()}"'
         configured_url = self._read_git_config_value(repo_dir, section, "url")
         if configured_url:
@@ -446,6 +486,8 @@ class GitOps:
         return url or configured_url
 
     def set_remote_url(self, repo_dir: Path, remote_name: str, remote_url: str) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support Git remotes.")
         normalized_remote_name = str(remote_name or "").strip()
         normalized_remote_url = str(remote_url or "").strip()
         section = f'remote "{normalized_remote_name}"'
@@ -461,10 +503,14 @@ class GitOps:
         self.run(["remote", "add", normalized_remote_name, normalized_remote_url], cwd=repo_dir)
 
     def has_changes(self, repo_dir: Path) -> bool:
+        if self._uses_lit_backend(repo_dir):
+            return self.lit.has_changes(repo_dir)
         output = self.run(["status", "--porcelain"], cwd=repo_dir).stdout.splitlines()
         return any(self._parse_status_path(line) is not None for line in output)
 
     def changed_files(self, repo_dir: Path) -> list[str]:
+        if self._uses_lit_backend(repo_dir):
+            return self.lit.changed_files(repo_dir)
         output = self.run(["status", "--porcelain"], cwd=repo_dir).stdout.splitlines()
         changed: list[str] = []
         for line in output:
@@ -529,25 +575,60 @@ class GitOps:
         return any(leaf_name.startswith(prefix) for prefix in self._UNTRACKED_SCRATCH_PREFIXES)
 
     def commit_all(self, repo_dir: Path, message: str, author_name: str | None = None) -> str:
+        if self._uses_lit_backend(repo_dir):
+            try:
+                revision = self.lit.commit_all(repo_dir, message)
+            except LitCommandError as exc:
+                raise GitCommandError(str(exc)) from exc
+            self._current_revision_cache[str(repo_dir.resolve())] = revision
+            return revision
         self.run(["add", "-A"], cwd=repo_dir)
         self.run(["commit", "-m", message], cwd=repo_dir, env=self._commit_env(author_name))
         return self.current_revision(repo_dir)
 
     def add_paths(self, repo_dir: Path, paths: list[str]) -> None:
+        if self._uses_lit_backend(repo_dir):
+            try:
+                self.lit.add_paths(repo_dir, paths)
+            except LitCommandError as exc:
+                raise GitCommandError(str(exc)) from exc
+            self._invalidate_repo_caches(repo_dir)
+            return
         normalized_paths = [str(path).strip() for path in paths if str(path).strip()]
         if not normalized_paths:
             return
         self.run(["add", "--", *normalized_paths], cwd=repo_dir)
 
     def add_all(self, repo_dir: Path) -> None:
+        if self._uses_lit_backend(repo_dir):
+            try:
+                self.lit.add_all(repo_dir)
+            except LitCommandError as exc:
+                raise GitCommandError(str(exc)) from exc
+            self._invalidate_repo_caches(repo_dir)
+            return
         self.run(["add", "-A"], cwd=repo_dir)
 
     def create_initial_commit(self, repo_dir: Path, message: str, author_name: str | None = None) -> str:
+        if self._uses_lit_backend(repo_dir):
+            try:
+                revision = self.lit.create_initial_commit(repo_dir, message)
+            except LitCommandError as exc:
+                raise GitCommandError(str(exc)) from exc
+            self._current_revision_cache[str(repo_dir.resolve())] = revision
+            return revision
         self.run(["add", "-A"], cwd=repo_dir)
         self.run(["commit", "--allow-empty", "-m", message], cwd=repo_dir, env=self._commit_env(author_name))
         return self.current_revision(repo_dir)
 
     def commit_paths(self, repo_dir: Path, paths: list[str], message: str, author_name: str | None = None) -> str:
+        if self._uses_lit_backend(repo_dir):
+            try:
+                revision = self.lit.commit_paths(repo_dir, paths, message)
+            except LitCommandError as exc:
+                raise GitCommandError(str(exc)) from exc
+            self._current_revision_cache[str(repo_dir.resolve())] = revision
+            return revision
         normalized_paths = [str(path).strip() for path in paths if str(path).strip()]
         if not normalized_paths:
             raise ValueError("paths must not be empty.")
@@ -556,10 +637,19 @@ class GitOps:
         return self.current_revision(repo_dir)
 
     def commit_staged(self, repo_dir: Path, message: str, author_name: str | None = None) -> str:
+        if self._uses_lit_backend(repo_dir):
+            try:
+                revision = self.lit.commit_staged(repo_dir, message)
+            except LitCommandError as exc:
+                raise GitCommandError(str(exc)) from exc
+            self._current_revision_cache[str(repo_dir.resolve())] = revision
+            return revision
         self.run(["commit", "-m", message], cwd=repo_dir, env=self._commit_env(author_name))
         return self.current_revision(repo_dir)
 
     def push(self, repo_dir: Path, branch: str) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support push through jakal-flow.")
         self.run(["push", "origin", branch], cwd=repo_dir)
 
     def push_refspec(self, repo_dir: Path, local_ref: str, remote_branch: str, force: bool = False) -> None:
@@ -571,21 +661,29 @@ class GitOps:
         self.run(args, cwd=repo_dir)
 
     def fetch(self, repo_dir: Path, remote_name: str, branch: str = "") -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support fetch through jakal-flow.")
         args = ["fetch", remote_name]
         if branch.strip():
             args.append(branch.strip())
         self.run(args, cwd=repo_dir)
 
     def pull_ff_only(self, repo_dir: Path, remote_name: str, branch: str) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support pull through jakal-flow.")
         self.run(["pull", "--ff-only", remote_name, branch], cwd=repo_dir)
 
     def delete_remote_branch(self, repo_dir: Path, remote_name: str, branch_name: str) -> None:
         self.run(["push", remote_name, "--delete", branch_name], cwd=repo_dir)
 
     def branch_exists(self, repo_dir: Path, branch_name: str) -> bool:
+        if self._uses_lit_backend(repo_dir):
+            return self.lit.branch_exists(repo_dir, branch_name)
         return bool(self.local_branch_revision(repo_dir, branch_name))
 
     def local_branch_revision(self, repo_dir: Path, branch_name: str) -> str:
+        if self._uses_lit_backend(repo_dir):
+            return self.lit.local_branch_revision(repo_dir, branch_name)
         normalized = str(branch_name or "").strip()
         if not normalized:
             return ""
@@ -595,6 +693,8 @@ class GitOps:
         return self._read_git_ref_revision(git_dir, f"refs/heads/{normalized}")
 
     def remote_branch_revision(self, repo_dir: Path, remote_name: str, branch: str) -> str | None:
+        if self._uses_lit_backend(repo_dir):
+            return None
         if not branch.strip():
             return None
         result = self.run(["ls-remote", "--heads", remote_name, branch], cwd=repo_dir, check=False)
@@ -617,9 +717,13 @@ class GitOps:
         return MISSING_REGISTERED_WORKTREE_MARKER in error_text
 
     def prune_worktrees(self, repo_dir: Path) -> None:
+        if self._uses_lit_backend(repo_dir):
+            return
         self.run(["worktree", "prune"], cwd=repo_dir, check=False)
 
     def add_worktree(self, repo_dir: Path, worktree_dir: Path, branch_name: str, start_point: str) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support Git worktrees in jakal-flow yet.")
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
         if self._has_live_worktree_registration(repo_dir, worktree_dir):
             return
@@ -636,6 +740,8 @@ class GitOps:
                 self.run(add_args, cwd=repo_dir)
 
     def attach_worktree(self, repo_dir: Path, worktree_dir: Path, branch_name: str) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support Git worktrees in jakal-flow yet.")
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
         if self._has_live_worktree_registration(repo_dir, worktree_dir):
             return
@@ -649,6 +755,8 @@ class GitOps:
             self.run(add_args, cwd=repo_dir)
 
     def remove_worktree(self, repo_dir: Path, worktree_dir: Path, force: bool = True) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support Git worktrees in jakal-flow yet.")
         args = ["worktree", "remove"]
         if force:
             args.append("--force")
@@ -657,25 +765,39 @@ class GitOps:
         remove_tree(worktree_dir, ignore_errors=True)
 
     def delete_branch(self, repo_dir: Path, branch_name: str, force: bool = True) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support branch deletion through jakal-flow yet.")
         args = ["branch", "-D" if force else "-d", branch_name]
         self.run(args, cwd=repo_dir, check=False)
 
     def cherry_pick(self, repo_dir: Path, revision: str) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support cherry-pick through jakal-flow yet.")
         self.run(["cherry-pick", revision], cwd=repo_dir)
 
     def try_cherry_pick(self, repo_dir: Path, revision: str) -> CommandResult:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support cherry-pick through jakal-flow yet.")
         return self.run(["cherry-pick", revision], cwd=repo_dir, check=False)
 
     def abort_cherry_pick(self, repo_dir: Path) -> None:
+        if self._uses_lit_backend(repo_dir):
+            return
         self.run(["cherry-pick", "--abort"], cwd=repo_dir, check=False)
 
     def skip_cherry_pick(self, repo_dir: Path) -> None:
+        if self._uses_lit_backend(repo_dir):
+            return
         self.run(["cherry-pick", "--skip"], cwd=repo_dir, check=False)
 
     def continue_cherry_pick(self, repo_dir: Path) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support cherry-pick through jakal-flow yet.")
         self.run(["cherry-pick", "--continue"], cwd=repo_dir)
 
     def cherry_pick_in_progress(self, repo_dir: Path) -> bool:
+        if self._uses_lit_backend(repo_dir):
+            return False
         return bool(self._git_state_revision(repo_dir, "CHERRY_PICK_HEAD"))
 
     def _parse_untracked_overwrite_paths(self, stderr: str) -> list[str]:
@@ -756,6 +878,8 @@ class GitOps:
         return removed_any
 
     def merge_ff_only(self, repo_dir: Path, revision: str) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support fast-forward merge through jakal-flow yet.")
         args = ["merge", "--ff-only", revision]
         result = self.run(args, cwd=repo_dir, check=False)
         if result.returncode == 0:
@@ -771,10 +895,14 @@ class GitOps:
         )
 
     def conflicted_files(self, repo_dir: Path) -> list[str]:
+        if self._uses_lit_backend(repo_dir):
+            return self.lit.conflicted_files(repo_dir)
         result = self.run(["diff", "--name-only", "--diff-filter=U"], cwd=repo_dir, check=False)
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
     def checkout_conflict_side(self, repo_dir: Path, side: str, paths: list[str]) -> None:
+        if self._uses_lit_backend(repo_dir):
+            raise GitCommandError("lit repositories do not support conflict-side checkout through jakal-flow yet.")
         if side not in {"ours", "theirs"}:
             raise ValueError(f"Unsupported conflict side: {side}")
         if not paths:
@@ -783,6 +911,15 @@ class GitOps:
         self.run(["add", "--", *paths], cwd=repo_dir)
 
     def hard_reset(self, repo_dir: Path, revision: str) -> None:
+        if self._uses_lit_backend(repo_dir):
+            try:
+                self.lit.hard_reset(repo_dir, revision)
+            except LitCommandError as exc:
+                raise GitCommandError(str(exc)) from exc
+            normalized_revision = str(revision).strip()
+            if normalized_revision:
+                self._current_revision_cache[str(repo_dir.resolve())] = normalized_revision
+            return
         self.run(["reset", "--hard", revision], cwd=repo_dir)
         self.run(["clean", "-fd"], cwd=repo_dir)
         normalized_revision = str(revision).strip()

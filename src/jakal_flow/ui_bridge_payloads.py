@@ -1688,6 +1688,7 @@ def bottom_panel_payload(
         "git_status": {
             "branch": context.metadata.branch,
             "repo_kind": context.metadata.repo_kind,
+            "vcs_backend": context.metadata.vcs_backend,
             "origin_url": context.metadata.origin_url,
             "current_status": context.metadata.current_status,
             "safe_revision": context.metadata.current_safe_revision,
@@ -1864,6 +1865,7 @@ def _build_project_list_item_payload(
         "repo_path": str(project.metadata.repo_path),
         "origin_url": project.metadata.origin_url,
         "branch": project.metadata.branch,
+        "vcs_backend": project.metadata.vcs_backend,
         "status": current_status,
         "detail": detail,
         "created_at": project.metadata.created_at,

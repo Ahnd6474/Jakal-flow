@@ -76,6 +76,7 @@ def _normalize_execution_step_model(model_provider: Any, model: Any) -> str:
 
 @dataclass(slots=True)
 class RuntimeOptions:
+    repo_backend: str = "auto"
     model_provider: str = "openai"
     local_model_provider: str = ""
     chat_model_provider: str = ""
@@ -168,6 +169,7 @@ class RepoMetadata:
     current_status: str = "initialized"
     current_safe_revision: str | None = None
     repo_kind: str = "remote"
+    vcs_backend: str = "git"
     display_name: str | None = None
     origin_url: str | None = None
     local_logs_mode: str = "repo"
@@ -191,6 +193,7 @@ class RepoMetadata:
             current_status=str(payload.get("current_status", "initialized")).strip() or "initialized",
             current_safe_revision=_optional_str(payload.get("current_safe_revision")),
             repo_kind=str(payload.get("repo_kind", "remote")).strip() or "remote",
+            vcs_backend=str(payload.get("vcs_backend", "git")).strip() or "git",
             display_name=_optional_str(payload.get("display_name")),
             origin_url=_optional_str(payload.get("origin_url")),
             local_logs_mode=str(payload.get("local_logs_mode", "repo")).strip() or "repo",

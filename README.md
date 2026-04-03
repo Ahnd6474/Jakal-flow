@@ -106,6 +106,8 @@ jakal-flow run --repo-url https://github.com/Ahnd6474/lit.git --branch main --wo
 jakal-flow run --repo-url https://github.com/Ahnd6474/lit.git --branch main --workspace-root .jakal-flow-workspace --plan-file PLAN.md
 ```
 
+Local `lit` repositories are also supported in local-project flows. Set `repo_backend = "lit"` in `[runtime]`, or leave it as `auto`: local setup now chooses Git when a `.git/` repository is present and falls back to lit otherwise. Remote clone/push and Git worktree flows remain Git-only for now.
+
 ## What jakal-flow is
 
 `jakal-flow` is not a single-repository chat wrapper. It is a multi-repository operations layer that keeps each managed project under its own workspace subtree and lets the CLI and desktop shell work from the same persisted state.

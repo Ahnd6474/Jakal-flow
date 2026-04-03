@@ -467,6 +467,16 @@ class Orchestrator(
             failure = ExecutionFailure(summary, reason_code=failure.reason_code)
         self._set_step_failure_metadata(step, failure)
 
+    def _resolve_local_repo_backend(self, repo_dir: Path, preferred: str = "auto") -> str:
+        normalized = str(preferred or "auto").strip().lower() or "auto"
+        if normalized in {"git", "lit"}:
+            return normalized
+        if self.git.is_git_repository(repo_dir):
+            return "git"
+        if self.git.is_lit_repository(repo_dir):
+            return "lit"
+        return "lit"
+
     def setup_local_project(
         self,
         project_dir: Path,
@@ -477,12 +487,15 @@ class Orchestrator(
     ) -> ProjectContext:
         runtime.execution_mode = self._normalize_execution_mode(runtime.execution_mode)
         resolved_dir = project_dir.resolve()
-        created_repo = self.git.ensure_repository(resolved_dir, branch)
+        repo_backend = self._resolve_local_repo_backend(resolved_dir, preferred=getattr(runtime, "repo_backend", "auto"))
+        runtime.repo_backend = repo_backend
+        created_repo = self.git.ensure_repository(resolved_dir, branch, backend=repo_backend)
         active_branch = self.git.current_branch(resolved_dir) or branch or "main"
-        if origin_url.strip():
+        if repo_backend == "git" and origin_url.strip():
             self.git.set_remote_url(resolved_dir, "origin", origin_url.strip())
-        detected_origin = self.git.remote_url(resolved_dir, "origin")
-        self._sync_local_setup_branch_from_origin(resolved_dir, active_branch)
+        detected_origin = origin_url.strip() if repo_backend == "lit" else (self.git.remote_url(resolved_dir, "origin") or origin_url.strip())
+        if repo_backend == "git":
+            self._sync_local_setup_branch_from_origin(resolved_dir, active_branch)
 
         existing = self.workspace.find_project_by_repo_path(resolved_dir)
         if existing is None:
@@ -493,6 +506,7 @@ class Orchestrator(
                 origin_url=detected_origin or origin_url.strip(),
                 display_name=display_name.strip(),
             )
+            context.metadata.vcs_backend = repo_backend
         else:
             context = existing
             context.runtime = runtime
@@ -501,6 +515,7 @@ class Orchestrator(
             context.metadata.repo_url = detected_origin or origin_url.strip() or str(resolved_dir)
             context.metadata.origin_url = detected_origin or origin_url.strip() or None
             context.metadata.repo_kind = "local"
+            context.metadata.vcs_backend = repo_backend
             context.metadata.display_name = display_name.strip() or context.metadata.display_name or resolved_dir.name
 
         self.git.configure_local_identity(
@@ -531,13 +546,23 @@ class Orchestrator(
                 )
 
         context.metadata.branch = self.git.current_branch(context.paths.repo_dir) or active_branch
-        self._push_local_setup_branch_to_origin(context.paths.repo_dir, context.metadata.branch)
+        if repo_backend == "git":
+            self._push_local_setup_branch_to_origin(context.paths.repo_dir, context.metadata.branch)
         context.metadata.current_safe_revision = safe_revision
         context.metadata.current_status = "setup_ready"
         context.metadata.last_run_at = now_utc_iso()
-        context.metadata.repo_url = self.git.remote_url(context.paths.repo_dir, "origin") or str(context.paths.repo_dir)
-        context.metadata.origin_url = self.git.remote_url(context.paths.repo_dir, "origin")
+        context.metadata.repo_url = (
+            detected_origin or str(context.paths.repo_dir)
+            if repo_backend == "lit"
+            else (self.git.remote_url(context.paths.repo_dir, "origin") or str(context.paths.repo_dir))
+        )
+        context.metadata.origin_url = (
+            detected_origin or None
+            if repo_backend == "lit"
+            else self.git.remote_url(context.paths.repo_dir, "origin")
+        )
         context.metadata.repo_kind = "local"
+        context.metadata.vcs_backend = repo_backend
         context.metadata.display_name = display_name.strip() or context.metadata.display_name or context.paths.repo_dir.name
         context.loop_state.current_safe_revision = safe_revision
         context.loop_state.stop_requested = False
@@ -557,12 +582,18 @@ class Orchestrator(
     ) -> ProjectContext:
         runtime.execution_mode = self._normalize_execution_mode(runtime.execution_mode)
         resolved_dir = project_dir.resolve()
-        if not self.git.is_git_repository(resolved_dir):
+        repo_backend = self._resolve_local_repo_backend(resolved_dir, preferred=getattr(runtime, "repo_backend", "auto"))
+        runtime.repo_backend = repo_backend
+        if repo_backend == "git" and not self.git.is_git_repository(resolved_dir):
             raise ExecutionPreflightError(
                 f"Terminal-Bench integration requires an existing git repository: {resolved_dir}"
             )
+        if repo_backend == "lit" and not self.git.is_lit_repository(resolved_dir):
+            raise ExecutionPreflightError(
+                f"Transient local execution requires an existing lit repository: {resolved_dir}"
+            )
         active_branch = self.git.current_branch(resolved_dir) or branch or "main"
-        detected_origin = self.git.remote_url(resolved_dir, "origin") or origin_url.strip()
+        detected_origin = origin_url.strip() if repo_backend == "lit" else (self.git.remote_url(resolved_dir, "origin") or origin_url.strip())
 
         existing = self.workspace.find_project_by_repo_path(resolved_dir)
         if existing is None:
@@ -574,6 +605,7 @@ class Orchestrator(
                 display_name=display_name.strip(),
                 local_logs_mode="workspace",
             )
+            context.metadata.vcs_backend = repo_backend
         else:
             context = existing
             context.runtime = runtime
@@ -582,6 +614,7 @@ class Orchestrator(
             context.metadata.repo_url = detected_origin or str(resolved_dir)
             context.metadata.origin_url = detected_origin or None
             context.metadata.repo_kind = "local"
+            context.metadata.vcs_backend = repo_backend
             context.metadata.local_logs_mode = "workspace"
             context.metadata.display_name = display_name.strip() or context.metadata.display_name or resolved_dir.name
             context.paths.repo_dir = resolved_dir
@@ -597,6 +630,7 @@ class Orchestrator(
         context.metadata.repo_url = detected_origin or str(context.paths.repo_dir)
         context.metadata.origin_url = detected_origin or None
         context.metadata.repo_kind = "local"
+        context.metadata.vcs_backend = repo_backend
         context.metadata.local_logs_mode = "workspace"
         context.metadata.display_name = display_name.strip() or context.metadata.display_name or context.paths.repo_dir.name
         context.loop_state.current_safe_revision = safe_revision or None
