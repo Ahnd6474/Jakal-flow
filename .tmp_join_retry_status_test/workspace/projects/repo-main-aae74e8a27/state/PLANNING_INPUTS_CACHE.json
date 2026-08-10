@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "sampled_docs": []
+  },
+  "payload": {
+    "agents": "AGENTS.md not found.",
+    "docs": "No markdown files under repo/docs.",
+    "readme": "README.md not found.",
+    "source": "No obvious implementation files detected under src/, app/, lib/, or desktop/src. A narrow skeleton/bootstrap step is acceptable only if it establishes the first real contract, entrypoint, or module."
+  },
+  "signature": "b904e534f116cae4f9d419ed984ca843f94e75e8",
+  "version": 2
+}

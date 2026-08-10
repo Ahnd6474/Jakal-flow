@@ -1,0 +1,38 @@
+{
+  "checkpoints": [
+    {
+      "approved_at": null,
+      "checkpoint_id": "CP1",
+      "commit_hashes": [],
+      "created_at": "2026-08-10T06:23:53+00:00",
+      "deadline_at": "",
+      "lineage_id": "",
+      "plan_refs": [
+        "ST1"
+      ],
+      "pushed": false,
+      "reached_at": null,
+      "review_notes": "",
+      "status": "pending",
+      "target_block": 1,
+      "title": "Frontend"
+    },
+    {
+      "approved_at": null,
+      "checkpoint_id": "CP2",
+      "commit_hashes": [],
+      "created_at": "2026-08-10T06:23:53+00:00",
+      "deadline_at": "",
+      "lineage_id": "",
+      "plan_refs": [
+        "ST2"
+      ],
+      "pushed": false,
+      "reached_at": null,
+      "review_notes": "",
+      "status": "pending",
+      "target_block": 2,
+      "title": "Backend"
+    }
+  ]
+}

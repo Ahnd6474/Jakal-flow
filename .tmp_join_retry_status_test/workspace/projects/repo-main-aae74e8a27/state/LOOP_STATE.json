@@ -1,0 +1,21 @@
+{
+  "block_index": 0,
+  "counters": {
+    "empty_cycles": 0,
+    "no_progress_blocks": 0,
+    "regression_failures": 0
+  },
+  "current_checkpoint_id": null,
+  "current_checkpoint_lineage_id": null,
+  "current_safe_revision": "safe-main",
+  "current_task": "Reviewer A pre-execution pass",
+  "last_block_completed_at": null,
+  "last_candidates": [],
+  "last_commit_hash": null,
+  "pending_checkpoint_approval": false,
+  "plan_locked": true,
+  "repo_id": "aae74e8a276e5005912799f8758f950b95db93a9",
+  "repo_slug": "repo-main-aae74e8a27",
+  "stop_reason": null,
+  "stop_requested": false
+}

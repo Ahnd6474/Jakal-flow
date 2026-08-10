@@ -1,0 +1,55 @@
+{
+  "checkpoints": [
+    {
+      "approved_at": null,
+      "checkpoint_id": "CP1",
+      "commit_hashes": [],
+      "created_at": "2026-08-10T06:24:07+00:00",
+      "deadline_at": "",
+      "lineage_id": "LN1",
+      "plan_refs": [
+        "ST1"
+      ],
+      "pushed": false,
+      "reached_at": null,
+      "review_notes": "",
+      "status": "approved",
+      "target_block": 1,
+      "title": "Verification branch"
+    },
+    {
+      "approved_at": null,
+      "checkpoint_id": "CP2",
+      "commit_hashes": [],
+      "created_at": "2026-08-10T06:24:07+00:00",
+      "deadline_at": "",
+      "lineage_id": "LN2",
+      "plan_refs": [
+        "ST2"
+      ],
+      "pushed": false,
+      "reached_at": null,
+      "review_notes": "",
+      "status": "approved",
+      "target_block": 2,
+      "title": "Reference branch"
+    },
+    {
+      "approved_at": null,
+      "checkpoint_id": "CP3",
+      "commit_hashes": [],
+      "created_at": "2026-08-10T06:24:07+00:00",
+      "deadline_at": "",
+      "lineage_id": "",
+      "plan_refs": [
+        "ST3"
+      ],
+      "pushed": false,
+      "reached_at": null,
+      "review_notes": "",
+      "status": "pending",
+      "target_block": 3,
+      "title": "Join verification work"
+    }
+  ]
+}

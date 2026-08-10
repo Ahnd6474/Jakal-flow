@@ -1,0 +1,16 @@
+{
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "attempt": 1,
+      "duration_seconds": 0.203,
+      "last_message_excerpt": "",
+      "returncode": 1,
+      "stderr_excerpt": "Error: \uc9c0\uc815\ub41c \uacbd\ub85c\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. (os error 3)",
+      "stdout_excerpt": "",
+      "unexpected_token_detected": false
+    }
+  ],
+  "recovered_after_retry": false,
+  "unexpected_token_detected": false
+}
